@@ -296,7 +296,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     );
     assert_eq!(revisions[0]["automatic"], true);
     assert_eq!(revisions[0]["reason_code"], "incorrect_answers");
-    assert!(revisions[0]["undone"].as_bool().unwrap() == false);
+    assert!(!revisions[0]["undone"].as_bool().unwrap());
     let rid: Uuid = revisions[0]["id"].as_str().unwrap().parse().unwrap();
 
     // Learner state: honest sparse-data behavior (AI-02). One answered item,
