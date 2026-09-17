@@ -419,10 +419,10 @@ pub async fn submit(
 
     let totals = sqlx::query!(
         r#"SELECT
-             COUNT(*) AS total,
-             COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS correct,
-             COALESCE(COUNT(*) FILTER (WHERE a.chosen_index IS NOT NULL AND a.correct = FALSE), 0) AS incorrect,
-             COALESCE(COUNT(*) FILTER (WHERE a.id IS NULL OR a.chosen_index IS NULL), 0) AS skipped
+             COUNT(*) AS "total!",
+             COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!",
+             COALESCE(COUNT(*) FILTER (WHERE a.chosen_index IS NOT NULL AND a.correct = FALSE), 0) AS "incorrect!",
+             COALESCE(COUNT(*) FILTER (WHERE a.id IS NULL OR a.chosen_index IS NULL), 0) AS "skipped!"
            FROM session_items si
            LEFT JOIN attempts a
              ON a.session_id = si.session_id AND a.item_index = si.item_index

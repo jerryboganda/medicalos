@@ -9,7 +9,6 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::ApiResult;
-use crate::state::AppState;
 
 // --- today's plan -----------------------------------------------------------
 
