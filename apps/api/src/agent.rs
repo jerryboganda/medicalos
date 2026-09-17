@@ -203,15 +203,18 @@ pub async fn maybe_create_revision(
     }
     let (old_plan_id, from_version) = get_or_create_today(pool, user_id).await?;
     let (new_plan_id, to_version) = fork_plan(pool, old_plan_id, from_version).await?;
+    let revision_id = Uuid::new_v4();
     let title = format!("Re-practice: {} missed question(s)", missed);
     sqlx::query!(
-        "INSERT INTO plan_tasks (id, plan_id, kind, title, question_count, source_session_id)
-         VALUES ($1, $2, 'revision', $3, $4, $5)",
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, question_count, source_session_id, added_by_revision)
+         VALUES ($1, $2, 'revision', $3, $4, $5, $6)",
         Uuid::new_v4(),
         new_plan_id,
         title,
         missed as i32,
-        session_id
+        session_id,
+        revision_id
     )
     .execute(pool)
     .await?;
@@ -236,7 +239,7 @@ pub async fn maybe_create_revision(
            (id, plan_id, from_version, to_version, reason_code, explanation,
             automatic, receipt)
          VALUES ($1, $2, $3, $4, 'incorrect_answers', $5, true, $6)",
-        Uuid::new_v4(),
+        revision_id,
         new_plan_id,
         from_version,
         to_version,
