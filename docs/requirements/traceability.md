@@ -6,6 +6,8 @@ Status vocabulary: `not-started` · `in-progress` · `tested` (acceptance eviden
 
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + §28.1. Release gates: §30.
 
+**Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
+
 ## Phase 0 — Decisions and evidence
 
 | ID | Requirement | Status | Evidence |
@@ -19,7 +21,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| CORE-01 | One identity with personal and institution contexts | not-started | — |
+| CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
 | CORE-02 | Versioned goals, exam dates, protected commitments | not-started | — |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | not-started | — |
 | CORE-04 | Multi-tenant role and audit foundations | not-started | — |
@@ -28,31 +30,31 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | not-started | — |
 | CORE-08 | Notification policy, push + in-app inbox | not-started | — |
 | CORE-09 | Guest trial before sign-up (SHOULD) | not-started | — |
-| CORE-10 | Navigational hierarchy mapped to concept identities | not-started | — |
-| QB-01 | Immutable published question versions | not-started | — |
-| QB-02 | Question-family and variant identities | not-started | — |
-| QB-03 | Timed / untimed / tutor practice | not-started | — |
-| QB-04 | Confidence and assistance evidence separation | not-started | — |
-| QB-05 | Per-option explanations and source anchors | not-started | — |
+| CORE-10 | Navigational hierarchy mapped to concept identities | in-progress (Exam→Subject→System→Chapter nodes tested; concept-identity mapping pending) | run 35280682748 |
+| QB-01 | Immutable published question versions | tested (slice-1 scope: versioned, published-only serving) | run 35280682748 |
+| QB-02 | Question-family and variant identities | in-progress (family_id column exists; variant flows pending) | run 35280682748 |
+| QB-03 | Timed / untimed / tutor practice | in-progress (tutor + revision presets tested; timed/untimed pending) | run 35280682748 |
+| QB-04 | Confidence and assistance evidence separation | in-progress (confidence stored; assisted paths pending) | run 35280682748 |
+| QB-05 | Per-option explanations and source anchors | tested (slice-1 scope: rationale per option + source_ref, tutor feedback) | run 35280682748 |
 | QB-08 | Issue reporting and quarantined-item exclusion | not-started | — |
-| QB-11 | Two to ten options with generated labels | not-started | — |
-| QB-12 | Qbank builder: hierarchy multi-select, four pools, counts, availability rule, presets, Quick 10 | not-started | — |
-| QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | not-started | — |
-| QB-14 | Key learning point, exam tip, high-yield flag, authored + empirical difficulty | not-started | — |
+| QB-11 | Two to ten options with generated labels | tested (engine rule in domain-contracts + OptionCount validation on ingestion) | run 35280682748 |
+| QB-12 | Qbank builder: hierarchy multi-select, four pools, counts, availability rule, presets, Quick 10 | in-progress (chapter pool + honest empty-pool message tested; full builder is the UI slice) | run 35280682748 |
+| QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | in-progress (session result summary tested; tool-tray tools pending UI) | run 35280682748 |
+| QB-14 | Key learning point, exam tip, high-yield flag, authored + empirical difficulty | tested (slice-1 scope: fields stored, served in tutor feedback; empirical rating via Elo state) | run 35280682748 |
 | QB-17 | Session results with time + answer-change analysis and result actions (part 1 in P1, part 2 in P2) | not-started | — |
-| EX-01 | Official-source exam registry with aliases | not-started | — |
-| EX-04 | Durable answer persistence and submission receipts | not-started | — |
-| AI-01 | Structured learner-concept state and uncertainty | not-started | — |
-| AI-02 | Cold-start plan with honest sparse-data behavior | not-started | — |
-| AI-04 | Time-budgeted next-best-action selection | not-started | — |
-| AI-05 | Bounded event-driven orchestration | not-started | — |
-| AI-06 | Permissioned action tools | not-started | — |
-| AI-07 | Action receipts and undoable plan revisions | not-started | — |
-| AI-13 | Cost limits, fallbacks, kill switches | not-started | — |
-| AI-14 | No cross-tenant private-memory access | not-started | — |
-| AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | not-started | — |
-| PLAN-01 | Original / revised / current plan timeline | not-started | — |
-| PLAN-02 | Capacity changes and feasible replanning | not-started | — |
+| EX-01 | Official-source exam registry with aliases | in-progress (registry table tested; aliases + official-source records pending) | run 35280682748 |
+| EX-04 | Durable answer persistence and submission receipts | tested (slice-1 scope: idempotent replay, first-answer-wins, double-submit rejected) | run 35280682748 |
+| AI-01 | Structured learner-concept state and uncertainty | tested (slice-1 scope: per-chapter Elo state + evidence counts, server-authoritative) | run 35280682748 |
+| AI-02 | Cold-start plan with honest sparse-data behavior | tested (slice-1 scope: modest first plan, low_evidence level, no fake mastery under 10 attempts) | run 35280682748 |
+| AI-04 | Time-budgeted next-best-action selection | in-progress (cold-start task only; capacity-constrained selection pending) | run 35280682748 |
+| AI-05 | Bounded event-driven orchestration | in-progress (deterministic in-request handlers; event/queue layer arrives with workers) | run 35280682748 |
+| AI-06 | Permissioned action tools | in-progress (the only agent action so far — deterministic plan revision — respects §9.1; LLM tool scopes land with the Coach) | run 35280682748 |
+| AI-07 | Action receipts and undoable plan revisions | tested (slice-1 scope: revision receipt JSONB with triggering evidence + checks + diff, undo restores version) | run 35280682748 |
+| AI-13 | Cost limits, fallbacks, kill switches | in-progress (no model calls yet — deterministic slice; switches land with OPS-05 remote config) | run 35280682748 |
+| AI-14 | No cross-tenant private-memory access | in-progress (single-tenant slice; learner state is user-scoped by design, isolation tests with tenants pending) | run 35280682748 |
+| AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
+| PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
+| PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
 | LIB-01 | Versioned articles and references | not-started | — |
 | NOTE-01 | Source-linked private notes | not-started | — |
 | ADMIN-01 | Real cross-tenant owner dashboard | not-started | — |
