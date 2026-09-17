@@ -319,7 +319,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         request(
             "POST",
             &format!(
-                "/v1/plans/{}/{}/undo",
+                "/v1/plans/{}/revisions/{}/undo",
                 today["plan_id"].as_str().unwrap(),
                 rid
             ),
