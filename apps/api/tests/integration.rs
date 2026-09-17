@@ -8,6 +8,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use serde_json::Value;
+use sqlx::Row;
 use tower::ServiceExt; // oneshot
 use uuid::Uuid;
 
