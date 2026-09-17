@@ -29,12 +29,21 @@ async fn setup() -> Arc<AppState> {
     Arc::new(AppState { pool })
 }
 
-async fn body_json(resp: axum::response::Response) -> Value {
+async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
+    let uri = req.uri().clone();
+    let resp = app.oneshot(req).await.expect("oneshot");
+    let status = resp.status();
     let bytes = http_body_util::BodyExt::collect(resp.into_body())
         .await
         .expect("body")
         .to_bytes();
-    serde_json::from_slice(&bytes).expect("json body")
+    let v = serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        panic!(
+            "non-json response to {uri} (status {status}): {e}: {}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    (status, v)
 }
 
 fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
@@ -48,12 +57,6 @@ fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) ->
     builder
         .body(Body::from(body.map(|b| b.to_string()).unwrap_or_default()))
         .expect("request")
-}
-
-async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
-    let resp = app.oneshot(req).await.expect("oneshot");
-    let status = resp.status();
-    (status, body_json(resp).await)
 }
 
 async fn register_and_login(app: Router) -> String {
