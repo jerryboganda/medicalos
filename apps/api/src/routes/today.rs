@@ -13,7 +13,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Serialize)]
-struct TaskView {
+pub struct TaskView {
     id: Uuid,
     kind: String,
     title: String,
@@ -23,7 +23,7 @@ struct TaskView {
 }
 
 #[derive(Serialize)]
-struct RevisionView {
+pub struct RevisionView {
     id: Uuid,
     to_version: i32,
     reason_code: String,
@@ -33,7 +33,7 @@ struct RevisionView {
 }
 
 #[derive(Serialize)]
-struct LearnerChapter {
+pub struct LearnerChapter {
     chapter_id: Uuid,
     chapter_name: String,
     /// Observed independent accuracy, 0-100. Null under the evidence floor —
@@ -44,7 +44,7 @@ struct LearnerChapter {
 }
 
 #[derive(Serialize)]
-struct TodayResponse {
+pub struct TodayResponse {
     plan_id: Uuid,
     version: i32,
     tasks: Vec<TaskView>,
@@ -148,7 +148,7 @@ pub async fn today(
 }
 
 #[derive(Serialize)]
-struct UndoResponse {
+pub struct UndoResponse {
     plan_version: i32,
 }
 

@@ -73,7 +73,7 @@ pub async fn login(
     )
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::unauthorized())?;
+    .ok_or_else(ApiError::unauthorized)?;
     if !verify_password(&req.password, &user.password_hash) {
         return Err(ApiError::unauthorized());
     }

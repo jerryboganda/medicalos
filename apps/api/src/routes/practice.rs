@@ -215,7 +215,7 @@ pub struct AnswerReq {
 }
 
 #[derive(Serialize)]
-struct AnswerResponse {
+pub struct AnswerResponse {
     already_recorded: bool,
     correct: Option<bool>,
     correct_index: i16,
@@ -317,7 +317,7 @@ pub async fn answer(
             .options
             .as_array()
             .map(|a| a.len())
-            .ok_or_else(|| ApiError::internal())?;
+            .ok_or_else(ApiError::internal)?;
         if c < 0 || c as usize >= n_opts {
             return Err(ApiError::unprocessable(
                 "invalid_option",
@@ -388,7 +388,7 @@ pub async fn answer(
 }
 
 #[derive(Serialize)]
-struct SubmitResponse {
+pub struct SubmitResponse {
     total: i64,
     correct: i64,
     incorrect: i64,
