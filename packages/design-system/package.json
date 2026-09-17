@@ -1,0 +1,7 @@
+{
+  "name": "@medical-os/design-system",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shared tokens and (from Phase 1) Svelte components for the app client and Astro site.",
+  "main": "tokens.css"
+}

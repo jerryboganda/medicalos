@@ -1,0 +1,48 @@
+/*
+ * Medical Learning OS — design tokens.
+ * Source: master plan §7.1 "Proposed starting tokens, to be validated in real
+ * screens." These are the owner-approved starting values, NOT a measured
+ * extraction or contrast certification (§7.1). Every foreground/background
+ * combination gets validated during Phase 1 hallmark UI work before release.
+ * Components must consume these by name — never inline raw values
+ * (hallmark locked-token rule; TRUST-01 applies to visual claims too).
+ */
+
+:root {
+	/* Color */
+	--color-canvas: #09090f;
+	--color-surface: #14141e;
+	--color-surface-elevated: #1b1728;
+	--color-action-primary: #7c3aed;
+	--color-accent: #a78bfa;
+	--color-text-primary: #f5f3ff;
+	--color-text-secondary: #b8b4c6;
+
+	/* Spacing — 4 pt scale (§7.1) */
+	--space-xs: 4px;
+	--space-sm: 8px;
+	--space-md: 12px;
+	--space-lg: 16px;
+	--space-xl: 24px;
+	--space-2xl: 32px;
+	--space-3xl: 48px;
+
+	/* Radius — §7.1 ranges, lower-bound choices pending screen validation */
+	--radius-card: 20px; /* plan range 20–24 px */
+	--radius-control: 12px; /* plan range 12–16 px */
+
+	/* Type — 16–18 px reading baseline, user-adjustable (§7.1, §7.3) */
+	--text-body: 16px;
+	--text-body-lg: 18px;
+
+	/* Motion — brief, purposeful; reduced-motion alternative required (§7.1, §7.3) */
+	--dur-fast: 120ms;
+	--dur-base: 200ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--dur-fast: 0ms;
+		--dur-base: 0ms;
+	}
+}

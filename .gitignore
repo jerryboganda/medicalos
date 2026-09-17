@@ -1,0 +1,19 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+.svelte-kit/
+dist/
+build/
+.astro/
+
+# Env and secrets
+.env
+.env.*
+*.local
+
+# OS
+.DS_Store
+Thumbs.db

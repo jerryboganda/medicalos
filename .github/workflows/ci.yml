@@ -1,0 +1,68 @@
+# CI per master plan §27/§27.1 and the project compute policy (AGENTS.md):
+# ALL builds, lints, tests, and artifacts run here — never on the production
+# VPS or local development machines. Gates for later-phase surfaces (ephemeral
+# Postgres integration + SQLx checks, contract-drift check, browser E2E,
+# desktop/mobile build + signing, performance budgets) are added in the phase
+# that first has code for them (issue 04).
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    # Linux runner: API, workers, crates, WASM (§27.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      # Rust compile caching is mandatory under the compute rule (§27.1)
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Dependency advisories + licenses
+        uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Tests
+        run: cargo test --workspace
+      # ARCH-01: shared core compiles for the web build too (no wasm runtime
+      # tests yet; a wasm test harness arrives when core-wasm bindings exist)
+      - name: Shared core builds for wasm32
+        run: cargo build -p domain-contracts --target wasm32-unknown-unknown
+
+  client:
+    # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+
+  site:
+    # Astro marketing site — holds no learner data (§31.1)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
