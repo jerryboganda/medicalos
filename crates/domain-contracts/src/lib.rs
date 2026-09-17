@@ -23,7 +23,9 @@ impl OptionCount {
 
     /// Generated labels per §11.5: 'labels generated' — A..J for 2..=10 options.
     pub fn labels(self) -> Vec<String> {
-        (0..self.0).map(|i| ((b'A' + i) as char).to_string()).collect()
+        (0..self.0)
+            .map(|i| ((b'A' + i) as char).to_string())
+            .collect()
     }
 }
 

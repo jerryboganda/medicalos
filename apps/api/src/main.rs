@@ -11,7 +11,9 @@ async fn healthz() -> &'static str {
 async fn main() {
     telemetry::init();
     let app = Router::new().route("/healthz", get(healthz));
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.expect("bind 8080");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
+        .await
+        .expect("bind 8080");
     tracing::info!("api listening on 8080");
     axum::serve(listener, app).await.expect("serve");
 }
