@@ -75,8 +75,8 @@ pub async fn today(
     .await?;
     let learner_rows = sqlx::query!(
         r#"SELECT qv.chapter_id, c.name AS chapter_name,
-                  COUNT(*) AS independent_count,
-                  COUNT(*) FILTER (WHERE a.correct = TRUE) AS correct
+                  COALESCE(COUNT(*), 0) AS independent_count,
+                  COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS correct
            FROM attempts a
            JOIN question_versions qv ON qv.id = a.question_version_id
            JOIN curriculum_nodes c ON c.id = qv.chapter_id

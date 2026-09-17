@@ -6,10 +6,9 @@ use domain_contracts::option_count;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain_option;
 use crate::error::{ApiError, ApiResult};
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QuestionOption {
     pub text: String,
     pub rationale: String,
@@ -37,7 +36,12 @@ struct NewQuestion {
 async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiError> {
     // QB-11: the 2..=10 option rule lives in the shared crate, so the fixture
     // goes through the same validation real ingestion will use.
-    let _count = option_count(q.options.len())?;
+    let _count = option_count(q.options.len()).map_err(|_| {
+        ApiError::unprocessable(
+            "invalid_option_count",
+            "question options must number between 2 and 10",
+        )
+    })?;
     let qid = Uuid::new_v4();
     let vid = Uuid::new_v4();
     let options = serde_json::to_value(&q.options).map_err(|_| ApiError::internal())?;
