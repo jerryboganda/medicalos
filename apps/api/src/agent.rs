@@ -28,7 +28,7 @@ pub async fn get_or_create_today(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResul
     }
     let plan_id = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO plans (id, user_id) VALUES ($1, $2)",
+        "INSERT INTO plans (id, user_id, version) VALUES ($1, $2, 1)",
         plan_id,
         user_id
     )
