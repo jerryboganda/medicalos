@@ -10,10 +10,10 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| OPS-01 | GitHub Actions development-compute enforcement | in-progress (enforced via AGENTS.md; CI matrix being built) | .scratch/phase-0-decisions/issues/04 |
+| OPS-01 | GitHub Actions development-compute enforcement | in-progress (enforced; proven by green CI run 35273824336) | .scratch/phase-0-decisions/issues/04 |
 | OPS-02 | Runtime boundary approval before deployment | blocked (owner decision) | issues/10 |
-| OPS-07 | Rust + Tauri CI runner matrix under the compute rule | in-progress | issues/04 |
-| ARCH-01 | Shared Rust core across server, Tauri, and WebAssembly | in-progress (P0: native + WASM pipeline proof) | issues/03, issues/08 |
+| OPS-07 | Rust + Tauri CI runner matrix under the compute rule | tested (Linux gates green, run 35273824336; macOS/Windows signing jobs arrive with Tauri shells) | issues/04 |
+| ARCH-01 | Shared Rust core across server, Tauri, and WebAssembly | in-progress (native + wasm32 compile proven in CI run 35273824336; runtime parity check remains in the Phase 0 spike, issues/08) | issues/03, issues/08 |
 
 ## Phase 1 — Connected vertical slice
 

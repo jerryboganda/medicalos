@@ -1,6 +1,6 @@
 # 03 — Monorepo scaffold (§20.4)
 
-Status: implemented — CI verification pending first run (no GitHub remote yet; compute rule bars local builds)
+Status: resolved — CI-verified (all gates green in https://github.com/jerryboganda/medicalos/actions/runs/35273824336: fmt, clippy, cargo-deny, tests, wasm32 build of domain-contracts, client + site builds)
 Requirement IDs: ARCH-01 (native + WASM pipeline proof)
 
 ## Task

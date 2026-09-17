@@ -1,6 +1,6 @@
 # 04 — CI runner matrix (§27.1)
 
-Status: implemented — CI verification pending first run (no GitHub remote yet)
+Status: resolved for Phase 0 scope — core gates green in run 35273824336. Later-phase gates (Postgres integration/SQLx, contract drift, E2E, signing, perf budgets) are added by the phase that first has code for them.
 Requirement IDs: OPS-01, OPS-07
 
 ## Task
