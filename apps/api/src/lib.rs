@@ -1,0 +1,44 @@
+//! Phase 1 slice 1: the connected question loop (see
+//! .scratch/phase-1-slice-1/spec.md). The HTTP API is the tested seam.
+
+pub mod agent;
+pub mod auth;
+pub mod error;
+pub mod routes;
+pub mod schema;
+pub mod seed;
+pub mod state;
+
+use std::sync::Arc;
+
+use axum::routing::{get, post};
+use axum::Router;
+
+pub fn router(state: Arc<state::AppState>) -> Router {
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/v1/auth/register", post(routes::auth::register))
+        .route("/v1/auth/login", post(routes::auth::login))
+        .route("/v1/me/today", get(routes::today::today))
+        .route(
+            "/v1/practice/sessions",
+            post(routes::practice::create_session),
+        )
+        .route(
+            "/v1/practice/sessions/{sid}/answers",
+            post(routes::practice::answer),
+        )
+        .route(
+            "/v1/practice/sessions/{sid}/submit",
+            post(routes::practice::submit),
+        )
+        .route(
+            "/v1/plans/{pid}/revisions/{rid}/undo",
+            post(routes::today::undo_revision),
+        )
+        .with_state(state)
+}
+
+async fn healthz() -> &'static str {
+    "ok"
+}

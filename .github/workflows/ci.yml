@@ -18,6 +18,21 @@ jobs:
   rust:
     # Linux runner: API, workers, crates, WASM (§27.1)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,6 +43,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
+      # Compile-time-checked queries (§31.1) expand against the live schema.
+      - name: Apply schema for query checks and tests
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/migrations/0001_init.up.sql
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Dependency advisories + licenses

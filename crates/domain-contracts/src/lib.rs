@@ -41,6 +41,12 @@ impl TryFrom<u8> for OptionCount {
     }
 }
 
+/// Validated option count from a plain usize length (0..=255 inputs).
+pub fn option_count(len: usize) -> Result<OptionCount, OptionCountOutOfRange> {
+    let n = u8::try_from(len).map_err(|_| OptionCountOutOfRange)?;
+    OptionCount::try_from(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
