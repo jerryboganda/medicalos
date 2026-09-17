@@ -80,6 +80,8 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
-        Ok(AuthUser { user_id: row.user_id })
+        Ok(AuthUser {
+            user_id: row.user_id,
+        })
     }
 }

@@ -81,7 +81,10 @@ async fn insert_session(
             lead_in: q.lead_in.clone(),
             difficulty: q.difficulty.clone(),
             // §11.3: no answer keys or rationales before they are permitted.
-            options: opts.into_iter().map(|o| serde_json::json!({"text": o.text})).collect(),
+            options: opts
+                .into_iter()
+                .map(|o| serde_json::json!({"text": o.text}))
+                .collect(),
         });
     }
     Ok(Json(serde_json::json!({"session_id": sid, "items": items})))
@@ -124,8 +127,15 @@ pub async fn create_session(
                     options: r.options,
                 })
                 .collect();
-            insert_session(&state.pool, user.user_id, "tutor", Some(chapter_id), None, &qs)
-                .await
+            insert_session(
+                &state.pool,
+                user.user_id,
+                "tutor",
+                Some(chapter_id),
+                None,
+                &qs,
+            )
+            .await
         }
         "revision" => {
             let src = req.source_session_id.ok_or_else(|| {
@@ -248,7 +258,10 @@ pub async fn answer(
     .await?
     .ok_or_else(|| ApiError::not_found("session_not_found"))?;
     if session.status != "open" {
-        return Err(ApiError::conflict("session_closed", "session already submitted"));
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session already submitted",
+        ));
     }
 
     // Idempotent replay: same key, same stored answer, no duplicate attempt.
@@ -397,7 +410,10 @@ pub async fn submit(
     .await?
     .ok_or_else(|| ApiError::not_found("session_not_found"))?;
     if session.status != "open" {
-        return Err(ApiError::conflict("session_closed", "session already submitted"));
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session already submitted",
+        ));
     }
 
     let totals = sqlx::query!(
@@ -423,7 +439,10 @@ pub async fn submit(
     .execute(&state.pool)
     .await?;
     if updated.rows_affected() == 0 {
-        return Err(ApiError::conflict("session_closed", "session already submitted"));
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session already submitted",
+        ));
     }
 
     agent::mark_matching_task_done(

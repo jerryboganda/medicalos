@@ -34,10 +34,7 @@ struct NewQuestion {
     high_yield: bool,
 }
 
-async fn insert_question(
-    pool: &PgPool,
-    q: &NewQuestion,
-) -> Result<Uuid, ApiError> {
+async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiError> {
     // QB-11: the 2..=10 option rule lives in the shared crate, so the fixture
     // goes through the same validation real ingestion will use.
     let _count = option_count(q.options.len())?;
@@ -113,10 +110,24 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
 
     let subject = insert_node(pool, exam_id, "subject", "Fictional Systems", None, 0).await?;
     let system = insert_node(pool, exam_id, "system", "Gloopoid Axis", Some(subject), 0).await?;
-    let chapter1 =
-        insert_node(pool, exam_id, "chapter", "Gloopoid Physiology", Some(system), 0).await?;
-    let chapter2 =
-        insert_node(pool, exam_id, "chapter", "Glorbin Measurement", Some(system), 1).await?;
+    let chapter1 = insert_node(
+        pool,
+        exam_id,
+        "chapter",
+        "Gloopoid Physiology",
+        Some(system),
+        0,
+    )
+    .await?;
+    let chapter2 = insert_node(
+        pool,
+        exam_id,
+        "chapter",
+        "Glorbin Measurement",
+        Some(system),
+        1,
+    )
+    .await?;
 
     let mk = |chapter: Uuid,
               difficulty: &'static str,
@@ -133,7 +144,10 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         lead_in,
         options: options
             .into_iter()
-            .map(|(t, r)| QuestionOption { text: t.to_string(), rationale: r.to_string() })
+            .map(|(t, r)| QuestionOption {
+                text: t.to_string(),
+                rationale: r.to_string(),
+            })
             .collect(),
         correct,
         key_point,
@@ -150,10 +164,22 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
             .to_string(),
         "What happens to hormone Z secretion as glorbin rises?",
         vec![
-            ("It decreases", "Correct: the fixture models classic negative feedback."),
-            ("It increases", "That would be positive feedback, not this model."),
-            ("It stops permanently", "Nothing in the fixture implies permanence."),
-            ("It is unaffected", "The fixture states glorbin acts back on Z."),
+            (
+                "It decreases",
+                "Correct: the fixture models classic negative feedback.",
+            ),
+            (
+                "It increases",
+                "That would be positive feedback, not this model.",
+            ),
+            (
+                "It stops permanently",
+                "Nothing in the fixture implies permanence.",
+            ),
+            (
+                "It is unaffected",
+                "The fixture states glorbin acts back on Z.",
+            ),
         ],
         0,
         "In classic negative-feedback loops, rising product suppresses the upstream signal.",
@@ -169,9 +195,18 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         "Which step of the fictional pathway is defective?",
         vec![
             ("Synthesis", "Synthesis is described as normal."),
-            ("Storage and packaging", "Correct: made but not stored, so release is low."),
-            ("Receptor binding", "Receptors act after secretion; synthesis reached blood."),
-            ("Degradation", "Low - not high - blood levels argue against excess breakdown."),
+            (
+                "Storage and packaging",
+                "Correct: made but not stored, so release is low.",
+            ),
+            (
+                "Receptor binding",
+                "Receptors act after secretion; synthesis reached blood.",
+            ),
+            (
+                "Degradation",
+                "Low - not high - blood levels argue against excess breakdown.",
+            ),
         ],
         1,
         "Normal synthesis plus absent granules points to the storage step, not production.",
@@ -186,10 +221,22 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
             .to_string(),
         "Which interpretation is correct?",
         vec![
-            ("Within the fictional reference range", "Correct: 40 lies between 10 and 50."),
-            ("Above the fictional reference range", "40 is below the upper limit of 50."),
-            ("Below the fictional reference range", "40 is above the lower limit of 10."),
-            ("Uninterpretable without repeats", "The fixture defines a single interpretable value."),
+            (
+                "Within the fictional reference range",
+                "Correct: 40 lies between 10 and 50.",
+            ),
+            (
+                "Above the fictional reference range",
+                "40 is below the upper limit of 50.",
+            ),
+            (
+                "Below the fictional reference range",
+                "40 is above the lower limit of 10.",
+            ),
+            (
+                "Uninterpretable without repeats",
+                "The fixture defines a single interpretable value.",
+            ),
         ],
         0,
         "Compare the value against both bounds of the reference range before interpreting.",
@@ -204,10 +251,22 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
             .to_string(),
         "What happens to glorbin's effect?",
         vec![
-            ("It increases", "Inhibition reduces, not amplifies, the effect."),
-            ("It decreases despite normal blood levels", "Correct: the receptor step is blocked."),
-            ("It is unchanged because levels are normal", "Levels alone do not determine effect."),
-            ("It converts to an agonist", "Nothing in the fixture implies conversion."),
+            (
+                "It increases",
+                "Inhibition reduces, not amplifies, the effect.",
+            ),
+            (
+                "It decreases despite normal blood levels",
+                "Correct: the receptor step is blocked.",
+            ),
+            (
+                "It is unchanged because levels are normal",
+                "Levels alone do not determine effect.",
+            ),
+            (
+                "It converts to an agonist",
+                "Nothing in the fixture implies conversion.",
+            ),
         ],
         1,
         "Effect depends on both level and receptor action; blocking receptors lowers effect.",

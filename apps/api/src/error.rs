@@ -22,15 +22,27 @@ impl ApiError {
     }
 
     pub fn not_found(code: &'static str) -> Self {
-        Self { status: StatusCode::NOT_FOUND, code, message: code.into() }
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code,
+            message: code.into(),
+        }
     }
 
     pub fn conflict(code: &'static str, message: impl Into<String>) -> Self {
-        Self { status: StatusCode::CONFLICT, code, message: message.into() }
+        Self {
+            status: StatusCode::CONFLICT,
+            code,
+            message: message.into(),
+        }
     }
 
     pub fn unprocessable(code: &'static str, message: impl Into<String>) -> Self {
-        Self { status: StatusCode::UNPROCESSABLE_ENTITY, code, message: message.into() }
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            message: message.into(),
+        }
     }
 
     pub fn internal() -> Self {

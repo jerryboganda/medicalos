@@ -15,10 +15,7 @@ use crate::state::AppState;
 
 /// Latest version of today's plan, creating the cold-start plan when needed
 /// (AI-02: a modest first plan, one chapter task, no diagnostics demanded).
-pub async fn get_or_create_today(
-    pool: &sqlx::PgPool,
-    user_id: Uuid,
-) -> ApiResult<(Uuid, i32)> {
+pub async fn get_or_create_today(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResult<(Uuid, i32)> {
     let latest = sqlx::query!(
         "SELECT id, version FROM plans
          WHERE user_id = $1 AND plan_date = CURRENT_DATE
@@ -31,9 +28,13 @@ pub async fn get_or_create_today(
         return Ok((p.id, p.version));
     }
     let plan_id = Uuid::new_v4();
-    sqlx::query!("INSERT INTO plans (id, user_id) VALUES ($1, $2)", plan_id, user_id)
-        .execute(pool)
-        .await?;
+    sqlx::query!(
+        "INSERT INTO plans (id, user_id) VALUES ($1, $2)",
+        plan_id,
+        user_id
+    )
+    .execute(pool)
+    .await?;
     // Single-exam fixture world: the first chapter is the exam's first. The
     // selection policy of 8.8 replaces this when several exams exist.
     let first = sqlx::query!(
@@ -60,11 +61,7 @@ pub async fn get_or_create_today(
 
 /// New plan version copying every task of the current version (audit trail
 /// lives in plan_revisions + the old version rows).
-pub async fn fork_plan(
-    pool: &sqlx::PgPool,
-    plan_id: Uuid,
-    version: i32,
-) -> ApiResult<(Uuid, i32)> {
+pub async fn fork_plan(pool: &sqlx::PgPool, plan_id: Uuid, version: i32) -> ApiResult<(Uuid, i32)> {
     let new_id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO plans (id, user_id, plan_date, version)

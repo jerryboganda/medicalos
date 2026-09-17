@@ -111,7 +111,11 @@ async fn auth_register_login_and_reject_bad_credentials() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "duplicate email must conflict");
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "duplicate email must conflict"
+    );
 
     let (status, _) = call(
         app.clone(),
@@ -159,11 +163,13 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(status, StatusCode::OK, "{today}");
     assert_eq!(today["version"], 1);
     assert_eq!(today["tasks"].as_array().unwrap().len(), 1);
-    assert_eq!(today["learner"].as_array().unwrap().len(), 0, "no fake analytics");
+    assert_eq!(
+        today["learner"].as_array().unwrap().len(),
+        0,
+        "no fake analytics"
+    );
 
-    let chapter1 = today["tasks"][0]["chapter_id"]
-        .as_str()
-        .map(str::to_string);
+    let chapter1 = today["tasks"][0]["chapter_id"].as_str().map(str::to_string);
     let chapter1 = Uuid::parse_str(&chapter1.expect("cold-start task has chapter")).unwrap();
 
     // Tutor session over the cold-start chapter.
@@ -191,10 +197,8 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 0, "chosen_index": chosen,
-                                   "idempotency_key": key}),
-            ),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": chosen,
+                                   "idempotency_key": key})),
         )
     };
     // Find the correct index by trying: the fixture option 0 of each question
@@ -235,9 +239,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 1, "idempotency_key": "key-2"}),
-            ),
+            Some(serde_json::json!({"item_index": 1, "idempotency_key": "key-2"})),
         ),
     )
     .await;
@@ -258,7 +260,8 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(result["total"], 2);
     assert_eq!(result["skipped"], 1);
     assert_eq!(
-        result["correct"].as_i64().unwrap() + result["incorrect"].as_i64().unwrap()
+        result["correct"].as_i64().unwrap()
+            + result["incorrect"].as_i64().unwrap()
             + result["skipped"].as_i64().unwrap(),
         2
     );
@@ -285,7 +288,11 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(status, StatusCode::OK, "{today}");
     assert_eq!(today["tasks"][0]["status"], "done");
     let revisions = today["revisions"].as_array().unwrap();
-    assert_eq!(revisions.len(), 1, "revision created after missed answers: {today}");
+    assert_eq!(
+        revisions.len(),
+        1,
+        "revision created after missed answers: {today}"
+    );
     assert_eq!(revisions[0]["automatic"], true);
     assert_eq!(revisions[0]["reason_code"], "incorrect_answers");
     assert!(revisions[0]["undone"].as_bool().unwrap() == false);
@@ -295,7 +302,10 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     // one skip (skips are not evidence).
     let learner = today["learner"].as_array().unwrap();
     assert_eq!(learner.len(), 1);
-    assert!(learner[0]["mastery_index"].is_null(), "no mastery under 10 attempts");
+    assert!(
+        learner[0]["mastery_index"].is_null(),
+        "no mastery under 10 attempts"
+    );
     assert_eq!(learner[0]["evidence_level"], "low_evidence");
     assert_eq!(learner[0]["independent_count"], 1);
 
@@ -304,7 +314,11 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         app.clone(),
         request(
             "POST",
-            &format!("/v1/plans/{}/{}/undo", today["plan_id"].as_str().unwrap(), rid),
+            &format!(
+                "/v1/plans/{}/{}/undo",
+                today["plan_id"].as_str().unwrap(),
+                rid
+            ),
             Some(&token),
             None,
         ),
@@ -358,10 +372,8 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                   "idempotency_key": "r-key-1"}),
-            ),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "r-key-1"})),
         ),
     )
     .await;
@@ -371,10 +383,8 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 1, "chosen_index": 0,
-                                   "idempotency_key": "r-key-2"}),
-            ),
+            Some(serde_json::json!({"item_index": 1, "chosen_index": 0,
+                                   "idempotency_key": "r-key-2"})),
         ),
     )
     .await;
@@ -399,9 +409,7 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
             "POST",
             "/v1/practice/sessions",
             Some(&token),
-            Some(
-                serde_json::json!({"preset": "revision", "source_session_id": sid}),
-            ),
+            Some(serde_json::json!({"preset": "revision", "source_session_id": sid})),
         ),
     )
     .await;
@@ -427,16 +435,18 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{open_session}");
-    let open_sid: Uuid = open_session["session_id"].as_str().unwrap().parse().unwrap();
+    let open_sid: Uuid = open_session["session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let (status, _) = call(
         app.clone(),
         request(
             "POST",
             "/v1/practice/sessions",
             Some(&token),
-            Some(
-                serde_json::json!({"preset": "revision", "source_session_id": open_sid}),
-            ),
+            Some(serde_json::json!({"preset": "revision", "source_session_id": open_sid})),
         ),
     )
     .await;
@@ -457,5 +467,9 @@ async fn migration_up_down_up_is_reversible() {
     .fetch_one(&state.pool)
     .await
     .expect("table check");
-    assert_eq!(rows.get::<i64, _>("n"), 1, "schema present after up-down-up");
+    assert_eq!(
+        rows.get::<i64, _>("n"),
+        1,
+        "schema present after up-down-up"
+    );
 }

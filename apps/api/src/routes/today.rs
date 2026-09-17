@@ -138,7 +138,13 @@ pub async fn today(
         })
         .collect();
 
-    Ok(Json(TodayResponse { plan_id, version, tasks, revisions, learner }))
+    Ok(Json(TodayResponse {
+        plan_id,
+        version,
+        tasks,
+        revisions,
+        learner,
+    }))
 }
 
 #[derive(Serialize)]
@@ -168,7 +174,10 @@ pub async fn undo_revision(
     .await?
     .ok_or_else(|| ApiError::not_found("revision_not_found"))?;
     if revision.undone {
-        return Err(ApiError::conflict("already_undone", "revision is already undone"));
+        return Err(ApiError::conflict(
+            "already_undone",
+            "revision is already undone",
+        ));
     }
     // Only the newest revision can be undone (older ones would silently
     // resurrect tasks removed by later revisions).
@@ -196,5 +205,7 @@ pub async fn undo_revision(
     .execute(&state.pool)
     .await?;
     agent::mark_revision_undone(&state.pool, rid).await?;
-    Ok(Json(UndoResponse { plan_version: new_version }))
+    Ok(Json(UndoResponse {
+        plan_version: new_version,
+    }))
 }

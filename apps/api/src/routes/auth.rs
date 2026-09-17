@@ -29,7 +29,10 @@ pub async fn register(
 ) -> ApiResult<Json<serde_json::Value>> {
     let email = req.email.trim().to_lowercase();
     if !email.contains('@') || email.len() < 3 || email.len() > 254 {
-        return Err(ApiError::unprocessable("invalid_email", "email is not valid"));
+        return Err(ApiError::unprocessable(
+            "invalid_email",
+            "email is not valid",
+        ));
     }
     if req.password.len() < 8 {
         return Err(ApiError::unprocessable(
@@ -41,7 +44,10 @@ pub async fn register(
         .fetch_optional(&state.pool)
         .await?;
     if exists.is_some() {
-        return Err(ApiError::conflict("email_taken", "email is already registered"));
+        return Err(ApiError::conflict(
+            "email_taken",
+            "email is already registered",
+        ));
     }
     let hash = hash_password(&req.password)?;
     let user_id = Uuid::new_v4();
