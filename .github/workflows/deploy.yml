@@ -102,12 +102,23 @@ jobs:
       - name: Verify production serves this exact commit
         run: |
           set -e
-          sleep 15
           BASE="https://jerryboganda.github.io/medicalos"
           echo "Checking $BASE ..."
-          curl -sf "$BASE/version.json" | tee version.json
-          grep -q "\"sha\":\"${GITHUB_SHA}\"" version.json \
-            || { echo "FAIL: deployed SHA != ${GITHUB_SHA}"; exit 1; }
-          curl -sf "$BASE/" | grep -qi "medical learning os" \
+          # Pages CDN may serve a stale copy for up to 10 minutes — retry.
+          for i in $(seq 1 18); do
+            if curl -sf "$BASE/version.json" | grep -q "\"sha\":\"${GITHUB_SHA}\""; then
+              echo "SHA match: latest commit is live."
+              break
+            fi
+            echo "attempt $i: CDN still stale; retrying..."
+            sleep 30
+            [ "$i" -eq 18 ] && { echo "FAIL: deployed SHA never matched"; exit 1; }
+          done
+          # SPA: the shell must mount the SvelteKit app (content renders via JS).
+          curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data' \
             || { echo "FAIL: app shell not served"; exit 1; }
-          echo "PRODUCTION VERIFIED: latest commit ${GITHUB_SHA} is live."
+          # App assets must load (JS entry bundle reachable).
+          ASSET=$(curl -sf "$BASE/" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
+          [ -n "$ASSET" ] || { echo "FAIL: no entry bundle referenced"; exit 1; }
+          curl -sf "$BASE$ASSET" > /dev/null || { echo "FAIL: entry bundle 404"; exit 1; }
+          echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
