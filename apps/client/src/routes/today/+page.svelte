@@ -45,6 +45,27 @@
 		}
 	}
 
+	async function startTimed(task) {
+		if (startingTask) return;
+		startingTask = `timed-${task.id}`;
+		error = '';
+		try {
+			const { session_id } = await Api.createSession({
+				preset: 'timed',
+				chapter_id: task.chapter_id,
+				question_count: 10,
+				time_limit_seconds: 300
+			});
+			goto(`/session/${session_id}`);
+		} catch (err) {
+			error =
+				err instanceof ApiError
+					? err.message
+					: 'Could not start the session. Try again.';
+			startingTask = '';
+		}
+	}
+
 	async function undo(revision) {
 		if (undoing) return;
 		undoing = revision.id;
@@ -90,20 +111,31 @@
 						{task.status === 'done' ? 'Done' : task.kind === 'revision' ? 'Re-practice' : 'Practice'}
 					</span>
 				</div>
-				{#if task.status !== 'done'}
-					<p style="margin-bottom:0;">
+			{#if task.status !== 'done'}
+				<p style="margin-bottom:0; display:flex; gap:12px; flex-wrap:wrap;">
+					<button
+						class="btn primary"
+						type="button"
+						disabled={startingTask !== ''}
+						data-loading={startingTask === task.id}
+						data-testid={task.kind === 'revision' ? 'revision-start' : 'task-start'}
+						onclick={() => startTask(task)}
+					>
+						{startingTask === task.id ? 'Starting…' : task.kind === 'revision' ? 'Start re-practice' : 'Start'}
+					</button>
+					{#if task.kind === 'practice' && task.chapter_id}
 						<button
-							class="btn primary"
+							class="btn"
 							type="button"
 							disabled={startingTask !== ''}
-							data-loading={startingTask === task.id}
-							data-testid={task.kind === 'revision' ? 'revision-start' : 'task-start'}
-							onclick={() => startTask(task)}
+							data-testid="task-timed"
+							onclick={() => startTimed(task)}
 						>
-							{startingTask === task.id ? 'Starting…' : task.kind === 'revision' ? 'Start re-practice' : 'Start'}
+							{startingTask === `timed-${task.id}` ? 'Starting…' : 'Start timed (5 min)'}
 						</button>
-					</p>
-				{/if}
+					{/if}
+				</p>
+			{/if}
 			</div>
 		{/each}
 	{/if}

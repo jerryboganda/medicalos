@@ -5,6 +5,7 @@ members = [
     "crates/calc-engine",
     "crates/competition-scoring",
     "crates/domain-contracts",
+    "crates/scheduler",
     "crates/telemetry",
 ]
 
@@ -27,3 +28,5 @@ argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
 tower-http = { version = "0.6", features = ["cors"] }
+# FSRS scheduler (plan §13): MIT-licensed, license-reviewed 2026-09-18.
+rs-fsrs = "1.2.1"

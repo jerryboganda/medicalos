@@ -44,7 +44,10 @@ jobs:
         run: cargo fmt --all -- --check
       # Compile-time-checked queries (§31.1) expand against the live schema.
       - name: Apply schema for query checks and tests
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/migrations/0001_init.up.sql
+        run: |
+          for f in apps/api/migrations/*.up.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || exit 1
+          done
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Dependency advisories + licenses
@@ -55,7 +58,7 @@ jobs:
       # tests yet; a wasm test harness arrives when core-wasm bindings exist)
       - name: Shared core builds for wasm32
         run: |
-          cargo build -p domain-contracts -p calc-engine -p competition-scoring --target wasm32-unknown-unknown
+          cargo build -p domain-contracts -p calc-engine -p competition-scoring -p scheduler --target wasm32-unknown-unknown
 
   client:
     # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)
@@ -102,6 +105,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
       VITE_API_BASE: http://127.0.0.1:8080
+      MIN_TIME_LIMIT_SECONDS: "5"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,7 +114,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Apply schema (compile-time query checks need the live schema)
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/migrations/0001_init.up.sql
+        run: |
+          for f in apps/api/migrations/*.up.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || exit 1
+          done
       - name: Build API
         run: cargo build -p api
       - name: Seed synthetic fixtures

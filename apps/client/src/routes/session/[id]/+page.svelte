@@ -19,6 +19,28 @@
 		session?.items ? session.items.every((i) => i.answered) : false
 	);
 
+	// EX-08: countdown derives from the server-issued deadline and server_now,
+	// so changing the device clock never extends the timer.
+	let clockSkewMs = $state(0);
+	let remainingMs = $state(null);
+	let autoSubmitted = $state(false);
+
+	function tick() {
+		if (!session?.deadline) return;
+		remainingMs = new Date(session.deadline).getTime() - (Date.now() + clockSkewMs);
+		if (remainingMs <= 0 && !autoSubmitted && !result && session.status === 'open') {
+			autoSubmitted = true;
+			submitSession();
+		}
+	}
+
+	function fmt(ms) {
+		const total = Math.max(0, Math.floor(ms / 1000));
+		const m = Math.floor(total / 60);
+		const s = total % 60;
+		return `${m}:${String(s).padStart(2, '0')}`;
+	}
+
 	function storageKey(index) {
 		return `mlos_key_${sid}_${index}`;
 	}
@@ -37,6 +59,10 @@
 			session = await Api.getSession(sid);
 			const firstUnanswered = session.items.findIndex((i) => !i.answered);
 			current = firstUnanswered === -1 ? session.items.length - 1 : firstUnanswered;
+			if (session.deadline && session.server_now) {
+				clockSkewMs = new Date(session.server_now).getTime() - Date.now();
+				tick();
+			}
 		} catch (err) {
 			loadFailed =
 				err instanceof ApiError ? err.message : 'Could not load the session.';
@@ -65,6 +91,12 @@
 			};
 			selected = null;
 		} catch (err) {
+			if (err instanceof ApiError && err.code === 'session_expired') {
+				// Server deadline passed: submit what exists (auto-submit, §11.6).
+				autoSubmitted = true;
+				await submitSession();
+				return;
+			}
 			error = err instanceof ApiError ? err.message : 'Could not record the answer.';
 		} finally {
 			busy = false;
@@ -100,6 +132,12 @@
 		}
 	}
 
+	$effect(() => {
+		if (!session?.deadline) return;
+		const timer = setInterval(tick, 500);
+		return () => clearInterval(timer);
+	});
+
 	function letterLabel(index) {
 		return String.fromCharCode(65 + index);
 	}
@@ -127,7 +165,17 @@
 {:else if session}
 	<p class="muted" style="margin-bottom: var(--space-sm);">
 		Question {current + 1} of {session.items.length}
-		· {session.preset === 'revision' ? 'Re-practice' : 'Tutor mode'}
+		· {session.preset === 'revision' ? 'Re-practice' : session.preset === 'timed' ? 'Timed' : 'Tutor mode'}
+		{#if remainingMs !== null}
+			· <span
+				class="timer"
+				style:color={remainingMs < 60_000 ? 'var(--color-warning)' : 'inherit'}
+				style:font-weight="700"
+				data-testid="timer"
+			>
+				{fmt(remainingMs)} left
+			</span>
+		{/if}
 	</p>
 
 	{#if item}
@@ -162,7 +210,7 @@
 				<button
 					class="btn primary"
 					type="button"
-					disabled={selected === null || busy}
+					disabled={selected === null || busy || (remainingMs !== null && remainingMs <= 0)}
 					data-loading={busy}
 					data-testid="answer"
 					onclick={() => answer(selected)}
@@ -172,7 +220,7 @@
 				<button
 					class="linklike"
 					type="button"
-					disabled={busy}
+					disabled={busy || (remainingMs !== null && remainingMs <= 0)}
 					data-testid="skip"
 					onclick={() => answer(null)}
 				>

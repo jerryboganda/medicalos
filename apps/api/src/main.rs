@@ -18,7 +18,19 @@ async fn main() {
         tracing::info!("seeded fixture content");
         return;
     }
-    let state = std::sync::Arc::new(api::state::AppState { pool });
+    let min_time_limit: i64 = std::env::var("MIN_TIME_LIMIT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+    let free_daily_questions: i64 = std::env::var("FREE_DAILY_QUESTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let state = std::sync::Arc::new(api::state::AppState {
+        pool,
+        min_time_limit_seconds: min_time_limit,
+        free_daily_questions,
+    });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("bind 8080");

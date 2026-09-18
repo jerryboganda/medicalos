@@ -458,6 +458,152 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
 }
 
 #[tokio::test]
+async fn timed_session_expires_server_side() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Create a timed session at the floor (default floor is 30s in tests).
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(
+                serde_json::json!({"preset": "timed", "chapter_id": ids.chapter1,
+                                   "question_count": 2, "time_limit_seconds": 30}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert!(
+        session["deadline"].is_string(),
+        "server issues the deadline"
+    );
+    assert!(session["server_now"].is_string());
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    // A timed session without time_limit_seconds is rejected outright.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(
+                serde_json::json!({"preset": "timed", "chapter_id": ids.chapter1,
+                                   "question_count": 2}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "time_limit_required");
+
+    // Force expiry server-side (the client cannot extend its timer: EX-08).
+    sqlx::query("UPDATE practice_sessions SET deadline = now() - interval '1 second'")
+        .bind(sid)
+        .execute(&state.pool)
+        .await
+        .expect("expire session");
+
+    // Answers are rejected once the server deadline has passed.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "expired-key"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "session_expired");
+
+    // Submission after expiry still works — auto-submit semantics (§11.6).
+    let (status, result) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["skipped"], 2, "unanswered items count as skipped");
+}
+
+#[tokio::test]
+async fn free_daily_allowance_blocks_new_sessions_with_details() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Default allowance is 10 questions; each session holds 2. Answer 10
+    // across five sessions, then the sixth session must be refused with an
+    // honest entitlement payload (COM-01).
+    for n in 0..5 {
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&token),
+                Some(
+                    serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter2,
+                                       "question_count": 2}),
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "session {n}: {session}");
+        let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+        for idx in 0..2 {
+            let (status, _) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/practice/sessions/{sid}/answers"),
+                    Some(&token),
+                    Some(serde_json::json!({"item_index": idx, "chosen_index": 0,
+                                           "idempotency_key": format!("allow-{n}-{idx}")})),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+    }
+
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(
+                serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter2,
+                                   "question_count": 2}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "free_allowance_reached");
+    assert_eq!(body["error"]["details"]["allowance"]["limit"], 10);
+    assert_eq!(body["error"]["details"]["allowance"]["used"], 10);
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

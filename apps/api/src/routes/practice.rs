@@ -19,6 +19,8 @@ pub struct CreateSessionReq {
     pub chapter_id: Option<Uuid>,
     pub question_count: Option<i32>,
     pub source_session_id: Option<Uuid>,
+    /// EX-08: required for the timed preset, validated server-side.
+    pub time_limit_seconds: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -45,17 +47,25 @@ async fn insert_session(
     preset: &str,
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
+    time_limit_seconds: Option<i64>,
     pool_questions: &[PoolQuestion],
 ) -> ApiResult<Json<serde_json::Value>> {
+    // EX-08: the server issues the deadline — the client never sets it, and
+    // answer acceptance is checked against it server-side.
+    let deadline =
+        time_limit_seconds.map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit));
     let sid = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO practice_sessions (id, user_id, preset, chapter_id, source_session_id)
-         VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO practice_sessions
+           (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds, deadline)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
         sid,
         user_id,
         preset,
         chapter_id,
-        source_session_id
+        source_session_id,
+        time_limit_seconds,
+        deadline
     )
     .execute(pool)
     .await?;
@@ -95,13 +105,62 @@ pub async fn create_session(
     user: AuthUser,
     Json(req): Json<CreateSessionReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // COM-01: the free-tier daily allowance is an entitlement check (§26.1) —
+    // upgrade prompts may originate only from here, never from the Coach.
+    // # ponytail: revision sessions are exempt (they re-practice already-
+    // served items); per-tier entitlement service lands with billing.
+    if req.preset.as_str() != "revision" {
+        let used = sqlx::query!(
+            r#"SELECT COALESCE(COUNT(*), 0) AS "n!"
+               FROM attempts
+               WHERE user_id = $1 AND created_at::date = CURRENT_DATE"#,
+            user.user_id
+        )
+        .fetch_one(&state.pool)
+        .await?
+        .n;
+        if used >= state.free_daily_questions {
+            return Err(ApiError::forbidden_with_details(
+                "free_allowance_reached",
+                format!(
+                    "Daily free allowance of {} questions reached — it resets tomorrow.",
+                    state.free_daily_questions
+                ),
+                serde_json::json!({
+                    "allowance": { "limit": state.free_daily_questions, "used": used }
+                }),
+            ));
+        }
+    }
     match req.preset.as_str() {
-        "tutor" => {
+        "tutor" | "timed" => {
             let chapter_id = req.chapter_id.ok_or_else(|| {
-                ApiError::unprocessable("chapter_required", "tutor sessions need a chapter_id")
+                ApiError::unprocessable("chapter_required", "practice sessions need a chapter_id")
             })?;
             // LIMIT binds as i64 in sqlx.
             let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
+            // EX-08: timed sessions carry a server-issued deadline. The floor
+            // is configurable so CI/E2E can run short timed sessions.
+            let time_limit_seconds = if req.preset == "timed" {
+                let limit = req.time_limit_seconds.ok_or_else(|| {
+                    ApiError::unprocessable(
+                        "time_limit_required",
+                        "timed sessions need time_limit_seconds",
+                    )
+                })?;
+                if !(state.min_time_limit_seconds..=14_400).contains(&limit) {
+                    return Err(ApiError::unprocessable(
+                        "time_limit_out_of_range",
+                        format!(
+                            "time_limit_seconds must be between {} and 14400",
+                            state.min_time_limit_seconds
+                        ),
+                    ));
+                }
+                Some(limit)
+            } else {
+                None
+            };
             let pool_qs = sqlx::query!(
                 r#"SELECT id, vignette, lead_in, difficulty, options
                    FROM question_versions
@@ -131,9 +190,10 @@ pub async fn create_session(
             insert_session(
                 &state.pool,
                 user.user_id,
-                "tutor",
+                &req.preset,
                 Some(chapter_id),
                 None,
+                time_limit_seconds,
                 &qs,
             )
             .await
@@ -197,7 +257,16 @@ pub async fn create_session(
                     options: r.options,
                 })
                 .collect();
-            insert_session(&state.pool, user.user_id, "revision", None, Some(src), &qs).await
+            insert_session(
+                &state.pool,
+                user.user_id,
+                "revision",
+                None,
+                Some(src),
+                None,
+                &qs,
+            )
+            .await
         }
         other => Err(ApiError::unprocessable(
             "unknown_preset",
@@ -215,7 +284,8 @@ pub async fn get_session(
     Path(sid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT preset, chapter_id, source_session_id, status FROM practice_sessions
+        "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline
+         FROM practice_sessions
          WHERE id = $1 AND user_id = $2",
         sid,
         user.user_id
@@ -277,6 +347,11 @@ pub async fn get_session(
         "chapter_id": session.chapter_id,
         "source_session_id": session.source_session_id,
         "status": session.status,
+        "time_limit_seconds": session.time_limit_seconds,
+        // EX-08: the client derives its countdown from these two values, so
+        // changing the device clock never extends the timer.
+        "deadline": session.deadline,
+        "server_now": chrono::Utc::now(),
         "items": out,
     })))
 }
@@ -326,7 +401,7 @@ pub async fn answer(
     Json(req): Json<AnswerReq>,
 ) -> ApiResult<Json<AnswerResponse>> {
     let session = sqlx::query!(
-        "SELECT status FROM practice_sessions WHERE id = $1 AND user_id = $2",
+        "SELECT status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
         user.user_id
     )
@@ -338,6 +413,16 @@ pub async fn answer(
             "session_closed",
             "session already submitted",
         ));
+    }
+    // EX-08: the server-side deadline is the single source of truth — once it
+    // passes, no new answers are recorded and the client auto-submits.
+    if let Some(deadline) = session.deadline {
+        if chrono::Utc::now() > deadline {
+            return Err(ApiError::conflict(
+                "session_expired",
+                "Time is up. The session submits with what you answered.",
+            ));
+        }
     }
 
     // Idempotent replay: same key, same stored answer, no duplicate attempt.

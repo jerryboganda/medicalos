@@ -96,6 +96,10 @@ export interface PracticeSession {
 	session_id: string;
 	preset: string;
 	status: string;
+	time_limit_seconds: number | null;
+	/** EX-08: server-issued; the countdown derives from deadline − server_now. */
+	deadline: string | null;
+	server_now: string | null;
 	items: SessionItem[];
 }
 
@@ -127,6 +131,7 @@ export const Api = {
 		chapter_id?: string;
 		question_count?: number;
 		source_session_id?: string;
+		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
 	answer: (

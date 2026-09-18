@@ -1,0 +1,9 @@
+[package]
+name = "scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rs-fsrs = { workspace = true }
+chrono = { workspace = true }
