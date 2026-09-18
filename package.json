@@ -1,0 +1,11 @@
+{
+  "name": "medical-os",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/client",
+    "apps/site",
+    "packages/design-system",
+    "tests/e2e"
+  ]
+}

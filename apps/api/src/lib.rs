@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use axum::routing::{get, post};
 use axum::Router;
+use tower_http::cors::CorsLayer;
 
 pub fn router(state: Arc<state::AppState>) -> Router {
     Router::new()
@@ -23,6 +24,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/practice/sessions",
             post(routes::practice::create_session),
+        )
+        .route(
+            "/v1/practice/sessions/{sid}",
+            get(routes::practice::get_session),
         )
         .route(
             "/v1/practice/sessions/{sid}/answers",
@@ -36,6 +41,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/plans/{pid}/revisions/{rid}/undo",
             post(routes::today::undo_revision),
         )
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 

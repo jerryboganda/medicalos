@@ -18,6 +18,7 @@ pub struct TaskView {
     kind: String,
     title: String,
     chapter_id: Option<Uuid>,
+    source_session_id: Option<Uuid>,
     question_count: i32,
     status: String,
 }
@@ -58,7 +59,8 @@ pub async fn today(
 ) -> ApiResult<Json<TodayResponse>> {
     let (plan_id, version) = agent::get_or_create_today(&state.pool, user.user_id).await?;
     let task_rows = sqlx::query!(
-        "SELECT id, kind, title, chapter_id, question_count, status FROM plan_tasks
+        "SELECT id, kind, title, chapter_id, source_session_id, question_count, status
+         FROM plan_tasks
          WHERE plan_id = $1 ORDER BY created_at",
         plan_id
     )
@@ -95,6 +97,7 @@ pub async fn today(
             kind: t.kind,
             title: t.title,
             chapter_id: t.chapter_id,
+            source_session_id: t.source_session_id,
             question_count: t.question_count,
             status: t.status,
         })

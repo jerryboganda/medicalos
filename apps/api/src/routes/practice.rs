@@ -206,6 +206,81 @@ pub async fn create_session(
     }
 }
 
+/// Session detail for the client: full item list for the navigator, with
+/// answer keys and rationales revealed only for already-answered items
+/// (§11.3 — nothing unreleased reaches the client).
+pub async fn get_session(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(sid): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let session = sqlx::query!(
+        "SELECT preset, chapter_id, source_session_id, status FROM practice_sessions
+         WHERE id = $1 AND user_id = $2",
+        sid,
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("session_not_found"))?;
+
+    let items = sqlx::query!(
+        r#"SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,
+                  qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,
+                  qv.exam_tip, a.id AS attempt_id, a.chosen_index, a.correct
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           LEFT JOIN attempts a
+             ON a.session_id = si.session_id AND a.item_index = si.item_index
+           WHERE si.session_id = $1
+           ORDER BY si.item_index"#,
+        sid
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut out = Vec::with_capacity(items.len());
+    for it in items {
+        let opts: Vec<QuestionOption> =
+            serde_json::from_value(it.options).map_err(|_| ApiError::internal())?;
+        let answered = it.attempt_id.is_some();
+        let public_opts: Vec<serde_json::Value> = opts
+            .iter()
+            .map(|o| serde_json::json!({"text": o.text}))
+            .collect();
+        let mut item = serde_json::json!({
+            "item_index": it.item_index,
+            "question_version_id": it.question_version_id,
+            "vignette": it.vignette,
+            "lead_in": it.lead_in,
+            "difficulty": it.difficulty,
+            "options": public_opts,
+            "answered": answered,
+            "chosen_index": it.chosen_index,
+            "correct": it.correct,
+            "correct_index": null,
+            "key_learning_point": null,
+            "exam_tip": null,
+        });
+        if answered {
+            item["correct_index"] = serde_json::json!(it.correct_index);
+            item["options"] = serde_json::json!(opts);
+            item["key_learning_point"] = serde_json::json!(it.key_learning_point);
+            item["exam_tip"] = serde_json::json!(it.exam_tip);
+        }
+        out.push(item);
+    }
+
+    Ok(Json(serde_json::json!({
+        "session_id": sid,
+        "preset": session.preset,
+        "chapter_id": session.chapter_id,
+        "source_session_id": session.source_session_id,
+        "status": session.status,
+        "items": out,
+    })))
+}
+
 #[derive(Deserialize)]
 pub struct AnswerReq {
     pub item_index: i16,

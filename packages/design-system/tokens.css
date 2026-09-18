@@ -34,10 +34,34 @@
 	/* Type — 16–18 px reading baseline, user-adjustable (§7.1, §7.3) */
 	--text-body: 16px;
 	--text-body-lg: 18px;
+	--text-sm: 14px;
+	--text-xl: 24px;
+
+	/* Fonts — hallmark 2+1 pairing, self-hosted via @fontsource (no CDN,
+	 * honors §30.2 budgets and offline-first). Lifted into the token block
+	 * per the locked-token rule. */
+	--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+	--font-body: 'Manrope', system-ui, -apple-system, sans-serif;
+
+	/* Interaction-state colors (hallmark state discipline: success / error /
+	 * warning need named tokens; tuned for the dark violet surfaces). */
+	--color-success: #34d399;
+	--color-error: #f87171;
+	--color-warning: #fbbf24;
+	--color-focus: #a78bfa;
+
+	/* Hover + wash variants (lifted tokens — no inline values in components) */
+	--color-surface-hover: #232336;
+	--color-action-hover: #8b5cf6;
+	--color-action-wash: rgba(124, 58, 237, 0.18);
+	--color-success-wash: rgba(52, 211, 153, 0.14);
+	--color-error-wash: rgba(248, 113, 113, 0.12);
+	--color-success-ink: #06281d;
 
 	/* Motion — brief, purposeful; reduced-motion alternative required (§7.1, §7.3) */
 	--dur-fast: 120ms;
 	--dur-base: 200ms;
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

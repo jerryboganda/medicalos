@@ -1,9 +1,8 @@
 # CI per master plan §27/§27.1 and the project compute policy (AGENTS.md):
-# ALL builds, lints, tests, and artifacts run here — never on the production
-# VPS or local development machines. Gates for later-phase surfaces (ephemeral
-# Postgres integration + SQLx checks, contract-drift check, browser E2E,
-# desktop/mobile build + signing, performance budgets) are added in the phase
-# that first has code for them (issue 04).
+# ALL builds, lints, tests, screenshots, and artifacts run here — never on the
+# production VPS or local development machines. Gates for later-phase surfaces
+# (contract-drift check, desktop/mobile build + signing, performance budgets)
+# are added in the phase that first has code for them (issue 04).
 
 name: ci
 
@@ -60,27 +59,77 @@ jobs:
   client:
     # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/client
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run build
+      - name: Install workspace dependencies
+        run: npm install
+      - name: Build client
+        run: npm run build -w @medical-os/client
 
   site:
     # Astro marketing site — holds no learner data (§31.1)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/site
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run build
+      - name: Install workspace dependencies
+        run: npm install
+      - name: Build site
+        run: npm run build -w @medical-os/site
+
+  e2e:
+    # Browser end-to-end of the web build against the real API (§27.1)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
+      VITE_API_BASE: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build API
+        run: cargo build -p api
+      - name: Seed synthetic fixtures
+        run: cargo run -p api -- --seed
+      - name: Start API
+        run: |
+          ./target/debug/api > api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/healthz
+      - name: Install workspace dependencies
+        run: npm install
+      - name: Build client
+        run: npm run build -w @medical-os/client
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      - name: Run browser E2E
+        run: npx playwright test
+        working-directory: tests/e2e
+      - name: API logs on failure
+        if: failure()
+        run: cat api.log

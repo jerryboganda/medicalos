@@ -12,6 +12,12 @@ async fn main() {
         .await
         .expect("connect to database");
     api::schema::apply_up(&pool).await.expect("apply schema");
+    // CI/E2E helper: apply schema, seed synthetic fixtures, exit.
+    if std::env::args().any(|a| a == "--seed") {
+        api::seed::seed(&pool).await.expect("seed fixtures");
+        tracing::info!("seeded fixture content");
+        return;
+    }
     let state = std::sync::Arc::new(api::state::AppState { pool });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

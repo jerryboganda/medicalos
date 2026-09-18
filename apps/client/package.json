@@ -8,6 +8,11 @@
     "build": "vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "@fontsource/fraunces": "^5.0.0",
+    "@fontsource/manrope": "^5.0.0",
+    "@medical-os/design-system": "*"
+  },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",

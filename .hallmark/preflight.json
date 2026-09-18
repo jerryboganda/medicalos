@@ -1,0 +1,9 @@
+{
+  "date": "2026-09-18",
+  "framework": "sveltekit-spa (apps/client, adapter-static)",
+  "palette": "packages/design-system/tokens.css — owner-locked, master plan §7.1 (dark canvas #09090F, action #7C3AED, accent #A78BFA, 4pt spacing)",
+  "fonts": ["Fraunces display (fontsource)", "Manrope body (fontsource)"],
+  "motion": "motion-cut (no animation libraries)",
+  "spacing": "4pt --space-* scale in tokens.css",
+  "notes": "System is owner-locked via master plan §7.1 — treats as design.md-managed: pages share the system, diversification inverted."
+}
