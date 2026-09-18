@@ -104,22 +104,21 @@ jobs:
           set -e
           BASE="https://jerryboganda.github.io/medicalos"
           echo "Checking $BASE ..."
-          # Pages CDN may serve a stale copy for up to 10 minutes — retry.
-          for i in $(seq 1 18); do
-            if curl -sf "$BASE/version.json" | grep -q "\"sha\":\"${GITHUB_SHA}\""; then
-              echo "SHA match: latest commit is live."
-              break
+          # Pages CDN mixes stale/new objects for up to ~10 minutes after a
+          # deploy. Retry ALL checks together until they pass as one state.
+          ok=""
+          for i in $(seq 1 20); do
+            if curl -sf "$BASE/version.json" | grep -q "\"sha\":\"${GITHUB_SHA}\"" \
+               && curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data'; then
+              ASSET=$(curl -sf "$BASE/" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
+              if [ -n "$ASSET" ] && curl -sf "$ASSET" > /dev/null; then
+                ok=yes
+                break
+              fi
             fi
-            echo "attempt $i: CDN still stale; retrying..."
+            echo "attempt $i: CDN not converged yet; retrying..."
             sleep 30
-            [ "$i" -eq 18 ] && { echo "FAIL: deployed SHA never matched"; exit 1; }
           done
-          # SPA: the shell must mount the SvelteKit app (content renders via JS).
-          curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data' \
-            || { echo "FAIL: app shell not served"; exit 1; }
-          # App assets must load (JS entry bundle reachable). The extracted
-          # path already includes the /medicalos base.
-          ASSET=$(curl -sf "$BASE/" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
-          [ -n "$ASSET" ] || { echo "FAIL: no entry bundle referenced"; exit 1; }
-          curl -sf "$ASSET" > /dev/null || { echo "FAIL: entry bundle 404"; exit 1; }
+          [ "$ok" = "yes" ] || { echo "FAIL: production never verified"; exit 1; }
+          echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
           echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
