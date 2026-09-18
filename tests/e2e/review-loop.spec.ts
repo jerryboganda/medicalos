@@ -49,6 +49,11 @@ test('flashcard review loop rates a card through the UI', async ({ page }) => {
 	await expect(page.getByTestId('review-card')).toContainText('Fictional prompt');
 	await page.getByTestId('reveal').click();
 	await expect(page.getByTestId('back')).toContainText('Requested retention');
+	const eventsPost = page.waitForResponse(
+		(r) => r.url().includes('/v1/reviews/events') && r.request().method() === 'POST'
+	);
 	await page.getByTestId('rate-good').click();
-	await expect(page.getByTestId('all-caught-up')).toBeVisible();
+	const resp = await eventsPost;
+	expect(resp.status(), 'review event POST status').toBe(200);
+	await expect(page.getByTestId('all-caught-up')).toBeVisible({ timeout: 10_000 });
 });

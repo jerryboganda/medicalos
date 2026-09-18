@@ -7,9 +7,9 @@ use sqlx::PgPool;
 
 macro_rules! migrations {
     ($($name:literal),* $(,)?) => {
-        /// Forward migrations in order.
+        /// Forward migrations in declaration order.
         pub const UP_SQLS: &[&str] = &[$(include_str!(concat!("../migrations/", $name, ".up.sql"))),*];
-        /// Rollback migrations in reverse order.
+        /// Same files; apply_down iterates this in REVERSE.
         pub const DOWN_SQLS: &[&str] = &[$(include_str!(concat!("../migrations/", $name, ".down.sql"))),*];
     };
 }
@@ -29,7 +29,7 @@ pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
 }
 
 pub async fn apply_down(pool: &PgPool) -> Result<(), sqlx::Error> {
-    for sql in DOWN_SQLS {
+    for sql in DOWN_SQLS.iter().rev() {
         sqlx::raw_sql(sql).execute(pool).await?;
     }
     Ok(())
