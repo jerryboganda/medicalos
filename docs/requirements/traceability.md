@@ -36,7 +36,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | QB-03 | Timed / untimed / tutor practice | in-progress (tutor, timed, and revision presets all tested; untimed-with-optional-per-question timer pending) | runs 35280682748, 35372696754 |
 | QB-04 | Confidence and assistance evidence separation | in-progress (confidence stored; assisted paths pending) | run 35280682748 |
 | QB-05 | Per-option explanations and source anchors | tested (slice-1 scope: rationale per option + source_ref, tutor feedback) | run 35280682748 |
-| QB-08 | Issue reporting and quarantined-item exclusion | not-started | — |
+| QB-08 | Issue reporting and quarantined-item exclusion | in-progress (report API + 3-vote quarantine + pool exclusion + report UI, CI-green on feat/qb08-item-reports run 35405398143; resolve route honestly 501 until the Phase 2 editorial console) | .scratch/phase-1-qb08-reports/ |
 | QB-11 | Two to ten options with generated labels | tested (engine rule in domain-contracts + OptionCount validation on ingestion) | run 35280682748 |
 | QB-12 | Qbank builder: hierarchy multi-select, four pools, counts, availability rule, presets, Quick 10 | in-progress (chapter pool + honest empty-pool message tested; full builder is the UI slice) | run 35280682748 |
 | QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | in-progress (deterministic calc-engine crate tested — BMI, BSA, MAP, GCS, Cockcroft-Gault, CKD-EPI 2021, anion gap, corrected calcium, native+wasm; tool-tray UI, converter, text size, hint, auto-submit pending) | runs 35366131810, 35367410576 |
