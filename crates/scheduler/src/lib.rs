@@ -7,7 +7,7 @@
 //! are deterministic rules here, unit-tested like all shared business rules.
 
 use chrono::{DateTime, Utc};
-pub use rs_fsrs::{Card, Rating};
+pub use rs_fsrs::{Card, Rating, FSRS};
 
 #[derive(Debug, Clone)]
 pub struct Scheduler {
@@ -65,7 +65,7 @@ pub struct QueueCard {
     pub card: Card,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct Queue {
     pub due: Vec<QueueCard>,
     pub new: Vec<QueueCard>,

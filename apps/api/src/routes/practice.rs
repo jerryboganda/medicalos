@@ -47,7 +47,7 @@ async fn insert_session(
     preset: &str,
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
-    time_limit_seconds: Option<i64>,
+    time_limit_seconds: Option<i32>,
     pool_questions: &[PoolQuestion],
 ) -> ApiResult<Json<serde_json::Value>> {
     // EX-08: the server issues the deadline — the client never sets it, and
@@ -157,7 +157,7 @@ pub async fn create_session(
                         ),
                     ));
                 }
-                Some(limit)
+                Some(limit as i32)
             } else {
                 None
             };
