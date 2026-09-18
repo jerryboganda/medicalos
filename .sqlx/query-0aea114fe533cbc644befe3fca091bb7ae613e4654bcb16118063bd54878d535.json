@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO question_versions\n           (id, question_id, version, status, chapter_id, difficulty, vignette,\n            lead_in, options, correct_index, key_learning_point, exam_tip,\n            high_yield, source_ref)\n           VALUES ($1, $2, 1, 'published', $3, $4, $5, $6, $7, $8, $9, $10,\n                   $11, $12)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int2",
+        "Text",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0aea114fe533cbc644befe3fca091bb7ae613e4654bcb16118063bd54878d535"
+}

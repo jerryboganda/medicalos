@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, front, back, state FROM cards\n           WHERE user_id = $1 AND suspended = false\n             AND (state->>'state')::int <> 0\n             AND (state->>'due')::timestamptz <= $2\n           ORDER BY (state->>'due')::timestamptz",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "front",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "back",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "state",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "740a3989995670ca998eb297c6e943a7ad2ef029deecafb36ded4bd9b8a82bc0"
+}

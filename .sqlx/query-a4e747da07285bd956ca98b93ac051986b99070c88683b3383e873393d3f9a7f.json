@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM plan_tasks WHERE plan_id = $1 AND added_by_revision = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4e747da07285bd956ca98b93ac051986b99070c88683b3383e873393d3f9a7f"
+}

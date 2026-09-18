@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, kind, title, chapter_id, source_session_id, question_count, status\n         FROM plan_tasks\n         WHERE plan_id = $1 ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "question_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "4e5574f3eab08f9edb29c8e4fd915aa2b12dbac582aaa70d76d956ecc3f6ba51"
+}

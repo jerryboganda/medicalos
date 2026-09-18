@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n             COUNT(*) AS \"total!\",\n             COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS \"correct!\",\n             COALESCE(COUNT(*) FILTER (WHERE a.chosen_index IS NOT NULL AND a.correct = FALSE), 0) AS \"incorrect!\",\n             COALESCE(COUNT(*) FILTER (WHERE a.id IS NULL OR a.chosen_index IS NULL), 0) AS \"skipped!\"\n           FROM session_items si\n           LEFT JOIN attempts a\n             ON a.session_id = si.session_id AND a.item_index = si.item_index\n           WHERE si.session_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "correct!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "incorrect!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "skipped!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e0b93698db55ab171618f74b072b7d405c7c33c9e765b3c0e617aeb56234cead"
+}

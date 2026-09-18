@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,\n                  qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,\n                  qv.exam_tip, a.id AS \"attempt_id?\", a.chosen_index, a.correct\n           FROM session_items si\n           JOIN question_versions qv ON qv.id = si.question_version_id\n           LEFT JOIN attempts a\n             ON a.session_id = si.session_id AND a.item_index = si.item_index\n           WHERE si.session_id = $1\n           ORDER BY si.item_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 7,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "exam_tip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "attempt_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 11,
+        "name": "correct",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8521e4e62075d52fb3cc94bfb50bc3c11d9783e57053468a424b715cba97dc14"
+}

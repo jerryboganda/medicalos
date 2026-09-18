@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.chapter_id, c.name AS chapter_name,\n                  COALESCE(COUNT(*), 0) AS \"independent_count!\",\n                  COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS \"correct!\"\n           FROM attempts a\n           JOIN question_versions qv ON qv.id = a.question_version_id\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE a.user_id = $1 AND a.assisted = FALSE AND a.correct IS NOT NULL\n           GROUP BY qv.chapter_id, c.name\n           ORDER BY c.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "independent_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "08059ce4705f109ac179b841cc87f445ea4bbcef1fd353bde1011d58cfc0a468"
+}

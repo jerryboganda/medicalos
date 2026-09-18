@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE plan_tasks SET status = 'done'\n         WHERE plan_id = $1 AND status = 'pending'\n           AND ((kind = 'practice' AND chapter_id IS NOT DISTINCT FROM $2)\n             OR (kind = 'revision' AND source_session_id IS NOT DISTINCT FROM $3))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6669ada37d9dbaddc29005d22a816e3f339eec2af87bdef9771990ef19d29dad"
+}

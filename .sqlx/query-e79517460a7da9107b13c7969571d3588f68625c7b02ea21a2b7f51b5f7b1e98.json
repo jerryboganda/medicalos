@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.to_version, r.reason_code, r.explanation, r.automatic, r.undone\n           FROM plan_revisions r JOIN plans p ON p.id = r.plan_id\n           WHERE p.user_id = $1 AND p.plan_date = CURRENT_DATE\n           ORDER BY r.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "to_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "explanation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "automatic",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "undone",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e79517460a7da9107b13c7969571d3588f68625c7b02ea21a2b7f51b5f7b1e98"
+}

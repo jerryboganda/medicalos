@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.correct_index, qv.options, qv.key_learning_point, qv.exam_tip\n           FROM session_items si JOIN question_versions qv ON qv.id = si.question_version_id\n           WHERE si.session_id = $1 AND si.item_index = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "exam_tip",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1b0b8d137d2b76ad126c5a24119362c7bdcc79a0eb125aa7e7995bd1e3f5ebaf"
+}

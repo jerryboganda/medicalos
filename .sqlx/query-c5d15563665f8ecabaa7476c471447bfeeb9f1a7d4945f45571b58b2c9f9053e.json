@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO plans (id, user_id, version) VALUES ($1, $2, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c5d15563665f8ecabaa7476c471447bfeeb9f1a7d4945f45571b58b2c9f9053e"
+}

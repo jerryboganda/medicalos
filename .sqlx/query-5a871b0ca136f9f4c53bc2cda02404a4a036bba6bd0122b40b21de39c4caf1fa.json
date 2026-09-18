@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ability, evidence_count, independent_count\n             FROM learner_concept_state WHERE user_id = $1 AND chapter_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ability",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 1,
+        "name": "evidence_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "independent_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5a871b0ca136f9f4c53bc2cda02404a4a036bba6bd0122b40b21de39c4caf1fa"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE plan_revisions SET undone = true, receipt = receipt || $2::jsonb WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "99ed8c2337f61f231ad49123d729a231d979154a4784abed96daefb9a13c9845"
+}

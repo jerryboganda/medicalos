@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\"\n               FROM attempts\n               WHERE user_id = $1 AND created_at::date = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8bab799a75e6bbb2c7ae2a0f7ad965dfd41f24d4a89c359949c5eaf973ffd82f"
+}
