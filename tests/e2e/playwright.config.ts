@@ -8,7 +8,10 @@ export default defineConfig({
 		baseURL: 'http://127.0.0.1:4173'
 	},
 	webServer: {
-		command: 'npm run preview -w @medical-os/client',
+		// Bind explicitly to IPv4 — vite's default `localhost` can resolve to
+		// ::1 on CI while the browser dials 127.0.0.1.
+		command:
+			'npm run preview -w @medical-os/client -- --host 127.0.0.1 --port 4173',
 		cwd: '../..',
 		port: 4173,
 		reuseExistingServer: true,
