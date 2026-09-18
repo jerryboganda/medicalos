@@ -100,9 +100,9 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | AI-16 | Qualified model routing and regression suites | not-started | — |
 | AI-18 | Pre-generated one-tap tutoring, cached and offline | not-started | — |
 | PLAN-03 | Review debt recovery and buffer time | not-started | — |
-| SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (engine scope: crates/scheduler wraps the official MIT rs-fsrs implementation — license-reviewed per §13; deterministic reviews, native+wasm) | run 35372696754 |
-| SR-02 | New-card and workload limits | tested (engine scope: QueueLimits 30 reviews / 10 new per day, most-at-risk-first backlog triage with overflow counting) | run 35372696754 |
-| SR-03 | Cloze, image, explanatory cards | not-started | — |
+| SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (product scope: decks, cards, review-events API, review UI — all through the official MIT rs-fsrs implementation behind the shared scheduler crate; native+wasm; browser-E2E tested) | run 35379501317 |
+| SR-02 | New-card and workload limits | tested (product scope: QueueLimits 30/10 enforced through GET /v1/reviews/queue; most-at-risk-first triage with overflow counting) | run 35379501317 |
+| SR-03 | Cloze, image, explanatory cards | in-progress (front/back text cards tested end-to-end; cloze, image-occlusion, audio, and clinical-discrimination card types pending) | run 35379501317 |
 | SR-04 | AI draft vs editorial trust labels | not-started | — |
 | SR-05 | Duplicate / sibling handling | not-started | — |
 | SR-08 | Automatic question re-test queue, objective grading, family-variant preference | not-started | — |
