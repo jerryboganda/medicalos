@@ -52,8 +52,8 @@ async fn insert_session(
 ) -> ApiResult<Json<serde_json::Value>> {
     // EX-08: the server issues the deadline — the client never sets it, and
     // answer acceptance is checked against it server-side.
-    let deadline =
-        time_limit_seconds.map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit));
+    let deadline = time_limit_seconds
+        .map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit as i64));
     let sid = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO practice_sessions

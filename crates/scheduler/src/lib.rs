@@ -37,7 +37,7 @@ impl Scheduler {
     /// Apply one review: returns the next card state. Deterministic for the
     /// same inputs (SR-01), same result on server and devices.
     pub fn review(&self, card: Card, rating: Rating, now: DateTime<Utc>) -> Card {
-        self.fsrs.repeat(card, now)[rating].card.clone()
+        self.fsrs.repeat(card, now)[&rating].card.clone()
     }
 }
 
