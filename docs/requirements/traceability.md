@@ -15,7 +15,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | OPS-01 | GitHub Actions development-compute enforcement | in-progress (enforced; proven by green CI run 35273824336) | .scratch/phase-0-decisions/issues/04 |
 | OPS-02 | Runtime boundary approval before deployment | blocked (owner decision) | issues/10 |
 | OPS-07 | Rust + Tauri CI runner matrix under the compute rule | tested (Linux gates green, run 35273824336; macOS/Windows signing jobs arrive with Tauri shells) | issues/04 |
-| ARCH-01 | Shared Rust core across server, Tauri, and WebAssembly | in-progress (native + wasm32 compile proven in CI run 35273824336; runtime parity check remains in the Phase 0 spike, issues/08) | issues/03, issues/08 |
+| ARCH-01 | Shared Rust core across server, Tauri, and WebAssembly | in-progress (three shared crates — domain-contracts, calc-engine, competition-scoring — proven native + wasm32 in CI; runtime parity check in the Phase 0 spike remains, issues/08) | runs 35273824336, 35367410576; issues/08 |
 
 ## Phase 1 — Connected vertical slice
 
@@ -39,7 +39,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | QB-08 | Issue reporting and quarantined-item exclusion | not-started | — |
 | QB-11 | Two to ten options with generated labels | tested (engine rule in domain-contracts + OptionCount validation on ingestion) | run 35280682748 |
 | QB-12 | Qbank builder: hierarchy multi-select, four pools, counts, availability rule, presets, Quick 10 | in-progress (chapter pool + honest empty-pool message tested; full builder is the UI slice) | run 35280682748 |
-| QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | in-progress (session result summary tested; tool-tray tools pending UI) | run 35280682748 |
+| QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | in-progress (deterministic calc-engine crate tested — BMI, BSA, MAP, GCS, Cockcroft-Gault, CKD-EPI 2021, anion gap, corrected calcium, native+wasm; tool-tray UI, converter, text size, hint, auto-submit pending) | runs 35366131810, 35367410576 |
 | QB-14 | Key learning point, exam tip, high-yield flag, authored + empirical difficulty | tested (slice-1 scope: fields stored, served in tutor feedback; empirical rating via Elo state) | run 35280682748 |
 | QB-17 | Session results with time + answer-change analysis and result actions (part 1 in P1, part 2 in P2) | not-started | — |
 | EX-01 | Official-source exam registry with aliases | in-progress (registry table tested; aliases + official-source records pending) | run 35280682748 |
@@ -162,7 +162,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | COMMUNITY-02 | Permitted shared content and private challenges | not-started | — |
 | COMMUNITY-03 | Optional gamification without coercive defaults | not-started | — |
 | COMP-01 | Daily / weekly / monthly / live competitions; same-exam population; opt-in handle | not-started | — |
-| COMP-02 | Scoring with guess penalty, capped speed bonus, tie-breaks | not-started | — |
+| COMP-02 | Scoring with guess penalty, capped speed bonus, tie-breaks | tested (engine scope: competition-scoring crate — 5/10/15 configurable points, 25% wrong penalty, 20% capped correct-only speed bonus, tie-break ladder score→accuracy→time→submission; native+wasm; live-event wiring lands with COMP-01) | run 35367410576 |
 | COMP-03 | Leagues and duels | not-started | — |
 | COMP-04 | Anti-cheat, integrity review, prizes only after review | not-started | — |
 | GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | not-started | — |
