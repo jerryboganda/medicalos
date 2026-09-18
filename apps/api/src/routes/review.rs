@@ -136,23 +136,27 @@ pub async fn queue(
     .await?;
 
     let due_cards: Vec<QueueCard> = due_rows
-        .iter()
-        .map(|r| QueueCard {
-            id: r.id.to_string(),
-            card: from_state(
-                &serde_json::from_value(r.state.clone()).map_err(|_| ApiError::internal())?,
-            ),
+        .into_iter()
+        .map(|r| {
+            Ok(QueueCard {
+                id: r.id.to_string(),
+                card: from_state(
+                    &serde_json::from_value(r.state).map_err(|_| ApiError::internal())?,
+                ),
+            })
         })
-        .collect();
+        .collect::<ApiResult<Vec<_>>>()?;
     let new_cards: Vec<QueueCard> = new_rows
-        .iter()
-        .map(|r| QueueCard {
-            id: r.id.to_string(),
-            card: from_state(
-                &serde_json::from_value(r.state.clone()).map_err(|_| ApiError::internal())?,
-            ),
+        .into_iter()
+        .map(|r| {
+            Ok(QueueCard {
+                id: r.id.to_string(),
+                card: from_state(
+                    &serde_json::from_value(r.state).map_err(|_| ApiError::internal())?,
+                ),
+            })
         })
-        .collect();
+        .collect::<ApiResult<Vec<_>>>()?;
 
     let queue = build_queue(QueueLimits::default(), due_cards, new_cards);
     let front_back = |id: &str| -> Option<(String, String)> {
