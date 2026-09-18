@@ -227,7 +227,7 @@ pub async fn get_session(
     let items = sqlx::query!(
         r#"SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,
                   qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,
-                  qv.exam_tip, a.id AS attempt_id, a.chosen_index, a.correct
+                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct
            FROM session_items si
            JOIN question_versions qv ON qv.id = si.question_version_id
            LEFT JOIN attempts a
