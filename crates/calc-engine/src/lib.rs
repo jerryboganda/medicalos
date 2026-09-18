@@ -142,8 +142,9 @@ mod tests {
             cockcroft_gault_crcl(40.0, 70.0, 1.0, false).unwrap(),
             97.22
         ));
-        // CKD-EPI 2021 reference example: male, 40y, SCr 1.0 -> ~97.6
-        assert!(approx(ckd_epi_2021_egfr(1.0, 40.0, false).unwrap(), 97.6));
+        // CKD-EPI 2021: male, 40y, SCr 1.0 -> 97.578 (two-decimal computed
+        // value; published tables round to ~98 mL/min/1.73 m²).
+        assert!(approx(ckd_epi_2021_egfr(1.0, 40.0, false).unwrap(), 97.58));
         assert!(approx(anion_gap(140.0, 102.0, 26.0).unwrap(), 12.0));
         assert!(approx(corrected_calcium(8.5, 2.0).unwrap(), 10.1));
     }
