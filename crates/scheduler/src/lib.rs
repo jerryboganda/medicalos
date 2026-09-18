@@ -9,20 +9,12 @@
 use chrono::{DateTime, Utc};
 pub use rs_fsrs::{Card, Rating, FSRS};
 
-#[derive(Debug, Clone)]
-pub struct Scheduler {
-    fsrs: FSRS,
-}
-
 // FSRS::default() carries the default 17/19-parameter set — the transparent
 // baseline of §8.4. Trained per-learner parameters arrive only through the
 // §8.5 controlled-comparison path, never by silent retuning.
-impl Default for Scheduler {
-    fn default() -> Self {
-        Scheduler {
-            fsrs: FSRS::default(),
-        }
-    }
+#[derive(Debug, Clone, Default)]
+pub struct Scheduler {
+    fsrs: FSRS,
 }
 
 impl Scheduler {
@@ -81,7 +73,7 @@ pub struct Queue {
 /// slice continues there).
 pub fn build_queue(limits: QueueLimits, due: Vec<QueueCard>, new_cards: Vec<QueueCard>) -> Queue {
     let mut due = due;
-    due.sort_by(|a, b| a.card.due.cmp(&b.card.due));
+    due.sort_by_key(|qc| qc.card.due);
     let queued_due = due.len().min(limits.max_reviews_per_day);
     let backlog_remaining = due.len() - queued_due;
     Queue {

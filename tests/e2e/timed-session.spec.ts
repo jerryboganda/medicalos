@@ -19,7 +19,7 @@ test('timed session shows the server countdown and auto-submits', async ({
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ email, password: 'correct horse battery' })
 	});
-	expect(register.ok()).toBeTruthy();
+	expect(register.ok).toBeTruthy();
 	const login = await fetch(`${API}/v1/auth/login`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
