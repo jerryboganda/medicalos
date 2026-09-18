@@ -118,6 +118,7 @@ pub async fn queue(
     let due_rows = sqlx::query!(
         r#"SELECT id, front, back, state FROM cards
            WHERE user_id = $1 AND suspended = false
+             AND (state->>'state')::int <> 0
              AND (state->>'due')::timestamptz <= $2
            ORDER BY (state->>'due')::timestamptz"#,
         user.user_id,
