@@ -8,7 +8,6 @@ pub mod routes;
 pub mod schema;
 pub mod seed;
 pub mod state;
-
 use std::sync::Arc;
 
 use axum::routing::{get, post};
@@ -41,6 +40,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/plans/{pid}/revisions/{rid}/undo",
             post(routes::today::undo_revision),
         )
+        .route("/v1/decks", post(routes::review::create_deck))
+        .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
+        .route("/v1/reviews/queue", get(routes::review::queue))
+        .route("/v1/reviews/events", post(routes::review::review_event))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

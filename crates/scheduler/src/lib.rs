@@ -7,7 +7,8 @@
 //! are deterministic rules here, unit-tested like all shared business rules.
 
 use chrono::{DateTime, Utc};
-pub use rs_fsrs::{Card, Rating, FSRS};
+pub use rs_fsrs::{Card, Rating, State, FSRS};
+use serde::{Deserialize, Serialize};
 
 // FSRS::default() carries the default 17/19-parameter set — the transparent
 // baseline of §8.4. Trained per-learner parameters arrive only through the
@@ -30,6 +31,70 @@ impl Scheduler {
     /// same inputs (SR-01), same result on server and devices.
     pub fn review(&self, card: Card, rating: Rating, now: DateTime<Utc>) -> Card {
         self.fsrs.repeat(card, now)[&rating].card.clone()
+    }
+}
+
+/// The persisted form of an FSRS card. rs-fsrs's `Card` type is the runtime
+/// state; this is the storage contract (JSONB in PostgreSQL, same shape in
+/// the encrypted on-device store later) so the crate's struct layout can
+/// evolve without a storage migration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardState {
+    pub due: DateTime<Utc>,
+    pub stability: f32,
+    pub difficulty: f32,
+    pub elapsed_days: u32,
+    pub scheduled_days: u32,
+    pub reps: u32,
+    pub lapses: u32,
+    /// 0 new · 1 learning · 2 review · 3 relearning
+    pub state: u8,
+    pub last_review: Option<DateTime<Utc>>,
+}
+
+pub fn to_state(card: &Card) -> CardState {
+    CardState {
+        due: card.due,
+        stability: card.stability,
+        difficulty: card.difficulty,
+        elapsed_days: card.elapsed_days,
+        scheduled_days: card.scheduled_days,
+        reps: card.reps,
+        lapses: card.lapses,
+        state: state_code(&card.state),
+        last_review: card.last_review,
+    }
+}
+
+pub fn from_state(state: &CardState) -> Card {
+    Card {
+        due: state.due,
+        stability: state.stability,
+        difficulty: state.difficulty,
+        elapsed_days: state.elapsed_days,
+        scheduled_days: state.scheduled_days,
+        reps: state.reps,
+        lapses: state.lapses,
+        state: state_from_code(state.state),
+        last_review: state.last_review,
+    }
+}
+
+fn state_code(state: &State) -> u8 {
+    match state {
+        State::New => 0,
+        State::Learning => 1,
+        State::Review => 2,
+        State::Relearning => 3,
+    }
+}
+
+fn state_from_code(code: u8) -> State {
+    match code {
+        1 => State::Learning,
+        2 => State::Review,
+        3 => State::Relearning,
+        _ => State::New,
     }
 }
 
@@ -142,5 +207,23 @@ mod tests {
         let queue = build_queue(QueueLimits::default(), vec![], vec![]);
         assert!(queue.due.is_empty() && queue.new.is_empty());
         assert_eq!(queue.backlog_remaining, 0);
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    #[test]
+    fn card_state_round_trips_through_storage_form() {
+        let s = Scheduler::new();
+        let now = Utc::now();
+        let reviewed = s.review(s.new_card(), Rating::Good, now);
+        let stored = to_state(&reviewed);
+        let json = serde_json::to_string(&stored).expect("serialize");
+        let parsed: CardState = serde_json::from_str(&json).expect("deserialize");
+        let restored = from_state(&parsed);
+        assert_eq!(restored.due, reviewed.due);
+        assert_eq!(to_state(&restored), stored);
     }
 }

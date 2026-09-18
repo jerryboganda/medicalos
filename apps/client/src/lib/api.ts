@@ -143,5 +143,24 @@ export const Api = {
 		call<{ plan_version: number }>(
 			'POST',
 			`/v1/plans/${planId}/revisions/${revisionId}/undo`
+		),
+	createDeck: (name: string) =>
+		call<{ deck_id: string }>('POST', '/v1/decks', { name }),
+	addCard: (deckId: string, front: string, back: string) =>
+		call<{ card_id: string }>('POST', `/v1/decks/${deckId}/cards`, {
+			front,
+			back
+		}),
+	reviewQueue: () =>
+		call<{
+			due: { card_id: string; front: string; back: string }[];
+			new: { card_id: string; front: string; back: string }[];
+			backlog_remaining: number;
+		}>('GET', '/v1/reviews/queue'),
+	reviewEvent: (cardId: string, rating: string, idempotencyKey: string) =>
+		call<{ already_recorded: boolean; due: string }>(
+			'POST',
+			'/v1/reviews/events',
+			{ card_id: cardId, rating, idempotency_key: idempotencyKey }
 		)
 };

@@ -620,6 +620,128 @@ async fn free_daily_allowance_blocks_new_sessions_with_details() {
 }
 
 #[tokio::test]
+async fn review_queue_caps_and_fsrs_rescheduling() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    // One deck, three new cards.
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&token),
+            Some(serde_json::json!({"name": "Fictional endocrine loops"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+    for n in 0..3 {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/decks/{deck_id}/cards"),
+                Some(&token),
+                Some(serde_json::json!({"front": format!("Fictional prompt {n}"),
+                                       "back": format!("Fictional answer {n}")})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // Queue: all three arrive as new, none as due.
+    let (status, q) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert_eq!(q["new"].as_array().unwrap().len(), 3);
+    assert_eq!(q["due"].as_array().unwrap().len(), 0);
+
+    // Rate the first new card Good: it leaves the queue, scheduled forward.
+    let card1: Uuid = q["new"][0]["card_id"].as_str().unwrap().parse().unwrap();
+    let (status, event) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/reviews/events",
+            Some(&token),
+            Some(serde_json::json!({"card_id": card1, "rating": "good",
+                                   "idempotency_key": "rev-key-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{event}");
+    assert_eq!(event["already_recorded"], false);
+    assert!(event["due"].is_string());
+    let due: chrono::DateTime<chrono::Utc> = event["due"].as_str().unwrap().parse().unwrap();
+    assert!(due > chrono::Utc::now(), "a Good review schedules forward");
+
+    // Idempotent replay: no duplicate review event.
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/reviews/events",
+            Some(&token),
+            Some(serde_json::json!({"card_id": card1, "rating": "good",
+                                   "idempotency_key": "rev-key-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["already_recorded"], true);
+    let events = sqlx::query("SELECT COUNT(*) AS n FROM review_events WHERE card_id = $1")
+        .bind(card1)
+        .fetch_one(&state.pool)
+        .await
+        .expect("count");
+    assert_eq!(events.get::<i64, _>("n"), 1, "no duplicate review evidence");
+
+    // Queue shrinks to two new cards.
+    let (_, q) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(q["new"].as_array().unwrap().len(), 2);
+
+    // Force the reviewed card due (time travel is a server-side test tool —
+    // the client can never do this): it returns as a DUE card.
+    sqlx::query(
+        "UPDATE cards SET state = jsonb_set(state, '{due}', to_jsonb(now() - interval '1 hour'))",
+    )
+    .bind(card1)
+    .execute(&state.pool)
+    .await
+    .expect("force due");
+    let (_, q) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(q["due"].as_array().unwrap().len(), 1, "due card surfaces");
+    assert_eq!(q["new"].as_array().unwrap().len(), 2);
+
+    // Another user's deck is invisible (tenant isolation sanity).
+    let other_token = register_and_login(app.clone()).await;
+    let (status, other_q) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&other_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_q}");
+    assert_eq!(other_q["new"].as_array().unwrap().len(), 0);
+    assert_eq!(other_q["due"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

@@ -14,7 +14,12 @@ macro_rules! migrations {
     };
 }
 
-migrations!("0001_init", "0002_session_timing", "0003_entitlements",);
+migrations!(
+    "0001_init",
+    "0002_session_timing",
+    "0003_entitlements",
+    "0004_recall",
+);
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
     for sql in UP_SQLS {

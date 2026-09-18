@@ -20,7 +20,10 @@
 <header class="top">
 	<a class="brand" href="/today">Medical Learning OS</a>
 	{#if auth.token}
-		<button class="btn" type="button" onclick={signOut}>Sign out</button>
+		<nav style="display:flex; gap:12px; align-items:center;">
+			<a class="btn" href="/review" data-testid="nav-review">Review</a>
+			<button class="btn" type="button" onclick={signOut}>Sign out</button>
+		</nav>
 	{/if}
 </header>
 

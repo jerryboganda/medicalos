@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 rs-fsrs = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true }
