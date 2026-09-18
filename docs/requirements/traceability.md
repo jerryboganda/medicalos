@@ -23,7 +23,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 |---|---|---|---|
 | CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
 | CORE-02 | Versioned goals, exam dates, protected commitments | not-started | — |
-| CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | not-started | — |
+| CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | in-progress (free-tier daily question allowance enforced server-side with honest 403 + details payload; media/retrieval/manifest entitlements pending) | run 35372696754 |
 | CORE-04 | Multi-tenant role and audit foundations | not-started | — |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
 | CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
@@ -33,7 +33,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-10 | Navigational hierarchy mapped to concept identities | in-progress (Exam→Subject→System→Chapter nodes tested; concept-identity mapping pending) | run 35280682748 |
 | QB-01 | Immutable published question versions | tested (slice-1 scope: versioned, published-only serving) | run 35280682748 |
 | QB-02 | Question-family and variant identities | in-progress (family_id column exists; variant flows pending) | run 35280682748 |
-| QB-03 | Timed / untimed / tutor practice | in-progress (tutor + revision presets tested; timed/untimed pending) | run 35280682748 |
+| QB-03 | Timed / untimed / tutor practice | in-progress (tutor, timed, and revision presets all tested; untimed-with-optional-per-question timer pending) | runs 35280682748, 35372696754 |
 | QB-04 | Confidence and assistance evidence separation | in-progress (confidence stored; assisted paths pending) | run 35280682748 |
 | QB-05 | Per-option explanations and source anchors | tested (slice-1 scope: rationale per option + source_ref, tutor feedback) | run 35280682748 |
 | QB-08 | Issue reporting and quarantined-item exclusion | not-started | — |
@@ -68,7 +68,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
 | UX-02 | Desktop and web keyboard map and fullscreen | in-progress (letter keys select, N/Enter next — fullscreen pending) | run 35366131810 |
 | ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | not-started | — |
-| COM-01 | Upgrade triggers and free allowance inside the 7C tiers | not-started | — |
+| COM-01 | Upgrade triggers and free allowance inside the 7C tiers | in-progress (allowance trigger tested — originates from entitlement checks only, never the Coach; remaining triggers: offline download, full mock, chapter analytics) | run 35372696754 |
 | GROW-02 | Astro site: per-exam pages, pricing, checkout, help, legal, app-link files | not-started | — |
 | ARCH-02 | TypeScript contracts generated from Rust types | in-progress (hand-written pre-generation client in apps/client/src/lib/api.ts, marked for replacement; generation pipeline pending) | run 35366131810 |
 | OPS-03 | Signed releases and reversible migrations | not-started | — |
@@ -90,7 +90,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | EX-05 | Reserved assessment-family protection | not-started | — |
 | EX-06 | Accommodations and assessment-specific AI restrictions | not-started | — |
 | EX-07 | Administrator-configured mock tests, types, results | not-started | — |
-| EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | not-started | — |
+| EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | in-progress (server-issued deadline, server-side answer cutoff after expiry, auto-submit semantics, skew-corrected client countdown — all tested incl. browser E2E; device-clock-tamper tests, grace windows, integrity signals pending) | run 35372696754 |
 | AI-03 | Mistake hypotheses, not assumed diagnoses | not-started | — |
 | AI-08 | Protected tasks and plan-churn controls | not-started | — |
 | AI-09 | Source-grounded contextual tutoring | not-started | — |
@@ -100,8 +100,8 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | AI-16 | Qualified model routing and regression suites | not-started | — |
 | AI-18 | Pre-generated one-tap tutoring, cached and offline | not-started | — |
 | PLAN-03 | Review debt recovery and buffer time | not-started | — |
-| SR-01 | Deterministic reviewed scheduling engine (FSRS) | not-started | — |
-| SR-02 | New-card and workload limits | not-started | — |
+| SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (engine scope: crates/scheduler wraps the official MIT rs-fsrs implementation — license-reviewed per §13; deterministic reviews, native+wasm) | run 35372696754 |
+| SR-02 | New-card and workload limits | tested (engine scope: QueueLimits 30 reviews / 10 new per day, most-at-risk-first backlog triage with overflow counting) | run 35372696754 |
 | SR-03 | Cloze, image, explanatory cards | not-started | — |
 | SR-04 | AI draft vs editorial trust labels | not-started | — |
 | SR-05 | Duplicate / sibling handling | not-started | — |
