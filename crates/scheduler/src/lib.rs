@@ -41,8 +41,8 @@ impl Scheduler {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CardState {
     pub due: DateTime<Utc>,
-    pub stability: f32,
-    pub difficulty: f32,
+    pub stability: f64,
+    pub difficulty: f64,
     pub elapsed_days: i64,
     pub scheduled_days: i64,
     pub reps: i32,
