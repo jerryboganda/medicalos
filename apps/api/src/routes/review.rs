@@ -135,6 +135,16 @@ pub async fn queue(
     .fetch_all(&state.pool)
     .await?;
 
+    // Lookup map built from borrowed rows before they are consumed below.
+    let mut meta: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    for r in &due_rows {
+        meta.insert(r.id.to_string(), (r.front.clone(), r.back.clone()));
+    }
+    for r in &new_rows {
+        meta.insert(r.id.to_string(), (r.front.clone(), r.back.clone()));
+    }
+
     let due_cards: Vec<QueueCard> = due_rows
         .into_iter()
         .map(|r| {
@@ -159,23 +169,11 @@ pub async fn queue(
         .collect::<ApiResult<Vec<_>>>()?;
 
     let queue = build_queue(QueueLimits::default(), due_cards, new_cards);
-    let front_back = |id: &str| -> Option<(String, String)> {
-        due_rows
-            .iter()
-            .find(|r| r.id.to_string() == id)
-            .map(|r| (r.front.clone(), r.back.clone()))
-            .or_else(|| {
-                new_rows
-                    .iter()
-                    .find(|r| r.id.to_string() == id)
-                    .map(|r| (r.front.clone(), r.back.clone()))
-            })
-    };
     let render = |cards: &[QueueCard]| -> Vec<serde_json::Value> {
         cards
             .iter()
             .filter_map(|qc| {
-                front_back(&qc.id).map(|(front, back)| {
+                meta.get(&qc.id).map(|(front, back)| {
                     serde_json::json!({
                         "card_id": qc.id,
                         "front": front,
