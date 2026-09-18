@@ -484,12 +484,24 @@ async fn timed_session_expires_server_side() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
-    assert!(
-        session["deadline"].is_string(),
-        "server issues the deadline"
-    );
-    assert!(session["server_now"].is_string());
     let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    // The deadline is served by the session detail endpoint (what the client
+    // uses for its countdown), not by the create response.
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["deadline"].is_string(), "server issues the deadline");
+    assert!(detail["server_now"].is_string());
+    assert_eq!(detail["time_limit_seconds"], 30);
 
     // A timed session without time_limit_seconds is rejected outright.
     let (status, body) = call(
