@@ -117,8 +117,9 @@ jobs:
           # SPA: the shell must mount the SvelteKit app (content renders via JS).
           curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data' \
             || { echo "FAIL: app shell not served"; exit 1; }
-          # App assets must load (JS entry bundle reachable).
+          # App assets must load (JS entry bundle reachable). The extracted
+          # path already includes the /medicalos base.
           ASSET=$(curl -sf "$BASE/" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
           [ -n "$ASSET" ] || { echo "FAIL: no entry bundle referenced"; exit 1; }
-          curl -sf "$BASE$ASSET" > /dev/null || { echo "FAIL: entry bundle 404"; exit 1; }
+          curl -sf "$ASSET" > /dev/null || { echo "FAIL: entry bundle 404"; exit 1; }
           echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
