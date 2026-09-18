@@ -65,10 +65,11 @@ jobs:
       - run: npm install
       - name: Stamp deployment provenance
         run: |
-          mkdir -p apps/client/public
+          # SvelteKit serves static assets from `static/` (its vite publicDir).
+          mkdir -p apps/client/static
           printf '{"sha":"%s","repo":"%s","deployed_at":"%s"}\n' \
             "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$(date -u +%FT%TZ)" \
-            > apps/client/public/version.json
+            > apps/client/static/version.json
       - name: Build client for Pages
         run: npm run build -w @medical-os/client
         env:
