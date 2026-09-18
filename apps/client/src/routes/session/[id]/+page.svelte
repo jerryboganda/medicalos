@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
 
 	let { data } = $props();
@@ -160,7 +161,7 @@
 			<span>Skipped<strong>{result.skipped}</strong></span>
 		</div>
 		<p class="muted">This result is about this form — it is not a prediction of anything.</p>
-		<a class="btn primary" href="/today" data-testid="back-today">Back to Today</a>
+		<a class="btn primary" href={`${base}/today`} data-testid="back-today">Back to Today</a>
 	</div>
 {:else if session}
 	<p class="muted" style="margin-bottom: var(--space-sm);">

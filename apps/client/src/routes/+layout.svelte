@@ -5,6 +5,7 @@
 	import '@fontsource/manrope/700.css';
 	import '@medical-os/design-system/tokens.css';
 	import '../app.css';
+	import { base } from '$app/paths';
 	import { auth, loadAuth, clearToken } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
 
@@ -13,15 +14,15 @@
 
 	function signOut() {
 		clearToken();
-		goto('/login');
+		goto(`${base}/login`);
 	}
 </script>
 
 <header class="top">
-	<a class="brand" href="/today">Medical Learning OS</a>
+	<a class="brand" href={`${base}/today`}>Medical Learning OS</a>
 	{#if auth.token}
 		<nav style="display:flex; gap:12px; align-items:center;">
-			<a class="btn" href="/review" data-testid="nav-review">Review</a>
+			<a class="btn" href={`${base}/review`} data-testid="nav-review">Review</a>
 			<button class="btn" type="button" onclick={signOut}>Sign out</button>
 		</nav>
 	{/if}

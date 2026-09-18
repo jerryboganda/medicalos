@@ -1,0 +1,110 @@
+# Production deployment (mandated sequence: PUBLIC repo → deploy → verify → PRIVATE).
+# Builds run entirely in GitHub Actions (AGENTS.md compute policy); the VPS
+# serves only the live app — it pulls the GHCR image, it never builds.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  api-image:
+    # Production API container → GHCR. The VPS runbook is one docker run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/jerryboganda/medicalos-api:latest
+            ghcr.io/jerryboganda/medicalos-api:${{ github.sha }}
+
+  api-release:
+    # Static Linux binary as a release artifact (VPS without Docker).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medicalos-api-linux-x86_64
+          path: target/release/api
+
+  web-pages:
+    # Client SPA → GitHub Pages, stamped with the commit SHA so production
+    # E2E can verify the latest commit actually landed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Stamp deployment provenance
+        run: |
+          mkdir -p apps/client/public
+          printf '{"sha":"%s","repo":"%s","deployed_at":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$(date -u +%FT%TZ)" \
+            > apps/client/public/version.json
+      - name: Build client for Pages
+        run: npm run build -w @medical-os/client
+        env:
+          BASE_PATH: /medicalos
+      - name: SPA fallback for deep links
+        run: cp apps/client/build/index.html apps/client/build/404.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/client/build
+
+  deploy-pages:
+    needs: web-pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  production-verify:
+    # Mandated production E2E: the live site must serve the app AND prove the
+    # latest commit landed (version.json carries the deployed SHA).
+    needs: deploy-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production serves this exact commit
+        run: |
+          set -e
+          sleep 15
+          BASE="https://jerryboganda.github.io/medicalos"
+          echo "Checking $BASE ..."
+          curl -sf "$BASE/version.json" | tee version.json
+          grep -q "\"sha\":\"${GITHUB_SHA}\"" version.json \
+            || { echo "FAIL: deployed SHA != ${GITHUB_SHA}"; exit 1; }
+          curl -sf "$BASE/" | grep -qi "medical learning os" \
+            || { echo "FAIL: app shell not served"; exit 1; }
+          echo "PRODUCTION VERIFIED: latest commit ${GITHUB_SHA} is live."

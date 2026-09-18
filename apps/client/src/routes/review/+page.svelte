@@ -3,6 +3,7 @@
 	import { Api, ApiError } from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 
 	let queue = $state(null);
 	let loading = $state(true);
@@ -71,7 +72,7 @@
 	onMount(async () => {
 		loadAuth();
 		if (!auth.token) {
-			goto('/login');
+			goto(`${base}/login`);
 			return;
 		}
 		await load();
@@ -94,7 +95,7 @@
 		{#if queue && queue.backlog_remaining > 0}
 			<p class="muted">{queue.backlog_remaining} overdue cards wait behind today's cap.</p>
 		{/if}
-		<a class="btn" href="/today">Back to Today</a>
+		<a class="btn" href={`${base}/today`}>Back to Today</a>
 	</div>
 {:else}
 	<div class="card" data-testid="review-card">

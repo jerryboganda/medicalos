@@ -1,5 +1,6 @@
 <script>
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
 	import { setToken } from '$lib/auth.svelte';
 
@@ -20,7 +21,7 @@
 			}
 			const { token } = await Api.login(email.trim(), password);
 			setToken(token);
-			goto('/today');
+			goto(`${base}/today`);
 		} catch (err) {
 			error =
 				err instanceof ApiError

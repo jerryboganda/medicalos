@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 
@@ -35,7 +36,7 @@
 					? { preset: 'revision', source_session_id: task.source_session_id }
 					: { preset: 'tutor', chapter_id: task.chapter_id, question_count: 10 };
 			const { session_id } = await Api.createSession(body);
-			goto(`/session/${session_id}`);
+			goto(`${base}/session/${session_id}`);
 		} catch (err) {
 			error =
 				err instanceof ApiError
@@ -56,7 +57,7 @@
 				question_count: 10,
 				time_limit_seconds: 300
 			});
-			goto(`/session/${session_id}`);
+			goto(`${base}/session/${session_id}`);
 		} catch (err) {
 			error =
 				err instanceof ApiError
@@ -83,7 +84,7 @@
 	onMount(async () => {
 		loadAuth();
 		if (!auth.token) {
-			goto('/login');
+			goto(`${base}/login`);
 			return;
 		}
 		await load();
