@@ -6,8 +6,12 @@
 FROM rust:1-slim AS build
 WORKDIR /app
 COPY Cargo.toml rust-toolchain.toml ./
+COPY .sqlx ./.sqlx
 COPY crates ./crates
 COPY apps/api ./apps/api
+# Queries compile against the committed offline cache (generated in CI from
+# the live schema — the same compile-time checks, no database needed).
+ENV SQLX_OFFLINE=true
 RUN cargo build --release -p api
 
 FROM debian:bookworm-slim

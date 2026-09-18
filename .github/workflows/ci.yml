@@ -54,6 +54,16 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: Tests
         run: cargo test --workspace
+      # Offline query cache: committed to the repo so Docker/release builds
+      # compile the same checked queries without a live database.
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --locked --no-default-features --features rustls,postgres
+      - name: Generate offline query cache
+        run: cargo sqlx prepare --workspace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlx-offline-cache
+          path: .sqlx
       # ARCH-01: shared core compiles for the web build too (no wasm runtime
       # tests yet; a wasm test harness arrives when core-wasm bindings exist)
       - name: Shared core builds for wasm32
