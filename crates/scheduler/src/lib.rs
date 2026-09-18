@@ -43,13 +43,13 @@ pub struct CardState {
     pub due: DateTime<Utc>,
     pub stability: f32,
     pub difficulty: f32,
-    pub elapsed_days: u32,
-    pub scheduled_days: u32,
-    pub reps: u32,
-    pub lapses: u32,
+    pub elapsed_days: i64,
+    pub scheduled_days: i64,
+    pub reps: i32,
+    pub lapses: i32,
     /// 0 new · 1 learning · 2 review · 3 relearning
     pub state: u8,
-    pub last_review: Option<DateTime<Utc>>,
+    pub last_review: DateTime<Utc>,
 }
 
 pub fn to_state(card: &Card) -> CardState {

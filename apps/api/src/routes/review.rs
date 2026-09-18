@@ -155,21 +155,29 @@ pub async fn queue(
         .collect();
 
     let queue = build_queue(QueueLimits::default(), due_cards, new_cards);
+    let front_back = |id: &str| -> Option<(String, String)> {
+        due_rows
+            .iter()
+            .find(|r| r.id.to_string() == id)
+            .map(|r| (r.front.clone(), r.back.clone()))
+            .or_else(|| {
+                new_rows
+                    .iter()
+                    .find(|r| r.id.to_string() == id)
+                    .map(|r| (r.front.clone(), r.back.clone()))
+            })
+    };
     let render = |cards: &[QueueCard]| -> Vec<serde_json::Value> {
         cards
             .iter()
             .filter_map(|qc| {
-                due_rows
-                    .iter()
-                    .chain(new_rows.iter())
-                    .find(|r| r.id.to_string() == qc.id)
-                    .map(|r| {
-                        serde_json::json!({
-                            "card_id": r.id,
-                            "front": r.front,
-                            "back": r.back,
-                        })
+                front_back(&qc.id).map(|(front, back)| {
+                    serde_json::json!({
+                        "card_id": qc.id,
+                        "front": front,
+                        "back": back,
                     })
+                })
             })
             .collect()
     };
