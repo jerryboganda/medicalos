@@ -112,19 +112,19 @@ jobs:
           # Pages CDN mixes stale/new objects for up to ~10 minutes after a
           # deploy. Retry ALL checks together until they pass as one state.
           ok=""
-          # Pages edge propagation can exceed 10 minutes — allow up to 25.
-          for i in $(seq 1 50); do
-            if curl -sf "$BASE/version.json" | grep -q "\"sha\":\"${GITHUB_SHA}\"" \
-               && curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data'; then
-              ASSET=$(curl -sf "$BASE/" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
-              if [ -n "$ASSET" ] && curl -sf "$ASSET" > /dev/null; then
+          # The runner's Fastly edge can pin a stale/negative-cached object
+          # indefinitely - bust the cache with a unique query per attempt.
+          for i in $(seq 1 10); do
+            CB="cb=${GITHUB_RUN_ID}-${i}"
+            if curl -sf "$BASE/version.json?$CB" | grep -q "\"sha\":\"${GITHUB_SHA}\""                && curl -sf "$BASE/?$CB" | grep -q 'data-sveltekit-preload-data'; then
+              ASSET=$(curl -sf "$BASE/?$CB" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
+              if [ -n "$ASSET" ] && curl -sf "$ASSET?$CB" > /dev/null; then
                 ok=yes
                 break
               fi
             fi
-            echo "attempt $i: CDN not converged yet; retrying..."
-            sleep 30  # ~25 min total window
+            echo "attempt $i: production not converged yet; retrying..."
+            sleep 20
           done
           [ "$ok" = "yes" ] || { echo "FAIL: production never verified"; exit 1; }
-          echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
           echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
