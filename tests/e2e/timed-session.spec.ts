@@ -42,7 +42,7 @@ test('timed session shows the server countdown and auto-submits', async ({
 			time_limit_seconds: 5
 		})
 	});
-	expect(sessionRes.ok()).toBeTruthy();
+	expect(sessionRes.ok).toBeTruthy();
 	const { session_id: sessionId } = await sessionRes.json();
 
 	// Act through the real UI, authenticated via the same token.
