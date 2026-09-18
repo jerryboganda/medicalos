@@ -64,6 +64,7 @@ jobs:
         with:
           name: sqlx-offline-cache
           path: .sqlx
+          include-hidden-files: true
       # ARCH-01: shared core compiles for the web build too (no wasm runtime
       # tests yet; a wasm test harness arrives when core-wasm bindings exist)
       - name: Shared core builds for wasm32
