@@ -40,6 +40,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/plans/{pid}/revisions/{rid}/undo",
             post(routes::today::undo_revision),
         )
+        .route(
+            "/v1/questions/versions/{vid}/reports",
+            post(routes::reports::report).get(routes::reports::my_reports),
+        )
+        .route("/v1/reports/{rid}/resolve", post(routes::reports::resolve))
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))

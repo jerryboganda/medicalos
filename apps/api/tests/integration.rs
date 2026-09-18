@@ -742,6 +742,231 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
 }
 
 #[tokio::test]
+async fn qb08_reports_quarantine_and_pool_exclusion() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let qv = ids.question_versions[0].to_string();
+
+    let report = |token: &str, category: &str, note: &str| {
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(token),
+            Some(serde_json::json!({"category": category, "note": note})),
+        )
+    };
+
+    // First report: recorded, not yet quarantined.
+    let (status, r1) = call(app.clone(), report(&token, "wrong_answer", "key looks off")).await;
+    assert_eq!(status, StatusCode::OK, "{r1}");
+    assert_eq!(r1["already_recorded"], false);
+    assert_eq!(r1["quarantined"], false);
+    assert!(r1["report_id"].as_str().is_some());
+
+    // Same learner reporting again: idempotent, no second record.
+    let (status, dup) = call(app.clone(), report(&token, "typo", "second try")).await;
+    assert_eq!(status, StatusCode::OK, "{dup}");
+    assert_eq!(dup["already_recorded"], true);
+    assert_eq!(dup["report_id"], r1["report_id"]);
+    let n: i64 =
+        sqlx::query("SELECT COUNT(*) AS n FROM question_reports WHERE question_version_id = $1")
+            .bind(ids.question_versions[0])
+            .fetch_one(&state.pool)
+            .await
+            .expect("count")
+            .get("n");
+    assert_eq!(n, 1, "same-learner duplicate must not add a row");
+
+    // Second distinct learner: still open, still served.
+    let token2 = register_and_login(app.clone()).await;
+    let (status, r2) = call(app.clone(), report(&token2, "typo", "")).await;
+    assert_eq!(status, StatusCode::OK, "{r2}");
+    assert_eq!(r2["quarantined"], false);
+
+    // Third distinct learner: quarantine flips.
+    let token3 = register_and_login(app.clone()).await;
+    let (status, r3) = call(app.clone(), report(&token3, "outdated", "")).await;
+    assert_eq!(status, StatusCode::OK, "{r3}");
+    assert_eq!(r3["quarantined"], true);
+
+    // Own-reports endpoint: status visible, no other learner disclosed.
+    let (status, mine) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token3),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mine}");
+    assert_eq!(mine["quarantined"], true);
+    assert_eq!(mine["reports"].as_array().unwrap().len(), 1);
+
+    // Quarantined item leaves new tutor sessions: chapter1 now serves only
+    // the one remaining unflagged question.
+    let chapter1 = ids.chapter1.to_string();
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token3),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter1, "question_count": 10
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let items = session["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "quarantined item excluded from the pool");
+    assert_ne!(
+        items[0]["question_version_id"].as_str().unwrap(),
+        qv,
+        "the served item is the unflagged one"
+    );
+
+    // A live session created BEFORE quarantine keeps its items answerable —
+    // quarantine never yanks items mid-session. (Seed one more session via a
+    // fresh user below the allowance: token3 used no attempts yet.)
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter1, "question_count": 10
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+
+    // Resolve route is honest about the missing console (no fake workflow).
+    let rid = r1["report_id"].as_str().unwrap();
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/reports/{rid}/resolve"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
+    assert_eq!(body["error"]["code"], "editor_console_pending");
+
+    // Validation: bad category and over-long note are rejected.
+    let (status, _) = call(app.clone(), report(&token, "bogus", "")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let long = "x".repeat(2001);
+    let (status, _) = call(app.clone(), report(&token2, "typo", &long)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Unknown version is 404, and other learners' queues are unaffected.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{}/reports", Uuid::new_v4()),
+            Some(&token),
+            Some(serde_json::json!({"category": "typo"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn qb08_session_detail_carries_report_status() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Create a session first (both chapter1 items present, unflagged).
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid = session["session_id"].as_str().unwrap();
+    let qv = session["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(
+        detail["items"][0]["report_status"].is_null(),
+        "unflagged item carries null report_status"
+    );
+
+    // Two more learners report the same version → still open, detail says so.
+    for t in [
+        register_and_login(app.clone()).await,
+        register_and_login(app.clone()).await,
+    ] {
+        let (status, r) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/questions/versions/{qv}/reports"),
+                Some(&t),
+                Some(serde_json::json!({"category": "typo"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{r}");
+    }
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let flagged: Vec<&serde_json::Value> = detail["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["question_version_id"].as_str().unwrap() == qv)
+        .collect();
+    assert_eq!(flagged.len(), 1);
+    assert_eq!(flagged[0]["report_status"], "open");
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

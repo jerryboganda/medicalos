@@ -19,6 +19,7 @@ migrations!(
     "0002_session_timing",
     "0003_entitlements",
     "0004_recall",
+    "0005_item_reports",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

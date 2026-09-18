@@ -90,6 +90,8 @@ export interface SessionItem {
 	correct_index: number | null;
 	key_learning_point: string | null;
 	exam_tip: string | null;
+	/** QB-08: honest flag state — null when unflagged. */
+	report_status: 'open' | 'quarantined' | 'resolved_fixed' | null;
 }
 
 export interface PracticeSession {
@@ -143,6 +145,12 @@ export const Api = {
 		call<{ plan_version: number }>(
 			'POST',
 			`/v1/plans/${planId}/revisions/${revisionId}/undo`
+		),
+	reportQuestion: (versionId: string, body: { category: string; note?: string }) =>
+		call<{ report_id: string; already_recorded: boolean; quarantined: boolean }>(
+			'POST',
+			`/v1/questions/versions/${versionId}/reports`,
+			body
 		),
 	createDeck: (name: string) =>
 		call<{ deck_id: string }>('POST', '/v1/decks', { name }),
