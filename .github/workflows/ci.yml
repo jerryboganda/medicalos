@@ -108,6 +108,8 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Apply schema (compile-time query checks need the live schema)
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/migrations/0001_init.up.sql
       - name: Build API
         run: cargo build -p api
       - name: Seed synthetic fixtures
