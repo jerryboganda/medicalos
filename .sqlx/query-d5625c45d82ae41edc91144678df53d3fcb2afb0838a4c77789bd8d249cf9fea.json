@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, vignette, lead_in, difficulty, options FROM (\n                       SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options\n                       FROM question_versions qv\n                       WHERE (qv.id IN (\n                           SELECT question_version_id FROM attempts\n                           WHERE session_id = $1 AND correct = FALSE\n                       )\n                       OR qv.id IN (\n                           SELECT si.question_version_id FROM session_items si\n                           WHERE si.session_id = $1 AND NOT EXISTS (\n                               SELECT 1 FROM attempts a\n                               WHERE a.session_id = si.session_id\n                                 AND a.item_index = si.item_index\n                           )\n                       ))\n                       AND NOT EXISTS (\n                           SELECT 1 FROM question_reports r\n                           WHERE r.question_version_id = qv.id\n                             AND r.status = 'quarantined'\n                       )\n                   ) t\n                   ORDER BY random()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d5625c45d82ae41edc91144678df53d3fcb2afb0838a4c77789bd8d249cf9fea"
+}

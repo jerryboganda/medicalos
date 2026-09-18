@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 AS one FROM question_reports\n         WHERE question_version_id = $1 AND status = 'quarantined' LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8246f4d15102f99726b0bae1b64a11d522a6eadcab3d5b366ab852ffe4369dd1"
+}
