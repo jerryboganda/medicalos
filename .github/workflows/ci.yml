@@ -54,7 +54,8 @@ jobs:
       # ARCH-01: shared core compiles for the web build too (no wasm runtime
       # tests yet; a wasm test harness arrives when core-wasm bindings exist)
       - name: Shared core builds for wasm32
-        run: cargo build -p domain-contracts --target wasm32-unknown-unknown
+        run: |
+          cargo build -p domain-contracts -p calc-engine -p competition-scoring --target wasm32-unknown-unknown
 
   client:
     # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)

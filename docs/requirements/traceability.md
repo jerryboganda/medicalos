@@ -25,8 +25,8 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-02 | Versioned goals, exam dates, protected commitments | not-started | — |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | not-started | — |
 | CORE-04 | Multi-tenant role and audit foundations | not-started | — |
-| CORE-05 | Five-destination learner navigation | not-started | — |
-| CORE-06 | Truthful loading, error, empty, permission states | not-started | — |
+| CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
+| CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
 | CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | not-started | — |
 | CORE-08 | Notification policy, push + in-app inbox | not-started | — |
 | CORE-09 | Guest trial before sign-up (SHOULD) | not-started | — |
@@ -65,12 +65,12 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | TRUST-02 | Privacy, deletion, export workflows | not-started | — |
 | TRUST-03 | Prompt-injection and tenant-isolation tests | not-started | — |
 | TRUST-04 | Clinically reviewed shared medical content | not-started | — |
-| UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | not-started | — |
-| UX-02 | Desktop and web keyboard map and fullscreen | not-started | — |
+| UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
+| UX-02 | Desktop and web keyboard map and fullscreen | in-progress (letter keys select, N/Enter next — fullscreen pending) | run 35366131810 |
 | ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | not-started | — |
 | COM-01 | Upgrade triggers and free allowance inside the 7C tiers | not-started | — |
 | GROW-02 | Astro site: per-exam pages, pricing, checkout, help, legal, app-link files | not-started | — |
-| ARCH-02 | TypeScript contracts generated from Rust types | not-started | — |
+| ARCH-02 | TypeScript contracts generated from Rust types | in-progress (hand-written pre-generation client in apps/client/src/lib/api.ts, marked for replacement; generation pipeline pending) | run 35366131810 |
 | OPS-03 | Signed releases and reversible migrations | not-started | — |
 | OPS-05 | Product-analytics taxonomy, experimentation, remote config, kill switches | not-started | — |
 

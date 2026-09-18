@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "apps/api",
+    "crates/calc-engine",
+    "crates/competition-scoring",
     "crates/domain-contracts",
     "crates/telemetry",
 ]
