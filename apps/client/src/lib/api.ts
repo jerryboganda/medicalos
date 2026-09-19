@@ -196,6 +196,34 @@ export interface DeviceSession {
 	current: boolean;
 }
 
+export interface NotificationCategories {
+	plan_review_reminders: boolean;
+	mock_assignment: boolean;
+	competition: boolean;
+	duel_invitation: boolean;
+	report_resolved: boolean;
+	subscription_events: boolean;
+}
+
+export interface NotificationPreferences {
+	timezone: string;
+	quiet_start: string | null;
+	quiet_end: string | null;
+	categories: NotificationCategories;
+}
+
+export interface InboxNotification {
+	id: string;
+	category: keyof NotificationCategories;
+	title: string;
+	body: string;
+	deep_link: string;
+	campaign_key: string | null;
+	promotional: boolean;
+	created_at: string;
+	read_at: string | null;
+}
+
 export const Api = {
 	register: (email: string, password: string) =>
 		call<{ user_id: string; verification_required: boolean; verification_token?: string }>(
@@ -225,6 +253,15 @@ export const Api = {
 	logout: () => call<{ signed_out: boolean }>('POST', '/v1/me/sessions/logout'),
 	requestAccountDeletion: (password: string) =>
 		call<{ status: 'pending' }>('POST', '/v1/me/account/deletion', { password }),
+	notificationPreferences: () =>
+		call<NotificationPreferences>('GET', '/v1/me/notification-preferences'),
+	updateNotificationPreferences: (body: NotificationPreferences) =>
+		call<NotificationPreferences>('PUT', '/v1/notification-preferences', body),
+	registerPushToken: (body: { device_id: string; platform: 'ios' | 'android'; token: string }) =>
+		call<{ registered: boolean }>('POST', '/v1/push-tokens', body),
+	notifications: () => call<{ notifications: InboxNotification[] }>('GET', '/v1/notifications'),
+	markNotificationRead: (id: string) =>
+		call<{ read: boolean; read_at: string }>('POST', `/v1/notifications/${id}/read`),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	goals: () => call<LearnerGoals>('GET', '/v1/me/goals'),
 	updateGoals: (body: {

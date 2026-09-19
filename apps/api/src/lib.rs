@@ -10,7 +10,7 @@ pub mod seed;
 pub mod state;
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 
@@ -38,6 +38,23 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/me/account/deletion",
             post(routes::auth::request_account_deletion),
+        )
+        .route(
+            "/v1/me/notification-preferences",
+            get(routes::notifications::get_preferences),
+        )
+        .route(
+            "/v1/notification-preferences",
+            put(routes::notifications::update_preferences),
+        )
+        .route(
+            "/v1/push-tokens",
+            post(routes::notifications::register_push_token),
+        )
+        .route("/v1/notifications", get(routes::notifications::inbox))
+        .route(
+            "/v1/notifications/{notification_id}/read",
+            post(routes::notifications::mark_read),
         )
         .route(
             "/v1/me/goals",
