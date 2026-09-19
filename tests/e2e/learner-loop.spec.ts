@@ -6,6 +6,12 @@ import { expect, test } from '@playwright/test';
 // A (index 0), q2's key is B (index 1) — so answering A on both items always
 // yields exactly 1 correct + 1 incorrect, and the plan revision always fires.
 
+function futureDate(days: number) {
+	const date = new Date();
+	date.setUTCDate(date.getUTCDate() + days);
+	return date.toISOString().slice(0, 10);
+}
+
 test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	page
 }) => {
@@ -50,4 +56,40 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	await expect(revision).toContainText('missed question');
 	await revision.getByTestId('undo').click();
 	await expect(revision).toContainText('Undone');
+});
+
+test('learner goals: configure, revise, and undo from Today', async ({ page }) => {
+	const email = `goals-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
+	const examDate = futureDate(60);
+	const commitmentDate = futureDate(14);
+
+	await page.goto('/login');
+	await page.getByTestId('toggle-mode').click();
+	await page.getByTestId('email').fill(email);
+	await page.getByTestId('password').fill('correct horse battery');
+	await page.getByTestId('submit').click();
+
+	const goals = page.getByTestId('goal-summary');
+	await expect(goals).toBeVisible();
+	await expect(goals).toContainText('No daily target');
+
+	await page.getByTestId('goals-editor-toggle').click();
+	await page.getByTestId('goals-daily-minutes').fill('45');
+	await page.getByTestId('goals-exam-date').fill(examDate);
+	await page.getByTestId('add-commitment').click();
+	await page.getByTestId('commitment-title-0').fill('Hospital teaching day');
+	await page.getByTestId('commitment-date-0').fill(commitmentDate);
+	await page.getByTestId('save-goals').click();
+
+	await expect(page.getByTestId('goals-status')).toHaveText('Saved');
+	await expect(goals).toContainText('45 min/day');
+	await expect(goals).toContainText('Hospital teaching day');
+
+	await page.getByTestId('goals-daily-minutes').fill('60');
+	await page.getByTestId('save-goals').click();
+	await expect(goals).toContainText('60 min/day');
+
+	await page.getByTestId('undo-goals').click();
+	await expect(goals).toContainText('45 min/day');
+	await expect(page.getByTestId('goals-daily-minutes')).toHaveValue('45');
 });
