@@ -6,6 +6,8 @@ Status vocabulary: `not-started` · `in-progress` · `tested` (acceptance eviden
 
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + §28.1. Release gates: §30.
 
+> **⚠ Validation status (2026-09-20):** slice-14 code (NOTE-02 collections/concepts, SR-08 retest queue, QB-16 screening, OPS-06 rollout config, LIB-02 ordering) is pushed to `main` (commit `8c35614`) but NOT yet CI-validated — GitHub Actions billing failed again and all runner jobs are blocked (`The job was not started because recent account payments have failed`). Validation will run via `gh run rerun` once billing is resolved. Slices 9–13 remain CI-green with evidence below.
+
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
 ## Phase 0 — Decisions and evidence
