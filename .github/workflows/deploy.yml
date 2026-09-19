@@ -124,9 +124,12 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          # script_stop: fail the job if the remote script fails (a 2s
+          # "success" once masked a no-op deploy as green).
+          script_stop: true
           script_file: infra/vps/deploy.sh
           script_arguments: ${{ github.sha }}
-          envs: VPS_DATABASE_URL_AS_ARG,GHCR_USER,GHCR_TOKEN
+          envs: VPS_DATABASE_URL_AS_ARG
         env:
           VPS_DATABASE_URL_AS_ARG: ${{ secrets.VPS_DATABASE_URL }}
 
