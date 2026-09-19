@@ -29,6 +29,7 @@
 			<a class="btn" href={`${base}/notifications`} data-testid="nav-notifications">
 				Notifications
 			</a>
+			<a class="btn" href={`${base}/practice`} data-testid="nav-practice">Practice</a>
 			<a class="btn" href={`${base}/review`} data-testid="nav-review">Review</a>
 			<a class="btn" href={`${base}/admin`} data-testid="nav-admin">Console</a>
 			<button class="btn" type="button" onclick={signOut}>Sign out</button>
