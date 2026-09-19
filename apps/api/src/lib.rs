@@ -268,10 +268,6 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/me/commitments/{id}",
             axum::routing::delete(routes::goals::remove_commitment),
         )
-        .route("/guest/trial/start", post(routes::guest::start))
-        .route(
-            "/guest/trial/next-question",
-            post(routes::guest::next_question),
         )
         .route(
             "/api/v1/questions/versions/{vid}/pregen-tutoring",
