@@ -1495,6 +1495,322 @@ async fn revision_session_includes_explicit_skips() {
 }
 
 #[tokio::test]
+async fn qb12_builder_exposes_tree_filters_and_truthful_availability() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let (status, builder) = call(
+        app.clone(),
+        request("GET", "/v1/practice/builder", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{builder}");
+    let nodes = builder["nodes"].as_array().expect("builder nodes");
+    assert!(
+        nodes.len() >= 4,
+        "subject/system/chapter tree is present: {builder}"
+    );
+    let chapter1 = nodes
+        .iter()
+        .find(|node| node["id"] == ids.chapter1.to_string())
+        .expect("chapter1 node");
+    assert_eq!(chapter1["available"], 2);
+    assert_eq!(chapter1["attempted"], 0);
+    assert_eq!(chapter1["unattempted"], 2);
+    assert_eq!(builder["selection"]["all"], 4);
+    assert_eq!(builder["selection"]["matching"], 4);
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_ids": [ids.chapter1, ids.chapter2],
+                "pool": "all",
+                "difficulties": ["easy"],
+                "high_yield": false,
+                "question_count": 100
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["requested_count"], 100);
+    assert_eq!(session["available_count"], 2);
+    assert_eq!(session["question_count"], 2);
+    assert_eq!(session["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        session["availability_message"],
+        "Only 2 questions are available for your current selection."
+    );
+    for item in session["items"].as_array().unwrap() {
+        assert_eq!(item["difficulty"], "easy");
+    }
+
+    let (status, high_yield) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/practice/builder?chapter_ids={},{}&pool=all&difficulties=easy&high_yield=true",
+                ids.chapter1, ids.chapter2
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{high_yield}");
+    assert_eq!(high_yield["selection"]["matching"], 1);
+    assert_eq!(high_yield["selection"]["all"], 1);
+}
+
+#[tokio::test]
+async fn qb12_pools_use_latest_attempt_and_marks_persist() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // q1 is the only easy + high-yield question in chapter1. First answer it
+    // incorrectly, then correctly in a later session: latest evidence wins.
+    let mut previous_sid = None;
+    for (n, chosen_index) in [(0, 1), (1, 0)] {
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&token),
+                Some(serde_json::json!({
+                    "preset": "tutor",
+                    "chapter_ids": [ids.chapter1],
+                    "pool": "all",
+                    "difficulties": ["easy"],
+                    "high_yield": true,
+                    "question_count": 1,
+                    "takeover": n > 0
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        let sid = Uuid::parse_str(session["session_id"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            session["items"][0]["question_version_id"],
+            ids.question_versions[0].to_string()
+        );
+        let (status, answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&token),
+                Some(serde_json::json!({
+                    "item_index": 0,
+                    "chosen_index": chosen_index,
+                    "idempotency_key": format!("qb12-latest-{n}")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        let (status, submitted) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/submit"),
+                Some(&token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{submitted}");
+        previous_sid = Some(sid);
+    }
+    assert!(previous_sid.is_some());
+
+    // q2 is the only medium question in chapter1; record an explicit skip.
+    let (status, skipped_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_ids": [ids.chapter1],
+                "pool": "all",
+                "difficulties": ["medium"],
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{skipped_session}");
+    let skipped_sid = Uuid::parse_str(skipped_session["session_id"].as_str().unwrap()).unwrap();
+    let (status, skipped) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{skipped_sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "idempotency_key": "qb12-skip-latest"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{skipped}");
+    let (status, submitted) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{skipped_sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submitted}");
+
+    let (status, missed) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/practice/builder?chapter_ids={}&pool=incorrect_skipped",
+                ids.chapter1
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{missed}");
+    assert_eq!(missed["selection"]["incorrect_skipped"], 1);
+    assert_eq!(missed["selection"]["matching"], 1);
+
+    let (status, easy_missed) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/practice/builder?chapter_ids={}&pool=incorrect_skipped&difficulties=easy&high_yield=true",
+                ids.chapter1
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{easy_missed}");
+    assert_eq!(
+        easy_missed["selection"]["matching"], 0,
+        "later correct evidence removes q1 from incorrect + skipped"
+    );
+
+    let (status, unattempted) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/practice/builder?chapter_ids={}&pool=unattempted",
+                ids.chapter1
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unattempted}");
+    assert_eq!(unattempted["selection"]["matching"], 0);
+
+    let q3 = ids.question_versions[2];
+    let (status, marked) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &format!("/v1/questions/versions/{q3}/mark"),
+            Some(&token),
+            Some(serde_json::json!({"marked": true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+    assert_eq!(marked["marked"], true);
+
+    let (status, marked_builder) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/practice/builder?chapter_ids={}&pool=marked",
+                ids.chapter2
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked_builder}");
+    assert_eq!(marked_builder["selection"]["marked"], 1);
+    assert_eq!(marked_builder["selection"]["matching"], 1);
+
+    let (status, marked_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_ids": [ids.chapter2],
+                "pool": "marked",
+                "question_count": 10
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked_session}");
+    assert_eq!(marked_session["items"].as_array().unwrap().len(), 1);
+    let marked_sid = marked_session["session_id"].as_str().unwrap();
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{marked_sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["items"][0]["marked"], true);
+
+    let (status, unmarked) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &format!("/v1/questions/versions/{q3}/mark"),
+            Some(&token),
+            Some(serde_json::json!({"marked": false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unmarked}");
+    assert_eq!(unmarked["marked"], false);
+}
+
+#[tokio::test]
 async fn core07_single_active_study_session_requires_explicit_takeover() {
     let _g = LOCK.lock().await;
     let state = setup().await;
