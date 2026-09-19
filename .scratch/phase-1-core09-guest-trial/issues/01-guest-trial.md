@@ -1,6 +1,6 @@
 # 01: CORE-09 guest trial before sign-up
 
-Status: implemented-pending-ci
+Status: implemented-ci-blocked
 
 Requirement ID: CORE-09.
 
@@ -18,7 +18,7 @@ Implement `../spec.md` through the existing auth, question, and practice seams.
 - [x] No new dependency or parallel quiz engine is introduced.
 - [x] Matt Standards/Spec review, Ponytail review, and Hallmark closeout are completed.
 - [x] Traceability is updated truthfully.
-- [ ] Heavy verification is delegated to GitHub Actions; deployment is skipped.
+- [x] Heavy verification is delegated to GitHub Actions; deployment is skipped.
 
 ## Comments
 
@@ -28,4 +28,5 @@ Implement `../spec.md` through the existing auth, question, and practice seams.
 - Matt review: Standards 0 findings; Spec 0 findings.
 - Ponytail review: lean implementation; no removable abstraction/dependency identified.
 - Hallmark closeout: one long mobile CTA was shortened to the spec wording `Try sample questions`; no remaining UI finding in this slice.
-- Heavy acceptance remains pending GitHub Actions.
+- GitHub Actions run `35445798553` failed before any runner step started. The run annotation states that recent account payments failed or the Actions spending limit must be increased. No retry was attempted.
+- Deployment remains skipped per owner instruction.
