@@ -19,11 +19,20 @@ export class ApiError extends Error {
 	}
 }
 
+export function adminToken(): string {
+	try {
+		return localStorage.getItem('mlos_admin') ?? '';
+	} catch {
+		return '';
+	}
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
 		method,
 		headers: {
 			'content-type': 'application/json',
+			'x-admin-token': adminToken(),
 			...(auth.token ? { authorization: `Bearer ${auth.token}` } : {})
 		},
 		body: body === undefined ? undefined : JSON.stringify(body)
@@ -192,6 +201,31 @@ export const Api = {
 	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
 	startMock: (mockId: string) =>
 		call<{ session_id: string }>('POST', `/v1/mocks/${mockId}/start`),
+	listAdminAudit: () =>
+		call<{ events: unknown[] }>('GET', '/v1/admin/audit'),
+	createNode: (body: {
+		exam_id: string;
+		kind: string;
+		name: string;
+		parent_id?: string;
+	}) => call<{ node_id: string }>('POST', '/v1/admin/hierarchy', body),
+	importQuestions: (body: {
+		exam_id: string;
+		dry_run: boolean;
+		rows: unknown[];
+	}) =>
+		call<{
+			batch_id: string;
+			status: string;
+			valid?: number;
+			issues?: { row: number; code: string; message: string }[];
+			created?: unknown[];
+		}>('POST', '/v1/admin/import', body),
+	rollbackImport: (batchId: string) =>
+		call<{ removed_questions: number }>(
+			'POST',
+			`/v1/admin/import/${batchId}/rollback`
+		),
 	reviewEvent: (cardId: string, rating: string, idempotencyKey: string) =>
 		call<{ already_recorded: boolean; due: string }>(
 			'POST',

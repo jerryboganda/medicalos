@@ -10,3 +10,20 @@ pub struct AppState {
     /// editorial console lands. None = endpoint disabled.
     pub admin_token: Option<String>,
 }
+
+impl AppState {
+    /// Admin gate shared by mock configuration and the editorial console.
+    pub fn require_admin(&self, provided: Option<&str>) -> Result<(), crate::error::ApiError> {
+        match (&self.admin_token, provided) {
+            (Some(expected), Some(got)) if expected == got => Ok(()),
+            (Some(_), _) => Err(crate::error::ApiError::forbidden(
+                "admin_required",
+                "this operation requires the admin token",
+            )),
+            (None, _) => Err(crate::error::ApiError::forbidden(
+                "admin_disabled",
+                "admin operations are disabled (no ADMIN_TOKEN configured)",
+            )),
+        }
+    }
+}

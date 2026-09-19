@@ -1237,6 +1237,252 @@ async fn community_stats_gate_and_expected_score() {
     assert!(stats["correct_rate_percent"].is_null());
 }
 
+fn admin_req(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
+    let mut builder = request(method, uri, token, body);
+    builder
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().expect("header"));
+    builder
+}
+
+#[tokio::test]
+async fn admin_gate_blocks_without_token() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/admin/exams",
+            Some(&token),
+            Some(serde_json::json!({"code": "X", "name": "X"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "admin_required");
+}
+
+#[tokio::test]
+async fn editorial_hierarchy_question_and_import_flow() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Hierarchy: create + rename (§5.5 management surface).
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter",
+                "name": "Imported Chapter", "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let node_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+    let (status, renamed) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/hierarchy/{node_id}"),
+            Some(&token),
+            Some(serde_json::json!({"name": "Imported Chapter II"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "Imported Chapter II");
+
+    // Bulk import: one valid row, one broken row; the dry run creates nothing.
+    let good_row = serde_json::json!({
+        "chapter_id": node_id, "difficulty": "easy",
+        "vignette": "Fictional import vignette about the gloopoid gland.",
+        "lead_in": "What applies?",
+        "options": [
+            {"text": "Right", "rationale": "Correct per the fixture."},
+            {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+        ],
+        "correct_index": 0,
+        "key_learning_point": "Imported fixtures validate like authored ones.",
+        "source_ref": "Fixture import"
+    });
+    let mut bad_row = good_row.clone();
+    bad_row["options"] = serde_json::json!([{"text": "only one", "rationale": "x"}]);
+    let (status, dry) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/import",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "dry_run": true,
+                "rows": [good_row.clone(), bad_row]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dry}");
+    assert_eq!(dry["status"], "dry_run");
+    assert_eq!(dry["valid"], 1);
+    assert_eq!(dry["issues"].as_array().unwrap().len(), 1);
+
+    // Nothing was created by the dry run.
+    let (status, q) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/questions?chapter_id={node_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert_eq!(q["questions"].as_array().unwrap().len(), 0);
+
+    // Apply for real.
+    let (status, applied) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/import",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "dry_run": false, "rows": [good_row]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    assert_eq!(applied["status"], "applied");
+    let batch_id: Uuid = applied["batch_id"].as_str().unwrap().parse().unwrap();
+
+    // The imported question is live in the learner pool.
+    let (status, q) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/questions?chapter_id={node_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert_eq!(q["questions"].as_array().unwrap().len(), 1);
+
+    // The audit trail records the import (§19.5).
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    let actions: Vec<&str> = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"import_applied"), "audit: {audit}");
+
+    // Rollback before any attempts removes the batch's questions.
+    let (status, rolled) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/import/{batch_id}/rollback"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rolled}");
+    assert_eq!(rolled["removed_questions"], 1);
+    let (status, q) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/questions?chapter_id={node_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert_eq!(q["questions"].as_array().unwrap().len(), 0);
+
+    // After attempts exist, rollback is refused — evidence is immutable.
+    let (status, applied2) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/import",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "dry_run": false, "rows": [good_row]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied2}");
+    let batch2: Uuid = applied2["batch_id"].as_str().unwrap().parse().unwrap();
+
+    // A learner answers the imported question via a tutor session.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": node_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0,
+                "idempotency_key": format!("imp-{batch2}")
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/import/{batch2}/rollback"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "has_attempts");
+}
+
 #[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;

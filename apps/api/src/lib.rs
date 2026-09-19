@@ -58,6 +58,24 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/questions/versions/{vid}/community-stats",
             get(routes::practice::community_stats),
         )
+        .route(
+            "/v1/admin/hierarchy",
+            post(routes::admin::create_node).get(routes::admin::list_nodes),
+        )
+        .route(
+            "/v1/admin/hierarchy/{node_id}",
+            axum::routing::patch(routes::admin::update_node),
+        )
+        .route(
+            "/v1/admin/questions",
+            post(routes::admin::create_question).get(routes::admin::search_questions),
+        )
+        .route("/v1/admin/import", post(routes::admin::import))
+        .route(
+            "/v1/admin/import/{batch_id}/rollback",
+            post(routes::admin::rollback_import),
+        )
+        .route("/v1/admin/audit", get(routes::admin::audit_log))
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -102,6 +120,24 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/questions/versions/{vid}/community-stats",
             get(routes::practice::community_stats),
         )
+        .route(
+            "/api/v1/admin/hierarchy",
+            post(routes::admin::create_node).get(routes::admin::list_nodes),
+        )
+        .route(
+            "/api/v1/admin/hierarchy/{node_id}",
+            axum::routing::patch(routes::admin::update_node),
+        )
+        .route(
+            "/api/v1/admin/questions",
+            post(routes::admin::create_question).get(routes::admin::search_questions),
+        )
+        .route("/api/v1/admin/import", post(routes::admin::import))
+        .route(
+            "/api/v1/admin/import/{batch_id}/rollback",
+            post(routes::admin::rollback_import),
+        )
+        .route("/api/v1/admin/audit", get(routes::admin::audit_log))
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
             "/api/v1/decks/{deck_id}/cards",

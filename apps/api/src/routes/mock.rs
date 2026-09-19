@@ -31,20 +31,6 @@ pub struct BlueprintEntry {
     pub count: i32,
 }
 
-fn require_admin(state: &AppState, token: Option<&str>) -> ApiResult<()> {
-    match (&state.admin_token, token) {
-        (Some(expected), Some(provided)) if expected == provided => Ok(()),
-        (Some(_), _) => Err(ApiError::forbidden(
-            "admin_required",
-            "mock configuration requires the admin token",
-        )),
-        (None, _) => Err(ApiError::forbidden(
-            "admin_disabled",
-            "mock configuration is disabled (no ADMIN_TOKEN configured)",
-        )),
-    }
-}
-
 pub async fn create_mock(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -52,7 +38,7 @@ pub async fn create_mock(
     Json(req): Json<CreateMockReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    require_admin(&state, provided)?;
+    state.require_admin(provided)?;
     let title = req.title.trim();
     if title.is_empty() || title.len() > 200 {
         return Err(ApiError::unprocessable(

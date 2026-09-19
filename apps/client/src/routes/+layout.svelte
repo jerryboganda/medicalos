@@ -23,6 +23,7 @@
 	{#if auth.token}
 		<nav style="display:flex; gap:12px; align-items:center;">
 			<a class="btn" href={`${base}/review`} data-testid="nav-review">Review</a>
+			<a class="btn" href={`${base}/admin`} data-testid="nav-admin">Console</a>
 			<button class="btn" type="button" onclick={signOut}>Sign out</button>
 		</nav>
 	{/if}
