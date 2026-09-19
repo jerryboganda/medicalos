@@ -45,6 +45,10 @@ impl ApiError {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
     }
 
+    pub fn forbidden(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, code, message)
+    }
+
     /// 403 with a structured details payload — used by entitlement checks so
     /// upgrade triggers can show why and what remains (COM-01, §26.1).
     pub fn forbidden_with_details(

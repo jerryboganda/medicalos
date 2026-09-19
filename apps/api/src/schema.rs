@@ -21,6 +21,7 @@ migrations!(
     "0004_recall",
     "0005_item_reports",
     "0006_learner_goals",
+    "0007_tenant_role_audit",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

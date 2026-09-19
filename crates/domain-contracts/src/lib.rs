@@ -4,6 +4,81 @@
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TenantRole {
+    Learner,
+    Instructor,
+    Author,
+    MedicalReviewer,
+    Examiner,
+    ProgramLead,
+    InstitutionAdministrator,
+    BillingAdministrator,
+}
+
+impl TenantRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Learner => "learner",
+            Self::Instructor => "instructor",
+            Self::Author => "author",
+            Self::MedicalReviewer => "medical_reviewer",
+            Self::Examiner => "examiner",
+            Self::ProgramLead => "program_lead",
+            Self::InstitutionAdministrator => "institution_administrator",
+            Self::BillingAdministrator => "billing_administrator",
+        }
+    }
+}
+
+impl FromStr for TenantRole {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "learner" => Ok(Self::Learner),
+            "instructor" => Ok(Self::Instructor),
+            "author" => Ok(Self::Author),
+            "medical_reviewer" => Ok(Self::MedicalReviewer),
+            "examiner" => Ok(Self::Examiner),
+            "program_lead" => Ok(Self::ProgramLead),
+            "institution_administrator" => Ok(Self::InstitutionAdministrator),
+            "billing_administrator" => Ok(Self::BillingAdministrator),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformRole {
+    Support,
+    PlatformOwner,
+}
+
+impl PlatformRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Support => "support",
+            Self::PlatformOwner => "platform_owner",
+        }
+    }
+}
+
+impl FromStr for PlatformRole {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "support" => Ok(Self::Support),
+            "platform_owner" => Ok(Self::PlatformOwner),
+            _ => Err(()),
+        }
+    }
+}
 
 pub const MIN_DAILY_STUDY_MINUTES: i32 = 1;
 pub const MAX_DAILY_STUDY_MINUTES: i32 = 1440;
@@ -173,5 +248,16 @@ mod tests {
             validate_goal_update(invalid, today),
             Err(GoalValidationError::InvalidDailyMinutes)
         );
+    }
+
+    #[test]
+    fn role_wire_values_are_stable() {
+        assert_eq!(
+            TenantRole::InstitutionAdministrator.as_str(),
+            "institution_administrator"
+        );
+        assert_eq!(PlatformRole::PlatformOwner.as_str(), "platform_owner");
+        assert_eq!("medical_reviewer".parse(), Ok(TenantRole::MedicalReviewer));
+        assert_eq!("support".parse(), Ok(PlatformRole::Support));
     }
 }

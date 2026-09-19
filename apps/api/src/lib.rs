@@ -24,6 +24,8 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::goals::get_goals).put(routes::goals::put_goals),
         )
         .route("/v1/me/goals/undo", post(routes::goals::undo_goals))
+        .route("/v1/me/contexts", get(routes::tenancy::my_contexts))
+        .route("/v1/tenant/context", get(routes::tenancy::tenant_context))
         .route("/v1/me/today", get(routes::today::today))
         .route(
             "/v1/practice/sessions",
