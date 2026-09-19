@@ -155,6 +155,179 @@ async fn auth_register_login_and_reject_bad_credentials() {
 }
 
 #[tokio::test]
+async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let other_token = register_and_login(app.clone()).await;
+
+    let (status, initial) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{initial}");
+    assert_eq!(initial["version"], 0);
+    assert!(initial["daily_minutes"].is_null());
+    assert!(initial["exam_date"].is_null());
+    assert_eq!(initial["protected_commitments"].as_array().unwrap().len(), 0);
+    assert_eq!(initial["can_undo"], false);
+
+    let original = serde_json::json!({
+        "expected_version": 0,
+        "daily_minutes": 90,
+        "exam_date": "2099-06-30",
+        "protected_commitments": [
+            {"title": "Night shift", "date": "2099-06-01"}
+        ]
+    });
+    let (status, saved) = call(
+        app.clone(),
+        request("PUT", "/v1/me/goals", Some(&token), Some(original.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["version"], 1);
+    assert_eq!(saved["daily_minutes"], 90);
+    assert_eq!(saved["exam_date"], "2099-06-30");
+    assert_eq!(saved["changed"], true);
+    assert_eq!(saved["can_undo"], false);
+    assert_eq!(saved["protected_commitments"][0]["title"], "Night shift");
+
+    // Re-saving the same semantic snapshot must not manufacture history.
+    let mut same = original.clone();
+    same["expected_version"] = serde_json::json!(1);
+    let (status, unchanged) = call(
+        app.clone(),
+        request("PUT", "/v1/me/goals", Some(&token), Some(same)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged["version"], 1);
+    assert_eq!(unchanged["changed"], false);
+
+    // Another learner still has an unconfigured profile.
+    let (status, other) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&other_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other}");
+    assert_eq!(other["version"], 0);
+    assert!(other["daily_minutes"].is_null());
+
+    // Stale clients cannot overwrite the current snapshot.
+    let (status, stale) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({
+                "expected_version": 0,
+                "daily_minutes": 60,
+                "exam_date": "2099-06-30",
+                "protected_commitments": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    assert_eq!(stale["error"]["code"], "goal_version_conflict");
+
+    for invalid in [
+        serde_json::json!({
+            "expected_version": 1,
+            "daily_minutes": 0,
+            "exam_date": "2099-06-30",
+            "protected_commitments": []
+        }),
+        serde_json::json!({
+            "expected_version": 1,
+            "daily_minutes": 60,
+            "exam_date": "2000-01-01",
+            "protected_commitments": []
+        }),
+        serde_json::json!({
+            "expected_version": 1,
+            "daily_minutes": 60,
+            "exam_date": "2099-06-30",
+            "protected_commitments": [{"title": "   ", "date": "2099-06-01"}]
+        }),
+    ] {
+        let (status, invalid_body) = call(
+            app.clone(),
+            request("PUT", "/v1/me/goals", Some(&token), Some(invalid)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_body}");
+    }
+
+    let (status, changed) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({
+                "expected_version": 1,
+                "daily_minutes": 60,
+                "exam_date": "2099-07-15",
+                "protected_commitments": [
+                    {"title": "Night shift", "date": "2099-06-01"},
+                    {"title": "Protected course deadline", "date": "2099-06-20"}
+                ]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["version"], 2);
+    assert_eq!(changed["changed"], true);
+    assert_eq!(changed["can_undo"], true);
+
+    // Existing automatic planning may read constraints later, but it must not
+    // silently rewrite this learner-owned record.
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let (status, after_planning) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_planning}");
+    assert_eq!(after_planning["version"], 2);
+    assert_eq!(after_planning["exam_date"], "2099-07-15");
+    assert_eq!(
+        after_planning["protected_commitments"][1]["title"],
+        "Protected course deadline"
+    );
+
+    let (status, undone) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/goals/undo",
+            Some(&token),
+            Some(serde_json::json!({"expected_version": 2})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+    assert_eq!(undone["version"], 3);
+    assert_eq!(undone["daily_minutes"], 90);
+    assert_eq!(undone["exam_date"], "2099-06-30");
+    assert_eq!(undone["protected_commitments"].as_array().unwrap().len(), 1);
+    assert_eq!(undone["can_undo"], true);
+}
+
+#[tokio::test]
 async fn full_loop_cold_start_answer_submit_revision_undo() {
     let _g = LOCK.lock().await;
     let state = setup().await;
