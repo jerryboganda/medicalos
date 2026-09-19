@@ -19,7 +19,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/healthz", get(healthz))
         // Same-origin production prefix: nginx serves the API under /api/
         // (medicalos.polytronx.com/api/* -> medicalos-api:8080/*).
-        .route("/api/healthz", get(healthz))
+        .route("/api/healthz", get(health_json))
         .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
@@ -97,6 +97,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn health_json() -> axum::Json<serde_json::Value> {
+    // JSON twin for the plain-text healthz (lets the deploy probe parse it).
+    axum::Json(serde_json::json!({"status": "ok"}))
 }
 
 async fn version() -> axum::Json<serde_json::Value> {

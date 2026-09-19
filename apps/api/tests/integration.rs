@@ -976,8 +976,9 @@ async fn same_origin_prefix_serves_version_and_health() {
     let (status, v) = call(app.clone(), request("GET", "/api/version.json", None, None)).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert!(v["sha"].is_string(), "deploy SHA stamped: {v}");
-    let (status, _) = call(app.clone(), request("GET", "/api/healthz", None, None)).await;
-    assert_eq!(status, StatusCode::OK);
+    let (status, h) = call(app.clone(), request("GET", "/api/healthz", None, None)).await;
+    assert_eq!(status, StatusCode::OK, "{h}");
+    assert_eq!(h["status"], "ok");
 }
 
 #[tokio::test]
