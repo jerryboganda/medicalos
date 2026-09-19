@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT question_version_id, chosen_index, correct, confidence, assisted, created_at\n           FROM attempts WHERE user_id = $1 ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "confidence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "assisted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "631ce5513e3eef8a2736d500a8f0df46d5d0c13bb4cda44a1e72ef635a82c2dd"
+}

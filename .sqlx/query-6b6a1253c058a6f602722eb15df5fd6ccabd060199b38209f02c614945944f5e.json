@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO appeals (id, user_id, question_version_id, reason, status)\n         VALUES ($1, $2, $3, $4, 'open')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b6a1253c058a6f602722eb15df5fd6ccabd060199b38209f02c614945944f5e"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO institution_members (institution_id, user_id, role)\n         VALUES ($1, $2, 'admin')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f5c713d123bd23fd9fea1ad9ce80d3f0a13b6abbf4259a0e8537f0f01a76939c"
+}

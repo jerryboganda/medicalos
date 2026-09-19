@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE guest_trials SET questions_served = questions_served + 1 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1bfa31695f17a058e1e7af27c37d00e0cb6a05378bffd61ea8d8d1add6b9cb32"
+}

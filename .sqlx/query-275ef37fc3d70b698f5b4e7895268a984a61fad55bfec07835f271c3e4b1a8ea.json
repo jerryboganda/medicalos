@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.slug, a.title, av.version, av.body, av.source_ref\n           FROM articles a\n           JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'\n           WHERE a.slug = $1\n             AND av.version = (\n                 SELECT MAX(version) FROM article_versions\n                 WHERE article_id = a.id AND status = 'published')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_ref",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "275ef37fc3d70b698f5b4e7895268a984a61fad55bfec07835f271c3e4b1a8ea"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO institution_members (institution_id, user_id, role)\n         VALUES ($1, $2, $3)\n         ON CONFLICT (institution_id, user_id) DO UPDATE SET role = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7153ec3288ff8677672917961821b03174be1b0db5eb6a19956c1cc13ccde84"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE goals SET retired = true WHERE user_id = $1 AND NOT retired",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2e4ac4333fc4a611d1a667c93dc38609ac2d3cbcf00aeaa2c897c200fc0da673"
+}

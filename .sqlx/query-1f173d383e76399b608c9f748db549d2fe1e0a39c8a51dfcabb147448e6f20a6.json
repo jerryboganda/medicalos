@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT prompt_type, message, answer, adapter, created_at FROM coach_turns\n           WHERE user_id = $1 AND question_version_id = $2\n           ORDER BY created_at DESC LIMIT 20",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "prompt_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "answer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "adapter",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1f173d383e76399b608c9f748db549d2fe1e0a39c8a51dfcabb147448e6f20a6"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT card_id, rating, reviewed_at FROM review_events\n           WHERE user_id = $1 ORDER BY reviewed_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "card_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "rating",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "reviewed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b797d01476a1b8ad5408b395367f0a2738398c2210ddcba267a7a0e5f8817682"
+}

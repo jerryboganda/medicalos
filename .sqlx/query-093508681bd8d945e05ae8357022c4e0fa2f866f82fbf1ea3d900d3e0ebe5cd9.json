@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT prompt_type, content FROM pregen_tutoring\n         WHERE question_version_id = $1 ORDER BY prompt_type",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "prompt_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "content",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "093508681bd8d945e05ae8357022c4e0fa2f866f82fbf1ea3d900d3e0ebe5cd9"
+}

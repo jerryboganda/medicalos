@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO feature_flags (key, value, rollout_percent)\n         VALUES ($1, $2, COALESCE($3, 100))\n         ON CONFLICT (key) DO UPDATE SET\n           value = $2, rollout_percent = COALESCE($3, feature_flags.rollout_percent),\n           updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "25cf0f94231f460fb4565a8ae689e95ce79f6a88a2d124d97ae837e44cf1cb61"
+}

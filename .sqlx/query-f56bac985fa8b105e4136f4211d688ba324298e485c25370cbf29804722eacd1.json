@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 AS one FROM institution_members im\n           JOIN cohorts c ON c.institution_id = im.institution_id\n           WHERE c.id = $1 AND im.user_id = $2 AND im.role IN ('admin','instructor')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f56bac985fa8b105e4136f4211d688ba324298e485c25370cbf29804722eacd1"
+}
