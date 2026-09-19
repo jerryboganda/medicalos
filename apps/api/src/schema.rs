@@ -26,6 +26,7 @@ migrations!(
     "0009_phase1",
     "0010_program",
     "0011_appeals",
+    "0012_fix_ce_hours",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

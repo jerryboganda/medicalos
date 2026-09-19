@@ -1,0 +1,1 @@
+ALTER TABLE ce_activities ALTER COLUMN hours TYPE NUMERIC(5,1);

@@ -3,7 +3,7 @@
 //! is user-scoped — and the agent never rewrites them (§12.5): it only
 //! proposes, which is out of scope for this module.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;

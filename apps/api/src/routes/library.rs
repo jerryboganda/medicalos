@@ -8,7 +8,6 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde_json::json;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
@@ -25,7 +24,7 @@ pub async fn search(
         r#"SELECT a.id, a.slug, a.title, av.version, av.body
            FROM articles a
            JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'
-           WHERE (av.title ILIKE $1 OR av.body ILIKE $1)
+           WHERE (a.title ILIKE $1 OR av.body ILIKE $1)
              AND av.version = (
                  SELECT MAX(version) FROM article_versions
                  WHERE article_id = a.id AND status = 'published')

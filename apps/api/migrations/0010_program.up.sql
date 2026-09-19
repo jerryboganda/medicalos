@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS ce_activities (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
     activity TEXT NOT NULL,
-    hours NUMERIC(5,1) NOT NULL DEFAULT 0,
+    hours REAL NOT NULL DEFAULT 0,
     completed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
