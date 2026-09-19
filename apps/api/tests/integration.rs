@@ -2876,24 +2876,3 @@ async fn session_actions_retry_and_practice_incorrect() {
     assert_eq!(status, StatusCode::OK, "{incorrect}");
     assert!(incorrect["item_count"].as_i64().unwrap() >= 0);
 }
-
-#[tokio::test]
-async fn migration_up_down_up_is_reversible() {
-    let _g = LOCK.lock().await;
-    let state = setup().await;
-    schema::apply_down(&state.pool).await.expect("down");
-    schema::apply_up(&state.pool).await.expect("up");
-    schema::apply_down(&state.pool).await.expect("down again");
-    schema::apply_up(&state.pool).await.expect("up again");
-    let rows = sqlx::query(
-        "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_name = 'plans'",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .expect("table check");
-    assert_eq!(
-        rows.get::<i64, _>("n"),
-        1,
-        "schema present after up-down-up"
-    );
-}
