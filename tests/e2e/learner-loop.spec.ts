@@ -52,7 +52,19 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	// Submit: deterministic 1 correct, 1 incorrect.
 	await page.getByTestId('submit-session').click();
 	await expect(page.getByTestId('score')).toHaveText('50%');
+	await expect(page.getByTestId('total')).toHaveText('2');
+	await expect(page.getByTestId('time-taken')).toContainText(/\d/);
 	await expect(page.getByTestId('results')).toContainText('not a prediction');
+	await expect(page.getByTestId('practice-missed')).toBeVisible();
+	await expect(page.getByTestId('review-answers')).toBeVisible();
+	await expect(page.getByTestId('retry-session')).toBeVisible();
+
+	// Review uses the submitted session itself; it must be read-only.
+	await page.getByTestId('review-answers').click();
+	await expect(page.getByText('Reviewing question 1 of 2')).toBeVisible();
+	await expect(page.getByTestId('option-0')).toBeDisabled();
+	await page.getByTestId('back-results').click();
+	await expect(page.getByTestId('results')).toBeVisible();
 
 	// Back to Today: task done, justified automatic revision, undo works.
 	await page.getByTestId('back-today').click();

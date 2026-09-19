@@ -1307,6 +1307,17 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["total"], 2);
     assert_eq!(result["skipped"], 1);
+    assert!(
+        result["time_taken_seconds"]
+            .as_i64()
+            .is_some_and(|seconds| seconds >= 0),
+        "submission time must be a non-negative server-derived duration: {result}"
+    );
+    assert_eq!(
+        result["score"].as_i64().unwrap(),
+        result["correct"].as_i64().unwrap() * 100 / result["total"].as_i64().unwrap(),
+        "score remains the integer percentage"
+    );
     assert_eq!(
         result["correct"].as_i64().unwrap()
             + result["incorrect"].as_i64().unwrap()
@@ -1399,6 +1410,75 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     // Cold-start task remains; the revision's added task is gone (only one
     // task in the latest version).
     assert_eq!(today["tasks"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn revision_session_includes_explicit_skips() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, skipped) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0, "idempotency_key": "skip-revision-contract"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{skipped}");
+    assert!(skipped["correct"].is_null());
+
+    let (status, result) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["skipped"], 1);
+
+    let (status, revision) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({"preset": "revision", "source_session_id": sid})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an explicit skip is a missed question and must be revisable: {revision}"
+    );
+    assert_eq!(revision["items"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
