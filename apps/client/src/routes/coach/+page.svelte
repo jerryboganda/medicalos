@@ -53,6 +53,9 @@
 		}
 		try {
 			questions = (await Api.answerableQuestions()).questions;
+			if (questions.length > 0) {
+				selected = questions[0].question_version_id;
+			}
 		} catch {
 			error = 'Could not load your answered questions.';
 		} finally {

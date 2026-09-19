@@ -172,7 +172,7 @@ pub async fn export_notes(
 ) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query!(
         r#"SELECT n.title, n.body, n.created_at,
-                  qv.source_ref AS source_reference
+                  qv.source_ref AS "source_reference?"
            FROM notes n
            LEFT JOIN question_versions qv
              ON qv.id = n.source_question_version_id
