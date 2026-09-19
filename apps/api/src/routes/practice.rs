@@ -669,12 +669,8 @@ pub async fn submit(
     // QB-15: expected-score comparison for self-built sessions, computed
     // from community correct-rates of the exact questions served. Percentile
     // is reserved for fixed forms (mocks). Hidden below the min sample.
-    let expected_score = expected_score_for_session(
-        &state.pool,
-        sid,
-        state.community_min_sample,
-    )
-    .await?;
+    let expected_score =
+        expected_score_for_session(&state.pool, sid, state.community_min_sample).await?;
 
     let mut body = serde_json::json!({
         "total": totals.total,
@@ -687,12 +683,9 @@ pub async fn submit(
     });
 
     if let Some(mock_id) = session.mock_id {
-        let mock = sqlx::query!(
-            "SELECT pass_mark_percent FROM mocks WHERE id = $1",
-            mock_id
-        )
-        .fetch_one(&state.pool)
-        .await?;
+        let mock = sqlx::query!("SELECT pass_mark_percent FROM mocks WHERE id = $1", mock_id)
+            .fetch_one(&state.pool)
+            .await?;
         let passed = score >= mock.pass_mark_percent;
         sqlx::query!(
             "INSERT INTO mock_attempts
@@ -797,7 +790,6 @@ async fn expected_score_for_session(
     let mean = rates.iter().sum::<f64>() / rates.len() as f64;
     Ok(Some(mean.round() as i64))
 }
-
 
 /// QB-15: per-question community statistics. Aggregates never identify a
 /// learner; the numbers stay hidden until the minimum sample is met, and the

@@ -286,8 +286,15 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
 
     // Single-question chapter: deterministic community-stats and mock flows
     // (every session here serves exactly this question).
-    let chapter3 =
-        insert_node(pool, exam_id, "chapter", "Glorbin Pharmacology", Some(system), 2).await?;
+    let chapter3 = insert_node(
+        pool,
+        exam_id,
+        "chapter",
+        "Glorbin Pharmacology",
+        Some(system),
+        2,
+    )
+    .await?;
     let q5 = mk(
         chapter3,
         "easy",

@@ -49,7 +49,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::reports::report).get(routes::reports::my_reports),
         )
         .route("/v1/reports/{rid}/resolve", post(routes::reports::resolve))
-        .route("/v1/mocks", post(routes::mock::create_mock).get(routes::mock::list_mocks))
+        .route(
+            "/v1/mocks",
+            post(routes::mock::create_mock).get(routes::mock::list_mocks),
+        )
         .route("/v1/mocks/{mid}/start", post(routes::mock::start_mock))
         .route(
             "/v1/questions/versions/{vid}/community-stats",
@@ -90,7 +93,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/reports/{rid}/resolve",
             post(routes::reports::resolve),
         )
-        .route("/api/v1/mocks", post(routes::mock::create_mock).get(routes::mock::list_mocks))
+        .route(
+            "/api/v1/mocks",
+            post(routes::mock::create_mock).get(routes::mock::list_mocks),
+        )
         .route("/api/v1/mocks/{mid}/start", post(routes::mock::start_mock))
         .route(
             "/api/v1/questions/versions/{vid}/community-stats",

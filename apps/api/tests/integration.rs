@@ -992,11 +992,7 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     let token = register_and_login(app.clone()).await;
 
     // Seeded fixture mock: chapter1 both questions, pass mark 50, 2 attempts.
-    let (status, mocks) = call(
-        app.clone(),
-        request("GET", "/v1/mocks", Some(&token), None),
-    )
-    .await;
+    let (status, mocks) = call(app.clone(), request("GET", "/v1/mocks", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{mocks}");
     let mock_list = mocks["mocks"].as_array().unwrap();
     assert_eq!(mock_list.len(), 1);
@@ -1024,17 +1020,18 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                   "idempotency_key": "mock-key-1"}),
-            ),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-1"})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{ans}");
     assert!(ans.get("correct").is_none(), "no correctness leak: {ans}");
     assert!(ans.get("correct_index").is_none(), "no key leak: {ans}");
-    assert!(ans.get("key_learning_point").is_none(), "no explanation leak");
+    assert!(
+        ans.get("key_learning_point").is_none(),
+        "no explanation leak"
+    );
 
     // Replay is still idempotent.
     let (status, replay) = call(
@@ -1043,10 +1040,8 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                   "idempotency_key": "mock-key-1"}),
-            ),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-1"})),
         ),
     )
     .await;
@@ -1060,10 +1055,8 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(
-                serde_json::json!({"item_index": 1, "chosen_index": 0,
-                                   "idempotency_key": "mock-key-2"}),
-            ),
+            Some(serde_json::json!({"item_index": 1, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-2"})),
         ),
     )
     .await;
@@ -1083,10 +1076,16 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     assert_eq!(result["score"], 50);
     let mock = result["mock"].as_object().expect("mock block");
     assert_eq!(mock["passed"], true, "50% >= 50% pass mark");
-    assert_eq!(mock["percentile"], serde_json::Value::Null,
-        "percentile hidden below min sample — nothing invented");
-    assert_eq!(mock["breakdown"].as_array().unwrap().len(), 1,
-        "both items come from chapter 1");
+    assert_eq!(
+        mock["percentile"],
+        serde_json::Value::Null,
+        "percentile hidden below min sample — nothing invented"
+    );
+    assert_eq!(
+        mock["breakdown"].as_array().unwrap().len(),
+        1,
+        "both items come from chapter 1"
+    );
 
     // Attempts exhausted: a second start is refused.
     let (status, body) = call(
@@ -1134,10 +1133,8 @@ async fn community_stats_gate_and_expected_score() {
                 "POST",
                 &format!("/v1/practice/sessions/{sid}/answers"),
                 Some(&token),
-                Some(
-                    serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                       "idempotency_key": format!("cs-{n}")}),
-                ),
+                Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                       "idempotency_key": format!("cs-{n}")})),
             ),
         )
         .await;
@@ -1185,7 +1182,10 @@ async fn community_stats_gate_and_expected_score() {
         app.clone(),
         request(
             "GET",
-            &format!("/v1/questions/versions/{}/community-stats", ids.question_versions[0]),
+            &format!(
+                "/v1/questions/versions/{}/community-stats",
+                ids.question_versions[0]
+            ),
             Some(&token),
             None,
         ),

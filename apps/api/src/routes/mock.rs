@@ -60,12 +60,7 @@ pub async fn create_mock(
             "title must be 1-200 characters",
         ));
     }
-    if req.blueprint.is_empty()
-        || !req
-            .blueprint
-            .iter()
-            .all(|e| e.count >= 1 && e.count <= 200)
-    {
+    if req.blueprint.is_empty() || !req.blueprint.iter().all(|e| e.count >= 1 && e.count <= 200) {
         return Err(ApiError::unprocessable(
             "invalid_blueprint",
             "blueprint needs 1-200 questions per chapter entry",
