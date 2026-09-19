@@ -201,6 +201,35 @@ export const Api = {
 	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
 	startMock: (mockId: string) =>
 		call<{ session_id: string }>('POST', `/v1/mocks/${mockId}/start`),
+	answerableQuestions: () =>
+		call<{
+			questions: {
+				question_version_id: string;
+				vignette: string;
+				chapter: string;
+			}[];
+		}>('GET', '/v1/coach/answerable-questions'),
+	coachTurn: (
+		vid: string,
+		promptType: string,
+		message: string,
+		idempotencyKey: string
+	) =>
+		call<{
+			already_recorded: boolean;
+			answer: string;
+			adapter: string;
+		}>('POST', '/v1/coach/turns', {
+			question_version_id: vid,
+			prompt_type: promptType,
+			message,
+			idempotency_key: idempotencyKey
+		}),
+	coachHistory: (vid: string) =>
+		call<{ turns: unknown[] }>(
+			'GET',
+			`/v1/coach/history?question_version_id=${vid}`
+		),
 	listAdminAudit: () =>
 		call<{ events: unknown[] }>('GET', '/v1/admin/audit'),
 	createNode: (body: {

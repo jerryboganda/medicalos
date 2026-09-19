@@ -35,6 +35,15 @@ async fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(20),
         admin_token: std::env::var("ADMIN_TOKEN").ok().filter(|t| !t.is_empty()),
+        free_daily_coach_turns: std::env::var("FREE_DAILY_COACH_TURNS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20),
+        openai_api_key: std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|t| !t.is_empty()),
+        openai_base_url: std::env::var("OPENAI_BASE_URL")
+            .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

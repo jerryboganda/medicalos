@@ -76,6 +76,12 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/v1/admin/audit", get(routes::admin::audit_log))
+        .route("/v1/coach/turns", post(routes::coach::coach_turn))
+        .route("/v1/coach/history", get(routes::coach::history))
+        .route(
+            "/v1/coach/answerable-questions",
+            get(routes::coach::answerable_questions),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -138,6 +144,12 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/api/v1/admin/audit", get(routes::admin::audit_log))
+        .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
+        .route("/api/v1/coach/history", get(routes::coach::history))
+        .route(
+            "/api/v1/coach/answerable-questions",
+            get(routes::coach::answerable_questions),
+        )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
             "/api/v1/decks/{deck_id}/cards",

@@ -9,6 +9,11 @@ pub struct AppState {
     /// §18/§19.5 scaffold: mock configuration is admin-gated until the
     /// editorial console lands. None = endpoint disabled.
     pub admin_token: Option<String>,
+    /// §26.1/AI-13: free daily AI allowance (Coach turns) — cost limit.
+    pub free_daily_coach_turns: i64,
+    /// §23: when set, the OpenAI-compatible adapter routes complex turns.
+    pub openai_api_key: Option<String>,
+    pub openai_base_url: String,
 }
 
 impl AppState {

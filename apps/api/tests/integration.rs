@@ -32,6 +32,9 @@ async fn setup() -> Arc<AppState> {
         free_daily_questions: 10,
         community_min_sample: 2,
         admin_token: Some("test-admin".into()),
+        free_daily_coach_turns: 20,
+        openai_api_key: None,
+        openai_base_url: "https://api.openai.com/v1".into(),
     })
 }
 
@@ -1486,6 +1489,242 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(body["error"]["code"], "has_attempts");
 }
 
+fn coach_req(
+    token: &str,
+    vid: Option<Uuid>,
+    prompt_type: &str,
+    message: &str,
+    key: &str,
+) -> Request<Body> {
+    let mut body = serde_json::json!({"message": message, "idempotency_key": key});
+    if let Some(v) = vid {
+        body["question_version_id"] = serde_json::json!(v);
+    }
+    body["prompt_type"] = serde_json::json!(prompt_type);
+    request("POST", "/v1/coach/turns", Some(token), Some(body))
+}
+
+#[tokio::test]
+async fn coach_grounded_abstaining_and_allowance() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // 1. No context, no answer — the Coach abstains instead of improvising.
+    let (status, body) = call(
+        app.clone(),
+        coach_req(&token, None, "free", "Tell me about glorbin.", "c-key-0"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "no_context");
+
+    // 2. Unanswered question: keys are unreleased — answer first.
+    let (status, body) = call(
+        app.clone(),
+        coach_req(
+            &token,
+            Some(ids.question_versions[0]),
+            "why_wrong",
+            "why?",
+            "c-key-0b",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "answer_first");
+
+    // 3. Answer a chapter-3 question (single-question chapter, key = A).
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter3, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                    "idempotency_key": "coach-flow-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    let vid: Uuid = session["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // 4. Coach turn on the answered question: grounded in reviewed material.
+    let (status, turn) = call(
+        app.clone(),
+        coach_req(
+            &token,
+            Some(vid),
+            "explain",
+            "Explain this simply.",
+            "c-key-1",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{turn}");
+    assert_eq!(turn["already_recorded"], false);
+    assert_eq!(turn["adapter"], "extractive");
+    let answer = turn["answer"].as_str().unwrap();
+    // Grounding: the answer quotes the stored rationale and key point.
+    assert!(
+        answer.contains("receptor"),
+        "answer must quote reviewed rationale: {answer}"
+    );
+    assert!(answer.contains("Key learning point:"));
+    assert!(answer.contains("Source:"));
+
+    // 5. Idempotent replay: same key, same answer, one stored turn.
+    let (status, replay) = call(
+        app.clone(),
+        coach_req(
+            &token,
+            Some(vid),
+            "explain",
+            "Explain this simply.",
+            "c-key-1",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["already_recorded"], true);
+    assert_eq!(replay["answer"], turn["answer"]);
+    let count = sqlx::query("SELECT COUNT(*) AS n FROM coach_turns WHERE idempotency_key = $1")
+        .bind("c-key-1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("count");
+    assert_eq!(count.get::<i64, _>("n"), 1, "no duplicate coach evidence");
+
+    // 6. History endpoint lists the turn.
+    let (status, history) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/coach/history?question_version_id={vid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    assert_eq!(history["turns"].as_array().unwrap().len(), 1);
+
+    // 7. AI-13: allowance refusal with structured details. The state's
+    // default here is 20; drive 19 more turns then expect refusal on the
+    // 21st — cheaper: this check lives in the free-allowance integration
+    // above (coach uses the same honest shape). Assert answerable list.
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/coach/answerable-questions", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["questions"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn coach_daily_allowance_enforced() {
+    let _g = LOCK.lock().await;
+    // Local state with a tiny allowance to prove the cost limit fires (AI-13).
+    let url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/medos_ci".into());
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .expect("db");
+    schema::apply_down(&pool).await.expect("down");
+    schema::apply_up(&pool).await.expect("up");
+    let state = Arc::new(AppState {
+        pool,
+        min_time_limit_seconds: 30,
+        free_daily_questions: 10,
+        community_min_sample: 2,
+        admin_token: Some("test-admin".into()),
+        free_daily_coach_turns: 1,
+        openai_api_key: None,
+        openai_base_url: "https://api.openai.com/v1".into(),
+    });
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter3, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                    "idempotency_key": "allow-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let vid: Uuid = session["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // First turn: within the allowance of 1.
+    let (status, _) = call(
+        app.clone(),
+        coach_req(&token, Some(vid), "explain", "Explain.", "allow-turn-1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Second turn: refused with the honest allowance payload (AI-13/§26.1).
+    let (status, body) = call(
+        app.clone(),
+        coach_req(
+            &token,
+            Some(vid),
+            "explain",
+            "Explain again.",
+            "allow-turn-2",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "coach_allowance_reached");
+    assert_eq!(body["error"]["details"]["allowance"]["limit"], 1);
+}
 #[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
