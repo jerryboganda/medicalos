@@ -424,7 +424,7 @@ pub async fn add_ce_activity(
         id,
         user.user_id,
         req.activity.trim(),
-        req.hours
+        req.hours as f32
     )
     .execute(&state.pool)
     .await?;
