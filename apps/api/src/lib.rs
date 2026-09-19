@@ -19,6 +19,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
+        .route(
+            "/v1/me/goals",
+            get(routes::goals::get_goals).put(routes::goals::put_goals),
+        )
+        .route("/v1/me/goals/undo", post(routes::goals::undo_goals))
         .route("/v1/me/today", get(routes::today::today))
         .route(
             "/v1/practice/sessions",
