@@ -72,7 +72,7 @@ fn extractive_answer(
     options: &[QuestionOption],
     key_point: &str,
     exam_tip: Option<&str>,
-    _source_ref: &str,
+    source_ref: &str,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
     match prompt_type {
