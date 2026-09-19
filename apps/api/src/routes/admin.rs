@@ -450,7 +450,7 @@ pub async fn import(
     let mut tx = state.pool.begin().await?;
     let mut created: Vec<serde_json::Value> = Vec::new();
     for row in &req.rows {
-        let (qid, vid) = insert_question_version(&mut *tx, row).await?;
+        let (qid, vid) = insert_question_version(&mut tx, row).await?;
         created.push(json!({"question_id": qid, "version_id": vid}));
     }
     sqlx::query!(
