@@ -408,7 +408,6 @@ async fn retest_queue_and_note_collections_and_screening() {
 }
 
 #[tokio::test]
-#[tokio::test]
 async fn account_export_and_signed_pack_manifest() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -2761,7 +2760,6 @@ async fn portfolio_and_ce_records() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[tokio::test]
 #[tokio::test]
 async fn settings_admin_gate_and_update() {
     let _g = LOCK.lock().await;
