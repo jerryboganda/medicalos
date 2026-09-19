@@ -3,7 +3,7 @@
 //! records, SIM-01/02/05 deterministic scenario engine, Phase 6 translation
 //! scaffold. API-first; surfaces attach in the next client iterations.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -42,10 +42,10 @@ pub async fn generate_pregen(
     let options: Vec<QuestionOption> =
         serde_json::from_value(qv.options).map_err(|_| ApiError::internal())?;
     let key = qv.correct_index as usize;
-    let key_option = options.get(key).ok_or_else(|| ApiError::internal())?;
+    let key_option = options.get(key).ok_or_else(ApiError::internal)?;
     let distractor = options
         .get((key + 1) % options.len())
-        .ok_or_else(|| ApiError::internal())?;
+        .ok_or_else(ApiError::internal)?;
 
     let cards = json!({
         "explain": format!("Simple version: {} — because {}.", key_option.text, key_option.rationale),
@@ -506,7 +506,7 @@ pub async fn start_scenario(
         .state_machine
         .get("initial")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ApiError::internal())?
+        .ok_or_else(ApiError::internal)?
         .to_string();
     let run_id = Uuid::new_v4();
     sqlx::query!(

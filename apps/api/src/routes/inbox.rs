@@ -128,11 +128,7 @@ pub async fn update_preferences(
     Json(req): Json<PrefReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     if let Some(s) = req.quiet_hours_start {
-        if !(0..=23).contains(&s)
-            || req
-                .quiet_hours_end
-                .map_or(false, |e| !(0..=23).contains(&e))
-        {
+        if !(0..=23).contains(&s) || req.quiet_hours_end.is_some_and(|e| !(0..=23).contains(&e)) {
             return Err(ApiError::unprocessable(
                 "invalid_quiet_hours",
                 "quiet hours must be hours of day (0-23)",

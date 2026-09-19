@@ -60,6 +60,10 @@ async fn check_daily_allowance(state: &AppState, user_id: Uuid) -> ApiResult<()>
 
 /// Extractive adapter (§23 baseline): the answer is assembled ONLY from the
 /// reviewed material. It cannot add a claim that is not in storage.
+// 8 args is the honest shape: the reviewed material is the context, and the
+// answer is assembled only from it (§23). Grouping into a struct would add a
+// type with one caller.
+#[allow(clippy::too_many_arguments)]
 fn extractive_answer(
     prompt_type: &str,
     message: &str,
