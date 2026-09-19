@@ -20,3 +20,4 @@ Thumbs.db
 
 # Session-local tool state
 .zcode/
+Cargo.lock
