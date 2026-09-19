@@ -43,7 +43,7 @@
 			</div>
 		{/if}
 	</div>
-	{#if auth.token}
+	{#if auth.token && !$page.url.pathname.startsWith(`${base}/session/`)}
 		<nav class="primary-navigation" aria-label="Primary" data-testid="primary-navigation">
 			{#each destinations as destination (destination.path)}
 				<a

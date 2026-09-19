@@ -38,6 +38,7 @@ test('Practice starts real tutor and timed sessions with explicit takeover', asy
 	await expect(page.getByTestId('practice-task')).toBeVisible();
 	await page.getByTestId('practice-tutor').first().click();
 	await expect(page.getByText('Question 1 of 2')).toBeVisible();
+	await expect(page.getByTestId('primary-navigation')).toHaveCount(0);
 
 	await page.goto('/practice');
 	await page.getByTestId('practice-timed').first().click();
