@@ -33,12 +33,12 @@ struct ItemPayload {
     options: Vec<serde_json::Value>,
 }
 
-struct PoolQuestion {
-    id: Uuid,
-    vignette: String,
-    lead_in: String,
-    difficulty: String,
-    options: serde_json::Value,
+pub(crate) struct PoolQuestion {
+    pub id: Uuid,
+    pub vignette: String,
+    pub lead_in: String,
+    pub difficulty: String,
+    pub options: serde_json::Value,
 }
 
 async fn insert_session(
@@ -294,7 +294,7 @@ pub async fn get_session(
     Path(sid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline
+        "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id
          FROM practice_sessions
          WHERE id = $1 AND user_id = $2",
         sid,
@@ -376,6 +376,7 @@ pub async fn get_session(
         "chapter_id": session.chapter_id,
         "source_session_id": session.source_session_id,
         "status": session.status,
+        "mock_id": session.mock_id,
         "time_limit_seconds": session.time_limit_seconds,
         // EX-08: the client derives its countdown from these two values, so
         // changing the device clock never extends the timer.
@@ -393,44 +394,14 @@ pub struct AnswerReq {
     pub idempotency_key: String,
 }
 
-#[derive(Serialize)]
-pub struct AnswerResponse {
-    already_recorded: bool,
-    correct: Option<bool>,
-    correct_index: i16,
-    options: Vec<QuestionOption>,
-    key_learning_point: String,
-    exam_tip: Option<String>,
-}
-
-fn feedback_response(
-    already: bool,
-    correct: Option<bool>,
-    correct_index: i16,
-    options: &serde_json::Value,
-    key_learning_point: &str,
-    exam_tip: Option<&str>,
-) -> ApiResult<AnswerResponse> {
-    let opts: Vec<QuestionOption> =
-        serde_json::from_value(options.clone()).map_err(|_| ApiError::internal())?;
-    Ok(AnswerResponse {
-        already_recorded: already,
-        correct,
-        correct_index,
-        options: opts,
-        key_learning_point: key_learning_point.to_string(),
-        exam_tip: exam_tip.map(str::to_string),
-    })
-}
-
 pub async fn answer(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(sid): Path<Uuid>,
     Json(req): Json<AnswerReq>,
-) -> ApiResult<Json<AnswerResponse>> {
+) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2",
+        "SELECT status, deadline, preset FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
         user.user_id
     )
@@ -466,13 +437,14 @@ pub async fn answer(
     .fetch_optional(&state.pool)
     .await?;
     if let Some(r) = replay {
-        return Ok(Json(feedback_response(
+        return Ok(Json(response_for_preset(
+            &session.preset,
             true,
             r.correct,
             r.correct_index,
             &r.options,
-            &r.key_learning_point,
-            r.exam_tip.as_deref(),
+            r.key_learning_point,
+            r.exam_tip,
         )?));
     }
 
@@ -556,24 +528,56 @@ pub async fn answer(
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| ApiError::conflict("already_answered", "item already answered"))?;
-        return Ok(Json(feedback_response(
+        return Ok(Json(response_for_preset(
+            &session.preset,
             true,
             r.correct,
             r.correct_index,
             &r.options,
-            &r.key_learning_point,
-            r.exam_tip.as_deref(),
+            r.key_learning_point,
+            r.exam_tip,
         )?));
     }
 
-    Ok(Json(feedback_response(
+    Ok(Json(response_for_preset(
+        &session.preset,
         false,
         correct,
         item.correct_index,
         &item.options,
-        &item.key_learning_point,
-        item.exam_tip.as_deref(),
+        item.key_learning_point.clone(),
+        item.exam_tip.clone(),
     )?))
+}
+
+/// §11.2 one-session vocabulary: tutor reveals immediately; exam-style
+/// presets (mock) defer everything until submission — not even the key is
+/// released early.
+fn response_for_preset(
+    preset: &str,
+    already: bool,
+    correct: Option<bool>,
+    correct_index: i16,
+    options: &serde_json::Value,
+    key_learning_point: String,
+    exam_tip: Option<String>,
+) -> ApiResult<serde_json::Value> {
+    if preset == "mock" {
+        return Ok(serde_json::json!({
+            "already_recorded": already,
+            "recorded": true,
+        }));
+    }
+    let opts: Vec<QuestionOption> =
+        serde_json::from_value(options.clone()).map_err(|_| ApiError::internal())?;
+    Ok(serde_json::json!({
+        "already_recorded": already,
+        "correct": correct,
+        "correct_index": correct_index,
+        "options": opts,
+        "key_learning_point": key_learning_point,
+        "exam_tip": exam_tip,
+    }))
 }
 
 #[derive(Serialize)]
@@ -591,7 +595,7 @@ pub async fn submit(
     Path(sid): Path<Uuid>,
 ) -> ApiResult<Json<SubmitResponse>> {
     let session = sqlx::query!(
-        "SELECT chapter_id, source_session_id, status FROM practice_sessions
+        "SELECT chapter_id, source_session_id, status, preset, mock_id FROM practice_sessions
          WHERE id = $1 AND user_id = $2",
         sid,
         user.user_id
@@ -643,7 +647,9 @@ pub async fn submit(
     )
     .await?;
     agent::update_learner_state(&state.pool, user.user_id, sid).await?;
-    if session.source_session_id.is_none() {
+    // Revision plans come only from self-directed practice; mocks and
+    // revision sessions never spawn them (anti-loop, §8.6).
+    if session.preset == "tutor" {
         agent::maybe_create_revision(
             &state.pool,
             user.user_id,
@@ -659,11 +665,185 @@ pub async fn submit(
     } else {
         totals.correct * 100 / totals.total
     };
-    Ok(Json(SubmitResponse {
-        total: totals.total,
-        correct: totals.correct,
-        incorrect: totals.incorrect,
-        skipped: totals.skipped,
-        score,
-    }))
+
+    // QB-15: expected-score comparison for self-built sessions, computed
+    // from community correct-rates of the exact questions served. Percentile
+    // is reserved for fixed forms (mocks). Hidden below the min sample.
+    let expected_score = expected_score_for_session(
+        &state.pool,
+        sid,
+        state.community_min_sample,
+    )
+    .await?;
+
+    let mut body = serde_json::json!({
+        "total": totals.total,
+        "correct": totals.correct,
+        "incorrect": totals.incorrect,
+        "skipped": totals.skipped,
+        "score": score,
+        "expected_score": expected_score,
+        "mock": null,
+    });
+
+    if let Some(mock_id) = session.mock_id {
+        let mock = sqlx::query!(
+            "SELECT pass_mark_percent FROM mocks WHERE id = $1",
+            mock_id
+        )
+        .fetch_one(&state.pool)
+        .await?;
+        let passed = score >= mock.pass_mark_percent;
+        sqlx::query!(
+            "INSERT INTO mock_attempts
+               (id, mock_id, user_id, session_id, score_percent, passed)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (mock_id, user_id, session_id) DO NOTHING",
+            Uuid::new_v4(),
+            mock_id,
+            user.user_id,
+            sid,
+            score as i32,
+            passed
+        )
+        .execute(&state.pool)
+        .await?;
+        // §11.8: percentile among takers of the SAME form, only once the
+        // sample is meaningful — otherwise an honest null.
+        let takers = sqlx::query!(
+            r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts WHERE mock_id = $1"#,
+            mock_id
+        )
+        .fetch_one(&state.pool)
+        .await?
+        .n;
+        let below = sqlx::query!(
+            r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts
+               WHERE mock_id = $1 AND score_percent < $2"#,
+            mock_id,
+            score as i32
+        )
+        .fetch_one(&state.pool)
+        .await?
+        .n;
+        let percentile = if takers >= state.community_min_sample && takers > 1 {
+            Some((below * 100 / (takers - 1)) as i32)
+        } else {
+            None
+        };
+        let breakdown = sqlx::query!(
+            r#"SELECT c.name AS chapter_name,
+                      COALESCE(COUNT(*), 0) AS "total!",
+                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!"
+               FROM session_items si
+               JOIN question_versions qv ON qv.id = si.question_version_id
+               JOIN curriculum_nodes c ON c.id = qv.chapter_id
+               LEFT JOIN attempts a
+                 ON a.session_id = si.session_id AND a.item_index = si.item_index
+               WHERE si.session_id = $1
+               GROUP BY c.name ORDER BY c.name"#,
+            sid
+        )
+        .fetch_all(&state.pool)
+        .await?;
+        body["mock"] = serde_json::json!({
+            "score_percent": score,
+            "passed": passed,
+            "pass_mark_percent": mock.pass_mark_percent,
+            "percentile": percentile,
+            "takers": takers,
+            "breakdown": breakdown.iter().map(|b| serde_json::json!({
+                "chapter": b.chapter_name,
+                "total": b.total,
+                "correct": b.correct,
+            })).collect::<Vec<_>>(),
+        });
+    }
+
+    Ok(Json(body))
+}
+
+/// Mean community correct-rate over the session's questions that already have
+/// enough attempts (QB-15). None until at least one question qualifies.
+async fn expected_score_for_session(
+    pool: &sqlx::PgPool,
+    sid: Uuid,
+    min_sample: i64,
+) -> ApiResult<Option<i64>> {
+    let rows = sqlx::query!(
+        r#"SELECT qv.id,
+                  COALESCE(COUNT(*), 0) AS "attempts!",
+                  COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!"
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           LEFT JOIN attempts a
+             ON a.question_version_id = si.question_version_id
+            AND a.correct IS NOT NULL
+           WHERE si.session_id = $1
+           GROUP BY qv.id"#,
+        sid
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut rates: Vec<f64> = Vec::new();
+    for r in rows {
+        if r.attempts >= min_sample {
+            rates.push(r.correct as f64 * 100.0 / r.attempts as f64);
+        }
+    }
+    if rates.is_empty() {
+        return Ok(None);
+    }
+    let mean = rates.iter().sum::<f64>() / rates.len() as f64;
+    Ok(Some(mean.round() as i64))
+}
+
+
+/// QB-15: per-question community statistics. Aggregates never identify a
+/// learner; the numbers stay hidden until the minimum sample is met, and the
+/// response says so instead of showing nothing.
+pub async fn community_stats(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path(vid): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let totals = sqlx::query!(
+        r#"SELECT
+             COALESCE(COUNT(*), 0) AS "attempts!",
+             COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS "correct!"
+           FROM attempts
+           WHERE question_version_id = $1 AND chosen_index IS NOT NULL"#,
+        vid
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let distribution = sqlx::query!(
+        r#"SELECT chosen_index, COALESCE(COUNT(*), 0) AS "picks!"
+           FROM attempts
+           WHERE question_version_id = $1 AND chosen_index IS NOT NULL
+           GROUP BY chosen_index ORDER BY chosen_index"#,
+        vid
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let revealed = totals.attempts >= state.community_min_sample;
+    let correct_rate_percent = if revealed && totals.attempts > 0 {
+        Some((totals.correct * 100 / totals.attempts) as i32)
+    } else {
+        None
+    };
+    Ok(Json(serde_json::json!({
+        "min_sample": state.community_min_sample,
+        "attempts": totals.attempts,
+        "revealed": revealed,
+        "correct_rate_percent": correct_rate_percent,
+        "option_distribution": if revealed {
+            serde_json::Value::from(distribution.iter().map(|d| serde_json::json!({
+                "index": d.chosen_index,
+                "picks": d.picks,
+            })).collect::<Vec<_>>())
+        } else {
+            serde_json::Value::Null
+        },
+    })))
 }

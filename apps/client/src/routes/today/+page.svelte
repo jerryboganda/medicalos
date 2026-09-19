@@ -10,6 +10,29 @@
 	let error = $state('');
 	let startingTask = $state('');
 	let undoing = $state('');
+	let mocks = $state(null);
+	let startingMock = $state('');
+
+	async function loadMocks() {
+		try {
+			mocks = (await Api.listMocks()).mocks;
+		} catch {
+			mocks = [];
+		}
+	}
+
+	async function startMock(mock) {
+		if (startingMock) return;
+		startingMock = mock.mock_id;
+		error = '';
+		try {
+			const { session_id } = await Api.startMock(mock.mock_id);
+			goto(`${base}/session/${session_id}`);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not start the mock.';
+			startingMock = '';
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -88,6 +111,7 @@
 			return;
 		}
 		await load();
+		await loadMocks();
 	});
 </script>
 
@@ -158,6 +182,38 @@
 						onclick={() => undo(revision)}
 					>
 						{undoing === revision.id ? 'Undoing…' : 'Undo'}
+					</button>
+				{/if}
+			</div>
+		{/each}
+	{/if}
+
+	<h2>Mock tests</h2>
+	{#if mocks === null || mocks.length === 0}
+		<div class="card">
+			<p class="muted">No mock tests are available yet.</p>
+		</div>
+	{:else}
+		{#each mocks as mock (mock.mock_id)}
+			<div class="card" data-testid="mock-card">
+				<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+					<strong>{mock.title}</strong>
+					<span class="chip">Pass mark {mock.pass_mark_percent}%</span>
+				</div>
+				<p class="muted" style="margin: var(--space-sm) 0;">
+					{mock.attempts_used} of {mock.attempts_allowed} attempts used
+					{#if mock.time_limit_seconds}· {Math.round(mock.time_limit_seconds / 60)} min{/if}
+					— results are observations about the form, not predictions.
+				</p>
+				{#if mock.attempts_used < mock.attempts_allowed}
+					<button
+						class="btn primary"
+						type="button"
+						disabled={startingMock !== ''}
+						data-testid="mock-start"
+						onclick={() => startMock(mock)}
+					>
+						{startingMock === mock.mock_id ? 'Preparing…' : 'Start mock'}
 					</button>
 				{/if}
 			</div>

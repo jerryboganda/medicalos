@@ -30,6 +30,8 @@ async fn setup() -> Arc<AppState> {
         pool,
         min_time_limit_seconds: 30,
         free_daily_questions: 10,
+        community_min_sample: 2,
+        admin_token: Some("test-admin".into()),
     })
 }
 
@@ -979,6 +981,220 @@ async fn same_origin_prefix_serves_version_and_health() {
     let (status, h) = call(app.clone(), request("GET", "/api/healthz", None, None)).await;
     assert_eq!(status, StatusCode::OK, "{h}");
     assert_eq!(h["status"], "ok");
+}
+
+#[tokio::test]
+async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Seeded fixture mock: chapter1 both questions, pass mark 50, 2 attempts.
+    let (status, mocks) = call(
+        app.clone(),
+        request("GET", "/v1/mocks", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mocks}");
+    let mock_list = mocks["mocks"].as_array().unwrap();
+    assert_eq!(mock_list.len(), 1);
+    assert_eq!(mock_list[0]["attempts_used"], 0);
+    let mid: Uuid = mock_list[0]["mock_id"].as_str().unwrap().parse().unwrap();
+
+    // Start: the form freezes — 2 items from the blueprint.
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mid}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
+
+    // §11.3 trust gate: the answer response must NOT leak correctness.
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(
+                serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-1"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    assert!(ans.get("correct").is_none(), "no correctness leak: {ans}");
+    assert!(ans.get("correct_index").is_none(), "no key leak: {ans}");
+    assert!(ans.get("key_learning_point").is_none(), "no explanation leak");
+
+    // Replay is still idempotent.
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(
+                serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-1"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["already_recorded"], true);
+
+    // Item 2: answer A as well -> exactly 1 correct of 2 = 50% = pass.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(
+                serde_json::json!({"item_index": 1, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-2"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, result) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["score"], 50);
+    let mock = result["mock"].as_object().expect("mock block");
+    assert_eq!(mock["passed"], true, "50% >= 50% pass mark");
+    assert_eq!(mock["percentile"], serde_json::Value::Null,
+        "percentile hidden below min sample — nothing invented");
+    assert_eq!(mock["breakdown"].as_array().unwrap().len(), 1,
+        "both items come from chapter 1");
+
+    // Attempts exhausted: a second start is refused.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mid}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "attempts_exhausted");
+}
+
+#[tokio::test]
+async fn community_stats_gate_and_expected_score() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+
+    // Two learners answer the single chapter-3 question -> sample 2 >= min 2.
+    for n in 0..2 {
+        let token = register_and_login(app.clone()).await;
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&token),
+                Some(
+                    serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter3,
+                                       "question_count": 1}),
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&token),
+                Some(
+                    serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                       "idempotency_key": format!("cs-{n}")}),
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, result) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/submit"),
+                Some(&token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        if n == 1 {
+            assert_eq!(
+                result["expected_score"], 100,
+                "both attempts correct: expected score revealed"
+            );
+        }
+    }
+
+    let token = register_and_login(app.clone()).await;
+    let vid = ids.question_versions[4];
+    let (status, stats) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{vid}/community-stats"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stats}");
+    assert_eq!(stats["revealed"], true);
+    assert_eq!(stats["attempts"], 2);
+    assert_eq!(stats["correct_rate_percent"], 100);
+    assert_eq!(stats["option_distribution"][0]["picks"], 2);
+
+    // An unattempted question: honest unrevealed state.
+    let v1 = ids.question_versions[0];
+    let (status, stats) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{}/community-stats", ids.question_versions[0]),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stats}");
+    let _ = v1;
+    assert_eq!(stats["revealed"], false);
+    assert!(stats["correct_rate_percent"].is_null());
 }
 
 #[tokio::test]

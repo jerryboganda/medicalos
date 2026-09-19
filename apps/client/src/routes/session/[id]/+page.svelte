@@ -98,6 +98,14 @@
 				chosen_index: chosen,
 				idempotency_key: idempotencyKey(current)
 			});
+			if (session.preset === 'mock') {
+				// Exam-style: deferred feedback — nothing is revealed (§11.2).
+				session.items[current] = {
+					...session.items[current],
+					answered: true,
+					chosen_index: chosen
+				};
+			} else {
 			session.items[current] = {
 				...session.items[current],
 				answered: true,
@@ -108,6 +116,7 @@
 				key_learning_point: res.key_learning_point,
 				exam_tip: res.exam_tip
 			};
+			}
 			selected = null;
 		} catch (err) {
 			if (err instanceof ApiError && err.code === 'session_expired') {
@@ -213,6 +222,24 @@
 			<span>Incorrect<strong>{result.incorrect}</strong></span>
 			<span>Skipped<strong>{result.skipped}</strong></span>
 		</div>
+		{#if result.mock}
+			<div class="feedback {result.mock.passed ? 'good' : 'bad'}" data-testid="mock-result">
+				<p class="verdict">{result.mock.passed ? 'Passed' : 'Not passed'} — mark was {result.mock.pass_mark_percent}%</p>
+				{#if result.mock.percentile === null}
+					<p class="muted">Percentile appears once at least {result.mock.takers < 20 ? 20 : result.mock.takers} learners have taken this mock — nothing is invented meanwhile.</p>
+				{:else}
+					<p>You are ahead of {result.mock.percentile}% of takers of this same form.</p>
+				{/if}
+				{#each result.mock.breakdown as row (row.chapter)}
+					<p style="margin:2px 0;">{row.chapter}: {row.correct}/{row.total}</p>
+				{/each}
+			</div>
+		{:else if result.expected_score !== null}
+			<p class="muted" data-testid="expected">
+				You scored {result.score}% — learners with history on these questions
+				score about {result.expected_score}% on average.
+			</p>
+		{/if}
 		<p class="muted">This result is about this form — it is not a prediction of anything.</p>
 		<a class="btn primary" href={`${base}/today`} data-testid="back-today">Back to Today</a>
 	</div>
@@ -260,6 +287,12 @@
 				<p class="error-text" role="alert">{error}</p>
 			{/if}
 
+			{#if !item.answered && session.preset !== 'mock'}
+				<p class="muted" style="margin: 0 0 var(--space-sm);">
+					Answers and explanations are revealed after you submit this mock.
+				</p>
+			{/if}
+
 			{#if !item.answered}
 				<button
 					class="btn primary"
@@ -269,8 +302,9 @@
 					data-testid="answer"
 					onclick={() => answer(selected)}
 				>
-					{busy ? 'Recording…' : 'Answer'}
+					{busy ? 'Recording…' : session.preset === 'mock' ? 'Record answer' : 'Answer'}
 				</button>
+				{#if session.preset !== 'mock'}
 				<button
 					class="linklike"
 					type="button"
@@ -280,7 +314,34 @@
 				>
 					Skip — I don't want to guess
 				</button>
-			{:else}
+				{/if}
+			{:else if session.preset === 'mock'}
+				<p class="muted" data-testid="mock-recorded">
+					{item.chosen_index === null ? 'Recorded as skipped.' : 'Answer recorded.'}
+					Nothing is revealed until submission.
+				</p>
+				{#if current < session.items.length - 1}
+					<button
+						class="btn primary"
+						type="button"
+						data-testid="next"
+						onclick={() => (current += 1)}
+					>
+						Next
+					</button>
+				{:else}
+					<button
+						class="btn primary"
+						type="button"
+						disabled={submitting}
+						data-loading={submitting}
+						data-testid="submit-session"
+						onclick={submitSession}
+					>
+						{submitting ? 'Submitting…' : 'Submit mock'}
+					</button>
+				{/if}
+			{:else if session.preset !== 'mock'}
 				<div
 					class="feedback {item.correct === true ? 'good' : item.correct === false ? 'bad' : ''}"
 					data-testid="feedback"

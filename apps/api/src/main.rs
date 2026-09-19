@@ -30,6 +30,11 @@ async fn main() {
         pool,
         min_time_limit_seconds: min_time_limit,
         free_daily_questions,
+        community_min_sample: std::env::var("COMMUNITY_MIN_SAMPLE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20),
+        admin_token: std::env::var("ADMIN_TOKEN").ok().filter(|t| !t.is_empty()),
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

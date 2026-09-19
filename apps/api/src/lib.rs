@@ -49,6 +49,12 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::reports::report).get(routes::reports::my_reports),
         )
         .route("/v1/reports/{rid}/resolve", post(routes::reports::resolve))
+        .route("/v1/mocks", post(routes::mock::create_mock).get(routes::mock::list_mocks))
+        .route("/v1/mocks/{mid}/start", post(routes::mock::start_mock))
+        .route(
+            "/v1/questions/versions/{vid}/community-stats",
+            get(routes::practice::community_stats),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -83,6 +89,12 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/reports/{rid}/resolve",
             post(routes::reports::resolve),
+        )
+        .route("/api/v1/mocks", post(routes::mock::create_mock).get(routes::mock::list_mocks))
+        .route("/api/v1/mocks/{mid}/start", post(routes::mock::start_mock))
+        .route(
+            "/api/v1/questions/versions/{vid}/community-stats",
+            get(routes::practice::community_stats),
         )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(

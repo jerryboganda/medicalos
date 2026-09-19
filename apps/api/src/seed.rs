@@ -18,6 +18,7 @@ pub struct SeedIds {
     pub exam_id: Uuid,
     pub chapter1: Uuid,
     pub chapter2: Uuid,
+    pub chapter3: Uuid,
     pub question_versions: [Uuid; 4],
 }
 
@@ -283,10 +284,53 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
     let v3 = insert_question(pool, &q3).await?;
     let v4 = insert_question(pool, &q4).await?;
 
+    // Single-question chapter: deterministic community-stats and mock flows
+    // (every session here serves exactly this question).
+    let chapter3 =
+        insert_node(pool, exam_id, "chapter", "Glorbin Pharmacology", Some(system), 2).await?;
+    let q5 = mk(
+        chapter3,
+        "easy",
+        "In the fictional model, drug G-boost increases receptor sensitivity          without changing blood glorbin."
+            .to_string(),
+        "What happens to glorbin's effect?",
+        vec![
+            ("It increases", "Correct: the receptor step is amplified."),
+            ("It decreases", "Sensitivity raises, not lowers, the effect."),
+            ("It is unchanged because levels are normal", "Levels alone do not determine effect."),
+            ("It converts to an agonist", "Nothing in the fixture implies conversion."),
+        ],
+        0,
+        "Effect can change through receptor sensitivity even when the level is stable.",
+        None,
+        false,
+    );
+    let v5 = insert_question(pool, &q5).await?;
+
+    // EX-07 fixture: deterministic frozen form (both chapter-1 questions;
+    // answering A on both yields exactly 1 correct = 50% = pass at mark 50).
+    let blueprint = serde_json::json!([{ "chapter_id": chapter1, "count": 2 }]);
+    let mock_id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO mocks
+           (id, title, exam_id, blueprint, time_limit_seconds, pass_mark_percent, attempts_allowed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        mock_id,
+        "Pilot Fixture Mock (full)",
+        exam_id,
+        blueprint,
+        600,
+        50,
+        2
+    )
+    .execute(pool)
+    .await?;
+
     Ok(SeedIds {
         exam_id,
         chapter1,
         chapter2,
-        question_versions: [v1, v2, v3, v4],
+        chapter3,
+        question_versions: [v1, v2, v3, v4, v5],
     })
 }

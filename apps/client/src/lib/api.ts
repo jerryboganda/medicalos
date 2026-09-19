@@ -124,6 +124,26 @@ export interface SubmitResult {
 	incorrect: number;
 	skipped: number;
 	score: number;
+	expected_score: number | null;
+	mock: MockResult | null;
+}
+
+export interface MockTest {
+	mock_id: string;
+	title: string;
+	pass_mark_percent: number;
+	attempts_allowed: number;
+	attempts_used: number;
+	time_limit_seconds: number | null;
+}
+
+export interface MockResult {
+	score_percent: number;
+	passed: boolean;
+	pass_mark_percent: number;
+	percentile: number | null;
+	takers: number;
+	breakdown: { chapter: string; total: number; correct: number }[];
 }
 
 export const Api = {
@@ -169,6 +189,9 @@ export const Api = {
 			new: { card_id: string; front: string; back: string }[];
 			backlog_remaining: number;
 		}>('GET', '/v1/reviews/queue'),
+	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
+	startMock: (mockId: string) =>
+		call<{ session_id: string }>('POST', `/v1/mocks/${mockId}/start`),
 	reviewEvent: (cardId: string, rating: string, idempotencyKey: string) =>
 		call<{ already_recorded: boolean; due: string }>(
 			'POST',
