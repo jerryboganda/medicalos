@@ -1,6 +1,7 @@
-# Production deployment (mandated sequence: PUBLIC repo → deploy → verify → PRIVATE).
+# Production deployment — medicalos.polytronx.com on the shared VPS.
 # Builds run entirely in GitHub Actions (AGENTS.md compute policy); the VPS
-# serves only the live app — it pulls the GHCR image, it never builds.
+# serves only the live app — it pulls the GHCR images, it never builds.
+# Sequence per owner mandate: repo PUBLIC during deploy+verify, then PRIVATE.
 
 name: deploy
 
@@ -16,16 +17,19 @@ on:
 permissions:
   contents: read
   packages: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: deploy-main
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io/jerryboganda
+  DOMAIN: medicalos.polytronx.com
+
 jobs:
   api-image:
-    # Production API container → GHCR. The VPS runbook is one docker run.
+    # Production API container → GHCR. The VPS runbook is one docker run
+    # (infra/vps/deploy.sh, via the deploy-vps job below).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +43,47 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/jerryboganda/medicalos-api:latest
-            ghcr.io/jerryboganda/medicalos-api:${{ github.sha }}
+            ${{ env.REGISTRY }}/medicalos-api:latest
+            ${{ env.REGISTRY }}/medicalos-api:${{ github.sha }}
+
+  web-image:
+    # Static client SPA + same-origin /api/ proxy → GHCR. The client is
+    # baked with VITE_API_BASE='' (same origin reaches the API container
+    # through the /api/ prefix, so no CORS configuration is needed).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Stamp deployment provenance
+        run: |
+          # Served at /version.json (no-store) so production E2E can prove
+          # the exact commit landed.
+          printf '{"sha":"%s","repo":"%s","deployed_at":"%s"}\n' \
+            "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$(date -u +%FT%TZ)" \
+            > apps/client/static/version.json
+      - name: Build client (same-origin API via /api/)
+        run: npm run build -w @medical-os/client
+        env:
+          VITE_API_BASE: ''
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/client
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/medicalos-web:latest
+            ${{ env.REGISTRY }}/medicalos-web:${{ github.sha }}
 
   api-release:
     # Static Linux binary as a release artifact (VPS without Docker).
@@ -58,67 +100,48 @@ jobs:
           name: medicalos-api-linux-x86_64
           path: target/release/api
 
-  web-pages:
-    # Client SPA → GitHub Pages, stamped with the commit SHA so production
-    # E2E can verify the latest commit actually landed.
+  deploy-vps:
+    # Ship to the shared VPS over SSH: pull GHCR images, recreate the two
+    # containers, health-check. Lightweight by design (AGENTS.md compute
+    # policy) — all compiling happened in the jobs above.
+    needs: [api-image, web-image]
     runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: medicalos-vps
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Deploy to production VPS
+        uses: appleboy/ssh-action@v1
         with:
-          node-version: 22
-      - run: npm install
-      - name: Stamp deployment provenance
-        run: |
-          # SvelteKit serves static assets from `static/` (its vite publicDir).
-          mkdir -p apps/client/static
-          printf '{"sha":"%s","repo":"%s","deployed_at":"%s"}\n' \
-            "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$(date -u +%FT%TZ)" \
-            > apps/client/static/version.json
-      - name: Build client for Pages
-        run: npm run build -w @medical-os/client
-        env:
-          BASE_PATH: /medicalos
-      - name: SPA fallback for deep links
-        run: cp apps/client/build/index.html apps/client/build/404.html
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: apps/client/build
-
-  deploy-pages:
-    needs: web-pages
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            export DATABASE_URL='${{ secrets.VPS_DATABASE_URL }}'
+            export REGISTRY='${{ env.REGISTRY }}'
+            bash -s '${{ github.sha }}' < infra/vps/deploy.sh
 
   production-verify:
-    # Mandated production E2E: the live site must serve the app AND prove the
-    # latest commit landed (version.json carries the deployed SHA).
-    needs: deploy-pages
+    # Mandated production E2E: the live domain must serve the app AND prove
+    # the latest commit landed (version.json carries the deployed SHA).
+    needs: deploy-vps
     runs-on: ubuntu-latest
     steps:
       - name: Verify production serves this exact commit
         run: |
           set -e
-          BASE="https://jerryboganda.github.io/medicalos"
+          BASE="https://${{ env.DOMAIN }}"
           echo "Checking $BASE ..."
-          # Pages CDN mixes stale/new objects for up to ~10 minutes after a
-          # deploy. Retry ALL checks together until they pass as one state.
           ok=""
-          # The runner's Fastly edge can pin a stale/negative-cached object
-          # indefinitely - bust the cache with a unique query per attempt.
           for i in $(seq 1 10); do
-            CB="cb=${GITHUB_RUN_ID}-${i}"
-            if curl -sf "$BASE/version.json?$CB" | grep -q "\"sha\":\"${GITHUB_SHA}\""                && curl -sf "$BASE/?$CB" | grep -q 'data-sveltekit-preload-data'; then
-              ASSET=$(curl -sf "$BASE/?$CB" | grep -o '/medicalos/_app/immutable/entry/start[^"]*\.js' | head -1)
-              if [ -n "$ASSET" ] && curl -sf "$ASSET?$CB" > /dev/null; then
+            if curl -sf "$BASE/api/version.json" | grep -q "\"sha\":\"${GITHUB_SHA}\"" \
+               && curl -sf "$BASE/" | grep -q 'data-sveltekit-preload-data'; then
+              ASSET=$(curl -sf "$BASE/" | grep -o '/_app/immutable/entry/start[^"]*\.js' | head -1)
+              if [ -n "$ASSET" ] && curl -sf "$BASE$ASSET" > /dev/null \
+                 && curl -sf "$BASE/api/healthz" | grep -q ok; then
                 ok=yes
                 break
               fi
@@ -127,4 +150,4 @@ jobs:
             sleep 20
           done
           [ "$ok" = "yes" ] || { echo "FAIL: production never verified"; exit 1; }
-          echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live and serving."
+          echo "PRODUCTION VERIFIED: commit ${GITHUB_SHA} is live on $BASE."

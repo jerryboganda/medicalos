@@ -17,6 +17,10 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: Arc<state::AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        // Same-origin production prefix: nginx serves the API under /api/
+        // (medicalos.polytronx.com/api/* -> medicalos-api:8080/*).
+        .route("/api/healthz", get(healthz))
+        .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
         .route("/v1/me/today", get(routes::today::today))
@@ -49,10 +53,56 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
         .route("/v1/reviews/events", post(routes::review::review_event))
+        .route("/api/v1/auth/register", post(routes::auth::register))
+        .route("/api/v1/auth/login", post(routes::auth::login))
+        .route("/api/v1/me/today", get(routes::today::today))
+        .route(
+            "/api/v1/practice/sessions",
+            post(routes::practice::create_session),
+        )
+        .route(
+            "/api/v1/practice/sessions/{sid}",
+            get(routes::practice::get_session),
+        )
+        .route(
+            "/api/v1/practice/sessions/{sid}/answers",
+            post(routes::practice::answer),
+        )
+        .route(
+            "/api/v1/practice/sessions/{sid}/submit",
+            post(routes::practice::submit),
+        )
+        .route(
+            "/api/v1/plans/{pid}/revisions/{rid}/undo",
+            post(routes::today::undo_revision),
+        )
+        .route(
+            "/api/v1/questions/versions/{vid}/reports",
+            post(routes::reports::report).get(routes::reports::my_reports),
+        )
+        .route(
+            "/api/v1/reports/{rid}/resolve",
+            post(routes::reports::resolve),
+        )
+        .route("/api/v1/decks", post(routes::review::create_deck))
+        .route(
+            "/api/v1/decks/{deck_id}/cards",
+            post(routes::review::add_card),
+        )
+        .route("/api/v1/reviews/queue", get(routes::review::queue))
+        .route("/api/v1/reviews/events", post(routes::review::review_event))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn version() -> axum::Json<serde_json::Value> {
+    // Served at /api/version.json in production so the deploy pipeline can
+    // prove the exact commit landed (SHA stamped at image build time).
+    axum::Json(serde_json::json!({
+        "sha": env!("MEDICALOS_BUILD_SHA", "dev"),
+    }))
 }

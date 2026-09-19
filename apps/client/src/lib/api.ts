@@ -3,7 +3,11 @@ import { auth, clearToken } from './auth.svelte';
 // Until ARCH-02 contract generation lands, this is the single hand-written
 // client for the endpoints the client app uses. It mirrors the API contract;
 // when the generated client arrives this file is replaced, not edited.
-const BASE: string = import.meta.env.VITE_API_BASE ?? '';
+// Production reaches the API same-origin through the /api/ prefix
+// (medicalos.polytronx.com/api/* -> the API container); local dev keeps
+// talking straight to the API host.
+const BASE: string =
+	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
 export class ApiError extends Error {
 	constructor(
