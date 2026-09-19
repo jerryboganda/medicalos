@@ -29,7 +29,7 @@ fn xp_for_difficulty(difficulty: &str) -> i32 {
 pub async fn award_xp_for_submit(
     state: &AppState,
     user_id: Uuid,
-    correct: i64,
+    #[allow(unused_variables)] correct: i64,
     difficulties: Vec<String>,
 ) -> ApiResult<()> {
     let total: i32 = difficulties.iter().map(|d| xp_for_difficulty(d)).sum();
