@@ -25,6 +25,11 @@ async fn setup() -> Arc<AppState> {
         .await
         .expect("connect to test database");
     schema::apply_up(&pool).await.expect("apply schema");
+    // Clean all data for test isolation (CASCADE handles FK ordering).
+    sqlx::query("TRUNCATE question_reports, retest_history, retest_cards, integrity_events, appeals, coach_turns, import_batches, audit_events, app_settings, xp_ledger, achievements, competition_entries, competitions, assignments, cohort_members, cohorts, institution_members, institutions, scenarios, scenario_runs, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, guest_trials, notification_preferences, notifications, note_collection_items, note_collections, note_links, notes, goals, protected_commitments, mock_attempts, attempts, session_items, practice_sessions, learner_concept_state, plan_revisions, plan_tasks, plans, question_versions, questions, curriculum_nodes, exams, auth_sessions, users, decks, cards, review_events CASCADE")
+        .execute(&pool)
+        .await
+        .expect("clean database");
 
     Arc::new(AppState {
         pool,
