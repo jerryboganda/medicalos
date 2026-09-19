@@ -1250,15 +1250,18 @@ async fn admin_gate_blocks_without_token() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
     let (status, body) = call(
         app.clone(),
         request(
             "POST",
-            "/v1/admin/exams",
+            "/v1/admin/hierarchy",
             Some(&token),
-            Some(serde_json::json!({"code": "X", "name": "X"})),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter", "name": "Gate test"
+            })),
         ),
     )
     .await;
