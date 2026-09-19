@@ -79,7 +79,7 @@ pub async fn mastery_heatmap(
     let rows = sqlx::query!(
         r#"SELECT system.id AS system_id, system.name AS system_name,
                   chapter.id AS chapter_id, chapter.name AS chapter_name,
-                  lcs.ability, lcs.evidence_count
+                  lcs.ability AS "ability?", lcs.evidence_count AS "evidence_count?"
            FROM curriculum_nodes system
            JOIN curriculum_nodes chapter ON chapter.parent_id = system.id
            LEFT JOIN learner_concept_state lcs

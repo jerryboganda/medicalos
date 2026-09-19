@@ -219,7 +219,7 @@ pub async fn create_session(
                              WHERE m.question_version_id = qv.id AND m.user_id = $2))
                      )
                    ORDER BY random() LIMIT $4"#,
-                chapters,
+                &chapters,
                 user.user_id,
                 source,
                 count
