@@ -34,6 +34,95 @@ async fn setup() -> Arc<AppState> {
     })
 }
 
+#[tokio::test]
+async fn lib01_library_is_versioned_connected_and_authenticated() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    seed::seed(&state.pool).await.expect("seed");
+    let app = router(state);
+
+    let (status, unauthenticated) = call(
+        app.clone(),
+        request("GET", "/v1/library", None, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{unauthenticated}");
+
+    let token = register_and_login(app.clone()).await;
+    let (status, library) = call(
+        app.clone(),
+        request("GET", "/v1/library", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{library}");
+    let items = library["items"].as_array().expect("library items");
+    assert_eq!(items.len(), 2, "synthetic library has two stable items");
+    assert!(
+        items.iter().all(|item| item.get("body").is_none()),
+        "list must not include full body: {library}"
+    );
+
+    let article = items
+        .iter()
+        .find(|item| item["kind"] == "article")
+        .expect("article item");
+    let reference = items
+        .iter()
+        .find(|item| item["kind"] == "reference")
+        .expect("reference item");
+    assert_eq!(article["version"], 2, "latest published article version");
+    assert_eq!(reference["version"], 1);
+    for item in items {
+        assert!(item["item_id"].is_string(), "{item}");
+        assert!(item["title"].is_string(), "{item}");
+        assert!(item["provenance_class"].is_string(), "{item}");
+        assert!(item["source_label"].is_string(), "{item}");
+        assert!(item["effective_date"].is_string(), "{item}");
+        assert!(item["jurisdiction"].is_string(), "{item}");
+    }
+
+    let article_id = article["item_id"].as_str().expect("article item id");
+    let (status, historical) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/library/{article_id}/versions/1"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{historical}");
+    assert_eq!(historical["item_id"], article_id);
+    assert_eq!(historical["kind"], "article");
+    assert_eq!(historical["version"], 1);
+    assert!(historical["body"].as_str().is_some_and(|body| !body.is_empty()));
+    assert!(
+        historical["concept_version_ids"]
+            .as_array()
+            .is_some_and(|links| !links.is_empty()),
+        "library version must link to concepts: {historical}"
+    );
+    assert!(
+        historical["question_version_ids"]
+            .as_array()
+            .is_some_and(|links| !links.is_empty()),
+        "library version must link to questions: {historical}"
+    );
+
+    let (status, missing) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/library/{article_id}/versions/99"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+}
+
 async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     let uri = req.uri().clone();
     let resp = app.oneshot(req).await.expect("oneshot");
