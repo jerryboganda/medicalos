@@ -137,6 +137,13 @@ export interface SubmitResult {
 	mock: MockResult | null;
 }
 
+export interface Note {
+	note_id: string;
+	title: string;
+	body: string;
+	backlinks: { note_id: string; title: string }[];
+}
+
 export interface MockTest {
 	mock_id: string;
 	title: string;
@@ -230,6 +237,36 @@ export const Api = {
 			'GET',
 			`/v1/coach/history?question_version_id=${vid}`
 		),
+	createNote: (title: string, body: string) =>
+		call<{ note_id: string }>('POST', '/v1/notes', { title, body }),
+	listNotes: () => call<{ notes: Note[] }>('GET', '/v1/notes'),
+	deleteNote: (noteId: string) =>
+		call<{ deleted: boolean }>('DELETE', `/v1/notes/${noteId}`),
+	librarySearch: (q: string) =>
+		call<{ results: unknown[] }>(
+			'GET',
+			`/v1/library/search?q=${encodeURIComponent(q)}`
+		),
+	inbox: () =>
+		call<{
+			notifications: {
+				id: string;
+				category: string;
+				title: string;
+				body: string;
+				read: boolean;
+			}[];
+		}>('GET', '/v1/me/notifications'),
+	updateNotificationPrefs: (body: Record<string, unknown>) =>
+		call<{ updated: boolean }>('PATCH', '/v1/me/notifications', body),
+	addPortfolioEntry: (body: Record<string, unknown>) =>
+		call<{ entry_id: string }>('POST', '/v1/me/portfolio', body),
+	listPortfolio: () => call<{ entries: unknown[] }>('GET', '/v1/me/portfolio'),
+	addCeActivity: (activity: string, hours: number) =>
+		call<{ activity_id: string; note: string }>('POST', '/v1/me/ce-activities', {
+			activity,
+			hours
+		}),
 	listAdminAudit: () =>
 		call<{ events: unknown[] }>('GET', '/v1/admin/audit'),
 	createNode: (body: {

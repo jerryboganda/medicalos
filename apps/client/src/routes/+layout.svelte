@@ -23,6 +23,11 @@
 	{#if auth.token}
 		<nav style="display:flex; gap:12px; align-items:center;">
 			<a class="btn" href={`${base}/coach`} data-testid="nav-coach">Coach</a>
+			<a class="btn" href={`${base}/notes`} data-testid="nav-notes">Notes</a>
+			<a class="btn" href={`${base}/library`} data-testid="nav-library">Library</a>
+			<a class="btn" href={`${base}/notifications`} data-testid="nav-notifications">
+				Notifications
+			</a>
 			<a class="btn" href={`${base}/review`} data-testid="nav-review">Review</a>
 			<a class="btn" href={`${base}/admin`} data-testid="nav-admin">Console</a>
 			<button class="btn" type="button" onclick={signOut}>Sign out</button>

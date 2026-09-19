@@ -82,6 +82,79 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/coach/answerable-questions",
             get(routes::coach::answerable_questions),
         )
+        .route(
+            "/v1/notes",
+            post(routes::notes::create_note).get(routes::notes::list_notes),
+        )
+        .route(
+            "/v1/notes/{note_id}",
+            axum::routing::patch(routes::notes::update_note).delete(routes::notes::delete_note),
+        )
+        .route("/v1/notes/link", post(routes::notes::link_notes))
+        .route("/v1/notes/export", get(routes::notes::export_notes))
+        .route("/v1/library/search", get(routes::library::search))
+        .route(
+            "/v1/library/articles/{slug}",
+            get(routes::library::get_article),
+        )
+        .route(
+            "/v1/me/notifications",
+            get(routes::inbox::inbox).patch(routes::inbox::update_preferences),
+        )
+        .route(
+            "/v1/me/notifications/{note_id}/read",
+            post(routes::inbox::mark_read),
+        )
+        .route(
+            "/v1/me/goals",
+            post(routes::goals::create_goal).get(routes::goals::list_goals),
+        )
+        .route("/v1/me/commitments", post(routes::goals::add_commitment))
+        .route(
+            "/v1/me/commitments/{id}",
+            axum::routing::delete(routes::goals::remove_commitment),
+        )
+        .route("/guest/trial/start", post(routes::guest::start))
+        .route(
+            "/guest/trial/next-question",
+            post(routes::guest::next_question),
+        )
+        .route(
+            "/v1/questions/versions/{vid}/pregen-tutoring",
+            get(routes::program::pregen_for_question).post(routes::program::generate_pregen),
+        )
+        .route("/v1/config/flags", get(routes::program::list_flags))
+        .route("/v1/admin/flags", post(routes::program::set_flag))
+        .route(
+            "/v1/institutions",
+            post(routes::program::create_institution),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/members",
+            post(routes::program::add_member),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/cohorts",
+            post(routes::program::create_cohort),
+        )
+        .route(
+            "/v1/cohorts/{cohort_id}/assignments",
+            post(routes::program::create_assignment),
+        )
+        .route(
+            "/v1/me/portfolio",
+            post(routes::program::add_portfolio_entry).get(routes::program::list_portfolio),
+        )
+        .route(
+            "/v1/me/ce-activities",
+            post(routes::program::add_ce_activity),
+        )
+        .route("/v1/scenarios", post(routes::program::create_scenario))
+        .route("/v1/scenarios/runs", post(routes::program::start_scenario))
+        .route(
+            "/v1/scenarios/runs/{run_id}/events",
+            post(routes::program::scenario_event),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -149,6 +222,85 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/coach/answerable-questions",
             get(routes::coach::answerable_questions),
+        )
+        .route(
+            "/api/v1/notes",
+            post(routes::notes::create_note).get(routes::notes::list_notes),
+        )
+        .route(
+            "/api/v1/notes/{note_id}",
+            axum::routing::patch(routes::notes::update_note).delete(routes::notes::delete_note),
+        )
+        .route("/api/v1/notes/link", post(routes::notes::link_notes))
+        .route("/api/v1/notes/export", get(routes::notes::export_notes))
+        .route("/api/v1/library/search", get(routes::library::search))
+        .route(
+            "/api/v1/library/articles/{slug}",
+            get(routes::library::get_article),
+        )
+        .route(
+            "/api/v1/me/notifications",
+            get(routes::inbox::inbox).patch(routes::inbox::update_preferences),
+        )
+        .route(
+            "/api/v1/me/notifications/{note_id}/read",
+            post(routes::inbox::mark_read),
+        )
+        .route(
+            "/api/v1/me/goals",
+            post(routes::goals::create_goal).get(routes::goals::list_goals),
+        )
+        .route(
+            "/api/v1/me/commitments",
+            post(routes::goals::add_commitment),
+        )
+        .route(
+            "/api/v1/me/commitments/{id}",
+            axum::routing::delete(routes::goals::remove_commitment),
+        )
+        .route("/guest/trial/start", post(routes::guest::start))
+        .route(
+            "/guest/trial/next-question",
+            post(routes::guest::next_question),
+        )
+        .route(
+            "/api/v1/questions/versions/{vid}/pregen-tutoring",
+            get(routes::program::pregen_for_question).post(routes::program::generate_pregen),
+        )
+        .route("/api/v1/config/flags", get(routes::program::list_flags))
+        .route("/api/v1/admin/flags", post(routes::program::set_flag))
+        .route(
+            "/api/v1/institutions",
+            post(routes::program::create_institution),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/members",
+            post(routes::program::add_member),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/cohorts",
+            post(routes::program::create_cohort),
+        )
+        .route(
+            "/api/v1/cohorts/{cohort_id}/assignments",
+            post(routes::program::create_assignment),
+        )
+        .route(
+            "/api/v1/me/portfolio",
+            post(routes::program::add_portfolio_entry).get(routes::program::list_portfolio),
+        )
+        .route(
+            "/api/v1/me/ce-activities",
+            post(routes::program::add_ce_activity),
+        )
+        .route("/api/v1/scenarios", post(routes::program::create_scenario))
+        .route(
+            "/api/v1/scenarios/runs",
+            post(routes::program::start_scenario),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/events",
+            post(routes::program::scenario_event),
         )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(

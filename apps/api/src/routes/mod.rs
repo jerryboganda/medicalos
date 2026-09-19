@@ -1,8 +1,14 @@
 pub mod admin;
 pub mod auth;
 pub mod coach;
+pub mod goals;
+pub mod guest;
+pub mod inbox;
+pub mod library;
 pub mod mock;
+pub mod notes;
 pub mod practice;
+pub mod program;
 pub mod reports;
 pub mod review;
 pub mod today;

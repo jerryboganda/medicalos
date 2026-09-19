@@ -1726,6 +1726,611 @@ async fn coach_daily_allowance_enforced() {
     assert_eq!(body["error"]["details"]["allowance"]["limit"], 1);
 }
 #[tokio::test]
+async fn notes_crud_links_export_and_isolation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let other = register_and_login(app.clone()).await;
+
+    // Create two notes, link them.
+    let (status, n1) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&token),
+            Some(serde_json::json!({"title": "Loop rule", "body": "Negative feedback suppresses upstream."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{n1}");
+    let id1: Uuid = n1["note_id"].as_str().unwrap().parse().unwrap();
+    let (status, n2) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&token),
+            Some(serde_json::json!({"title": "Linked note"})),
+        ),
+    )
+    .await;
+    let id2: Uuid = n2["note_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes/link",
+            Some(&token),
+            Some(serde_json::json!({"from_note_id": id1, "to_note_id": id2})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Update, list with backlinks.
+    let (status, upd) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            &format!("/v1/notes/{id2}"),
+            Some(&token),
+            Some(serde_json::json!({"body": "Second note body."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upd}");
+    let (status, list) = call(app.clone(), request("GET", "/v1/notes", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let notes = list["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 2);
+    let with_links = notes
+        .iter()
+        .find(|n| n["note_id"] == n1["note_id"])
+        .unwrap();
+    assert_eq!(with_links["backlinks"].as_array().unwrap().len(), 1);
+
+    // Isolation: the other learner sees nothing, cannot delete.
+    let (status, other_list) =
+        call(app.clone(), request("GET", "/v1/notes", Some(&other), None)).await;
+    assert_eq!(other_list["notes"].as_array().unwrap().len(), 0);
+    let (status, _) = call(
+        app.clone(),
+        request("DELETE", &format!("/v1/notes/{id1}"), Some(&other), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Export is complete and JSON.
+    let (status, export) = call(
+        app.clone(),
+        request("GET", "/v1/notes/export", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(export["notes"].as_array().unwrap().len(), 2);
+
+    // Delete works for the owner.
+    let (status, _) = call(
+        app.clone(),
+        request("DELETE", &format!("/v1/notes/{id1}"), Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn library_seed_search_article() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    // Seed a library article directly (console authoring is the next
+    // ADMIN-06 iteration).
+    let aid = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO articles (id, slug, title) VALUES ($1, 'gloopoid-overview', 'Gloopoid overview')",
+    )
+    .bind(aid)
+    .execute(&state.pool)
+    .await
+    .expect("seed article");
+    sqlx::query(
+        "INSERT INTO article_versions (id, article_id, version, status, body, source_ref) VALUES ($1, $2, 1, 'published', 'The fictional gloopoid gland stores glorbin before release.', 'Fixture library')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(aid)
+    .execute(&state.pool)
+    .await
+    .expect("seed version");
+
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let (status, results) = call(
+        app.clone(),
+        request("GET", "/v1/library/search?q=gloopoid", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{results}");
+    assert_eq!(results["results"].as_array().unwrap().len(), 1);
+
+    let (status, article) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/gloopoid-overview",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{article}");
+    assert!(article["body"].as_str().unwrap().contains("glorbin"));
+}
+
+#[tokio::test]
+async fn notifications_preferences_roundtrip() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, inbox) = call(
+        app.clone(),
+        request("GET", "/v1/me/notifications", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inbox}");
+    assert_eq!(inbox["notifications"].as_array().unwrap().len(), 0);
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/me/notifications",
+            Some(&token),
+            Some(serde_json::json!({"mock_results": false, "quiet_hours_start": 23})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn guest_trial_ceiling_and_isolation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let guest_key = format!("guest-{}-trial", Uuid::new_v4());
+
+    let (status, trial) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/guest/trial/start",
+            None,
+            Some(serde_json::json!({"guest_key": guest_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trial}");
+    assert_eq!(trial["questions_served"], 0);
+    assert_eq!(trial["ceiling"], 5);
+
+    // Guests fetch sample questions without an account (CORE-09).
+    for _ in 0..5 {
+        let (status, q) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/guest/trial/next-question",
+                None,
+                Some(serde_json::json!({"guest_key": guest_key})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{q}");
+        // §11.3: no keys for guests.
+        assert!(q["options"][0].get("rationale").is_none());
+    }
+
+    // Ceiling enforced honestly with an upgrade prompt.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/guest/trial/next-question",
+            None,
+            Some(serde_json::json!({"guest_key": guest_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "trial_finished");
+
+    let _ = ids;
+}
+
+#[tokio::test]
+async fn goals_and_protected_commitments_lifecycle() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let (status, goal) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "target_note": "Pass the pilot exam"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goal}");
+
+    // A new goal retires the old one; history is kept.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({"target_note": "Second goal"})),
+        ),
+    )
+    .await;
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let goals = list["goals"].as_array().unwrap();
+    assert_eq!(goals.len(), 2);
+    assert_eq!(goals.iter().filter(|g| g["retired"] == true).count(), 1);
+
+    // Protected commitments: create and remove (learner-only, §9.3).
+    let (status, c) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/commitments",
+            Some(&token),
+            Some(serde_json::json!({"label": "Night shift",
+                                    "starts_at": "2026-09-25T18:00:00Z",
+                                    "ends_at": "2026-09-26T06:00:00Z"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{c}");
+    let cid: Uuid = c["commitment_id"].as_str().unwrap().parse().unwrap();
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&token), None),
+    )
+    .await;
+    assert_eq!(list["protected_commitments"].as_array().unwrap().len(), 1);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/me/commitments/{cid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn pregen_tutoring_generated_and_cached() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let vid = ids.question_versions[0];
+
+    // Generate: five one-tap cards from reviewed material (AI-18).
+    let (status, gen) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/questions/versions/{vid}/pregen-tutoring"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{gen}");
+    assert_eq!(gen["generated"], 5);
+
+    // Cached read: cards contain reviewed rationale, never invention.
+    let (status, cards) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{vid}/pregen-tutoring"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cards}");
+    let list = cards["cards"].as_array().unwrap();
+    assert_eq!(list.len(), 5);
+    let explain = list
+        .iter()
+        .find(|c| c["prompt_type"] == "explain")
+        .expect("explain card");
+    assert!(explain["content"]
+        .as_str()
+        .unwrap()
+        .contains("Simple version"));
+}
+
+#[tokio::test]
+async fn feature_flags_roundtrip() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/flags",
+            Some(&token),
+            Some(serde_json::json!({"key": "mockv2", "value": true, "rollout_percent": 25})),
+        ),
+    )
+    .await;
+    let (status, flags) = call(
+        app.clone(),
+        request("GET", "/v1/config/flags", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flags}");
+    let found = flags["flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "mockv2")
+        .expect("flag persisted");
+    assert_eq!(found["rollout_percent"], 25);
+}
+
+#[tokio::test]
+async fn institutions_cohorts_assignments_flow() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let staff = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "Polytronx Teaching"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst}");
+    let inst_id: Uuid = inst["institution_id"].as_str().unwrap().parse().unwrap();
+
+    let learner_id = {
+        // Register a real second account to enrol as learner.
+        let email = format!("inst-{}@example.test", Uuid::new_v4());
+        let (_, v) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        let uid: Uuid = v["user_id"].as_str().unwrap().parse().unwrap();
+        uid
+    };
+
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/members"),
+            Some(&staff),
+            Some(serde_json::json!({"user_id": learner_id, "role": "learner"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "Cohort A", "member_ids": [learner_id]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cohort}");
+    let cohort_id: Uuid = cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, assignment) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/cohorts/{cohort_id}/assignments"),
+            Some(&staff),
+            Some(serde_json::json!({"title": "Chapter 1 practice", "due_at": "2026-10-01T00:00:00Z"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assignment}");
+
+    // Non-staff cannot create assignments in this cohort.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/cohorts/{cohort_id}/assignments"),
+            Some(&learner),
+            Some(serde_json::json!({"title": "Sneaky"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn scenario_engine_deterministic_transitions() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, sc) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/scenarios",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "gloopoid-stable",
+                "title": "Fictional stable patient",
+                "state_machine": {
+                    "initial": "presenting",
+                    "transitions": [
+                        {"from": "presenting", "on": "take_history", "to": "history_done"},
+                        {"from": "history_done", "on": "order_labs", "to": "labs_done"},
+                        {"from": "labs_done", "on": "discharge", "to": "discharged"}
+                    ]
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sc}");
+    let slug = "gloopoid-stable";
+
+    let (status, run) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&token),
+            Some(serde_json::json!({"scenario_slug": slug})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{run}");
+    let run_id: Uuid = run["run_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(run["current_state"], "presenting");
+
+    for event in ["take_history", "order_labs", "discharge"] {
+        let (status, step) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/scenarios/runs/{run_id}/events"),
+                Some(&token),
+                Some(serde_json::json!({"event": event})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{step}");
+    }
+    // Invalid transition from discharged is refused deterministically.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&token),
+            Some(serde_json::json!({"event": "order_labs"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "no_transition");
+}
+
+#[tokio::test]
+async fn portfolio_and_ce_records() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, entry) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/portfolio",
+            Some(&token),
+            Some(serde_json::json!({"kind": "rotation", "title": "Fictional internal medicine rotation",
+                                    "occurred_on": "2026-08-01"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{entry}");
+
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/me/portfolio", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["entries"].as_array().unwrap().len(), 1);
+
+    let (status, ce) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/ce-activities",
+            Some(&token),
+            Some(serde_json::json!({"activity": "Fixture journal club", "hours": 1.5})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ce}");
+    assert!(
+        ce["note"]
+            .as_str()
+            .unwrap()
+            .contains("Not an accredited credit"),
+        "§16 honesty: records are never labelled accredited"
+    );
+
+    // Invalid hours rejected.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/ce-activities",
+            Some(&token),
+            Some(serde_json::json!({"activity": "x", "hours": 900})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

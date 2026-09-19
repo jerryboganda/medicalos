@@ -23,6 +23,8 @@ migrations!(
     "0006_mocks",
     "0007_editorial",
     "0008_coach",
+    "0009_phase1",
+    "0010_program",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
