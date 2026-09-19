@@ -305,6 +305,8 @@ pub async fn search_questions(
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let pattern = format!("%{}%", q.get("q").map(String::as_str).unwrap_or(""));
+    let chapter_id = q.get("chapter_id").and_then(|s| Uuid::parse_str(s).ok());
+    let status = q.get("status").map(String::as_str);
     let rows = sqlx::query!(
         r#"SELECT qv.question_id, qv.id AS version_id, qv.vignette, qv.status,
                   qv.difficulty, c.name AS chapter_name
@@ -312,10 +314,12 @@ pub async fn search_questions(
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE qv.status = COALESCE($2, qv.status)
              AND qv.vignette ILIKE $1
+             AND qv.chapter_id IS NOT DISTINCT FROM $3
            ORDER BY qv.question_id, qv.version
            LIMIT 50"#,
         pattern,
-        q.get("status")
+        status,
+        chapter_id
     )
     .fetch_all(&state.pool)
     .await?;
