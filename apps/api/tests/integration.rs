@@ -507,6 +507,137 @@ async fn core07_account_security_lifecycle() {
 }
 
 #[tokio::test]
+async fn core08_notification_preferences_push_registration_and_empty_inbox() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state);
+    let token = register_and_login(app.clone()).await;
+
+    let (status, defaults) = call(
+        app.clone(),
+        request("GET", "/v1/me/notification-preferences", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{defaults}");
+    assert_eq!(defaults["timezone"], "UTC");
+    assert!(defaults["quiet_start"].is_null());
+    assert!(defaults["quiet_end"].is_null());
+    assert_eq!(defaults["categories"]["plan_review_reminders"], true);
+    assert_eq!(defaults["categories"]["mock_assignment"], true);
+    assert_eq!(defaults["categories"]["competition"], true);
+    assert_eq!(defaults["categories"]["duel_invitation"], true);
+    assert_eq!(defaults["categories"]["report_resolved"], true);
+    assert_eq!(defaults["categories"]["subscription_events"], true);
+
+    let updated_body = serde_json::json!({
+        "timezone": "Asia/Karachi",
+        "quiet_start": "22:30",
+        "quiet_end": "07:00",
+        "categories": {
+            "plan_review_reminders": false,
+            "mock_assignment": true,
+            "competition": false,
+            "duel_invitation": false,
+            "report_resolved": true,
+            "subscription_events": true
+        }
+    });
+    let (status, updated) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/notification-preferences",
+            Some(&token),
+            Some(updated_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated, updated_body);
+
+    let (status, persisted) = call(
+        app.clone(),
+        request("GET", "/v1/me/notification-preferences", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{persisted}");
+    assert_eq!(persisted, updated_body);
+
+    let (status, invalid) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/notification-preferences",
+            Some(&token),
+            Some(serde_json::json!({
+                "timezone": "Asia/Karachi",
+                "quiet_start": "22:30",
+                "quiet_end": null,
+                "categories": updated_body["categories"].clone()
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    assert_eq!(invalid["error"]["code"], "invalid_quiet_hours");
+
+    for push_token in ["apns-token-a", "apns-token-b"] {
+        let (status, registered) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/push-tokens",
+                Some(&token),
+                Some(serde_json::json!({
+                    "device_id": "phone-1",
+                    "platform": "ios",
+                    "token": push_token
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{registered}");
+        assert_eq!(registered["registered"], true);
+    }
+
+    let other_token = register_and_login(app.clone()).await;
+    let (status, other_defaults) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/notification-preferences",
+            Some(&other_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_defaults}");
+    assert_eq!(other_defaults["timezone"], "UTC");
+    assert_eq!(other_defaults["categories"]["plan_review_reminders"], true);
+
+    let (status, inbox) = call(
+        app.clone(),
+        request("GET", "/v1/notifications", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inbox}");
+    assert_eq!(inbox["notifications"].as_array().unwrap().len(), 0);
+
+    let (status, missing) = call(
+        app,
+        request(
+            "POST",
+            &format!("/v1/notifications/{}/read", Uuid::new_v4()),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+    assert_eq!(missing["error"]["code"], "notification_not_found");
+}
+
+#[tokio::test]
 async fn authenticated_user_has_explicit_personal_and_tenant_contexts() {
     let _g = LOCK.lock().await;
     let state = setup().await;
