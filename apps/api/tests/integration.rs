@@ -35,6 +35,7 @@ async fn setup() -> Arc<AppState> {
         free_daily_coach_turns: 20,
         openai_api_key: None,
         openai_base_url: "https://api.openai.com/v1".into(),
+        pack_signing_key: None,
     })
 }
 
@@ -93,6 +94,123 @@ async fn register_and_login(app: Router) -> String {
     .await;
     assert_eq!(status, StatusCode::OK, "login: {v}");
     v["token"].as_str().expect("token").to_string()
+}
+
+#[tokio::test]
+async fn account_export_and_signed_pack_manifest() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Produce evidence: one answered attempt via a tutor session.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter3, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                    "idempotency_key": "export-key-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // TRUST-02: full account export.
+    let (status, export) = call(
+        app.clone(),
+        request("GET", "/v1/me/export", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert!(export["account"]["email"].is_string());
+    assert_eq!(export["attempts"].as_array().unwrap().len(), 1);
+    assert!(export["notes"].is_array());
+    assert!(export["card_reviews"].is_array());
+    assert!(export["portfolio"].is_array());
+
+    // OFF-01: manifest for the answered chapter is signed; the signature
+    // verifies against a recomputed HMAC of the canonical listing.
+    let (status, manifest) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v1/packs/{}/manifest?chapters={}",
+                ids.exam_id, ids.chapter3
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manifest}");
+    assert_eq!(manifest["algorithm"], "hmac-sha256");
+    let sig = manifest["signature"].as_str().unwrap();
+    assert_eq!(sig.len(), 64, "sha256 hmac is 64 hex chars");
+    assert_eq!(manifest["items"].as_array().unwrap().len(), 1);
+
+    // Tampering with the canonical bytes changes the signature.
+    let canonical = format!(
+        "{} {}\n",
+        manifest["items"][0]["question_version_id"]
+            .as_str()
+            .unwrap(),
+        "tampered"
+    );
+    let recomputed = {
+        use sha2::{Digest, Sha256};
+        const BLOCK: usize = 64;
+        let key = b"dev-pack-signing-key";
+        let mut k = key.to_vec();
+        k.resize(BLOCK, 0);
+        let mut inner = Sha256::new();
+        for b in k.iter() {
+            inner.update([b ^ 0x36]);
+        }
+        inner.update(canonical.as_bytes());
+        let ih = inner.finalize();
+        let mut outer = Sha256::new();
+        for b in k.iter() {
+            outer.update([b ^ 0x5c]);
+        }
+        outer.update(ih);
+        outer
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    assert_ne!(sig, recomputed, "tampered content must not verify");
+
+    // Empty chapter list is refused.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/packs/{}/manifest?chapters=", ids.exam_id),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

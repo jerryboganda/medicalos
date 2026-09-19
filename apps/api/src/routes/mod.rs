@@ -7,6 +7,7 @@ pub mod inbox;
 pub mod library;
 pub mod mock;
 pub mod notes;
+pub mod packs;
 pub mod practice;
 pub mod program;
 pub mod reports;

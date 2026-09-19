@@ -14,6 +14,8 @@ pub struct AppState {
     /// §23: when set, the OpenAI-compatible adapter routes complex turns.
     pub openai_api_key: Option<String>,
     pub openai_base_url: String,
+    /// OFF-01: HMAC key signing offline pack manifests.
+    pub pack_signing_key: Option<String>,
 }
 
 impl AppState {

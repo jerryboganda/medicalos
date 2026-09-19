@@ -44,6 +44,7 @@ async fn main() {
             .filter(|t| !t.is_empty()),
         openai_base_url: std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
+        pack_signing_key: std::env::var("PACK_SIGNING_KEY").ok(),
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

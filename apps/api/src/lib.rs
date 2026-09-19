@@ -155,6 +155,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
         )
+        .route("/v1/me/export", get(routes::packs::export_account))
+        .route(
+            "/v1/packs/{exam_id}/manifest",
+            get(routes::packs::pack_manifest),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -301,6 +306,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
+        )
+        .route("/api/v1/me/export", get(routes::packs::export_account))
+        .route(
+            "/api/v1/packs/{exam_id}/manifest",
+            get(routes::packs::pack_manifest),
         )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
