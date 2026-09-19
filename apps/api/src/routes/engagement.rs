@@ -314,18 +314,19 @@ pub async fn submit_competition_entry(
     let score: f64 = answer_records.iter().map(|r| cfg.item_score(r)).sum();
 
     let entry_id = Uuid::new_v4();
+    let score_f32 = score as f32;
     sqlx::query!(
         "INSERT INTO competition_entries
            (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
          VALUES ($1, $2, $3, $4, $5, $6, $7,
            (SELECT COALESCE(MAX(submitted_order), 0) + 1 FROM competition_entries
             WHERE competition_id = $2))",
-        Uuid::new_v4(),
+        entry_id,
         comp_id,
         user.user_id,
         handle,
         serde_json::to_value(&req.answers).map_err(|_| ApiError::internal())?,
-        score: score as f32,
+        score_f32,
         req.total_time_ms
     )
     .execute(&state.pool)
