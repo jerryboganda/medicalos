@@ -63,6 +63,21 @@ fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) ->
         .expect("request")
 }
 
+fn tenant_request(
+    method: &str,
+    uri: &str,
+    token: &str,
+    tenant_id: Uuid,
+    body: Option<Value>,
+) -> Request<Body> {
+    let mut req = request(method, uri, Some(token), body);
+    req.headers_mut().insert(
+        "X-Tenant-Id",
+        tenant_id.to_string().parse().expect("tenant header"),
+    );
+    req
+}
+
 async fn register_and_login(app: Router) -> String {
     let email = format!("learner-{}@example.test", Uuid::new_v4());
     let (_, v) = call(
@@ -88,6 +103,17 @@ async fn register_and_login(app: Router) -> String {
     .await;
     assert_eq!(status, StatusCode::OK, "login: {v}");
     v["token"].as_str().expect("token").to_string()
+}
+
+async fn current_user_id(app: Router, token: &str) -> Uuid {
+    let (status, contexts) = call(app, request("GET", "/v1/me/contexts", Some(token), None)).await;
+    assert_eq!(status, StatusCode::OK, "{contexts}");
+    Uuid::parse_str(
+        contexts["personal"]["user_id"]
+            .as_str()
+            .expect("personal user id"),
+    )
+    .expect("valid personal user id")
 }
 
 #[tokio::test]
@@ -179,6 +205,291 @@ async fn authenticated_user_has_explicit_personal_and_tenant_contexts() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_scope}");
     assert_eq!(missing_scope["error"]["code"], "tenant_scope_required");
+}
+
+#[tokio::test]
+async fn tenant_roles_and_audit_are_scoped_and_idempotent() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let owner_token = register_and_login(app.clone()).await;
+    let support_token = register_and_login(app.clone()).await;
+    let admin_token = register_and_login(app.clone()).await;
+    let learner_token = register_and_login(app.clone()).await;
+    let outsider_token = register_and_login(app.clone()).await;
+
+    let owner_id = current_user_id(app.clone(), &owner_token).await;
+    let support_id = current_user_id(app.clone(), &support_token).await;
+    let admin_id = current_user_id(app.clone(), &admin_token).await;
+    let learner_id = current_user_id(app.clone(), &learner_token).await;
+    let outsider_id = current_user_id(app.clone(), &outsider_token).await;
+
+    // Test-only bootstrap: production deliberately has no self-elevation API.
+    sqlx::query("INSERT INTO platform_roles (user_id, role) VALUES ($1, $2), ($3, $4)")
+        .bind(owner_id)
+        .bind("platform_owner")
+        .bind(support_id)
+        .bind("support")
+        .execute(&state.pool)
+        .await
+        .expect("bootstrap platform roles");
+
+    let (status, first_tenant) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/platform/tenants",
+            Some(&owner_token),
+            Some(serde_json::json!({
+                "name": "North Medical College",
+                "initial_administrator_user_id": admin_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{first_tenant}");
+    let first_tenant_id = Uuid::parse_str(first_tenant["tenant_id"].as_str().expect("tenant id"))
+        .expect("valid tenant id");
+    let first_audit_id = Uuid::parse_str(
+        first_tenant["audit_event_id"]
+            .as_str()
+            .expect("tenant audit event"),
+    )
+    .expect("valid tenant audit event");
+
+    let (status, second_tenant) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/platform/tenants",
+            Some(&owner_token),
+            Some(serde_json::json!({
+                "name": "South Medical College",
+                "initial_administrator_user_id": admin_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second_tenant}");
+    let second_tenant_id = Uuid::parse_str(
+        second_tenant["tenant_id"]
+            .as_str()
+            .expect("second tenant id"),
+    )
+    .expect("valid second tenant id");
+
+    let (status, owner_contexts) = call(
+        app.clone(),
+        request("GET", "/v1/me/contexts", Some(&owner_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{owner_contexts}");
+    assert_eq!(owner_contexts["platform_roles"][0], "platform_owner");
+    assert_eq!(owner_contexts["tenants"].as_array().unwrap().len(), 0);
+
+    let (status, admin_contexts) = call(
+        app.clone(),
+        request("GET", "/v1/me/contexts", Some(&admin_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{admin_contexts}");
+    assert_eq!(admin_contexts["tenants"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        admin_contexts["tenants"][0]["roles"][0],
+        "institution_administrator"
+    );
+
+    let (status, active_tenant) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            "/v1/tenant/context",
+            &admin_token,
+            first_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{active_tenant}");
+    assert_eq!(active_tenant["tenant_id"], first_tenant_id.to_string());
+    assert_eq!(active_tenant["roles"][0], "institution_administrator");
+
+    let assignment = serde_json::json!({"user_id": learner_id, "role": "learner"});
+    let (status, added) = call(
+        app.clone(),
+        tenant_request(
+            "POST",
+            "/v1/tenant/memberships",
+            &admin_token,
+            first_tenant_id,
+            Some(assignment.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert_eq!(added["changed"], true);
+    let membership_id = added["membership_id"]
+        .as_str()
+        .expect("membership id")
+        .to_owned();
+    let membership_audit_id = added["audit_event_id"]
+        .as_str()
+        .expect("membership audit event")
+        .to_owned();
+
+    let (status, duplicate) = call(
+        app.clone(),
+        tenant_request(
+            "POST",
+            "/v1/tenant/memberships",
+            &admin_token,
+            first_tenant_id,
+            Some(assignment),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate}");
+    assert_eq!(duplicate["changed"], false);
+    assert_eq!(duplicate["membership_id"], membership_id);
+    assert!(duplicate["audit_event_id"].is_null());
+
+    let (status, second_role) = call(
+        app.clone(),
+        tenant_request(
+            "POST",
+            "/v1/tenant/memberships",
+            &admin_token,
+            first_tenant_id,
+            Some(serde_json::json!({"user_id": learner_id, "role": "instructor"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_role}");
+    assert_eq!(second_role["changed"], true);
+    assert_eq!(second_role["aggregate_version"], 2);
+
+    let (status, learner_context) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            "/v1/tenant/context",
+            &learner_token,
+            first_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{learner_context}");
+    assert_eq!(learner_context["roles"].as_array().unwrap().len(), 2);
+    assert!(learner_context["roles"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("learner")));
+    assert!(learner_context["roles"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("instructor")));
+
+    let (status, cross_tenant) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            "/v1/tenant/context",
+            &learner_token,
+            second_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{cross_tenant}");
+    assert_eq!(cross_tenant["error"]["code"], "tenant_access_denied");
+
+    let (status, non_admin) = call(
+        app.clone(),
+        tenant_request(
+            "POST",
+            "/v1/tenant/memberships",
+            &learner_token,
+            first_tenant_id,
+            Some(serde_json::json!({"user_id": outsider_id, "role": "learner"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{non_admin}");
+    assert_eq!(non_admin["error"]["code"], "tenant_admin_required");
+
+    let (status, support_denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/platform/tenants",
+            Some(&support_token),
+            Some(serde_json::json!({
+                "name": "Support Must Not Create",
+                "initial_administrator_user_id": outsider_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{support_denied}");
+    assert_eq!(support_denied["error"]["code"], "platform_owner_required");
+
+    let (status, owner_audit) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            &format!("/v1/tenant/audit/{first_audit_id}"),
+            &admin_token,
+            first_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{owner_audit}");
+    assert_eq!(owner_audit["actor_user_id"], owner_id.to_string());
+    assert_eq!(owner_audit["tenant_id"], first_tenant_id.to_string());
+    assert_eq!(owner_audit["subject_user_id"], admin_id.to_string());
+    assert_eq!(owner_audit["aggregate_type"], "tenant");
+    assert_eq!(owner_audit["aggregate_id"], first_tenant_id.to_string());
+    assert_eq!(owner_audit["aggregate_version"], 1);
+    assert_eq!(owner_audit["action"], "tenant.created");
+    assert_eq!(owner_audit["privacy_scope"], "tenant_admin");
+    assert!(owner_audit["occurred_at"].as_str().is_some());
+    assert!(owner_audit["received_at"].as_str().is_some());
+    assert!(owner_audit["correlation_id"].as_str().is_some());
+    assert!(owner_audit.get("device").is_some());
+
+    let membership_audit_id = Uuid::parse_str(&membership_audit_id).expect("membership audit UUID");
+    let (status, membership_audit) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            &format!("/v1/tenant/audit/{membership_audit_id}"),
+            &admin_token,
+            first_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{membership_audit}");
+    assert_eq!(membership_audit["subject_user_id"], learner_id.to_string());
+    assert_eq!(membership_audit["aggregate_type"], "tenant_membership");
+    assert_eq!(membership_audit["action"], "tenant_membership.role_added");
+    assert_eq!(membership_audit["payload"]["role"], "learner");
+
+    let (status, isolated_audit) = call(
+        app.clone(),
+        tenant_request(
+            "GET",
+            &format!("/v1/tenant/audit/{first_audit_id}"),
+            &admin_token,
+            second_tenant_id,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{isolated_audit}");
+    assert_eq!(isolated_audit["error"]["code"], "audit_event_not_found");
 }
 
 #[tokio::test]
