@@ -967,6 +967,21 @@ async fn qb08_session_detail_carries_report_status() {
 }
 
 #[tokio::test]
+async fn same_origin_prefix_serves_version_and_health() {
+    // Production serves the API under /api/ (nginx strips the prefix):
+    // version.json proves the deployed SHA, healthz proves liveness.
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let (status, v) = call(app.clone(), request("GET", "/api/version.json", None, None)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v["sha"].is_string(), "deploy SHA stamped: {v}");
+    let (status, h) = call(app.clone(), request("GET", "/api/healthz", None, None)).await;
+    assert_eq!(status, StatusCode::OK, "{h}");
+    assert_eq!(h["status"], "ok");
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

@@ -11,7 +11,11 @@ COPY crates ./crates
 COPY apps/api ./apps/api
 # Queries compile against the committed offline cache (generated in CI from
 # the live schema — the same compile-time checks, no database needed).
-ENV SQLX_OFFLINE=true
+# BUILD_SHA stamps /api/version.json so production E2E can prove the exact
+# commit landed (passed as --build-arg by the deploy workflow).
+ARG BUILD_SHA=dev
+ENV SQLX_OFFLINE=true \
+    MEDICALOS_BUILD_SHA=$BUILD_SHA
 RUN cargo build --release -p api
 
 FROM debian:bookworm-slim
