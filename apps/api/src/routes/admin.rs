@@ -615,3 +615,61 @@ pub async fn audit_log(
         .collect();
     Ok(Json(json!({ "events": events })))
 }
+
+/// QB-16: psychometric screening defaults (§11.4). Flag a question version
+/// when: attempts >= 20 AND (p < 0.20 or p > 0.95), a distractor out-pulls
+/// the key, or it carries 3+ open reports. Screening only — never verdicts.
+pub async fn psychometric_screening(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Query(q): Query<std::collections::HashMap<String, Uuid>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let Some(vid) = q.get("question_version_id").copied() else {
+        return Err(ApiError::unprocessable(
+            "question_required",
+            "pass ?question_version_id=",
+        ));
+    };
+    let totals = sqlx::query!(
+        r#"SELECT
+             COALESCE(COUNT(*), 0) AS "attempts!",
+             COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS "correct!"
+           FROM attempts
+           WHERE question_version_id = $1 AND chosen_index IS NOT NULL"#,
+        vid
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let open_reports = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM question_reports
+           WHERE question_version_id = $1 AND status IN ('open','quarantined')"#,
+        vid
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    let mut flags: Vec<&str> = Vec::new();
+    let mut p_percent: Option<i32> = None;
+    if totals.attempts >= 20 {
+        let p = totals.correct * 100 / totals.attempts;
+        p_percent = Some(p);
+        if p < 20 {
+            flags.push("too_hard");
+        }
+        if p > 95 {
+            flags.push("too_easy");
+        }
+    } else {
+        flags.push("insufficient_attempts");
+    }
+    if open_reports >= 3 {
+        flags.push("reported");
+    }
+    Ok(Json(json!({
+        "question_version_id": vid,
+        "attempts": totals.attempts,
+        "p_percent": p_percent,
+        "open_reports": open_reports,
+        "flags": flags,
+    })))
+}

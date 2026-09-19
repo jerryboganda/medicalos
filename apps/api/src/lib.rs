@@ -76,6 +76,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/v1/admin/audit", get(routes::admin::audit_log))
+        .route(
+            "/v1/admin/psychometrics/{vid}",
+            get(routes::admin::psychometric_screening),
+        )
         .route("/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/v1/coach/history", get(routes::coach::history))
         .route(
@@ -165,6 +169,9 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::sim::debrief),
         )
         .route("/v1/appeals", post(routes::sim::submit_appeal))
+        .route("/v1/me/retests", get(routes::retest::due_retests))
+        .route("/v1/me/retests/result", post(routes::retest::retest_result))
+        .route("/v1/config", get(routes::config::config))
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -269,6 +276,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             axum::routing::delete(routes::goals::remove_commitment),
         )
         .route(
+            "/api/v1/admin/psychometrics/{vid}",
+            get(routes::admin::psychometric_screening),
+        )
+        .route(
             "/api/v1/questions/versions/{vid}/pregen-tutoring",
             get(routes::program::pregen_for_question).post(routes::program::generate_pregen),
         )
@@ -317,6 +328,12 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::sim::debrief),
         )
         .route("/api/v1/appeals", post(routes::sim::submit_appeal))
+        .route("/api/v1/me/retests", get(routes::retest::due_retests))
+        .route(
+            "/api/v1/me/retests/result",
+            post(routes::retest::retest_result),
+        )
+        .route("/api/v1/config", get(routes::config::config))
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
             "/api/v1/decks/{deck_id}/cards",

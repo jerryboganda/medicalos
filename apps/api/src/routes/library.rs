@@ -21,14 +21,15 @@ pub async fn search(
     let pattern = format!("%{}%", q.get("q").map(String::as_str).unwrap_or(""));
     // Only the latest published version of each article is searchable.
     let rows = sqlx::query!(
-        r#"SELECT a.id, a.slug, a.title, av.version, av.body
+        r#"SELECT a.id, a.slug, a.title, av.version, av.body,
+                  (a.title ILIKE $1) AS title_match
            FROM articles a
            JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'
            WHERE (a.title ILIKE $1 OR av.body ILIKE $1)
              AND av.version = (
                  SELECT MAX(version) FROM article_versions
                  WHERE article_id = a.id AND status = 'published')
-           ORDER BY a.title LIMIT 25"#,
+           ORDER BY title_match DESC, a.title LIMIT 25"#,
         pattern
     )
     .fetch_all(&state.pool)
@@ -41,6 +42,7 @@ pub async fn search(
                 "slug": r.slug,
                 "title": r.title,
                 "version": r.version,
+                "title_match": r.title_match,
                 // A body excerpt keeps the list honest about what matched.
                 "excerpt": r.body.chars().take(200).collect::<String>(),
             })

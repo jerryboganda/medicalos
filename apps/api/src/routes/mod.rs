@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod coach;
+pub mod config;
 pub mod goals;
 pub mod guest;
 pub mod inbox;
@@ -11,6 +12,7 @@ pub mod packs;
 pub mod practice;
 pub mod program;
 pub mod reports;
+pub mod retest;
 pub mod review;
 pub mod sim;
 pub mod today;

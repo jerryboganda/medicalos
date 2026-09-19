@@ -97,6 +97,211 @@ async fn register_and_login(app: Router) -> String {
 }
 
 #[tokio::test]
+async fn retest_queue_and_note_collections_and_screening() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // --- NOTE-02 collections + concepts ---
+    let (status, coll) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/note-collections",
+            Some(&token),
+            Some(serde_json::json!({"name": "Exam cram"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{coll}");
+    let coll_id: Uuid = coll["collection_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, n1) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&token),
+            Some(serde_json::json!({"title": "Concept note", "body": "Body."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{n1}");
+    let note_id: Uuid = n1["note_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/notes/{note_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({"concept": "negative-feedback"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, by_concept) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/concepts/negative-feedback/notes",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{by_concept}");
+    assert_eq!(by_concept["notes"].as_array().unwrap().len(), 1);
+
+    // Collection roundtrip.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/note-collections/{coll_id}/notes"),
+            Some(&token),
+            Some(serde_json::json!({"note_id": note_id})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, collections) = call(
+        app.clone(),
+        request("GET", "/v1/note-collections", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{collections}");
+    assert_eq!(collections["collections"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        collections["collections"][0]["note_count"],
+        serde_json::json!(1)
+    );
+
+    // --- SR-08 re-test queue with deterministic intervals ---
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter3, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+                                    "idempotency_key": "rt-key-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let vid: Uuid = session["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // Wrong re-test: compresses to +1 day and resets passes.
+    let (status, r1) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&token),
+            Some(
+                serde_json::json!({"question_version_id": vid, "correct": false,
+                                    "idempotency_key": "rt-res-1"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{r1}");
+    assert_eq!(r1["passes"], 0);
+
+    let (status, r2) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&token),
+            Some(
+                serde_json::json!({"question_version_id": vid, "correct": true,
+                                    "idempotency_key": "rt-res-2"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{r2}");
+    assert_eq!(r2["passes"], 1);
+    let _ = r2;
+
+    // Idempotency: same key does not double-record history.
+    let count = sqlx::query("SELECT COUNT(*) AS n FROM retest_history WHERE idempotency_key = $1")
+        .bind("rt-res-2")
+        .fetch_one(&state.pool)
+        .await
+        .expect("count");
+    assert_eq!(count.get::<i64, _>("n"), 1);
+
+    // --- QB-16 screening flags on the same question ---
+    let (status, screen) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/psychometrics/{vid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{screen}");
+    let flags = screen["flags"].as_array().unwrap();
+    assert!(
+        flags.iter().any(|f| f == "insufficient_attempts"),
+        "under 20 attempts must flag insufficient evidence: {screen}"
+    );
+
+    // OPS-06: flag set + staged resolution for this user.
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/flags",
+            Some(&token),
+            Some(serde_json::json!({"key": "coach_v2", "value": true, "rollout_percent": 100})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, cfg) = call(
+        app.clone(),
+        request("GET", "/v1/config", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cfg}");
+    let flag = cfg["flags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "coach_v2")
+        .expect("flag present");
+    assert_eq!(flag["enabled"], true);
+}
+
+#[tokio::test]
+#[tokio::test]
 async fn account_export_and_signed_pack_manifest() {
     let _g = LOCK.lock().await;
     let state = setup().await;
