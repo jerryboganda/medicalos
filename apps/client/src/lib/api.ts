@@ -155,6 +155,41 @@ export interface SessionItem {
 	exam_tip: string | null;
 	/** QB-08: honest flag state — null when unflagged. */
 	report_status: 'open' | 'quarantined' | 'resolved_fixed' | null;
+	marked: boolean;
+}
+
+export interface BuilderNode {
+	id: string;
+	exam_id: string;
+	parent_id: string | null;
+	kind: string;
+	name: string;
+	display_order: number;
+	available: number;
+	attempted: number;
+	unattempted: number;
+}
+
+export interface BuilderSelection {
+	all: number;
+	attempted: number;
+	unattempted: number;
+	incorrect_skipped: number;
+	marked: number;
+	matching: number;
+}
+
+export interface BuilderResponse {
+	nodes: BuilderNode[];
+	selection: BuilderSelection;
+}
+
+export interface CreateSessionResponse {
+	session_id: string;
+	requested_count?: number | null;
+	available_count?: number;
+	question_count?: number;
+	availability_message?: string | null;
 }
 
 export interface PracticeSession {
@@ -279,11 +314,32 @@ export const Api = {
 	createSession: (body: {
 		preset: string;
 		chapter_id?: string;
+		chapter_ids?: string[];
 		question_count?: number;
+		pool?: 'all' | 'incorrect_skipped' | 'unattempted' | 'marked';
+		difficulties?: ('easy' | 'medium' | 'hard')[];
+		high_yield?: boolean;
+		all_available?: boolean;
 		source_session_id?: string;
 		time_limit_seconds?: number;
 		takeover?: boolean;
-	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
+	}) => call<CreateSessionResponse>('POST', '/v1/practice/sessions', body),
+	builder: (filters: {
+		chapter_ids?: string[];
+		pool?: 'all' | 'incorrect_skipped' | 'unattempted' | 'marked';
+		difficulties?: ('easy' | 'medium' | 'hard')[];
+		high_yield?: boolean;
+	} = {}) => {
+		const params = new URLSearchParams();
+		if (filters.chapter_ids?.length) params.set('chapter_ids', filters.chapter_ids.join(','));
+		if (filters.pool) params.set('pool', filters.pool);
+		if (filters.difficulties?.length) params.set('difficulties', filters.difficulties.join(','));
+		if (filters.high_yield) params.set('high_yield', 'true');
+		const query = params.toString();
+		return call<BuilderResponse>('GET', `/v1/practice/builder${query ? `?${query}` : ''}`);
+	},
+	setQuestionMark: (versionId: string, marked: boolean) =>
+		call<{ marked: boolean }>('PUT', `/v1/questions/versions/${versionId}/mark`, { marked }),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
 	answer: (
 		sid: string,

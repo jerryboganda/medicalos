@@ -25,6 +25,7 @@ migrations!(
     "0008_core07_accounts",
     "0009_core08_notifications",
     "0010_core10_concepts",
+    "0011_qb12_marks",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

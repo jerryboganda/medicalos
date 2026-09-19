@@ -21,6 +21,7 @@
 	let goalsStatus = $state('');
 	let savingGoals = $state(false);
 	let undoingGoals = $state(false);
+	let quickLoading = $state(false);
 
 	function syncGoalEditor(profile) {
 		goalsDailyMinutes = profile.daily_minutes ?? '';
@@ -167,6 +168,34 @@
 		);
 	}
 
+	async function startQuick10() {
+		if (startingTask || quickLoading) return;
+		quickLoading = true;
+		error = '';
+		try {
+			const builder = await Api.builder();
+			const chapterIds = builder.nodes.filter((node) => node.kind === 'chapter').map((node) => node.id);
+			if (chapterIds.length === 0) {
+				error = 'No question-bank chapters are available yet.';
+				return;
+			}
+			quickLoading = false;
+			await openSession(
+				{
+					preset: 'tutor',
+					chapter_ids: chapterIds,
+					question_count: 10,
+					pool: 'all'
+				},
+				'quick-10'
+			);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not start Quick 10.';
+		} finally {
+			quickLoading = false;
+		}
+	}
+
 	async function undo(revision) {
 		if (undoing) return;
 		undoing = revision.id;
@@ -224,6 +253,21 @@
 		<button class="btn" type="button" onclick={load}>Retry</button>
 	{/if}
 {:else if today}
+	<section class="card" aria-labelledby="quick-practice-heading">
+		<h2 id="quick-practice-heading">Quick practice</h2>
+		<p class="muted">Start up to 10 available questions across the current question bank.</p>
+		<button
+			class="btn primary"
+			type="button"
+			disabled={startingTask !== '' || quickLoading}
+			data-loading={quickLoading || startingTask === 'quick-10'}
+			data-testid="quick-10"
+			onclick={startQuick10}
+		>
+			{quickLoading || startingTask === 'quick-10' ? 'Starting…' : 'Quick 10'}
+		</button>
+	</section>
+
 	<section class="card goals-card" aria-labelledby="goals-heading">
 		<div class="goals-heading-row">
 			<div>

@@ -1,9 +1,10 @@
 //! QB-03/QB-04/QB-05/EX-04: practice sessions, tutor feedback, idempotent
 //! durable answers, submission with evidence updates and plan revision.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -17,12 +18,30 @@ use crate::state::AppState;
 pub struct CreateSessionReq {
     pub preset: String,
     pub chapter_id: Option<Uuid>,
+    pub chapter_ids: Option<Vec<Uuid>>,
     pub question_count: Option<i32>,
+    pub pool: Option<String>,
+    pub difficulties: Option<Vec<String>>,
+    pub high_yield: Option<bool>,
+    pub all_available: Option<bool>,
     pub source_session_id: Option<Uuid>,
     /// CORE-07: a second live study session requires explicit user takeover.
     pub takeover: Option<bool>,
     /// EX-08: required for the timed preset, validated server-side.
     pub time_limit_seconds: Option<i64>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct BuilderQuery {
+    pub chapter_ids: Option<String>,
+    pub pool: Option<String>,
+    pub difficulties: Option<String>,
+    pub high_yield: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct MarkReq {
+    pub marked: bool,
 }
 
 #[derive(Serialize)]
@@ -51,6 +70,281 @@ struct SessionInsert<'a> {
     source_session_id: Option<Uuid>,
     time_limit_seconds: Option<i32>,
     questions: &'a [PoolQuestion],
+}
+
+fn validate_pool(value: &str) -> ApiResult<&str> {
+    match value {
+        "all" | "incorrect_skipped" | "unattempted" | "marked" => Ok(value),
+        _ => Err(ApiError::unprocessable(
+            "invalid_pool",
+            "pool must be one of: all, incorrect_skipped, unattempted, marked",
+        )),
+    }
+}
+
+fn validate_difficulties(values: Vec<String>) -> ApiResult<Vec<String>> {
+    let mut out = Vec::new();
+    for value in values {
+        if !matches!(value.as_str(), "easy" | "medium" | "hard") {
+            return Err(ApiError::unprocessable(
+                "invalid_difficulty",
+                "difficulty must be easy, medium, or hard",
+            ));
+        }
+        if !out.contains(&value) {
+            out.push(value);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_uuid_csv(value: Option<&str>) -> ApiResult<Vec<Uuid>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for raw in value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let id = Uuid::parse_str(raw).map_err(|_| {
+            ApiError::unprocessable(
+                "invalid_chapter_ids",
+                "chapter_ids must contain valid UUIDs",
+            )
+        })?;
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_difficulty_csv(value: Option<&str>) -> ApiResult<Vec<String>> {
+    validate_difficulties(
+        value
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+    )
+}
+
+async fn validate_chapters(pool: &sqlx::PgPool, chapter_ids: &[Uuid]) -> ApiResult<()> {
+    if chapter_ids.is_empty() {
+        return Err(ApiError::unprocessable(
+            "chapter_required",
+            "practice sessions need at least one chapter",
+        ));
+    }
+    let valid = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM curriculum_nodes WHERE kind = 'chapter' AND id = ANY($1)",
+    )
+    .bind(chapter_ids)
+    .fetch_one(pool)
+    .await?;
+    if valid != chapter_ids.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_chapter_selection",
+            "chapter_ids must reference existing chapter nodes",
+        ));
+    }
+    Ok(())
+}
+
+async fn selection_counts(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    chapter_ids: &[Uuid],
+    difficulties: &[String],
+    high_yield: bool,
+) -> ApiResult<(i64, i64, i64, i64, i64)> {
+    sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        r#"WITH latest AS (
+               SELECT DISTINCT ON (question_version_id)
+                      question_version_id, chosen_index, correct
+               FROM attempts
+               WHERE user_id = $1
+               ORDER BY question_version_id, created_at DESC, id DESC
+           )
+           SELECT COUNT(*)::bigint,
+                  COUNT(*) FILTER (WHERE latest.question_version_id IS NOT NULL)::bigint,
+                  COUNT(*) FILTER (WHERE latest.question_version_id IS NULL)::bigint,
+                  COUNT(*) FILTER (
+                      WHERE latest.question_version_id IS NOT NULL
+                        AND (latest.correct = FALSE OR latest.chosen_index IS NULL)
+                  )::bigint,
+                  COUNT(*) FILTER (WHERE qm.question_version_id IS NOT NULL)::bigint
+           FROM question_versions qv
+           LEFT JOIN latest ON latest.question_version_id = qv.id
+           LEFT JOIN question_marks qm
+             ON qm.user_id = $1 AND qm.question_version_id = qv.id
+           WHERE qv.status = 'published'
+             AND ($2::uuid[] = '{}'::uuid[] OR qv.chapter_id = ANY($2))
+             AND ($3::text[] = '{}'::text[] OR qv.difficulty = ANY($3))
+             AND (NOT $4 OR qv.high_yield)
+             AND NOT EXISTS (
+                 SELECT 1 FROM question_reports r
+                 WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
+             )"#,
+    )
+    .bind(user_id)
+    .bind(chapter_ids)
+    .bind(difficulties)
+    .bind(high_yield)
+    .fetch_one(pool)
+    .await
+    .map_err(Into::into)
+}
+
+fn matching_count(pool: &str, counts: (i64, i64, i64, i64, i64)) -> i64 {
+    match pool {
+        "incorrect_skipped" => counts.3,
+        "unattempted" => counts.2,
+        "marked" => counts.4,
+        _ => counts.0,
+    }
+}
+
+pub async fn builder(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Query(query): Query<BuilderQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let selected_pool = validate_pool(query.pool.as_deref().unwrap_or("all"))?;
+    let chapter_ids = parse_uuid_csv(query.chapter_ids.as_deref())?;
+    let difficulties = parse_difficulty_csv(query.difficulties.as_deref())?;
+    let high_yield = query.high_yield.unwrap_or(false);
+
+    if !chapter_ids.is_empty() {
+        validate_chapters(&state.pool, &chapter_ids).await?;
+    }
+
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>, String, String, i32, i64, i64, i64)>(
+        r#"WITH RECURSIVE descendants AS (
+               SELECT id AS node_id, id AS descendant_id FROM curriculum_nodes
+               UNION ALL
+               SELECT d.node_id, child.id
+               FROM descendants d
+               JOIN curriculum_nodes child ON child.parent_id = d.descendant_id
+           ),
+           latest AS (
+               SELECT DISTINCT ON (question_version_id) question_version_id
+               FROM attempts
+               WHERE user_id = $1
+               ORDER BY question_version_id, created_at DESC, id DESC
+           )
+           SELECT n.id, n.exam_id, n.parent_id, n.kind, n.name, n.display_order,
+                  COUNT(DISTINCT qv.id)::bigint AS available,
+                  COUNT(DISTINCT qv.id) FILTER (
+                      WHERE latest.question_version_id IS NOT NULL
+                  )::bigint AS attempted,
+                  COUNT(DISTINCT qv.id) FILTER (
+                      WHERE qv.id IS NOT NULL AND latest.question_version_id IS NULL
+                  )::bigint AS unattempted
+           FROM curriculum_nodes n
+           LEFT JOIN descendants d ON d.node_id = n.id
+           LEFT JOIN question_versions qv
+             ON qv.chapter_id = d.descendant_id
+            AND qv.status = 'published'
+            AND NOT EXISTS (
+                SELECT 1 FROM question_reports r
+                WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
+            )
+           LEFT JOIN latest ON latest.question_version_id = qv.id
+           GROUP BY n.id, n.exam_id, n.parent_id, n.kind, n.name, n.display_order
+           ORDER BY n.display_order, n.name"#,
+    )
+    .bind(user.user_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let nodes: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                exam_id,
+                parent_id,
+                kind,
+                name,
+                display_order,
+                available,
+                attempted,
+                unattempted,
+            )| {
+                serde_json::json!({
+                    "id": id,
+                    "exam_id": exam_id,
+                    "parent_id": parent_id,
+                    "kind": kind,
+                    "name": name,
+                    "display_order": display_order,
+                    "available": available,
+                    "attempted": attempted,
+                    "unattempted": unattempted,
+                })
+            },
+        )
+        .collect();
+
+    let counts = selection_counts(
+        &state.pool,
+        user.user_id,
+        &chapter_ids,
+        &difficulties,
+        high_yield,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({
+        "nodes": nodes,
+        "selection": {
+            "all": counts.0,
+            "attempted": counts.1,
+            "unattempted": counts.2,
+            "incorrect_skipped": counts.3,
+            "marked": counts.4,
+            "matching": matching_count(selected_pool, counts),
+        }
+    })))
+}
+
+pub async fn set_mark(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(vid): Path<Uuid>,
+    Json(req): Json<MarkReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM question_versions WHERE id = $1)",
+    )
+    .bind(vid)
+    .fetch_one(&state.pool)
+    .await?;
+    if !exists {
+        return Err(ApiError::not_found("question_version_not_found"));
+    }
+
+    if req.marked {
+        sqlx::query(
+            "INSERT INTO question_marks (user_id, question_version_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(user.user_id)
+        .bind(vid)
+        .execute(&state.pool)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM question_marks WHERE user_id = $1 AND question_version_id = $2")
+            .bind(user.user_id)
+            .bind(vid)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    Ok(Json(serde_json::json!({"marked": req.marked})))
 }
 
 async fn insert_session(
@@ -177,11 +471,42 @@ pub async fn create_session(
     }
     match req.preset.as_str() {
         "tutor" | "timed" => {
-            let chapter_id = req.chapter_id.ok_or_else(|| {
-                ApiError::unprocessable("chapter_required", "practice sessions need a chapter_id")
-            })?;
-            // LIMIT binds as i64 in sqlx.
-            let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
+            let mut chapter_ids = req.chapter_ids.clone().unwrap_or_default();
+            if chapter_ids.is_empty() {
+                if let Some(chapter_id) = req.chapter_id {
+                    chapter_ids.push(chapter_id);
+                }
+            }
+            chapter_ids.sort_unstable();
+            chapter_ids.dedup();
+            validate_chapters(&state.pool, &chapter_ids).await?;
+
+            let selected_pool = validate_pool(req.pool.as_deref().unwrap_or("all"))?;
+            let difficulties = validate_difficulties(req.difficulties.clone().unwrap_or_default())?;
+            let high_yield = req.high_yield.unwrap_or(false);
+            let all_available = req.all_available.unwrap_or(false);
+
+            let counts = selection_counts(
+                &state.pool,
+                user.user_id,
+                &chapter_ids,
+                &difficulties,
+                high_yield,
+            )
+            .await?;
+            let available_count = matching_count(selected_pool, counts);
+            if available_count == 0 {
+                return Err(ApiError::unprocessable(
+                    "empty_pool",
+                    "No questions are available for this selection.",
+                ));
+            }
+            let requested_count = req.question_count.unwrap_or(10).clamp(1, 100) as i64;
+            let count = if all_available {
+                available_count
+            } else {
+                requested_count.min(available_count)
+            };
             // EX-08: timed sessions carry a server-issued deadline. The floor
             // is configurable so CI/E2E can run short timed sessions.
             let time_limit_seconds = if req.preset == "timed" {
@@ -204,19 +529,45 @@ pub async fn create_session(
             } else {
                 None
             };
-            let pool_qs = sqlx::query!(
-                r#"SELECT id, vignette, lead_in, difficulty, options
+            let pool_qs = sqlx::query_as::<_, (Uuid, String, String, String, serde_json::Value)>(
+                r#"WITH latest AS (
+                       SELECT DISTINCT ON (question_version_id)
+                              question_version_id, chosen_index, correct
+                       FROM attempts
+                       WHERE user_id = $1
+                       ORDER BY question_version_id, created_at DESC, id DESC
+                   )
+                   SELECT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                    FROM question_versions qv
-                   WHERE status = 'published' AND chapter_id = $1
+                   LEFT JOIN latest ON latest.question_version_id = qv.id
+                   LEFT JOIN question_marks qm
+                     ON qm.user_id = $1 AND qm.question_version_id = qv.id
+                   WHERE qv.status = 'published'
+                     AND qv.chapter_id = ANY($2)
+                     AND ($3::text[] = '{}'::text[] OR qv.difficulty = ANY($3))
+                     AND (NOT $4 OR qv.high_yield)
+                     AND CASE $5
+                           WHEN 'all' THEN TRUE
+                           WHEN 'incorrect_skipped' THEN
+                               latest.question_version_id IS NOT NULL
+                               AND (latest.correct = FALSE OR latest.chosen_index IS NULL)
+                           WHEN 'unattempted' THEN latest.question_version_id IS NULL
+                           WHEN 'marked' THEN qm.question_version_id IS NOT NULL
+                           ELSE FALSE
+                         END
                      AND NOT EXISTS (
                          SELECT 1 FROM question_reports r
                          WHERE r.question_version_id = qv.id
                            AND r.status = 'quarantined'
                      )
-                   ORDER BY random() LIMIT $2"#,
-                chapter_id,
-                count
+                   ORDER BY random() LIMIT $6"#,
             )
+            .bind(user.user_id)
+            .bind(&chapter_ids)
+            .bind(&difficulties)
+            .bind(high_yield)
+            .bind(selected_pool)
+            .bind(count)
             .fetch_all(&state.pool)
             .await?;
             if pool_qs.is_empty() {
@@ -227,27 +578,50 @@ pub async fn create_session(
             }
             let qs: Vec<PoolQuestion> = pool_qs
                 .into_iter()
-                .map(|r| PoolQuestion {
-                    id: r.id,
-                    vignette: r.vignette,
-                    lead_in: r.lead_in,
-                    difficulty: r.difficulty,
-                    options: r.options,
-                })
+                .map(
+                    |(id, vignette, lead_in, difficulty, options)| PoolQuestion {
+                        id,
+                        vignette,
+                        lead_in,
+                        difficulty,
+                        options,
+                    },
+                )
                 .collect();
-            insert_session(
+            let stored_chapter_id = (chapter_ids.len() == 1).then_some(chapter_ids[0]);
+            let Json(mut response) = insert_session(
                 &state.pool,
                 SessionInsert {
                     user_id: user.user_id,
                     takeover: req.takeover.unwrap_or(false),
                     preset: &req.preset,
-                    chapter_id: Some(chapter_id),
+                    chapter_id: stored_chapter_id,
                     source_session_id: None,
                     time_limit_seconds,
                     questions: &qs,
                 },
             )
-            .await
+            .await?;
+            response["requested_count"] = if all_available {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!(requested_count)
+            };
+            response["available_count"] = serde_json::json!(available_count);
+            response["question_count"] = serde_json::json!(qs.len());
+            response["availability_message"] =
+                if !all_available && requested_count > available_count {
+                    serde_json::json!(if available_count == 1 {
+                        "Only 1 question is available for your current selection.".to_string()
+                    } else {
+                        format!(
+                        "Only {available_count} questions are available for your current selection."
+                    )
+                    })
+                } else {
+                    serde_json::Value::Null
+                };
+            Ok(Json(response))
         }
         "revision" => {
             let src = req.source_session_id.ok_or_else(|| {
@@ -382,6 +756,21 @@ pub async fn get_session(
     .fetch_all(&state.pool)
     .await?;
 
+    let question_ids: Vec<Uuid> = items.iter().map(|item| item.question_version_id).collect();
+    let marked_ids: HashSet<Uuid> = if question_ids.is_empty() {
+        HashSet::new()
+    } else {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT question_version_id FROM question_marks WHERE user_id = $1 AND question_version_id = ANY($2)",
+        )
+        .bind(user.user_id)
+        .bind(&question_ids)
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .collect()
+    };
+
     let mut out = Vec::with_capacity(items.len());
     let mut correct = 0_i64;
     let mut incorrect = 0_i64;
@@ -423,6 +812,7 @@ pub async fn get_session(
             "key_learning_point": null,
             "exam_tip": null,
             "report_status": report_status,
+            "marked": marked_ids.contains(&it.question_version_id),
         });
         if answered || session.status == "submitted" {
             item["correct_index"] = serde_json::json!(it.correct_index);

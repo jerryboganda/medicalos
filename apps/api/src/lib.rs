@@ -73,6 +73,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::tenancy::get_audit_event),
         )
         .route("/v1/me/today", get(routes::today::today))
+        .route("/v1/practice/builder", get(routes::practice::builder))
         .route(
             "/v1/practice/sessions",
             post(routes::practice::create_session),
@@ -96,6 +97,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/questions/versions/{vid}/reports",
             post(routes::reports::report).get(routes::reports::my_reports),
+        )
+        .route(
+            "/v1/questions/versions/{vid}/mark",
+            put(routes::practice::set_mark),
         )
         .route("/v1/reports/{rid}/resolve", post(routes::reports::resolve))
         .route("/v1/decks", post(routes::review::create_deck))

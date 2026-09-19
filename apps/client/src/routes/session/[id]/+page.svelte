@@ -18,6 +18,8 @@
 	let reviewing = $state(false);
 	let actionBusy = $state(false);
 	let actionError = $state('');
+	let markBusy = $state(false);
+	let markError = $state('');
 
 	// QB-08: report-a-problem control on answered items.
 	let reportOpen = $state(false);
@@ -225,6 +227,20 @@
 		}
 	}
 
+	async function toggleMark() {
+		if (!item || markBusy) return;
+		markBusy = true;
+		markError = '';
+		try {
+			const next = await Api.setQuestionMark(item.question_version_id, !item.marked);
+			session.items[current] = { ...session.items[current], marked: next.marked };
+		} catch (err) {
+			markError = err instanceof ApiError ? err.message : 'Could not update this question mark.';
+		} finally {
+			markBusy = false;
+		}
+	}
+
 	// Fresh report panel per question — navigating never leaks state.
 	$effect(() => {
 		current;
@@ -232,6 +248,7 @@
 		reportDone = '';
 		reportError = '';
 		reportNote = '';
+		markError = '';
 	});
 
 	function onKeydown(event) {
@@ -373,6 +390,23 @@
 
 	{#if item}
 		<div class="card">
+			<div class="question-actions">
+				<button
+					class="btn"
+					class:primary={item.marked}
+					type="button"
+					disabled={markBusy}
+					data-loading={markBusy}
+					data-testid="question-mark"
+					aria-pressed={item.marked}
+					onclick={toggleMark}
+				>
+					{markBusy ? 'Saving…' : item.marked ? 'Marked' : 'Mark question'}
+				</button>
+			</div>
+			{#if markError}
+				<p class="error-text" role="alert">{markError}</p>
+			{/if}
 			<p>{item.vignette}</p>
 			<p><strong>{item.lead_in}</strong></p>
 
