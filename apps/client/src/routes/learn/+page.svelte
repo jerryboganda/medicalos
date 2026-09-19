@@ -16,20 +16,26 @@
 	async function load() {
 		loading = true;
 		error = '';
+		libraryError = '';
 		try {
-			const [reviewQueue, libraryResponse] = await Promise.all([Api.reviewQueue(), Api.library()]);
-			queue = reviewQueue;
-			library = libraryResponse.items;
+			queue = await Api.reviewQueue();
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Could not load your learning queue.';
 		} finally {
 			loading = false;
+		}
+
+		try {
+			library = (await Api.library()).items;
+		} catch (err) {
+			libraryError = err instanceof ApiError ? err.message : 'Could not load the library.';
 		}
 	}
 
 	async function openLibrary(item) {
 		libraryLoading = true;
 		libraryError = '';
+		selectedLibrary = null;
 		try {
 			selectedLibrary = await Api.libraryVersion(item.item_id, item.version);
 		} catch (err) {
