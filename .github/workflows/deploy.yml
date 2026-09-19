@@ -27,12 +27,59 @@ env:
   DOMAIN: medicalos.polytronx.com
 
 jobs:
+  sqlx-cache:
+    # The committed .sqlx query cache goes stale as checked queries evolve;
+    # SQLX_OFFLINE builds (docker image + release binary) fail on any query
+    # missing from it. Regenerate from the live schema here so every offline
+    # build in this workflow compiles the exact current queries — same
+    # compile-time checks ci.yml runs, no database needed downstream.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: medos_deploy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --locked --no-default-features --features rustls,postgres
+      - name: Apply schema
+        run: |
+          for f in apps/api/migrations/*.up.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || exit 1
+          done
+      - name: Generate offline query cache
+        run: cargo sqlx prepare --workspace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlx-offline-cache
+          path: .sqlx
+          include-hidden-files: true
+
   api-image:
     # Production API container → GHCR. The VPS runbook is one docker run
     # (infra/vps/deploy.sh, via the deploy-vps job below).
+    needs: sqlx-cache
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Refresh offline query cache
+        uses: actions/download-artifact@v4
+        with:
+          name: sqlx-offline-cache
+          path: .sqlx
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -93,11 +140,17 @@ jobs:
 
   api-release:
     # Static Linux binary as a release artifact (VPS without Docker).
+    needs: sqlx-cache
     runs-on: ubuntu-latest
     env:
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
+      - name: Refresh offline query cache
+        uses: actions/download-artifact@v4
+        with:
+          name: sqlx-offline-cache
+          path: .sqlx
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p api
