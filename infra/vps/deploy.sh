@@ -11,12 +11,10 @@ set -euo pipefail
 SHA="${1:?usage: deploy.sh <sha>}"
 DATABASE_URL="${DATABASE_URL:-${VPS_DATABASE_URL_AS_ARG:?VPS_DATABASE_URL secret missing}}"
 REGISTRY="${REGISTRY:-ghcr.io/jerryboganda}"
-# GHCR needs auth even for pulls when the package inherits the repo's
-# visibility: the workflow exports GHCR_USER/GHCR_TOKEN (GITHUB_TOKEN with
-# packages:read) and we log in once here.
-if [ -n "${GHCR_TOKEN:-}" ]; then
-  echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-github}" --password-stdin
-fi
+# The GHCR packages for this repo are public: pulls are anonymous, no
+# registry login is wired through CI by design. (A failed `docker login`
+# here once masked a no-op deploy as success — the script must fail loudly
+# if pulls fail, and every step below echoes what it did.)
 API_IMAGE="$REGISTRY/medicalos-api:$SHA"
 WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
 : "${DATABASE_URL:?DATABASE_URL must be exported (VPS_DATABASE_URL secret)}"
@@ -24,13 +22,19 @@ WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
 echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
 docker pull "$API_IMAGE"
 docker pull "$WEB_IMAGE"
+echo "[medicalos] pulled:"
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+  | grep -E "medicalos-(api|web):$SHA" || {
+  echo "pulled images do not include SHA $SHA" >&2
+  exit 1
+}
 
 for net in platform nginx-proxy-manager_default; do
   docker network inspect "$net" >/dev/null 2>&1 \
     || { echo "missing docker network $net" >&2; exit 1; }
 done
 
-echo "[medicalos] recreating medicalos-api"
+echo "[medicalos] recreating medicalos-api (image: $API_IMAGE)"
 docker rm -f medicalos-api 2>/dev/null || true
 docker run -d --name medicalos-api --restart unless-stopped \
   --cpus "1.0" --memory "1g" \
@@ -39,14 +43,16 @@ docker run -d --name medicalos-api --restart unless-stopped \
   -e MIN_TIME_LIMIT_SECONDS=30 \
   -e FREE_DAILY_QUESTIONS=10 \
   "$API_IMAGE"
+echo "[medicalos] api container: $(docker inspect medicalos-api --format '{{.Config.Image}}')"
 
-echo "[medicalos] recreating medicalos-web"
+echo "[medicalos] recreating medicalos-web (image: $WEB_IMAGE)"
 docker rm -f medicalos-web 2>/dev/null || true
 docker run -d --name medicalos-web --restart unless-stopped \
   --cpus "0.5" --memory "256m" \
   --network platform \
   "$WEB_IMAGE"
 docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
+echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
 
 echo "[medicalos] health-check (API + web through the container network)"
 for i in $(seq 1 30); do
