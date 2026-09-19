@@ -98,6 +98,20 @@ fn validate_device(device_id: &str, device_name: &str) -> ApiResult<(String, Str
     Ok((device_id.to_string(), device_name.to_string()))
 }
 
+fn require_auth_challenge_delivery(state: &AppState) -> ApiResult<()> {
+    // ponytail: the test-token seam is the only current delivery path; replace
+    // this guard when a real mail adapter is configured.
+    if !state.expose_test_auth_tokens {
+        return Err(ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "auth_email_delivery_unavailable",
+            message: "account email delivery is not configured".into(),
+            details: None,
+        });
+    }
+    Ok(())
+}
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterReq>,
@@ -105,6 +119,7 @@ pub async fn register(
     let email = normalized_email(&req.email);
     validate_email(&email)?;
     validate_password(&req.password)?;
+    require_auth_challenge_delivery(&state)?;
 
     let hash = hash_password(&req.password)?;
     let user_id = Uuid::new_v4();
@@ -375,6 +390,7 @@ pub async fn forgot_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ForgotPasswordReq>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    require_auth_challenge_delivery(&state)?;
     let email = normalized_email(&req.email);
     let user = sqlx::query!(
         "SELECT id FROM users

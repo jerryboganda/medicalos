@@ -198,7 +198,7 @@
 {:else if error}
 	<p class="error-text" role="alert">{error}</p>
 	{#if pendingTakeover}
-		<div style="display:flex; gap:12px; flex-wrap:wrap;">
+		<div class="takeover-actions">
 			<button
 				class="btn primary"
 				type="button"
@@ -442,6 +442,12 @@
 	.goals-card {
 		display: grid;
 		gap: var(--space-md);
+	}
+
+	.takeover-actions {
+		display: flex;
+		gap: var(--space-md);
+		flex-wrap: wrap;
 	}
 
 	.goals-heading-row,

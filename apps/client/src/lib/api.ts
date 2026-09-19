@@ -15,8 +15,7 @@ export class ApiError extends Error {
 	constructor(
 		public status: number,
 		public code: string,
-		message: string,
-		public details?: unknown
+		message: string
 	) {
 		super(message);
 	}
@@ -79,16 +78,14 @@ async function call<T>(
 		if (res.status === 401 && sentAccessToken) clearAuth();
 		let code = 'error';
 		let message = `Request failed (${res.status})`;
-		let details: unknown;
 		try {
 			const parsed = await res.json();
 			code = parsed?.error?.code ?? code;
 			message = parsed?.error?.message ?? message;
-			details = parsed?.error?.details;
 		} catch {
 			/* non-json error body */
 		}
-		throw new ApiError(res.status, code, message, details);
+		throw new ApiError(res.status, code, message);
 	}
 	return (await res.json()) as T;
 }

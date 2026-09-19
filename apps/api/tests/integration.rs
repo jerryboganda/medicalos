@@ -228,6 +228,48 @@ async fn auth_register_login_and_reject_bad_credentials() {
 }
 
 #[tokio::test]
+async fn auth_challenge_flows_fail_closed_without_delivery() {
+    let _g = LOCK.lock().await;
+    let test_state = setup().await;
+    let state = Arc::new(AppState {
+        pool: test_state.pool.clone(),
+        min_time_limit_seconds: test_state.min_time_limit_seconds,
+        free_daily_questions: test_state.free_daily_questions,
+        expose_test_auth_tokens: false,
+    });
+    let app = router(state);
+    let email = format!("no-delivery-{}@example.test", Uuid::new_v4());
+
+    for _ in 0..2 {
+        let (status, body) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email, "password": "correct horse"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(body["error"]["code"], "auth_email_delivery_unavailable");
+    }
+
+    let (status, body) = call(
+        app,
+        request(
+            "POST",
+            "/v1/auth/forgot-password",
+            None,
+            Some(serde_json::json!({"email": email})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["error"]["code"], "auth_email_delivery_unavailable");
+}
+
+#[tokio::test]
 async fn core07_account_security_lifecycle() {
     let _g = LOCK.lock().await;
     let state = setup().await;
