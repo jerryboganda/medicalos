@@ -101,8 +101,10 @@ async fn healthz() -> &'static str {
 
 async fn version() -> axum::Json<serde_json::Value> {
     // Served at /api/version.json in production so the deploy pipeline can
-    // prove the exact commit landed (SHA stamped at image build time).
+    // prove the exact commit landed. SHA stamped at image build time via
+    // MEDICALOS_BUILD_SHA (Docker build-arg); option_env! keeps local/CI
+    // builds compiling without it.
     axum::Json(serde_json::json!({
-        "sha": env!("MEDICALOS_BUILD_SHA", "dev"),
+        "sha": option_env!("MEDICALOS_BUILD_SHA").unwrap_or("dev"),
     }))
 }
