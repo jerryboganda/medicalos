@@ -25,7 +25,7 @@ pub struct CreateMockReq {
     pub attempts_allowed: Option<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct BlueprintEntry {
     pub chapter_id: Uuid,
     pub count: i32,
@@ -87,7 +87,8 @@ pub async fn create_mock(
         title,
         req.exam_id,
         blueprint,
-        req.time_limit_seconds,
+        // INT column binds as i32; the request field is i64 for validation.
+        req.time_limit_seconds.map(|l| l as i32),
         pass_mark,
         attempts,
         user.user_id

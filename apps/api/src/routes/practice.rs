@@ -580,20 +580,11 @@ fn response_for_preset(
     }))
 }
 
-#[derive(Serialize)]
-pub struct SubmitResponse {
-    total: i64,
-    correct: i64,
-    incorrect: i64,
-    skipped: i64,
-    score: i64,
-}
-
 pub async fn submit(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(sid): Path<Uuid>,
-) -> ApiResult<Json<SubmitResponse>> {
+) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
         "SELECT chapter_id, source_session_id, status, preset, mock_id FROM practice_sessions
          WHERE id = $1 AND user_id = $2",
@@ -686,7 +677,7 @@ pub async fn submit(
         let mock = sqlx::query!("SELECT pass_mark_percent FROM mocks WHERE id = $1", mock_id)
             .fetch_one(&state.pool)
             .await?;
-        let passed = score >= mock.pass_mark_percent;
+        let passed = score >= mock.pass_mark_percent as i64;
         sqlx::query!(
             "INSERT INTO mock_attempts
                (id, mock_id, user_id, session_id, score_percent, passed)

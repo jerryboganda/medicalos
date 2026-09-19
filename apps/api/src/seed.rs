@@ -19,7 +19,7 @@ pub struct SeedIds {
     pub chapter1: Uuid,
     pub chapter2: Uuid,
     pub chapter3: Uuid,
-    pub question_versions: [Uuid; 4],
+    pub question_versions: [Uuid; 5],
 }
 
 struct NewQuestion {
