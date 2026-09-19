@@ -2793,6 +2793,88 @@ async fn settings_admin_gate_and_update() {
 }
 
 #[tokio::test]
+async fn session_actions_retry_and_practice_incorrect() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Create and submit a session.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter2, "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    // Answer both.
+    for (idx, key) in [(0i16, "act-1"), (1, "act-2")] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&token),
+                Some(serde_json::json!({"item_index": idx, "chosen_index": 0,
+                                        "idempotency_key": key})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Retry action creates a new session in the same chapter.
+    let (status, retry) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/action"),
+            Some(&token),
+            Some(serde_json::json!({"action": "retry"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retry}");
+    let retry_sid: Uuid = retry["session_id"].as_str().unwrap().parse().unwrap();
+    assert_ne!(retry_sid, sid, "new session created");
+
+    // Practice incorrect action creates a revision session.
+    let (status, incorrect) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/action"),
+            Some(&token),
+            Some(serde_json::json!({"action": "practice_incorrect"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{incorrect}");
+    assert!(incorrect["item_count"].as_i64().unwrap() >= 0);
+}
+
+#[tokio::test]
 async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;

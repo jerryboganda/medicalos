@@ -194,6 +194,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/integrity-events",
             post(routes::integrity::record_integrity_event),
         )
+        .route(
+            "/v1/practice/sessions/{sid}/action",
+            post(routes::actions::session_action),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -376,6 +380,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/integrity-events",
             post(routes::integrity::record_integrity_event),
+        )
+        .route(
+            "/api/v1/practice/sessions/{sid}/action",
+            post(routes::actions::session_action),
         )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
