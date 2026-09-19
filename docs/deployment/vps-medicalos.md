@@ -45,7 +45,7 @@ Live surfaces (2026-09-19, owner-directed):
    the deployed SHA, `/` serves the app shell, the JS entry bundle
    returns 200, `/api/healthz` returns `ok`.
 
-## Secrets (GitHub environment `production`)
+## Secrets (repo-level, owner decision)
 
 | Name | Purpose |
 |---|---|

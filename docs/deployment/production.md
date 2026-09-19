@@ -27,7 +27,7 @@ Built by GitHub Actions only (AGENTS.md compute policy — the VPS never builds)
 | `MIN_TIME_LIMIT_SECONDS` | 30 | Floor for timed sessions |
 | `FREE_DAILY_QUESTIONS` | 10 | Free-tier daily allowance |
 
-GitHub `production` environment secrets: `VPS_HOST`, `VPS_USER`,
+GitHub repo-level secrets: `VPS_HOST`, `VPS_USER`,
 `VPS_SSH_KEY`, `VPS_DATABASE_URL`.
 
 ## Verification after any deploy

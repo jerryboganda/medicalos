@@ -104,9 +104,9 @@ jobs:
     # Ship to the shared VPS over SSH: pull GHCR images, recreate the two
     # containers, health-check. Lightweight by design (AGENTS.md compute
     # policy) — all compiling happened in the jobs above.
+    # Secrets are repo-level (owner decision: no environment gate yet).
     needs: [api-image, web-image]
     runs-on: ubuntu-latest
-    environment: production
     concurrency:
       group: medicalos-vps
       cancel-in-progress: false
