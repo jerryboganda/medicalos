@@ -15,11 +15,14 @@ Implement the concept-identity foundation in `../spec.md` through the existing s
 - [x] Existing chapter-based practice, planning, and learner-state behavior remains unchanged in this foundation slice.
 - [x] The red integration contract was committed before schema/seed implementation (`e0303aa`).
 - [x] Heavy acceptance is delegated to GitHub Actions; local verification stays lightweight.
-- [ ] Matt Standards/Spec review and Ponytail review are completed before closeout.
-- [ ] Traceability remains truthful about the pending learner-state and cross-modality migrations.
+- [x] Matt Standards/Spec review and Ponytail review are completed for this foundation slice.
+- [x] Traceability remains truthful about the pending learner-state and cross-modality migrations.
 
 ## Comments
 
 - The testing seam is the existing seeded PostgreSQL integration contract because the current product has no public curriculum interface that should expose concept identifiers.
 - No speculative curriculum endpoint or unmodeled content-modality table is part of this ticket.
 - Red CI run `35431732049` executed zero runner steps because GitHub reported failed account payments or an insufficient spending limit; it is not functional red evidence.
+- Implementation CI run `35431943529` was blocked by the same billing/spending-limit state before any runner step executed, so no functional green claim is made.
+- Matt Standards/Spec review found one delivery-risk issue: new `query!` calls would have required fresh tracked SQLx offline metadata while CI cannot generate it. Commit `6c093fa` replaced only the new CORE-10 seed inserts with runtime `sqlx::query` bindings; no remaining Standards or Spec finding remained after that repair.
+- Ponytail review: Lean already. Ship the foundation; no dependency, service layer, endpoint, or speculative modality model was added.
