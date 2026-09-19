@@ -1087,7 +1087,47 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
         "both items come from chapter 1"
     );
 
-    // Attempts exhausted: a second start is refused.
+    // Second attempt is allowed (seed allows 2): start, answer, submit again.
+    let (status, started2) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mid}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started2}");
+    let sid2: Uuid = started2["session_id"].as_str().unwrap().parse().unwrap();
+    for (idx, key) in [(0i16, "mock2-key-1"), (1, "mock2-key-2")] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid2}/answers"),
+                Some(&token),
+                Some(serde_json::json!({"item_index": idx, "chosen_index": 0,
+                                       "idempotency_key": key})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, result2) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid2}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result2}");
+    assert_eq!(result2["mock"]["passed"], true);
+
+    // Attempts exhausted: the third start is refused.
     let (status, body) = call(
         app.clone(),
         request(
