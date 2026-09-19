@@ -3,10 +3,13 @@
 # GitHub Actions `deploy-vps` job. Pulls GHCR images (never builds), recreates
 # the two containers on the shared networks, health-checks, reports versions.
 #
-# Usage: deploy.sh <sha>   (DATABASE_URL exported in the environment)
+# Usage: deploy.sh <sha>   (VPS_DATABASE_URL_AS_ARG exported by CI; the
+# appleboy action passes `envs` through, DATABASE_URL is set from it below
+# so the secret never appears in the SSH command line.)
 set -euo pipefail
 
 SHA="${1:?usage: deploy.sh <sha>}"
+DATABASE_URL="${DATABASE_URL:-${VPS_DATABASE_URL_AS_ARG:?VPS_DATABASE_URL secret missing}}"
 REGISTRY="${REGISTRY:-ghcr.io/jerryboganda}"
 API_IMAGE="$REGISTRY/medicalos-api:$SHA"
 WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
