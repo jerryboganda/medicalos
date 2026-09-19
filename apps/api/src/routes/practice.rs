@@ -163,8 +163,13 @@ pub async fn create_session(
             };
             let pool_qs = sqlx::query!(
                 r#"SELECT id, vignette, lead_in, difficulty, options
-                   FROM question_versions
+                   FROM question_versions qv
                    WHERE status = 'published' AND chapter_id = $1
+                     AND NOT EXISTS (
+                         SELECT 1 FROM question_reports r
+                         WHERE r.question_version_id = qv.id
+                           AND r.status = 'quarantined'
+                     )
                    ORDER BY random() LIMIT $2"#,
                 chapter_id,
                 count
@@ -223,7 +228,7 @@ pub async fn create_session(
                 r#"SELECT id, vignette, lead_in, difficulty, options FROM (
                        SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                        FROM question_versions qv
-                       WHERE qv.id IN (
+                       WHERE (qv.id IN (
                            SELECT question_version_id FROM attempts
                            WHERE session_id = $1 AND correct = FALSE
                        )
@@ -234,6 +239,11 @@ pub async fn create_session(
                                WHERE a.session_id = si.session_id
                                  AND a.item_index = si.item_index
                            )
+                       ))
+                       AND NOT EXISTS (
+                           SELECT 1 FROM question_reports r
+                           WHERE r.question_version_id = qv.id
+                             AND r.status = 'quarantined'
                        )
                    ) t
                    ORDER BY random()"#,
@@ -297,7 +307,17 @@ pub async fn get_session(
     let items = sqlx::query!(
         r#"SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,
                   qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,
-                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct
+                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct,
+                  EXISTS (
+                      SELECT 1 FROM question_reports r
+                      WHERE r.question_version_id = qv.id
+                        AND r.status IN ('open', 'quarantined')
+                  ) AS "flagged!",
+                  EXISTS (
+                      SELECT 1 FROM question_reports r
+                      WHERE r.question_version_id = qv.id
+                        AND r.status = 'quarantined'
+                  ) AS "quarantined!"
            FROM session_items si
            JOIN question_versions qv ON qv.id = si.question_version_id
            LEFT JOIN attempts a
@@ -318,6 +338,14 @@ pub async fn get_session(
             .iter()
             .map(|o| serde_json::json!({"text": o.text}))
             .collect();
+        // QB-08: honest flag state so the UI can label affected items.
+        let report_status = if it.quarantined {
+            serde_json::Value::String("quarantined".into())
+        } else if it.flagged {
+            serde_json::Value::String("open".into())
+        } else {
+            serde_json::Value::Null
+        };
         let mut item = serde_json::json!({
             "item_index": it.item_index,
             "question_version_id": it.question_version_id,
@@ -331,6 +359,7 @@ pub async fn get_session(
             "correct_index": null,
             "key_learning_point": null,
             "exam_tip": null,
+            "report_status": report_status,
         });
         if answered {
             item["correct_index"] = serde_json::json!(it.correct_index);

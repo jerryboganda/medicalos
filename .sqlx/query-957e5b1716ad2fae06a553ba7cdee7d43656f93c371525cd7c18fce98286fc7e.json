@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO question_reports (id, question_version_id, reporter_id, category, note)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (question_version_id, reporter_id) DO NOTHING\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "957e5b1716ad2fae06a553ba7cdee7d43656f93c371525cd7c18fce98286fc7e"
+}

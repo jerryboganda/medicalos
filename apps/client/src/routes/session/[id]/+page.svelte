@@ -15,6 +15,24 @@
 	let result = $state(null);
 	let loadFailed = $state('');
 
+	// QB-08: report-a-problem control on answered items.
+	let reportOpen = $state(false);
+	let reportCategory = $state('wrong_answer');
+	let reportNote = $state('');
+	let reportBusy = $state(false);
+	let reportDone = $state('');
+	let reportError = $state('');
+
+	const REPORT_CATEGORIES = [
+		['wrong_answer', 'Wrong answer'],
+		['bad_explanation', 'Bad explanation'],
+		['typo', 'Typo'],
+		['duplicate', 'Duplicate'],
+		['outdated', 'Outdated'],
+		['broken_image', 'Broken image'],
+		['other', 'Other']
+	];
+
 	const item = $derived(session?.items?.[current] ?? null);
 	const allAnswered = $derived(
 		session?.items ? session.items.every((i) => i.answered) : false
@@ -116,6 +134,41 @@
 			submitting = false;
 		}
 	}
+
+	async function submitReport() {
+		if (reportBusy || !item) return;
+		reportBusy = true;
+		reportError = '';
+		try {
+			const res = await Api.reportQuestion(item.question_version_id, {
+				category: reportCategory,
+				note: reportNote.trim() ? reportNote.trim() : undefined
+			});
+			session.items[current] = {
+				...session.items[current],
+				report_status: res.quarantined ? 'quarantined' : 'open'
+			};
+			reportDone = res.quarantined
+				? 'Thanks — enough learners flagged this, so it is out of rotation pending review.'
+				: 'Thanks — your report is recorded for editorial review.';
+			reportOpen = false;
+			reportNote = '';
+		} catch (err) {
+			reportError =
+				err instanceof ApiError ? err.message : 'Could not send the report.';
+		} finally {
+			reportBusy = false;
+		}
+	}
+
+	// Fresh report panel per question — navigating never leaks state.
+	$effect(() => {
+		current;
+		reportOpen = false;
+		reportDone = '';
+		reportError = '';
+		reportNote = '';
+	});
 
 	function onKeydown(event) {
 		if (result || !session || !item) return;
@@ -248,7 +301,91 @@
 					{#if item.exam_tip}
 						<p class="muted" style="margin: 4px 0 0;">Exam tip: {item.exam_tip}</p>
 					{/if}
+					{#if item.report_status === 'quarantined'}
+						<p class="muted" style="margin: 4px 0 0;">
+							Flagged by learners — out of rotation pending editorial review.
+						</p>
+					{:else if item.report_status === 'open'}
+						<p class="muted" style="margin: 4px 0 0;">
+							Flagged by a learner — under review.
+						</p>
+					{/if}
 				</div>
+
+				{#if reportDone}
+					<p class="muted" data-testid="report-done">{reportDone}</p>
+				{:else if !reportOpen}
+					<button
+						class="linklike"
+						type="button"
+						disabled={reportBusy}
+						data-testid="report-open"
+						onclick={() => {
+							reportOpen = true;
+							reportError = '';
+						}}
+					>
+						Report a problem with this question
+					</button>
+				{:else}
+					<div data-testid="report-form">
+						<p class="field">
+							<span>What's wrong?</span>
+							<span style="display:flex; gap:8px; flex-wrap:wrap;">
+								{#each REPORT_CATEGORIES as [value, label]}
+									<button
+										type="button"
+										class="btn {reportCategory === value ? 'primary' : ''}"
+										disabled={reportBusy}
+										data-testid={`report-cat-${value}`}
+										onclick={() => {
+											reportCategory = value;
+										}}
+									>
+										{label}
+									</button>
+								{/each}
+							</span>
+						</p>
+						<label class="field">
+							<span>Details (optional)</span>
+							<input
+								type="text"
+								bind:value={reportNote}
+								disabled={reportBusy}
+								maxlength="2000"
+								placeholder="What looks wrong?"
+								data-testid="report-note"
+							/>
+						</label>
+						{#if reportError}
+							<p class="error-text" role="alert">{reportError}</p>
+						{/if}
+						<p style="display:flex; gap:12px;">
+							<button
+								class="btn primary"
+								type="button"
+								disabled={reportBusy}
+								data-loading={reportBusy}
+								data-testid="report-submit"
+								onclick={submitReport}
+							>
+								{reportBusy ? 'Sending…' : 'Send report'}
+							</button>
+							<button
+								class="linklike"
+								type="button"
+								disabled={reportBusy}
+								onclick={() => {
+									reportOpen = false;
+									reportError = '';
+								}}
+							>
+								Cancel
+							</button>
+						</p>
+					</div>
+				{/if}
 
 				{#if current < session.items.length - 1}
 					<button
