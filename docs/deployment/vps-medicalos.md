@@ -29,7 +29,16 @@ Live surfaces (2026-09-19, owner-directed):
     `apps/client/nginx.conf`). Client baked with
     `VITE_API_BASE=''` (same-origin; API reached via the `/api/` prefix).
 - NPM proxy host: `medicalos.polytronx.com` → `medicalos-web:80`,
-  SSL forced (Let's Encrypt via NPM), HSTS per shared default.
+  SSL forced (Let's Encrypt cert `medicalos.polytronx.com`, registered as
+  NPM certificate 49 with files copied to the `npm-49` live dir — NPM
+  generates `live/<name>/`, not `live/npm-<id>/`, for manually-issued
+  certs, so the copy is required). One manual patch on top of the generated
+  `proxy_host/47.conf` (NPM regenerates the file on restart — re-apply if
+  the host is ever edited in the UI):
+  - `include conf.d/include/letsencrypt-acme-challenge.conf;` (without it
+    the vhost 404s `/.well-known/acme-challenge/`, and renewals fail),
+  - `location = /api/version.json { proxy_pass http://medicalos-web/version.json; }`
+    (the deploy SHA proof must come from the static web build, not the API).
 - Backups: the `medicalos` database is inside platform-postgres, so the
   nightly `platform-backup` pg_dump covers it (7 nights on-box).
 

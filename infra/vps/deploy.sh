@@ -49,12 +49,12 @@ docker run -d --name medicalos-web --restart unless-stopped \
 docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
 
 echo "[medicalos] health-check (API + web through the container network)"
-API_IP=$(docker inspect medicalos-api --format '{{.NetworkSettings.Networks.platform.IPAddress}}')
-WEB_IP=$(docker inspect medicalos-web --format '{{.NetworkSettings.Networks.platform.IPAddress}}')
 for i in $(seq 1 30); do
-  if docker exec medicalos-api wget -q -O - http://127.0.0.1:8080/healthz 2>/dev/null | grep -q ok \
-    && wget -q -O - "http://$WEB_IP/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
-    echo "[medicalos] api ($API_IP) + web ($WEB_IP) healthy"
+  # The debian-slim API image has no wget/curl: probe from a throwaway
+  # curl container on the same network instead.
+  if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
+    && docker run --rm --network platform curlimages/curl:8.5.0 -sf "http://medicalos-web/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
+    echo "[medicalos] api + web healthy"
     break
   fi
   [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
