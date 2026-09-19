@@ -3,7 +3,7 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use competition_scoring::{rank, AnswerRecord, Difficulty, Entry, ScoringConfig};
+use competition_scoring::{AnswerRecord, Difficulty, ScoringConfig};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;

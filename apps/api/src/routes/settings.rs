@@ -33,7 +33,6 @@ pub async fn update_settings(
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let mut updated: Vec<&str> = Vec::new();
-    let mut updated: Vec<&str> = Vec::new();
     let mut pairs: Vec<(&str, serde_json::Value)> = Vec::new();
     if let Some(b) = req.mastery_bands {
         pairs.push(("mastery_bands", json!(b)));

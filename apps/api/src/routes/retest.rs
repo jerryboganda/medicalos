@@ -3,7 +3,7 @@
 //! re-test (family-variant preferred at selection time, §13); successes
 //! space out deterministically. All queries are user-scoped.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::Json;
 use chrono::Utc;
 use serde::Deserialize;
