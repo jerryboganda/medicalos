@@ -25,10 +25,7 @@ async fn setup() -> Arc<AppState> {
         .await
         .expect("connect to test database");
     schema::apply_up(&pool).await.expect("apply schema");
-    sqlx::query("TRUNCATE users, auth_sessions, exams, curriculum_nodes, questions, question_versions, practice_sessions, session_items, attempts, learner_concept_state, plans, plan_tasks, plan_revisions, decks, cards, review_events, coach_turns, articles, article_versions, article_citations, notification_preferences, notifications, guest_trials, goals, protected_commitments, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, institutions, institution_members, cohorts, cohort_members, assignments, scenarios, scenario_runs, appeals, retest_cards, retest_history, import_batches, audit_events, question_reports CASCADE")
-        .execute(&pool)
-        .await
-        .expect("truncate");
+
     Arc::new(AppState {
         pool,
         min_time_limit_seconds: 30,
