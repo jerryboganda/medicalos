@@ -553,9 +553,9 @@ pub async fn scenario_event(
         )
     })?;
     let mut transcript = run.transcript.clone();
-    transcript.as_array_mut().map_or((), |a| {
+    if let Some(a) = transcript.as_array_mut() {
         a.push(json!({"from": run.current_state, "on": req.event, "to": next}));
-    });
+    }
     sqlx::query!(
         "UPDATE scenario_runs SET current_state = $2, transcript = $3 WHERE id = $1",
         run_id,
