@@ -140,17 +140,18 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
     ) -> ApiResult<Uuid> {
         let concept_id = Uuid::new_v4();
         let concept_version_id = Uuid::new_v4();
-        sqlx::query!("INSERT INTO concepts (id) VALUES ($1)", concept_id)
+        sqlx::query("INSERT INTO concepts (id) VALUES ($1)")
+            .bind(concept_id)
             .execute(pool)
             .await?;
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO concept_versions (id, concept_id, version, status, name, definition)
              VALUES ($1, $2, 1, 'published', $3, $4)",
-            concept_version_id,
-            concept_id,
-            name,
-            definition,
         )
+        .bind(concept_version_id)
+        .bind(concept_id)
+        .bind(name)
+        .bind(definition)
         .execute(pool)
         .await?;
         Ok(concept_version_id)
@@ -170,12 +171,12 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
     .await?;
 
     for (node_id, concept_version_id) in [(chapter1, concept1), (chapter2, concept2)] {
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO curriculum_node_concepts (node_id, concept_version_id)
              VALUES ($1, $2)",
-            node_id,
-            concept_version_id,
         )
+        .bind(node_id)
+        .bind(concept_version_id)
         .execute(pool)
         .await?;
     }
@@ -336,13 +337,13 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         (v3, concept2),
         (v4, concept2),
     ] {
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO question_version_concepts
              (question_version_id, concept_version_id, relation)
              VALUES ($1, $2, 'primary')",
-            question_version_id,
-            concept_version_id,
         )
+        .bind(question_version_id)
+        .bind(concept_version_id)
         .execute(pool)
         .await?;
     }
