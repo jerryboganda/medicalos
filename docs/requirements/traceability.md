@@ -22,7 +22,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
-| CORE-02 | Versioned goals, exam dates, protected commitments | not-started | — |
+| CORE-02 | Versioned goals, exam dates, protected commitments | tested | .scratch/phase-1-core02-goals/; run 35424883754 |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | in-progress (free-tier daily question allowance enforced server-side with honest 403 + details payload; media/retrieval/manifest entitlements pending) | run 35372696754 |
 | CORE-04 | Multi-tenant role and audit foundations | not-started | — |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
