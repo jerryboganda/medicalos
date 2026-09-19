@@ -190,6 +190,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/institutions/{inst_id}/coverage",
             get(routes::engagement::institution_coverage),
         )
+        .route(
+            "/v1/integrity-events",
+            post(routes::integrity::record_integrity_event),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -368,6 +372,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/me/settings-public",
             get(routes::settings::public_settings),
+        )
+        .route(
+            "/api/v1/integrity-events",
+            post(routes::integrity::record_integrity_event),
         )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(

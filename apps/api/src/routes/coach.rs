@@ -111,11 +111,19 @@ fn extractive_answer(
             ));
         }
     }
+    if prompt_type == "socratic" {
+        // AI-10: guided self-explanation without direct reveal.
+        parts.insert(
+            0,
+            "Work through these prompts before checking below:".into(),
+        );
+        parts.insert(1, "• What exactly is the stem asking for?".into());
+        parts.push("• Now compare each option against your rule.".into());
+    }
     parts.push(format!("Key learning point: {key_point}"));
     if let Some(tip) = exam_tip {
         parts.push(format!("Exam tip: {tip}"));
     }
-    parts.push(format!("Source: {source_ref}"));
     parts.join(" ")
 }
 

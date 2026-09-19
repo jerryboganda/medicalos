@@ -6,6 +6,7 @@ pub mod engagement;
 pub mod goals;
 pub mod guest;
 pub mod inbox;
+pub mod integrity;
 pub mod library;
 pub mod mock;
 pub mod notes;
