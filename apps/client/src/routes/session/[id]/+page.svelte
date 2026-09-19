@@ -1,5 +1,5 @@
 <script>
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick as svelteTick } from 'svelte';
 	import { base } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Api, ApiError } from '$lib/api';
@@ -34,6 +34,20 @@
 	let calcBusy = $state(false);
 	let calcResult = $state(null);
 	let calcError = $state('');
+	let navigatorOpen = $state(false);
+	let navigatorFilter = $state('all');
+	let eliminationMode = $state(false);
+	let draftSelections = $state({});
+	let visited = $state([]);
+	let eliminatedOptions = $state({});
+	let focusMode = $state(false);
+	let focusError = $state('');
+	let wakeLock = null;
+	let wakeLockPending = false;
+	let questionTouchStart = null;
+	let optionTouch = null;
+	let optionLongPressTimer = null;
+	let suppressOptionClickUntil = 0;
 
 	const TEXT_SIZES = [
 		['small', 'Small'],
@@ -75,6 +89,9 @@
 	const allAnswered = $derived(
 		session?.items ? session.items.every((i) => i.answered) : false
 	);
+	const answeredCount = $derived(session?.items?.filter((i) => i.answered).length ?? 0);
+	const unansweredCount = $derived((session?.items?.length ?? 0) - answeredCount);
+	const markedCount = $derived(session?.items?.filter((i) => i.marked).length ?? 0);
 	const missedCount = $derived(result ? result.incorrect + result.skipped : 0);
 
 	// EX-08: countdown derives from the server-issued deadline and server_now,
@@ -134,6 +151,327 @@
 		}
 	}
 
+	function workspaceStorageKey() {
+		return `mlos_session_workspace_v1_${sid}`;
+	}
+
+	function saveWorkspaceState() {
+		if (!session || session.status !== 'open') return;
+		try {
+			localStorage.setItem(
+				workspaceStorageKey(),
+				JSON.stringify({
+					current,
+					drafts: draftSelections,
+					visited,
+					eliminated: eliminatedOptions
+				})
+			);
+		} catch {
+			// Draft UI state is best-effort; storage denial must not block learning.
+		}
+	}
+
+	function clearWorkspaceState() {
+		try {
+			localStorage.removeItem(workspaceStorageKey());
+		} catch {
+			// Submission remains authoritative even when local storage is unavailable.
+		}
+	}
+
+	function restoreWorkspaceState() {
+		if (!session?.items?.length || session.status !== 'open') return false;
+		try {
+			const raw = localStorage.getItem(workspaceStorageKey());
+			if (!raw) return false;
+			const parsed = JSON.parse(raw);
+			const length = session.items.length;
+			const restoredCurrent =
+				Number.isInteger(parsed.current) && parsed.current >= 0 && parsed.current < length
+					? parsed.current
+					: current;
+			const restoredDrafts = {};
+			for (const [indexKey, chosen] of Object.entries(parsed.drafts ?? {})) {
+				const index = Number(indexKey);
+				const optionCount = session.items[index]?.options?.length ?? 0;
+				if (
+					Number.isInteger(index) &&
+					index >= 0 &&
+					index < length &&
+					!session.items[index].answered &&
+					Number.isInteger(chosen) &&
+					chosen >= 0 &&
+					chosen < optionCount
+				) {
+					restoredDrafts[index] = chosen;
+				}
+			}
+			const restoredVisited = Array.from(
+				new Set(
+					(Array.isArray(parsed.visited) ? parsed.visited : []).filter(
+						(index) => Number.isInteger(index) && index >= 0 && index < length
+					)
+				)
+			);
+			if (!restoredVisited.includes(restoredCurrent)) restoredVisited.push(restoredCurrent);
+			const restoredEliminated = {};
+			for (const [indexKey, optionIndexes] of Object.entries(parsed.eliminated ?? {})) {
+				const index = Number(indexKey);
+				if (!Number.isInteger(index) || index < 0 || index >= length || session.items[index].answered) {
+					continue;
+				}
+				const optionCount = session.items[index]?.options?.length ?? 0;
+				const valid = Array.from(
+					new Set(
+						(Array.isArray(optionIndexes) ? optionIndexes : []).filter(
+							(optionIndex) =>
+								Number.isInteger(optionIndex) && optionIndex >= 0 && optionIndex < optionCount
+						)
+					)
+				);
+				if (valid.length) restoredEliminated[index] = valid;
+			}
+
+			current = restoredCurrent;
+			draftSelections = restoredDrafts;
+			visited = restoredVisited;
+			eliminatedOptions = restoredEliminated;
+			selected = restoredDrafts[restoredCurrent] ?? null;
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	function setDraftSelection(value) {
+		selected = value;
+		const next = { ...draftSelections };
+		if (value === null) delete next[current];
+		else next[current] = value;
+		draftSelections = next;
+		saveWorkspaceState();
+	}
+
+	function markVisited(index) {
+		if (visited.includes(index)) return;
+		visited = [...visited, index];
+	}
+
+	function goToQuestion(index) {
+		if (!session?.items?.length || index < 0 || index >= session.items.length || index === current) return;
+		current = index;
+		selected = session.items[index].answered ? null : (draftSelections[index] ?? null);
+		markVisited(index);
+		navigatorOpen = false;
+		saveWorkspaceState();
+	}
+
+	function previousQuestion() {
+		if (current > 0) goToQuestion(current - 1);
+	}
+
+	function nextQuestion() {
+		if (session && current < session.items.length - 1) goToQuestion(current + 1);
+	}
+
+	function firstUnansweredQuestion() {
+		const index = session?.items?.findIndex((question) => !question.answered) ?? -1;
+		if (index >= 0) goToQuestion(index);
+	}
+
+	function questionState(index) {
+		if (index === current) return 'current';
+		if (session.items[index].answered) return 'answered';
+		return visited.includes(index) ? 'unanswered' : 'not-visited';
+	}
+
+	function questionStateLabel(index) {
+		return {
+			current: 'current',
+			answered: 'answered',
+			unanswered: 'unanswered',
+			'not-visited': 'not visited'
+		}[questionState(index)];
+	}
+
+	function questionStateIcon(index) {
+		return { current: '●', answered: '✓', unanswered: '◐', 'not-visited': '○' }[
+			questionState(index)
+		];
+	}
+
+	function navigatorIndices() {
+		if (!session?.items) return [];
+		return session.items
+			.map((_, index) => index)
+			.filter((index) => {
+				if (navigatorFilter === 'marked') return !!session.items[index].marked;
+				if (navigatorFilter === 'unanswered') return !session.items[index].answered;
+				return true;
+			});
+	}
+
+	function isEliminated(questionIndex, optionIndex) {
+		return eliminatedOptions[questionIndex]?.includes(optionIndex) ?? false;
+	}
+
+	function toggleElimination(optionIndex) {
+		if (!item || item.answered || reviewing || session?.status !== 'open') return;
+		const currentOptions = eliminatedOptions[current] ?? [];
+		const nextOptions = currentOptions.includes(optionIndex)
+			? currentOptions.filter((index) => index !== optionIndex)
+			: [...currentOptions, optionIndex];
+		const next = { ...eliminatedOptions };
+		if (nextOptions.length) next[current] = nextOptions;
+		else delete next[current];
+		eliminatedOptions = next;
+		if (selected === optionIndex && nextOptions.includes(optionIndex)) {
+			selected = null;
+			const drafts = { ...draftSelections };
+			delete drafts[current];
+			draftSelections = drafts;
+		}
+		saveWorkspaceState();
+	}
+
+	function handleOptionClick(optionIndex) {
+		if (Date.now() < suppressOptionClickUntil || item?.answered) return;
+		if (eliminationMode) toggleElimination(optionIndex);
+		else setDraftSelection(selected === optionIndex ? null : optionIndex);
+	}
+
+	function touchPoint(event) {
+		return event.changedTouches?.[0] ?? event.touches?.[0] ?? null;
+	}
+
+	function startQuestionTouch(event) {
+		const point = touchPoint(event);
+		if (point) questionTouchStart = { x: point.clientX, y: point.clientY };
+	}
+
+	function endQuestionTouch(event) {
+		const point = touchPoint(event);
+		const start = questionTouchStart;
+		questionTouchStart = null;
+		if (!point || !start || window.getSelection()?.toString()) return;
+		const dx = point.clientX - start.x;
+		const dy = point.clientY - start.y;
+		if (Math.abs(dx) < 72 || Math.abs(dx) <= Math.abs(dy) * 1.25) return;
+		if (dx < 0) nextQuestion();
+		else previousQuestion();
+	}
+
+	function cancelOptionLongPress() {
+		if (optionLongPressTimer) clearTimeout(optionLongPressTimer);
+		optionLongPressTimer = null;
+	}
+
+	function startOptionTouch(event, optionIndex) {
+		event.stopPropagation();
+		const point = touchPoint(event);
+		if (!point) return;
+		cancelOptionLongPress();
+		optionTouch = { optionIndex, x: point.clientX, y: point.clientY, longPressed: false };
+		optionLongPressTimer = setTimeout(() => {
+			if (!optionTouch || optionTouch.optionIndex !== optionIndex) return;
+			optionTouch.longPressed = true;
+			suppressOptionClickUntil = Date.now() + 700;
+			toggleElimination(optionIndex);
+		}, 550);
+	}
+
+	function moveOptionTouch(event) {
+		event.stopPropagation();
+		const point = touchPoint(event);
+		if (!point || !optionTouch) return;
+		if (Math.abs(point.clientX - optionTouch.x) > 12 || Math.abs(point.clientY - optionTouch.y) > 12) {
+			cancelOptionLongPress();
+		}
+	}
+
+	function endOptionTouch(event, optionIndex) {
+		event.stopPropagation();
+		const point = touchPoint(event);
+		const start = optionTouch;
+		cancelOptionLongPress();
+		optionTouch = null;
+		if (!point || !start || start.optionIndex !== optionIndex || start.longPressed) return;
+		const dx = point.clientX - start.x;
+		const dy = point.clientY - start.y;
+		if (Math.abs(dx) >= 56 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+			suppressOptionClickUntil = Date.now() + 700;
+			toggleElimination(optionIndex);
+		}
+	}
+
+	function cancelOptionTouch(event) {
+		event.stopPropagation();
+		cancelOptionLongPress();
+		optionTouch = null;
+	}
+
+	async function requestWakeLock() {
+		if (!navigator.wakeLock?.request || wakeLock || wakeLockPending) return;
+		wakeLockPending = true;
+		try {
+			const lock = await navigator.wakeLock.request('screen');
+			if (!focusMode) {
+				await lock?.release?.();
+				return;
+			}
+			wakeLock = lock;
+			wakeLock?.addEventListener?.('release', () => {
+				wakeLock = null;
+			});
+		} catch {
+			if (focusMode) {
+				focusError = 'Screen wake lock could not be enabled. Focus Mode remains usable.';
+			}
+		} finally {
+			wakeLockPending = false;
+		}
+	}
+
+	async function releaseWakeLock() {
+		const lock = wakeLock;
+		wakeLock = null;
+		try {
+			await lock?.release?.();
+		} catch {
+			// A released/invalidated wake lock needs no further recovery.
+		}
+	}
+
+	async function onFullscreenChange() {
+		focusMode = !!document.fullscreenElement;
+		if (focusMode) await requestWakeLock();
+		else await releaseWakeLock();
+	}
+
+	async function toggleFocusMode() {
+		focusError = '';
+		if (document.fullscreenElement || focusMode) {
+			try {
+				if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+			} catch {
+				focusMode = !!document.fullscreenElement;
+				focusError = 'Focus Mode could not exit fullscreen. Use your browser fullscreen control to exit.';
+			}
+			return;
+		}
+		if (!document.documentElement.requestFullscreen) {
+			focusError = 'Fullscreen is not available in this browser. The session remains fully usable.';
+			return;
+		}
+		try {
+			await document.documentElement.requestFullscreen();
+		} catch {
+			focusMode = !!document.fullscreenElement;
+			focusError = 'Focus Mode could not enter fullscreen. The session remains fully usable.';
+		}
+	}
+
 	function convertValue(kind, raw) {
 		if (raw === '' || raw === null || raw === undefined) return 'Enter a number';
 		const value = Number(raw);
@@ -162,13 +500,13 @@
 
 	async function openTools() {
 		toolsOpen = true;
-		await tick();
+		await svelteTick();
 		toolsCloseButton?.focus();
 	}
 
 	async function closeTools() {
 		toolsOpen = false;
-		await tick();
+		await svelteTick();
 		toolsOpenButton?.focus();
 	}
 
@@ -197,13 +535,16 @@
 
 	async function revealHint() {
 		if (!item || item.answered || session?.preset !== 'tutor' || hintBusy || hintText) return;
+		const itemIndex = current;
 		hintBusy = true;
 		hintError = '';
 		try {
-			const response = await Api.hint(sid, current);
-			hintText = response.hint;
+			const response = await Api.hint(sid, itemIndex);
+			if (current === itemIndex) hintText = response.hint;
 		} catch (err) {
-			hintError = err instanceof ApiError ? err.message : 'Could not load the hint.';
+			if (current === itemIndex) {
+				hintError = err instanceof ApiError ? err.message : 'Could not load the hint.';
+			}
 		} finally {
 			hintBusy = false;
 		}
@@ -228,10 +569,18 @@
 			if (session.status === 'submitted' && session.result) {
 				result = session.result;
 				current = 0;
+				clearWorkspaceState();
 				return;
 			}
 			const firstUnanswered = session.items.findIndex((i) => !i.answered);
 			current = firstUnanswered === -1 ? session.items.length - 1 : firstUnanswered;
+			if (!restoreWorkspaceState()) {
+				selected = null;
+				draftSelections = {};
+				eliminatedOptions = {};
+				visited = [current];
+				saveWorkspaceState();
+			}
 			if (session.deadline && session.server_now) {
 				clockSkewMs = new Date(session.server_now).getTime() - Date.now();
 				tick();
@@ -244,16 +593,17 @@
 
 	async function answer(chosen) {
 		if (!item || item.answered || busy) return;
+		const itemIndex = current;
 		busy = true;
 		error = '';
 		try {
 			const res = await Api.answer(sid, {
-				item_index: current,
+				item_index: itemIndex,
 				chosen_index: chosen,
-				idempotency_key: idempotencyKey(current)
+				idempotency_key: idempotencyKey(itemIndex)
 			});
-			session.items[current] = {
-				...session.items[current],
+			session.items[itemIndex] = {
+				...session.items[itemIndex],
 				answered: true,
 				chosen_index: chosen,
 				correct: res.correct,
@@ -262,7 +612,14 @@
 				key_learning_point: res.key_learning_point,
 				exam_tip: res.exam_tip
 			};
-			selected = null;
+			if (current === itemIndex) selected = null;
+			const drafts = { ...draftSelections };
+			delete drafts[itemIndex];
+			draftSelections = drafts;
+			const eliminated = { ...eliminatedOptions };
+			delete eliminated[itemIndex];
+			eliminatedOptions = eliminated;
+			saveWorkspaceState();
 		} catch (err) {
 			if (err instanceof ApiError && err.code === 'session_expired') {
 				// Server deadline passed: submit what exists (auto-submit, §11.6).
@@ -289,6 +646,7 @@
 				if (session) session.status = 'submitted';
 			}
 			current = 0;
+			clearWorkspaceState();
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Could not submit the session.';
 		} finally {
@@ -298,6 +656,7 @@
 
 	function startReview() {
 		current = 0;
+		selected = null;
 		reviewing = true;
 		actionError = '';
 	}
@@ -335,25 +694,30 @@
 
 	async function submitReport() {
 		if (reportBusy || !item) return;
+		const itemIndex = current;
+		const questionVersionId = item.question_version_id;
 		reportBusy = true;
 		reportError = '';
 		try {
-			const res = await Api.reportQuestion(item.question_version_id, {
+			const res = await Api.reportQuestion(questionVersionId, {
 				category: reportCategory,
 				note: reportNote.trim() ? reportNote.trim() : undefined
 			});
-			session.items[current] = {
-				...session.items[current],
+			session.items[itemIndex] = {
+				...session.items[itemIndex],
 				report_status: res.quarantined ? 'quarantined' : 'open'
 			};
-			reportDone = res.quarantined
-				? 'Thanks — enough learners flagged this, so it is out of rotation pending review.'
-				: 'Thanks — your report is recorded for editorial review.';
-			reportOpen = false;
-			reportNote = '';
+			if (current === itemIndex) {
+				reportDone = res.quarantined
+					? 'Thanks — enough learners flagged this, so it is out of rotation pending review.'
+					: 'Thanks — your report is recorded for editorial review.';
+				reportOpen = false;
+				reportNote = '';
+			}
 		} catch (err) {
-			reportError =
-				err instanceof ApiError ? err.message : 'Could not send the report.';
+			if (current === itemIndex) {
+				reportError = err instanceof ApiError ? err.message : 'Could not send the report.';
+			}
 		} finally {
 			reportBusy = false;
 		}
@@ -361,13 +725,18 @@
 
 	async function toggleMark() {
 		if (!item || markBusy) return;
+		const itemIndex = current;
+		const questionVersionId = item.question_version_id;
+		const marked = item.marked;
 		markBusy = true;
 		markError = '';
 		try {
-			const next = await Api.setQuestionMark(item.question_version_id, !item.marked);
-			session.items[current] = { ...session.items[current], marked: next.marked };
+			const next = await Api.setQuestionMark(questionVersionId, !marked);
+			session.items[itemIndex] = { ...session.items[itemIndex], marked: next.marked };
 		} catch (err) {
-			markError = err instanceof ApiError ? err.message : 'Could not update this question mark.';
+			if (current === itemIndex) {
+				markError = err instanceof ApiError ? err.message : 'Could not update this question mark.';
+			}
 		} finally {
 			markBusy = false;
 		}
@@ -391,27 +760,56 @@
 			closeTools();
 			return;
 		}
-		if (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName)) return;
+		if (event.key === 'Escape' && navigatorOpen) {
+			navigatorOpen = false;
+			return;
+		}
+		if (
+			['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName) ||
+			event.target?.isContentEditable
+		) {
+			return;
+		}
 		if (reviewing) {
-			if (
-				(event.key === 'Enter' || event.key === 'n' || event.key === 'N') &&
-				current < session.items.length - 1
-			) {
-				current += 1;
+			if (event.key === 'Enter' || event.key === 'n' || event.key === 'N' || event.key === 'ArrowRight') {
+				event.preventDefault();
+				nextQuestion();
+			} else if (event.key === 'p' || event.key === 'P' || event.key === 'ArrowLeft') {
+				event.preventDefault();
+				previousQuestion();
 			}
 			return;
 		}
-		const letter = 'abcdefghij'.indexOf(event.key.toLowerCase());
-		if (event.key.toLowerCase() === 'h' && session.preset === 'tutor' && !item.answered) {
+		const lower = event.key.toLowerCase();
+		if (lower === 'f') {
+			event.preventDefault();
+			toggleMark();
+			return;
+		}
+		if (lower === 'e' && !item.answered && session.status === 'open') {
+			event.preventDefault();
+			eliminationMode = !eliminationMode;
+			return;
+		}
+		const letter = 'abcdefghij'.indexOf(lower);
+		if (lower === 'h' && session.preset === 'tutor' && !item.answered) {
 			event.preventDefault();
 			revealHint();
+		} else if (event.key === 'ArrowRight' || lower === 'n') {
+			event.preventDefault();
+			nextQuestion();
+		} else if (event.key === 'ArrowLeft' || lower === 'p') {
+			event.preventDefault();
+			previousQuestion();
 		} else if (letter >= 0 && !item.answered && letter < item.options.length) {
-			selected = letter;
-		} else if (event.key === 'Enter' || event.key === 'n' || event.key === 'N') {
+			event.preventDefault();
+			if (eliminationMode) toggleElimination(letter);
+			else setDraftSelection(letter);
+		} else if (event.key === 'Enter') {
 			if (!item.answered && selected !== null) {
 				answer(selected);
 			} else if (item.answered && current < session.items.length - 1) {
-				current += 1;
+				nextQuestion();
 			} else if (item.answered && allAnswered) {
 				submitSession();
 			}
@@ -431,6 +829,12 @@
 	onMount(() => {
 		restoreTextSize();
 		load();
+		document.addEventListener('fullscreenchange', onFullscreenChange);
+		return () => {
+			document.removeEventListener('fullscreenchange', onFullscreenChange);
+			cancelOptionLongPress();
+			void releaseWakeLock();
+		};
 	});
 </script>
 
@@ -526,6 +930,16 @@
 	<div class="session-top-actions">
 		<button
 			class="btn"
+			class:primary={focusMode}
+			type="button"
+			aria-pressed={focusMode}
+			data-testid="focus-mode"
+			onclick={toggleFocusMode}
+		>
+			{focusMode ? 'Exit Focus Mode' : 'Focus Mode'}
+		</button>
+		<button
+			class="btn"
 			type="button"
 			bind:this={toolsOpenButton}
 			aria-expanded={toolsOpen}
@@ -536,6 +950,14 @@
 			Tools
 		</button>
 	</div>
+	{#if focusMode}
+		<p class="focus-note muted" data-testid="focus-mode-note">
+			Focus Mode is active. Consider enabling Do Not Disturb on your device if you want fewer interruptions.
+		</p>
+	{/if}
+	{#if focusError}
+		<p class="error-text" role="status">{focusError}</p>
+	{/if}
 	{#if !reviewing && autoSubmitWarning()}
 		<p class="deadline-warning" role="status" data-testid="auto-submit-warning">
 			{autoSubmitWarning()}
@@ -553,7 +975,12 @@
 	{/if}
 
 	{#if item}
-		<div class={`card session-card text-${textSize}`}>
+		<div
+			class={`card session-card text-${textSize}`}
+			data-testid="question-swipe-surface"
+			ontouchstart={startQuestionTouch}
+			ontouchend={endQuestionTouch}
+		>
 			<div class="question-actions">
 				<button
 					class="btn"
@@ -567,6 +994,18 @@
 				>
 					{markBusy ? 'Saving…' : item.marked ? 'Marked' : 'Mark question'}
 				</button>
+				{#if !reviewing && session.status === 'open' && !item.answered}
+					<button
+						class="btn"
+						class:primary={eliminationMode}
+						type="button"
+						aria-pressed={eliminationMode}
+						data-testid="elimination-mode"
+						onclick={() => (eliminationMode = !eliminationMode)}
+					>
+						{eliminationMode ? 'Elimination on' : 'Eliminate options'}
+					</button>
+				{/if}
 				{#if !reviewing && session.preset === 'tutor' && session.status === 'open' && !item.answered}
 					<button
 						class="btn"
@@ -599,16 +1038,21 @@
 					<button
 						type="button"
 						class="option {(item.answered || reviewing || session.status === 'submitted') && i === item.correct_index ? 'correct' : ''}
-							{item.answered && item.chosen_index === i && item.correct === false ? 'incorrect' : ''}"
+							{item.answered && item.chosen_index === i && item.correct === false ? 'incorrect' : ''}
+							{isEliminated(current, i) ? 'eliminated' : ''}"
 						aria-pressed={!item.answered && selected === i}
+						aria-label={`${letterLabel(i)}. ${option.text}${isEliminated(current, i) ? ', eliminated' : ''}`}
 						disabled={item.answered || busy || reviewing || session.status !== 'open'}
 						data-testid={`option-${i}`}
-						onclick={() => {
-							if (!item.answered) selected = selected === i ? null : i;
-						}}
+						data-eliminated={isEliminated(current, i) ? 'true' : 'false'}
+						onclick={() => handleOptionClick(i)}
+						ontouchstart={(event) => startOptionTouch(event, i)}
+						ontouchmove={moveOptionTouch}
+						ontouchend={(event) => endOptionTouch(event, i)}
+						ontouchcancel={cancelOptionTouch}
 					>
 						<span class="key">{letterLabel(i)}</span>
-						<span>{option.text}</span>
+						<span class="option-text">{option.text}</span>
 					</button>
 				{/each}
 			</div>
@@ -750,16 +1194,7 @@
 					</div>
 				{/if}
 
-				{#if current < session.items.length - 1}
-					<button
-						class="btn primary"
-						type="button"
-						data-testid="next"
-						onclick={() => (current += 1)}
-					>
-						Next
-					</button>
-				{:else if reviewing}
+				{#if reviewing && current === session.items.length - 1}
 					<button
 						class="btn"
 						type="button"
@@ -768,7 +1203,7 @@
 					>
 						Back to results
 					</button>
-				{:else if allAnswered}
+				{:else if !reviewing && current === session.items.length - 1 && allAnswered}
 					<button
 						class="btn primary"
 						type="button"
@@ -779,7 +1214,7 @@
 					>
 						{submitting ? 'Submitting…' : 'Submit session'}
 					</button>
-				{:else}
+				{:else if !reviewing && current === session.items.length - 1}
 					<button
 						class="btn"
 						type="button"
@@ -792,6 +1227,108 @@
 				{/if}
 			{/if}
 		</div>
+
+		<div class="session-bottom-bar" aria-label="Question navigation">
+			<button class="btn" type="button" disabled={current === 0} data-testid="previous" onclick={previousQuestion}>
+				Previous
+			</button>
+			<button
+				class="btn"
+				class:primary={navigatorOpen}
+				type="button"
+				aria-expanded={navigatorOpen}
+				aria-controls="question-navigator"
+				data-testid="navigator-toggle"
+				onclick={() => (navigatorOpen = !navigatorOpen)}
+			>
+				Navigator
+			</button>
+			<button
+				class="btn primary"
+				type="button"
+				disabled={current === session.items.length - 1}
+				data-testid="next"
+				onclick={nextQuestion}
+			>
+				Next
+			</button>
+		</div>
+
+		<div class="submission-status" data-testid="submission-status">
+			<span><strong>{answeredCount}</strong> answered</span>
+			<span><strong>{unansweredCount}</strong> unanswered</span>
+			<span><strong>{markedCount}</strong> marked</span>
+			{#if unansweredCount > 0}
+				<button class="linklike" type="button" data-testid="first-unanswered" onclick={firstUnansweredQuestion}>
+					Go to first unanswered
+				</button>
+			{/if}
+		</div>
+
+		{#if navigatorOpen}
+			<section id="question-navigator" class="navigator-panel" aria-label="Question navigator">
+				<div class="navigator-heading">
+					<div>
+						<h2>Question navigator</h2>
+						<p class="muted">Marked questions keep their star independently of answer status.</p>
+					</div>
+					<div class="navigator-filters" aria-label="Navigator filters">
+						<button
+							class="btn"
+							class:primary={navigatorFilter === 'all'}
+							type="button"
+							aria-pressed={navigatorFilter === 'all'}
+							data-testid="navigator-filter-all"
+							onclick={() => (navigatorFilter = 'all')}
+						>
+							All
+						</button>
+						<button
+							class="btn"
+							class:primary={navigatorFilter === 'marked'}
+							type="button"
+							aria-pressed={navigatorFilter === 'marked'}
+							data-testid="navigator-filter-marked"
+							onclick={() => (navigatorFilter = 'marked')}
+						>
+							Marked
+						</button>
+						<button
+							class="btn"
+							class:primary={navigatorFilter === 'unanswered'}
+							type="button"
+							aria-pressed={navigatorFilter === 'unanswered'}
+							data-testid="navigator-filter-unanswered"
+							onclick={() => (navigatorFilter = 'unanswered')}
+						>
+							Unanswered
+						</button>
+					</div>
+				</div>
+				<div class="navigator-grid">
+					{#each navigatorIndices() as index (index)}
+						<button
+							class={`navigator-question state-${questionState(index)}`}
+							type="button"
+							data-testid={`navigator-question-${index}`}
+							data-state={questionState(index)}
+							aria-current={index === current ? 'step' : undefined}
+							aria-label={`Question ${index + 1}, ${questionStateLabel(index)}${session.items[index].marked ? ', marked' : ''}`}
+							onclick={() => goToQuestion(index)}
+						>
+							<span class="navigator-state-icon" aria-hidden="true">{questionStateIcon(index)}</span>
+							<span>{index + 1}</span>
+							{#if session.items[index].marked}
+								<span class="navigator-mark" aria-hidden="true">★</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+				{#if navigatorIndices().length === 0}
+					<p class="muted navigator-empty">No questions match this filter.</p>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 
 	{#if toolsOpen}
@@ -931,6 +1468,13 @@
 		margin-bottom: var(--space-sm);
 	}
 
+	.focus-note {
+		margin: 0 0 var(--space-md);
+		padding: var(--space-sm) var(--space-md);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+	}
+
 	.question-actions {
 		justify-content: space-between;
 		margin-bottom: var(--space-md);
@@ -981,6 +1525,133 @@
 
 	.session-card :global(.option) {
 		font-size: inherit;
+	}
+
+	.session-card :global(.option.eliminated) {
+		border-style: dashed;
+		opacity: 0.68;
+	}
+
+	.session-card :global(.option.eliminated) .option-text {
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+	}
+
+	.session-bottom-bar,
+	.submission-status,
+	.navigator-heading,
+	.navigator-filters {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		flex-wrap: wrap;
+	}
+
+	.session-bottom-bar {
+		position: sticky;
+		z-index: 10;
+		bottom: calc(var(--space-sm) + env(safe-area-inset-bottom));
+		justify-content: space-between;
+		padding: var(--space-sm);
+		margin-bottom: var(--space-md);
+		background: var(--color-surface);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+	}
+
+	.session-bottom-bar .btn {
+		flex: 1 1 0;
+		min-width: 0;
+		padding-inline: var(--space-sm);
+	}
+
+	.submission-status {
+		margin-bottom: var(--space-md);
+		color: var(--color-text-secondary);
+	}
+
+	.submission-status span {
+		white-space: nowrap;
+	}
+
+	.navigator-panel {
+		margin-bottom: var(--space-lg);
+		padding: var(--space-lg);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-card);
+		background: var(--color-surface);
+	}
+
+	.navigator-heading {
+		justify-content: space-between;
+		align-items: flex-start;
+		margin-bottom: var(--space-md);
+	}
+
+	.navigator-heading h2,
+	.navigator-heading p,
+	.navigator-empty {
+		margin: 0;
+	}
+
+	.navigator-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+		gap: var(--space-sm);
+	}
+
+	.navigator-question {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-xs);
+		min-height: 48px;
+		padding: var(--space-sm);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+		background: var(--color-canvas);
+		color: var(--color-text-secondary);
+		font: 700 var(--text-body) / 1 var(--font-body);
+		cursor: pointer;
+	}
+
+	.navigator-question:hover,
+	.navigator-question:focus-visible {
+		border-color: var(--color-accent);
+	}
+
+	.navigator-question:focus-visible {
+		outline: 2px solid var(--color-focus);
+		outline-offset: 2px;
+	}
+
+	.navigator-question.state-current {
+		border-color: var(--color-accent);
+		color: var(--color-text-primary);
+		background: var(--color-surface-elevated);
+	}
+
+	.navigator-question.state-answered {
+		border-color: var(--color-success);
+		color: var(--color-success);
+	}
+
+	.navigator-question.state-unanswered {
+		border-color: var(--color-warning);
+		color: var(--color-warning);
+	}
+
+	.navigator-mark {
+		position: absolute;
+		top: 2px;
+		right: 4px;
+		color: var(--color-warning);
+		font-size: var(--text-sm);
+	}
+
+	.navigator-empty {
+		padding-top: var(--space-sm);
 	}
 
 	.session-tools {
@@ -1061,6 +1732,10 @@
 	}
 
 	@media (min-width: 768px) {
+		.session-bottom-bar {
+			padding-inline: var(--space-md);
+		}
+
 		.session-tools {
 			left: auto;
 			top: 0;
