@@ -3000,3 +3000,154 @@ async fn migration_up_down_up_is_reversible() {
         "schema present after up-down-up"
     );
 }
+
+#[tokio::test]
+async fn core09_guest_trial_is_bounded_and_migrates_answered_progress_on_signup() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    seed::seed(&state.pool).await.expect("seed");
+    let app = router(state.clone());
+
+    let (status, trial) = call(
+        app.clone(),
+        request("POST", "/v1/guest-trial/start", None, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trial}");
+    let trial_token = trial["trial_token"].as_str().expect("guest trial token");
+    let items = trial["items"].as_array().expect("guest trial items");
+    assert!(!items.is_empty() && items.len() <= 3, "{trial}");
+    for item in items {
+        assert!(
+            item["correct_index"].is_null(),
+            "pre-answer key leaked: {item}"
+        );
+        assert!(
+            item["key_learning_point"].is_null(),
+            "pre-answer rationale leaked: {item}"
+        );
+        assert!(
+            item["exam_tip"].is_null(),
+            "pre-answer exam tip leaked: {item}"
+        );
+        assert!(
+            item["options"]
+                .as_array()
+                .expect("options")
+                .iter()
+                .all(|option| option.get("rationale").is_none()),
+            "pre-answer option rationale leaked: {item}"
+        );
+    }
+
+    let answer_body = serde_json::json!({
+        "trial_token": trial_token,
+        "item_index": 0,
+        "chosen_index": 0,
+        "idempotency_key": "core09-first-answer"
+    });
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/guest-trial/answer",
+            None,
+            Some(answer_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["already_recorded"], false);
+    assert!(answer["correct_index"].is_number(), "{answer}");
+    assert!(
+        answer["options"]
+            .as_array()
+            .expect("answered options")
+            .iter()
+            .all(|option| option["rationale"].is_string()),
+        "answered feedback must include option rationales: {answer}"
+    );
+
+    let (status, replay) = call(
+        app.clone(),
+        request("POST", "/v1/guest-trial/answer", None, Some(answer_body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["already_recorded"], true);
+
+    let (status, second_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/guest-trial/answer",
+            None,
+            Some(serde_json::json!({
+                "trial_token": trial_token,
+                "item_index": 0,
+                "chosen_index": 1,
+                "idempotency_key": "core09-second-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{second_answer}");
+
+    let (status, outside_sample) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/guest-trial/answer",
+            None,
+            Some(serde_json::json!({
+                "trial_token": trial_token,
+                "item_index": 3,
+                "chosen_index": 0,
+                "idempotency_key": "core09-outside-sample"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{outside_sample}");
+
+    let email = format!("guest-convert-{}@example.test", Uuid::new_v4());
+    let (status, registered) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": email,
+                "password": "correct horse",
+                "guest_trial_token": trial_token
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{registered}");
+    assert_eq!(registered["guest_answers_migrated"], 1);
+    let user_id = Uuid::parse_str(registered["user_id"].as_str().unwrap()).unwrap();
+    let migrated: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attempts WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("migrated guest attempt count");
+    assert_eq!(migrated, 1);
+
+    let (status, reused) = call(
+        app,
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": format!("guest-reuse-{}@example.test", Uuid::new_v4()),
+                "password": "correct horse",
+                "guest_trial_token": trial_token
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{reused}");
+}
