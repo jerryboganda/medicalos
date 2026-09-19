@@ -172,7 +172,10 @@ async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
     assert_eq!(initial["version"], 0);
     assert!(initial["daily_minutes"].is_null());
     assert!(initial["exam_date"].is_null());
-    assert_eq!(initial["protected_commitments"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        initial["protected_commitments"].as_array().unwrap().len(),
+        0
+    );
     assert_eq!(initial["can_undo"], false);
 
     let original = serde_json::json!({
