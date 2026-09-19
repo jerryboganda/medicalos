@@ -27,3 +27,15 @@ _Avoid_: Tenant role, super-admin membership
 **Audit event**:
 An append-only record of a privileged action, including actor, tenant scope, subject, aggregate, timestamps, correlation identifier, privacy scope, and payload.
 _Avoid_: Activity log, mutable history
+
+**Concept identity**:
+A stable learning entity that remains the same even when navigation placement or authored resources change.
+_Avoid_: Chapter, curriculum node, content item
+
+**Concept version**:
+An immutable numbered definition of a concept identity used to anchor learning content and evidence to a specific published meaning.
+_Avoid_: Chapter version, curriculum version
+
+**Curriculum node**:
+A navigational and reporting placement in an exam taxonomy that can map to one or more concept versions without becoming the learning source of truth.
+_Avoid_: Concept, learning identity

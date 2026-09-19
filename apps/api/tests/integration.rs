@@ -638,6 +638,42 @@ async fn core08_notification_preferences_push_registration_and_empty_inbox() {
 }
 
 #[tokio::test]
+async fn core10_seed_maps_taxonomy_and_questions_to_versioned_concepts() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    seed::seed(&state.pool)
+        .await
+        .expect("seed synthetic content");
+
+    let chapter_mapping = sqlx::query(
+        "SELECT COUNT(*) AS n, COUNT(DISTINCT concept_version_id) AS concepts
+         FROM curriculum_node_concepts cnc
+         JOIN concept_versions cv ON cv.id = cnc.concept_version_id
+         JOIN curriculum_nodes cn ON cn.id = cnc.node_id
+         WHERE cn.kind = 'chapter' AND cv.status = 'published' AND cv.version = 1",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("seeded chapters map to published concept versions");
+    assert_eq!(chapter_mapping.get::<i64, _>("n"), 2);
+    assert_eq!(chapter_mapping.get::<i64, _>("concepts"), 2);
+
+    let question_mapping = sqlx::query(
+        "SELECT COUNT(*) AS n
+         FROM question_version_concepts qvc
+         JOIN question_versions qv ON qv.id = qvc.question_version_id
+         JOIN curriculum_node_concepts cnc
+           ON cnc.node_id = qv.chapter_id
+          AND cnc.concept_version_id = qvc.concept_version_id
+         WHERE qvc.relation = 'primary'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("seeded questions map to their chapter concept version");
+    assert_eq!(question_mapping.get::<i64, _>("n"), 4);
+}
+
+#[tokio::test]
 async fn authenticated_user_has_explicit_personal_and_tenant_contexts() {
     let _g = LOCK.lock().await;
     let state = setup().await;
