@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, blueprint, time_limit_seconds FROM mocks WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "blueprint",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "time_limit_seconds",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c288e281a870567c0fb025877d863d1ebba7f8160fbfba155170d2933c3ecd17"
+}

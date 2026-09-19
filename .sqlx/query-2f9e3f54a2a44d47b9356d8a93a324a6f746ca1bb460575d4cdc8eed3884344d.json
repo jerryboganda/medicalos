@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mocks\n           (id, title, exam_id, blueprint, time_limit_seconds, pass_mark_percent, attempts_allowed)\n         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Jsonb",
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f9e3f54a2a44d47b9356d8a93a324a6f746ca1bb460575d4cdc8eed3884344d"
+}

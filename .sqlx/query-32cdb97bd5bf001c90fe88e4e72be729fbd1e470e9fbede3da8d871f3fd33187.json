@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mock_attempts\n               (id, mock_id, user_id, session_id, score_percent, passed)\n             VALUES ($1, $2, $3, $4, $5, $6)\n             ON CONFLICT (mock_id, user_id, session_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "32cdb97bd5bf001c90fe88e4e72be729fbd1e470e9fbede3da8d871f3fd33187"
+}

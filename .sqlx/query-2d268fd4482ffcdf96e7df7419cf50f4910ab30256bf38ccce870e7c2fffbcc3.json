@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline\n         FROM practice_sessions\n         WHERE id = $1 AND user_id = $2",
+  "query": "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id\n         FROM practice_sessions\n         WHERE id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "deadline",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "mock_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -46,8 +51,9 @@
       true,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "9f234bffbcfb1a45f0cfa8bf4ac2332c611b2cd1cf3c63a65128ca3bbe4bde1b"
+  "hash": "2d268fd4482ffcdf96e7df7419cf50f4910ab30256bf38ccce870e7c2fffbcc3"
 }

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO practice_sessions\n           (id, user_id, preset, mock_id, time_limit_seconds, deadline)\n         VALUES ($1, $2, 'mock', $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "009577905d16b4ccc09c3eccbf8d771de6cffe72a87c1d257b89764e548d8cb6"
+}

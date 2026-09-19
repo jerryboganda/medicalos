@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id,\n                  COALESCE(COUNT(*), 0) AS \"attempts!\",\n                  COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS \"correct!\"\n           FROM session_items si\n           JOIN question_versions qv ON qv.id = si.question_version_id\n           LEFT JOIN attempts a\n             ON a.question_version_id = si.question_version_id\n            AND a.correct IS NOT NULL\n           WHERE si.session_id = $1\n           GROUP BY qv.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "cdde6846c80bf84a43437088b6bcedb4e96999db0b90cff17b479b1ae7b485fa"
+}

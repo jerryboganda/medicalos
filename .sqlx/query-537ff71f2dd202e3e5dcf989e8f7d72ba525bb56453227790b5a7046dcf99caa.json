@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT chapter_id, source_session_id, status FROM practice_sessions\n         WHERE id = $1 AND user_id = $2",
+  "query": "SELECT chapter_id, source_session_id, status, preset, mock_id FROM practice_sessions\n         WHERE id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,16 @@
         "ordinal": 2,
         "name": "status",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "preset",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "mock_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
@@ -28,8 +38,10 @@
     "nullable": [
       true,
       true,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "bfbe44c741f02be43e37865ad5f8b8ebd764ca8a9897e83b823941d9c1f3cf6b"
+  "hash": "537ff71f2dd202e3e5dcf989e8f7d72ba525bb56453227790b5a7046dcf99caa"
 }

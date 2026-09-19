@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2",
+  "query": "SELECT status, deadline, preset FROM practice_sessions WHERE id = $1 AND user_id = $2",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,11 @@
         "ordinal": 1,
         "name": "deadline",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "preset",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -22,8 +27,9 @@
     },
     "nullable": [
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "a95d97560b514c85319068635bd0ce7d5324454437bd87213d0f8cd606c29842"
+  "hash": "fc8b663abcbe52dd327569bbc3fabefe7fdc81e8f6244ccb7a65c4f80c636792"
 }

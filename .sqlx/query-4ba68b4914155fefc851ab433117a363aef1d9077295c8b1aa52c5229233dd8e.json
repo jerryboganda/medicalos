@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, vignette, lead_in, difficulty, options\n                   FROM question_versions\n                   WHERE status = 'published' AND chapter_id = $1\n                   ORDER BY random() LIMIT $2",
+  "query": "SELECT id, vignette, lead_in, difficulty, options\n               FROM question_versions\n               WHERE status = 'published' AND chapter_id = $1\n               ORDER BY random() LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -43,5 +43,5 @@
       false
     ]
   },
-  "hash": "be5ddb355cc4d6b3c7fa2f2647ac063efedbbcc7e9f826b7fb105b327c48c30d"
+  "hash": "4ba68b4914155fefc851ab433117a363aef1d9077295c8b1aa52c5229233dd8e"
 }
