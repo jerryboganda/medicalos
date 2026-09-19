@@ -1,5 +1,12 @@
 [
   {
+    "date": "2026-09-19",
+    "macrostructure": "App Shell (existing Today learner workspace)",
+    "theme": "Midnight-equivalent (owner-locked design tokens)",
+    "enrichment": "none",
+    "brief": "CORE-02 compact learner goal summary and editor on Today"
+  },
+  {
     "date": "2026-09-18",
     "macrostructure": "App Shell (owner §7.4: single-column mobile, side-rail desktop; no marketing hero/footer)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens: dark paper · violet accent · sans display)",

@@ -85,11 +85,19 @@ test('learner goals: configure, revise, and undo from Today', async ({ page }) =
 	await expect(goals).toContainText('45 min/day');
 	await expect(goals).toContainText('Hospital teaching day');
 
+	// Persistence proof: reload forces a fresh GET through the real API/database path.
+	await page.reload();
+	await expect(page.getByTestId('goal-summary')).toContainText('45 min/day');
+	await expect(page.getByTestId('goal-summary')).toContainText('Hospital teaching day');
+	await page.getByTestId('goals-editor-toggle').click();
+	await expect(page.getByTestId('goals-daily-minutes')).toHaveValue('45');
+
 	await page.getByTestId('goals-daily-minutes').fill('60');
+	await expect(page.getByTestId('goals-status')).toHaveText('');
 	await page.getByTestId('save-goals').click();
-	await expect(goals).toContainText('60 min/day');
+	await expect(page.getByTestId('goal-summary')).toContainText('60 min/day');
 
 	await page.getByTestId('undo-goals').click();
-	await expect(goals).toContainText('45 min/day');
+	await expect(page.getByTestId('goal-summary')).toContainText('45 min/day');
 	await expect(page.getByTestId('goals-daily-minutes')).toHaveValue('45');
 });

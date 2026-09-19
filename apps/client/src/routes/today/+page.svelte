@@ -41,11 +41,17 @@
 	}
 
 	function addCommitment() {
+		goalsStatus = '';
 		goalCommitments = [...goalCommitments, { title: '', date: '' }];
 	}
 
 	function removeCommitment(index) {
+		goalsStatus = '';
 		goalCommitments = goalCommitments.filter((_, current) => current !== index);
+	}
+
+	function markGoalsDirty() {
+		if (!savingGoals && !undoingGoals) goalsStatus = '';
 	}
 
 	async function saveGoals() {
@@ -222,16 +228,20 @@
 					<span>Daily study target (minutes)</span>
 					<input
 						type="number"
-						min="1"
-						max="1440"
 						inputmode="numeric"
 						bind:value={goalsDailyMinutes}
+						oninput={markGoalsDirty}
 						data-testid="goals-daily-minutes"
 					/>
 				</label>
 				<label class="field">
 					<span>Exam date (optional)</span>
-					<input type="date" bind:value={goalsExamDate} data-testid="goals-exam-date" />
+					<input
+						type="date"
+						bind:value={goalsExamDate}
+						oninput={markGoalsDirty}
+						data-testid="goals-exam-date"
+					/>
 				</label>
 
 				<div class="commitments">
@@ -247,8 +257,8 @@
 								<span>Commitment {index + 1}</span>
 								<input
 									type="text"
-									maxlength="120"
 									bind:value={commitment.title}
+									oninput={markGoalsDirty}
 									data-testid={`commitment-title-${index}`}
 								/>
 							</label>
@@ -257,6 +267,7 @@
 								<input
 									type="date"
 									bind:value={commitment.date}
+									oninput={markGoalsDirty}
 									data-testid={`commitment-date-${index}`}
 								/>
 							</label>
@@ -387,6 +398,7 @@
 {/if}
 
 <style>
+	/* Hallmark · macrostructure: App Shell · tone: calm utilitarian · anchor hue: violet */
 	.goals-card {
 		display: grid;
 		gap: var(--space-md);

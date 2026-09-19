@@ -1,0 +1,2 @@
+/* Hallmark portable token export. The canonical declarations stay in the shared design-system package. */
+@import './packages/design-system/tokens.css';

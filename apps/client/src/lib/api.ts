@@ -87,6 +87,7 @@ export interface LearnerGoals {
 	daily_minutes: number | null;
 	exam_date: string | null;
 	protected_commitments: GoalCommitment[];
+	created_at: string | null;
 	can_undo: boolean;
 	changed: boolean;
 }

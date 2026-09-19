@@ -198,6 +198,10 @@ async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
     assert_eq!(saved["changed"], true);
     assert_eq!(saved["can_undo"], false);
     assert_eq!(saved["protected_commitments"][0]["title"], "Night shift");
+    let created_at = saved["created_at"]
+        .as_str()
+        .expect("saved goal snapshot exposes audit timestamp")
+        .to_owned();
 
     // Re-saving the same semantic snapshot must not manufacture history.
     let mut same = original.clone();
@@ -210,6 +214,7 @@ async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
     assert_eq!(status, StatusCode::OK, "{unchanged}");
     assert_eq!(unchanged["version"], 1);
     assert_eq!(unchanged["changed"], false);
+    assert_eq!(unchanged["created_at"], created_at);
 
     // Another learner still has an unconfigured profile.
     let (status, other) = call(
@@ -337,6 +342,28 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     let app = router(state.clone());
     seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
+
+    // CORE-02: learner-owned constraints exist before automatic planning and
+    // must survive both plan creation and evidence-driven plan revision.
+    let (status, goals) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({
+                "expected_version": 0,
+                "daily_minutes": 75,
+                "exam_date": "2099-08-31",
+                "protected_commitments": [
+                    {"title": "Protected exam course", "date": "2099-08-01"}
+                ]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goals}");
+    assert_eq!(goals["version"], 1);
 
     // Cold start: a modest plan exists before any evidence (AI-02).
     let (status, today) = call(
@@ -481,6 +508,20 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(revisions[0]["reason_code"], "incorrect_answers");
     assert!(!revisions[0]["undone"].as_bool().unwrap());
     let rid: Uuid = revisions[0]["id"].as_str().unwrap().parse().unwrap();
+
+    let (status, goals_after_revision) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goals_after_revision}");
+    assert_eq!(goals_after_revision["version"], 1);
+    assert_eq!(goals_after_revision["daily_minutes"], 75);
+    assert_eq!(goals_after_revision["exam_date"], "2099-08-31");
+    assert_eq!(
+        goals_after_revision["protected_commitments"][0]["title"],
+        "Protected exam course"
+    );
 
     // Learner state: honest sparse-data behavior (AI-02). One answered item,
     // one skip (skips are not evidence).
