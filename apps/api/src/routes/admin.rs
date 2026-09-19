@@ -652,7 +652,7 @@ pub async fn psychometric_screening(
     let mut p_percent: Option<i32> = None;
     if totals.attempts >= 20 {
         let p = totals.correct * 100 / totals.attempts;
-        p_percent = Some(p);
+        p_percent = Some(p as i32);
         if p < 20 {
             flags.push("too_hard");
         }

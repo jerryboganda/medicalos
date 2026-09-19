@@ -325,7 +325,7 @@ pub async fn submit_competition_entry(
         user.user_id,
         handle,
         serde_json::to_value(&req.answers).map_err(|_| ApiError::internal())?,
-        score,
+        score: score as f32,
         req.total_time_ms
     )
     .execute(&state.pool)

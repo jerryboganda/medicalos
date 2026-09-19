@@ -1,7 +1,7 @@
 //! QB-17 completion: session result actions — retry same session,
 //! practice-incorrect-only, and per-chapter weak-chapter targeting.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
