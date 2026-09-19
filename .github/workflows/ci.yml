@@ -117,6 +117,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
       VITE_API_BASE: http://127.0.0.1:8080
       MIN_TIME_LIMIT_SECONDS: "5"
+      EXPOSE_TEST_AUTH_TOKENS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

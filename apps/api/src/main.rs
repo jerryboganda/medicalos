@@ -26,11 +26,15 @@ async fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
+    // Raw auth challenges are an E2E/debug seam only. Release builds ignore
+    // the environment variable even if it is accidentally configured.
+    let expose_test_auth_tokens =
+        cfg!(debug_assertions) && std::env::var("EXPOSE_TEST_AUTH_TOKENS").as_deref() == Ok("1");
     let state = std::sync::Arc::new(api::state::AppState {
         pool,
         min_time_limit_seconds: min_time_limit,
         free_daily_questions,
-        expose_test_auth_tokens: false,
+        expose_test_auth_tokens,
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

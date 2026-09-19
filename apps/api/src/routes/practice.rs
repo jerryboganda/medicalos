@@ -43,32 +43,39 @@ struct PoolQuestion {
     options: serde_json::Value,
 }
 
-async fn insert_session(
-    pool: &sqlx::PgPool,
+struct SessionInsert<'a> {
     user_id: Uuid,
     takeover: bool,
-    preset: &str,
+    preset: &'a str,
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
     time_limit_seconds: Option<i32>,
-    pool_questions: &[PoolQuestion],
+    questions: &'a [PoolQuestion],
+}
+
+async fn insert_session(
+    pool: &sqlx::PgPool,
+    session: SessionInsert<'_>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Serialize session creation per learner so concurrent requests cannot
     // produce two open study sessions.
     let mut tx = pool.begin().await?;
-    sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    sqlx::query!(
+        "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        session.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let active = sqlx::query!(
         "SELECT id FROM practice_sessions
          WHERE user_id = $1 AND status = 'open'
          ORDER BY created_at DESC LIMIT 1",
-        user_id
+        session.user_id
     )
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(active) = active {
-        if !takeover {
+        if !session.takeover {
             return Err(ApiError::conflict_with_details(
                 "active_study_session",
                 "another study session is already active",
@@ -78,7 +85,7 @@ async fn insert_session(
         sqlx::query!(
             "UPDATE practice_sessions SET status = 'abandoned'
              WHERE user_id = $1 AND status = 'open'",
-            user_id
+            session.user_id
         )
         .execute(&mut *tx)
         .await?;
@@ -86,7 +93,8 @@ async fn insert_session(
 
     // EX-08: the server issues the deadline — the client never sets it, and
     // answer acceptance is checked against it server-side.
-    let deadline = time_limit_seconds
+    let deadline = session
+        .time_limit_seconds
         .map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit as i64));
     let sid = Uuid::new_v4();
     sqlx::query!(
@@ -94,17 +102,17 @@ async fn insert_session(
            (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds, deadline)
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
         sid,
-        user_id,
-        preset,
-        chapter_id,
-        source_session_id,
-        time_limit_seconds,
+        session.user_id,
+        session.preset,
+        session.chapter_id,
+        session.source_session_id,
+        session.time_limit_seconds,
         deadline
     )
     .execute(&mut *tx)
     .await?;
-    let mut items = Vec::with_capacity(pool_questions.len());
-    for (i, q) in pool_questions.iter().enumerate() {
+    let mut items = Vec::with_capacity(session.questions.len());
+    for (i, q) in session.questions.iter().enumerate() {
         let idx = i as i16;
         sqlx::query!(
             "INSERT INTO session_items (id, session_id, item_index, question_version_id)
@@ -229,13 +237,15 @@ pub async fn create_session(
                 .collect();
             insert_session(
                 &state.pool,
-                user.user_id,
-                req.takeover.unwrap_or(false),
-                &req.preset,
-                Some(chapter_id),
-                None,
-                time_limit_seconds,
-                &qs,
+                SessionInsert {
+                    user_id: user.user_id,
+                    takeover: req.takeover.unwrap_or(false),
+                    preset: &req.preset,
+                    chapter_id: Some(chapter_id),
+                    source_session_id: None,
+                    time_limit_seconds,
+                    questions: &qs,
+                },
             )
             .await
         }
@@ -305,13 +315,15 @@ pub async fn create_session(
                 .collect();
             insert_session(
                 &state.pool,
-                user.user_id,
-                req.takeover.unwrap_or(false),
-                "revision",
-                None,
-                Some(src),
-                None,
-                &qs,
+                SessionInsert {
+                    user_id: user.user_id,
+                    takeover: req.takeover.unwrap_or(false),
+                    preset: "revision",
+                    chapter_id: None,
+                    source_session_id: Some(src),
+                    time_limit_seconds: None,
+                    questions: &qs,
+                },
             )
             .await
         }

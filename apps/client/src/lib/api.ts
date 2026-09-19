@@ -1,4 +1,10 @@
-import { auth, clearToken } from './auth.svelte';
+import {
+	auth,
+	clearAuth,
+	getDeviceIdentity,
+	setAuthSession,
+	type AuthSession
+} from './auth.svelte';
 
 // Until ARCH-02 contract generation lands, this is the single hand-written
 // client for the endpoints the client app uses. It mirrors the API contract;
@@ -9,35 +15,80 @@ export class ApiError extends Error {
 	constructor(
 		public status: number,
 		public code: string,
-		message: string
+		message: string,
+		public details?: unknown
 	) {
 		super(message);
 	}
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+	if (!auth.refreshToken) return false;
+	if (refreshInFlight) return refreshInFlight;
+	refreshInFlight = (async () => {
+		try {
+			const res = await fetch(`${BASE}/v1/auth/refresh`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ refresh_token: auth.refreshToken })
+			});
+			if (!res.ok) {
+				clearAuth();
+				return false;
+			}
+			setAuthSession((await res.json()) as AuthSession);
+			return true;
+		} catch {
+			clearAuth();
+			return false;
+		} finally {
+			refreshInFlight = null;
+		}
+	})();
+	return refreshInFlight;
+}
+
+async function call<T>(
+	method: string,
+	path: string,
+	body?: unknown,
+	retryAfterRefresh = true
+): Promise<T> {
+	const protectedRequest = !path.startsWith('/v1/auth/');
+	const accessToken = protectedRequest ? auth.token : '';
+	const sentAccessToken = Boolean(accessToken);
 	const res = await fetch(`${BASE}${path}`, {
 		method,
 		headers: {
 			'content-type': 'application/json',
-			...(auth.token ? { authorization: `Bearer ${auth.token}` } : {})
+			...(sentAccessToken ? { authorization: `Bearer ${accessToken}` } : {})
 		},
 		body: body === undefined ? undefined : JSON.stringify(body)
 	});
-	if (!res.ok) {
-		if (res.status === 401) {
-			clearToken();
+	if (res.status === 401 && retryAfterRefresh && sentAccessToken) {
+		// Another request may already have rotated the session while this request
+		// was in flight. Reuse the newer access token instead of rotating again.
+		if (auth.token && auth.token !== accessToken) return call<T>(method, path, body, false);
+		if (auth.refreshToken && (await refreshSession())) {
+			return call<T>(method, path, body, false);
 		}
+	}
+	if (!res.ok) {
+		if (res.status === 401 && sentAccessToken) clearAuth();
 		let code = 'error';
 		let message = `Request failed (${res.status})`;
+		let details: unknown;
 		try {
 			const parsed = await res.json();
 			code = parsed?.error?.code ?? code;
 			message = parsed?.error?.message ?? message;
+			details = parsed?.error?.details;
 		} catch {
 			/* non-json error body */
 		}
-		throw new ApiError(res.status, code, message);
+		throw new ApiError(res.status, code, message, details);
 	}
 	return (await res.json()) as T;
 }
@@ -137,11 +188,46 @@ export interface SubmitResult {
 	score: number;
 }
 
+export interface DeviceSession {
+	session_id: string;
+	device_id: string;
+	device_name: string;
+	created_at: string;
+	last_seen_at: string;
+	expires_at: string;
+	refresh_expires_at: string;
+	current: boolean;
+}
+
 export const Api = {
 	register: (email: string, password: string) =>
-		call<{ user_id: string }>('POST', '/v1/auth/register', { email, password }),
-	login: (email: string, password: string) =>
-		call<{ token: string }>('POST', '/v1/auth/login', { email, password }),
+		call<{ user_id: string; verification_required: boolean; verification_token?: string }>(
+			'POST',
+			'/v1/auth/register',
+			{ email, password }
+		),
+	verifyEmail: (token: string) =>
+		call<{ verified: boolean }>('POST', '/v1/auth/verify-email', { token }),
+	login: (email: string, password: string) => {
+		const { deviceId, deviceName } = getDeviceIdentity();
+		return call<AuthSession>('POST', '/v1/auth/login', {
+			email,
+			password,
+			device_id: deviceId,
+			device_name: deviceName
+		});
+	},
+	forgotPassword: (email: string) =>
+		call<{ accepted: boolean; reset_token?: string }>('POST', '/v1/auth/forgot-password', {
+			email
+		}),
+	resetPassword: (token: string, password: string) =>
+		call<{ reset: boolean }>('POST', '/v1/auth/reset-password', { token, password }),
+	sessions: () => call<{ sessions: DeviceSession[] }>('GET', '/v1/me/sessions'),
+	signOutOthers: () => call<{ revoked: number }>('POST', '/v1/me/sessions/sign-out-others'),
+	logout: () => call<{ signed_out: boolean }>('POST', '/v1/me/sessions/logout'),
+	requestAccountDeletion: (password: string) =>
+		call<{ status: 'pending' }>('POST', '/v1/me/account/deletion', { password }),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	goals: () => call<LearnerGoals>('GET', '/v1/me/goals'),
 	updateGoals: (body: {
@@ -158,6 +244,7 @@ export const Api = {
 		question_count?: number;
 		source_session_id?: string;
 		time_limit_seconds?: number;
+		takeover?: boolean;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
 	answer: (

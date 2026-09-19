@@ -9,6 +9,7 @@
 	let loading = $state(true);
 	let error = $state('');
 	let startingTask = $state('');
+	let pendingTakeover = $state(null);
 	let undoing = $state('');
 	let goals = $state(null);
 	let goalsLoading = $state(true);
@@ -111,45 +112,59 @@
 		}
 	}
 
-	async function startTask(task) {
+	async function openSession(body, busyKey) {
 		if (startingTask) return;
-		startingTask = task.id;
+		startingTask = busyKey;
 		error = '';
+		pendingTakeover = null;
 		try {
-			const body =
-				task.kind === 'revision'
-					? { preset: 'revision', source_session_id: task.source_session_id }
-					: { preset: 'tutor', chapter_id: task.chapter_id, question_count: 10 };
 			const { session_id } = await Api.createSession(body);
 			goto(`${base}/session/${session_id}`);
 		} catch (err) {
-			error =
-				err instanceof ApiError
-					? err.message
-					: 'Could not start the session. Try again.';
+			if (err instanceof ApiError && err.code === 'active_study_session') {
+				pendingTakeover = { body, busyKey };
+				error =
+					'Another study session is already active. Taking over will end that open session and start this one.';
+			} else {
+				error = err instanceof ApiError ? err.message : 'Could not start the session. Try again.';
+			}
 			startingTask = '';
 		}
 	}
 
-	async function startTimed(task) {
-		if (startingTask) return;
-		startingTask = `timed-${task.id}`;
+	async function confirmTakeover() {
+		if (!pendingTakeover || startingTask) return;
+		const pending = pendingTakeover;
+		startingTask = pending.busyKey;
 		error = '';
 		try {
-			const { session_id } = await Api.createSession({
+			const { session_id } = await Api.createSession({ ...pending.body, takeover: true });
+			pendingTakeover = null;
+			goto(`${base}/session/${session_id}`);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not take over the study session.';
+			startingTask = '';
+		}
+	}
+
+	async function startTask(task) {
+		const body =
+			task.kind === 'revision'
+				? { preset: 'revision', source_session_id: task.source_session_id }
+				: { preset: 'tutor', chapter_id: task.chapter_id, question_count: 10 };
+		await openSession(body, task.id);
+	}
+
+	async function startTimed(task) {
+		await openSession(
+			{
 				preset: 'timed',
 				chapter_id: task.chapter_id,
 				question_count: 10,
 				time_limit_seconds: 300
-			});
-			goto(`${base}/session/${session_id}`);
-		} catch (err) {
-			error =
-				err instanceof ApiError
-					? err.message
-					: 'Could not start the session. Try again.';
-			startingTask = '';
-		}
+			},
+			`timed-${task.id}`
+		);
 	}
 
 	async function undo(revision) {
@@ -182,7 +197,32 @@
 	<p class="muted">Loading your plan…</p>
 {:else if error}
 	<p class="error-text" role="alert">{error}</p>
-	<button class="btn" type="button" onclick={load}>Retry</button>
+	{#if pendingTakeover}
+		<div style="display:flex; gap:12px; flex-wrap:wrap;">
+			<button
+				class="btn primary"
+				type="button"
+				disabled={startingTask !== ''}
+				onclick={confirmTakeover}
+				data-testid="confirm-takeover"
+			>
+				{startingTask ? 'Starting…' : 'Take over study session'}
+			</button>
+			<button
+				class="btn"
+				type="button"
+				disabled={startingTask !== ''}
+				onclick={() => {
+					pendingTakeover = null;
+					error = '';
+				}}
+			>
+				Cancel
+			</button>
+		</div>
+	{:else}
+		<button class="btn" type="button" onclick={load}>Retry</button>
+	{/if}
 {:else if today}
 	<section class="card goals-card" aria-labelledby="goals-heading">
 		<div class="goals-heading-row">

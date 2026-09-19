@@ -14,6 +14,10 @@ test('question report flow records a report from the session UI', async ({
 	await page.getByTestId('email').fill(email);
 	await page.getByTestId('password').fill('correct horse battery');
 	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+	await page.getByTestId('submit').click();
 
 	// Today: cold-start plan with one pending task.
 	await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();

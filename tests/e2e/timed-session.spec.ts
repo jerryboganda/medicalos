@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createVerifiedSession } from './auth';
 
 // EX-08 in the browser: the timer derives from the server-issued deadline
 // (server_now skew correction), and the session auto-submits at zero.
@@ -14,18 +15,11 @@ test('timed session shows the server countdown and auto-submits', async ({
 	const email = `e2e-timed-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
 
 	// Arrange the account and the short timed session through the API.
-	const register = await fetch(`${API}/v1/auth/register`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	expect(register.ok).toBeTruthy();
-	const login = await fetch(`${API}/v1/auth/login`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	const { token } = await login.json();
+	const { token } = await createVerifiedSession(
+		email,
+		'correct horse battery',
+		`timed-${Date.now()}`
+	);
 	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
 	const todayRes = await fetch(`${API}/v1/me/today`, { headers: authHeaders });

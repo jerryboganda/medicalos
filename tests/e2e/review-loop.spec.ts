@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createVerifiedSession } from './auth';
 
 const API = 'http://127.0.0.1:8080';
 
@@ -8,19 +9,11 @@ const API = 'http://127.0.0.1:8080';
 
 test('flashcard review loop rates a card through the UI', async ({ page }) => {
 	const email = `e2e-review-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
-
-	const register = await fetch(`${API}/v1/auth/register`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	expect(register.ok).toBeTruthy();
-	const login = await fetch(`${API}/v1/auth/login`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	const { token } = await login.json();
+	const { token } = await createVerifiedSession(
+		email,
+		'correct horse battery',
+		`review-${Date.now()}`
+	);
 	const authHeaders = {
 		authorization: `Bearer ${token}`,
 		'content-type': 'application/json'

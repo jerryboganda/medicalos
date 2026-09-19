@@ -22,6 +22,11 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	await page.getByTestId('email').fill(email);
 	await page.getByTestId('password').fill('correct horse battery');
 	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+	await expect(page.getByTestId('verification-token')).not.toHaveValue('');
+	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+	await page.getByTestId('submit').click();
 
 	// Today: cold-start plan with one pending task (AI-02).
 	await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
@@ -67,6 +72,10 @@ test('learner goals: configure, revise, and undo from Today', async ({ page }) =
 	await page.getByTestId('toggle-mode').click();
 	await page.getByTestId('email').fill(email);
 	await page.getByTestId('password').fill('correct horse battery');
+	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+	await page.getByTestId('submit').click();
+	await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
 	await page.getByTestId('submit').click();
 
 	const goals = page.getByTestId('goal-summary');
