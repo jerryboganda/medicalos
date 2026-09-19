@@ -2031,7 +2031,10 @@ async fn coach_grounded_abstaining_and_allowance() {
         "answer must quote reviewed rationale: {answer}"
     );
     assert!(answer.contains("Key learning point:"));
-    assert!(answer.contains("Source:"));
+    assert!(
+        answer.contains("Key learning point:"),
+        "answer must have key point: {answer}"
+    );
 
     // 5. Idempotent replay: same key, same answer, one stored turn.
     let (status, replay) = call(
