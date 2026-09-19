@@ -17,6 +17,8 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: Arc<state::AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/v1/guest-trial/start", post(routes::guest_trial::start))
+        .route("/v1/guest-trial/answer", post(routes::guest_trial::answer))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
         .route("/v1/auth/verify-email", post(routes::auth::verify_email))

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod engagement;
 pub mod goals;
+pub mod guest_trial;
 pub mod notifications;
 pub mod practice;
 pub mod reports;

@@ -14,12 +14,14 @@ use crate::auth::{
     verify_password, AuthUser,
 };
 use crate::error::{ApiError, ApiResult};
+use crate::routes::guest_trial;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct RegisterReq {
     pub email: String,
     pub password: String,
+    pub guest_trial_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +146,12 @@ pub async fn register(
         ));
     }
 
+    let guest_answers_migrated = if let Some(token) = req.guest_trial_token.as_deref() {
+        guest_trial::migrate_into_user(&mut tx, user_id, token).await?
+    } else {
+        0
+    };
+
     sqlx::query!(
         "INSERT INTO email_verification_challenges (token_hash, user_id, expires_at)
          VALUES ($1, $2, $3)",
@@ -157,7 +165,8 @@ pub async fn register(
 
     let mut body = serde_json::json!({
         "user_id": user_id,
-        "verification_required": true
+        "verification_required": true,
+        "guest_answers_migrated": guest_answers_migrated
     });
     if state.expose_test_auth_tokens {
         body["verification_token"] = serde_json::json!(challenge.token);

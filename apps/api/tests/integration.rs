@@ -3040,6 +3040,53 @@ async fn core09_guest_trial_is_bounded_and_migrates_answered_progress_on_signup(
         );
     }
 
+    let raw_token_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM guest_trials WHERE token_hash = $1")
+            .bind(trial_token)
+            .fetch_one(&state.pool)
+            .await
+            .expect("raw guest token storage check");
+    assert_eq!(raw_token_rows, 0, "raw guest token must not be stored");
+
+    let (status, repeated_trial) = call(
+        app.clone(),
+        request("POST", "/v1/guest-trial/start", None, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated_trial}");
+    let repeated_token = repeated_trial["trial_token"]
+        .as_str()
+        .expect("repeated guest trial token");
+    let repeated_ids: Vec<&str> = repeated_trial["items"]
+        .as_array()
+        .expect("repeated guest trial items")
+        .iter()
+        .map(|item| {
+            item["question_version_id"]
+                .as_str()
+                .expect("repeated question version id")
+        })
+        .collect();
+    let first_ids: Vec<&str> = items
+        .iter()
+        .map(|item| {
+            item["question_version_id"]
+                .as_str()
+                .expect("question version id")
+        })
+        .collect();
+    assert_eq!(
+        repeated_ids, first_ids,
+        "repeated starts must expose the same samples"
+    );
+
+    let (status, guest_as_bearer) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(trial_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{guest_as_bearer}");
+
     let answer_body = serde_json::json!({
         "trial_token": trial_token,
         "item_index": 0,
@@ -3135,14 +3182,15 @@ async fn core09_guest_trial_is_bounded_and_migrates_answered_progress_on_signup(
         .expect("migrated guest attempt count");
     assert_eq!(migrated, 1);
 
+    let reused_email = format!("guest-reuse-{}@example.test", Uuid::new_v4());
     let (status, reused) = call(
-        app,
+        app.clone(),
         request(
             "POST",
             "/v1/auth/register",
             None,
             Some(serde_json::json!({
-                "email": format!("guest-reuse-{}@example.test", Uuid::new_v4()),
+                "email": reused_email,
                 "password": "correct horse",
                 "guest_trial_token": trial_token
             })),
@@ -3150,4 +3198,76 @@ async fn core09_guest_trial_is_bounded_and_migrates_answered_progress_on_signup(
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{reused}");
+    let reused_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = $1")
+        .bind(&reused_email)
+        .fetch_one(&state.pool)
+        .await
+        .expect("converted-token registration rollback");
+    assert_eq!(
+        reused_users, 0,
+        "failed migration must roll back account creation"
+    );
+
+    let invalid_email = format!("guest-invalid-{}@example.test", Uuid::new_v4());
+    let (status, invalid) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": invalid_email,
+                "password": "correct horse",
+                "guest_trial_token": "not-a-real-guest-trial-token"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    let invalid_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = $1")
+        .bind(&invalid_email)
+        .fetch_one(&state.pool)
+        .await
+        .expect("invalid-token registration rollback");
+    assert_eq!(
+        invalid_users, 0,
+        "invalid guest token must roll back registration"
+    );
+
+    let expired_rows = sqlx::query(
+        "UPDATE guest_trials
+         SET expires_at = now() - interval '1 minute'
+         WHERE converted_at IS NULL",
+    )
+    .execute(&state.pool)
+    .await
+    .expect("expire repeated guest trial")
+    .rows_affected();
+    assert_eq!(expired_rows, 1, "expected one unconverted guest trial");
+
+    let expired_email = format!("guest-expired-{}@example.test", Uuid::new_v4());
+    let (status, expired) = call(
+        app,
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": expired_email,
+                "password": "correct horse",
+                "guest_trial_token": repeated_token
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{expired}");
+    let expired_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email = $1")
+        .bind(&expired_email)
+        .fetch_one(&state.pool)
+        .await
+        .expect("expired-token registration rollback");
+    assert_eq!(
+        expired_users, 0,
+        "expired guest token must roll back registration"
+    );
 }

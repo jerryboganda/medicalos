@@ -55,7 +55,7 @@ async function call<T>(
 	body?: unknown,
 	retryAfterRefresh = true
 ): Promise<T> {
-	const protectedRequest = !path.startsWith('/v1/auth/');
+	const protectedRequest = !path.startsWith('/v1/auth/') && !path.startsWith('/v1/guest-trial/');
 	const accessToken = protectedRequest ? auth.token : '';
 	const sentAccessToken = Boolean(accessToken);
 	const res = await fetch(`${BASE}${path}`, {
@@ -138,6 +138,24 @@ export interface LearnerGoals {
 	created_at: string | null;
 	can_undo: boolean;
 	changed: boolean;
+}
+
+export interface GuestTrialItem {
+	item_index: number;
+	question_version_id: string;
+	vignette: string;
+	lead_in: string;
+	difficulty: string;
+	options: { text: string }[];
+	correct_index: null;
+	key_learning_point: null;
+	exam_tip: null;
+}
+
+export interface GuestTrialStart {
+	trial_token: string;
+	expires_at: string;
+	items: GuestTrialItem[];
 }
 
 export interface EngagementPreferences {
@@ -311,12 +329,24 @@ export interface InboxNotification {
 }
 
 export const Api = {
-	register: (email: string, password: string) =>
-		call<{ user_id: string; verification_required: boolean; verification_token?: string }>(
+	register: (email: string, password: string, guestTrialToken?: string) =>
+		call<{
+			user_id: string;
+			verification_required: boolean;
+			verification_token?: string;
+			guest_answers_migrated: number;
+		}>(
 			'POST',
 			'/v1/auth/register',
-			{ email, password }
+			{ email, password, guest_trial_token: guestTrialToken }
 		),
+	guestTrialStart: () => call<GuestTrialStart>('POST', '/v1/guest-trial/start'),
+	guestTrialAnswer: (body: {
+		trial_token: string;
+		item_index: number;
+		chosen_index: number;
+		idempotency_key: string;
+	}) => call<AnswerResult>('POST', '/v1/guest-trial/answer', body),
 	verifyEmail: (token: string) =>
 		call<{ verified: boolean }>('POST', '/v1/auth/verify-email', { token }),
 	login: (email: string, password: string) => {
