@@ -3058,12 +3058,7 @@ async fn phase2_pools_marks_timing_insights() {
     // AI-03: two misses in one chapter surface exactly one hypothesis.
     let (status, hyp) = call(
         app.clone(),
-        request(
-            "GET",
-            "/v1/me/mistake-hypotheses",
-            Some(&learner),
-            None,
-        ),
+        request("GET", "/v1/me/mistake-hypotheses", Some(&learner), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{hyp}");

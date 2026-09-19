@@ -581,9 +581,7 @@ pub async fn answer(
     let correct = req.chosen_index.map(|c| c == item.correct_index);
     // QB-17: clamp client-reported time into a sane range; out-of-range or
     // negative reports are dropped to NULL rather than trusted.
-    let elapsed_ms = req
-        .elapsed_ms
-        .filter(|ms| (0..=3_600_000).contains(ms));
+    let elapsed_ms = req.elapsed_ms.filter(|ms| (0..=3_600_000).contains(ms));
 
     let inserted = sqlx::query!(
         r#"INSERT INTO attempts

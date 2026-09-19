@@ -67,12 +67,7 @@ pub async fn mastery_heatmap(
     )
     .fetch_optional(&state.pool)
     .await?
-    .map(|r| {
-        vec![
-            r.lo.as_i64().unwrap_or(1400),
-            r.hi.as_i64().unwrap_or(1600),
-        ]
-    })
+    .map(|r| vec![r.lo.as_i64().unwrap_or(1400), r.hi.as_i64().unwrap_or(1600)])
     .unwrap_or_else(|| vec![1400, 1600]);
     let (weak_at, strong_at) = (bands[0] as f32, bands[1] as f32);
 
@@ -125,5 +120,7 @@ pub async fn mastery_heatmap(
             }));
         }
     }
-    Ok(Json(json!({ "systems": systems, "bands": {"weak_below": weak_at, "strong_at": strong_at} })))
+    Ok(Json(
+        json!({ "systems": systems, "bands": {"weak_below": weak_at, "strong_at": strong_at} }),
+    ))
 }

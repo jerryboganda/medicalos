@@ -15,7 +15,6 @@ use crate::state::AppState;
 
 // ---- ENG-02: XP + achievements -----------------------------------------------
 
-
 pub async fn my_xp(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
