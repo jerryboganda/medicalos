@@ -13,7 +13,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | OPS-01 | GitHub Actions development-compute enforcement | in-progress (enforced; proven by green CI run 35273824336) | .scratch/phase-0-decisions/issues/04 |
-| OPS-02 | Runtime boundary approval before deployment | blocked (owner decision) | issues/10 |
+| OPS-02 | Runtime boundary approval before deployment | resolved (owner deployment mandate + VPS runtime live: medicalos.polytronx.com serves client + API, production-verified; see docs/deployment/production.md) | run 35456997436 |
 | OPS-07 | Rust + Tauri CI runner matrix under the compute rule | tested (Linux gates green, run 35273824336; macOS/Windows signing jobs arrive with Tauri shells) | issues/04 |
 | ARCH-01 | Shared Rust core across server, Tauri, and WebAssembly | in-progress (three shared crates — domain-contracts, calc-engine, competition-scoring — proven native + wasm32 in CI; runtime parity check in the Phase 0 spike remains, issues/08) | runs 35273824336, 35367410576; issues/08 |
 
@@ -83,13 +83,13 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | QB-06 | Targeted, unseen, marked, incorrect filters | not-started | — |
 | QB-07 | Blueprint-balanced session generation | not-started | — |
 | QB-09 | Item statistics and editorial review | not-started | — |
-| QB-15 | Community statistics with minimum sample + expected-score comparison | not-started | — |
+| QB-15 | Community statistics with minimum sample + expected-score comparison | tested (slice-9 scope: per-question stats behind min-sample gate + option distribution; expected-score on self-built submits; percentile reserved for fixed forms) | run 35456997436 |
 | QB-16 | Psychometric screening defaults + issue-report SLA | not-started | — |
 | EX-02 | Date-effective block / timer / break configuration | not-started | — |
 | EX-03 | Frozen assessment forms and versions | not-started | — |
 | EX-05 | Reserved assessment-family protection | not-started | — |
 | EX-06 | Accommodations and assessment-specific AI restrictions | not-started | — |
-| EX-07 | Administrator-configured mock tests, types, results | not-started | — |
+| EX-07 | Administrator-configured mock tests, types, results | tested (slice-9 scope: admin-token mock configuration, frozen blueprint forms, deferred feedback, pass mark + per-chapter breakdown + attempts; form types and time analysis pending) | run 35456997436 |
 | EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | in-progress (server-issued deadline, server-side answer cutoff after expiry, auto-submit semantics, skew-corrected client countdown — all tested incl. browser E2E; device-clock-tamper tests, grace windows, integrity signals pending) | run 35372696754 |
 | AI-03 | Mistake hypotheses, not assumed diagnoses | not-started | — |
 | AI-08 | Protected tasks and plan-churn controls | not-started | — |
