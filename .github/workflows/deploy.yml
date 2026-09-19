@@ -124,15 +124,56 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          # script_stop + debug: fail loudly on remote error and echo the
-          # remote script output (a silent no-op once passed as green).
-          script_stop: true
-          debug: true
-          script_file: infra/vps/deploy.sh
-          script_arguments: ${{ github.sha }}
-          envs: VPS_DATABASE_URL_AS_ARG
-        env:
-          VPS_DATABASE_URL_AS_ARG: ${{ secrets.VPS_DATABASE_URL }}
+          # Inline the script (script_file + script_arguments silently sent
+          # NOTHING in v1: the debug log showed empty CMD with success).
+          # The script content is identical to infra/vps/deploy.sh — keep
+          # both in sync; the file remains the VPS-side source of truth.
+          script: |
+            set -euo pipefail
+            SHA='${{ github.sha }}'
+            export VPS_DATABASE_URL_AS_ARG='${{ secrets.VPS_DATABASE_URL }}'
+            DATABASE_URL="$VPS_DATABASE_URL_AS_ARG"
+            REGISTRY='ghcr.io/jerryboganda'
+            API_IMAGE="$REGISTRY/medicalos-api:$SHA"
+            WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
+            echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
+            docker pull "$API_IMAGE"
+            docker pull "$WEB_IMAGE"
+            echo "[medicalos] pulled:"
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+              | grep -E "medicalos-(api|web):$SHA" || {
+              echo "pulled images do not include SHA $SHA" >&2
+              exit 1
+            }
+            echo "[medicalos] recreating medicalos-api (image: $API_IMAGE)"
+            docker rm -f medicalos-api 2>/dev/null || true
+            docker run -d --name medicalos-api --restart unless-stopped \
+              --cpus "1.0" --memory "1g" \
+              --network platform \
+              -e DATABASE_URL="$DATABASE_URL" \
+              -e MIN_TIME_LIMIT_SECONDS=30 \
+              -e FREE_DAILY_QUESTIONS=10 \
+              "$API_IMAGE"
+            echo "[medicalos] api container: $(docker inspect medicalos-api --format '{{.Config.Image}}')"
+            echo "[medicalos] recreating medicalos-web (image: $WEB_IMAGE)"
+            docker rm -f medicalos-web 2>/dev/null || true
+            docker run -d --name medicalos-web --restart unless-stopped \
+              --cpus "0.5" --memory "256m" \
+              --network platform \
+              "$WEB_IMAGE"
+            docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
+            echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
+            echo "[medicalos] health-check (API + web through the container network)"
+            for i in $(seq 1 30); do
+              if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
+                && docker run --rm --network platform curlimages/curl:8.5.0 -sf "http://medicalos-web/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
+                echo "[medicalos] api + web healthy"
+                break
+              fi
+              [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
+              sleep 2
+            done
+            echo "[medicalos] live on medicalos.polytronx.com @ $SHA"
 
   production-verify:
     # Mandated production E2E: the live domain must serve the app AND prove
