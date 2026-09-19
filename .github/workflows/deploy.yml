@@ -63,7 +63,9 @@ jobs:
       - name: Stamp deployment provenance
         run: |
           # Served at /version.json (no-store) so production E2E can prove
-          # the exact commit landed.
+          # the exact commit landed. SvelteKit serves static/ as its public
+          # dir — create it first (fresh runners have no static/ dir).
+          mkdir -p apps/client/static
           printf '{"sha":"%s","repo":"%s","deployed_at":"%s"}\n' \
             "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$(date -u +%FT%TZ)" \
             > apps/client/static/version.json
