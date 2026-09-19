@@ -120,11 +120,11 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            set -e
-            export DATABASE_URL='${{ secrets.VPS_DATABASE_URL }}'
-            export REGISTRY='${{ env.REGISTRY }}'
-            bash -s '${{ github.sha }}' < infra/vps/deploy.sh
+          script_file: infra/vps/deploy.sh
+          script_arguments: ${{ github.sha }}
+          envs: VPS_DATABASE_URL_AS_ARG
+        env:
+          VPS_DATABASE_URL_AS_ARG: ${{ secrets.VPS_DATABASE_URL }}
 
   production-verify:
     # Mandated production E2E: the live domain must serve the app AND prove
