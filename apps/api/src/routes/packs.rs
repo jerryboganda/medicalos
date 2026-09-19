@@ -150,7 +150,7 @@ pub async fn pack_manifest(
     let mut canonical = String::new();
     for chapter_id in &chapter_ids {
         let rows = sqlx::query!(
-            r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS checksum
+            r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
                FROM question_versions
                WHERE chapter_id = $1 AND status = 'published'
                ORDER BY id"#,
