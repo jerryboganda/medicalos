@@ -337,3 +337,25 @@ pub async fn submit_competition_entry(
         "questions": records.len(),
     })))
 }
+
+/// Simple XP award called from the practice submit handler.
+pub async fn award_session_xp(
+    state: &AppState,
+    user_id: Uuid,
+    correct_count: i64,
+) -> ApiResult<()> {
+    if correct_count == 0 {
+        return Ok(());
+    }
+    let points = correct_count * 10; // base XP per correct answer
+    sqlx::query!(
+        "INSERT INTO xp_ledger (id, user_id, points, reason)
+         VALUES ($1, $2, $3, 'session_correct')",
+        Uuid::new_v4(),
+        user_id,
+        points
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}

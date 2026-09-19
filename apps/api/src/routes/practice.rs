@@ -630,6 +630,8 @@ pub async fn submit(
         ));
     }
 
+    crate::routes::engagement::award_xp_for_submit_simple(&state, user.user_id, totals.correct)
+        .await?;
     agent::mark_matching_task_done(
         &state.pool,
         user.user_id,
