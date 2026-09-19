@@ -74,7 +74,7 @@ pub async fn mastery_heatmap(
         ]
     })
     .unwrap_or_else(|| vec![1400, 1600]);
-    let (weak_at, strong_at) = (bands[0] as f64, bands[1] as f64);
+    let (weak_at, strong_at) = (bands[0] as f32, bands[1] as f32);
 
     let rows = sqlx::query!(
         r#"SELECT system.id AS system_id, system.name AS system_name,
