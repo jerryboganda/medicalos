@@ -33,38 +33,33 @@ pub async fn update_settings(
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let mut updated: Vec<&str> = Vec::new();
-    let pairs: Vec<(&str, serde_json::Value)> = vec![
-        ("mastery_bands", req.mastery_bands.map(|b| json!(b))),
-        (
-            "community_min_sample",
-            req.community_min_sample.map(|v| json!(v)),
-        ),
-        (
-            "free_daily_questions",
-            req.free_daily_questions.map(|v| json!(v)),
-        ),
-        (
-            "free_daily_coach_turns",
-            req.free_daily_coach_turns.map(|v| json!(v)),
-        ),
-        (
-            "retest_intervals_days",
-            req.retest_intervals_days.map(|v| json!(v)),
-        ),
-    ]
-    .to_vec();
-    for (key, value) in pairs {
-        if let Some(v) = value {
-            sqlx::query!(
-                "INSERT INTO app_settings (key, value) VALUES ($1, $2)
-                 ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
-                key,
-                v
-            )
-            .execute(&state.pool)
-            .await?;
-            updated.push(key);
-        }
+    let mut updated: Vec<&str> = Vec::new();
+    let mut pairs: Vec<(&str, serde_json::Value)> = Vec::new();
+    if let Some(b) = req.mastery_bands {
+        pairs.push(("mastery_bands", json!(b)));
+    }
+    if let Some(v) = req.community_min_sample {
+        pairs.push(("community_min_sample", json!(v)));
+    }
+    if let Some(v) = req.free_daily_questions {
+        pairs.push(("free_daily_questions", json!(v)));
+    }
+    if let Some(v) = req.free_daily_coach_turns {
+        pairs.push(("free_daily_coach_turns", json!(v)));
+    }
+    if let Some(v) = req.retest_intervals_days {
+        pairs.push(("retest_intervals_days", json!(v)));
+    }
+    for (key, value) in &pairs {
+        sqlx::query!(
+            "INSERT INTO app_settings (key, value) VALUES ($1, $2)
+             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
+            key,
+            value
+        )
+        .execute(&state.pool)
+        .await?;
+        updated.push(key);
     }
     Ok(Json(json!({ "updated": updated })))
 }
