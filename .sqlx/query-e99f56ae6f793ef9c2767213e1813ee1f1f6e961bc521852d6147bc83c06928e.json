@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO questions (id, family_id) VALUES ($1, $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e99f56ae6f793ef9c2767213e1813ee1f1f6e961bc521852d6147bc83c06928e"
+}

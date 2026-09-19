@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(DISTINCT a.question_version_id), 0) AS \"n!\"\n               FROM attempts a\n               WHERE a.question_version_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "30ee4847a91189c0d084bf8fc312e68661cfa2d1aa3fe95100206f472cb591c2"
+}

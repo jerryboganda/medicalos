@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, summary, exam_id FROM import_batches WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "summary",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "exam_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7f71420d0dc7586d2970362e054492d46909ca94a9d66b7c72b76e1c0ab98013"
+}

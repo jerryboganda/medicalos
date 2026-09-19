@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 AS one FROM curriculum_nodes\n             WHERE id = $1 AND exam_id = $2 AND kind = 'chapter' AND status = 'active'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0ba21a328cf439cd53ffdb337c5147b70fb2cbbdd533c874a279eb63d3cd50e4"
+}
