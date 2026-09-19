@@ -264,6 +264,12 @@ async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
             "exam_date": "2099-06-30",
             "protected_commitments": [{"title": "   ", "date": "2099-06-01"}]
         }),
+        serde_json::json!({
+            "expected_version": 1,
+            "daily_minutes": 60,
+            "exam_date": "2099-06-30",
+            "protected_commitments": [{"title": "Past commitment", "date": "2000-01-01"}]
+        }),
     ] {
         let (status, invalid_body) = call(
             app.clone(),
