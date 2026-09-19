@@ -48,6 +48,7 @@ Provider sign-in and real email delivery remain explicitly incomplete until real
 - A personal account may have at most two non-revoked, refresh-valid device sessions. A third distinct device receives a conflict response; the server does not silently evict another device.
 - Registration creates a hashed, expiring email-verification challenge. Login is denied until verification completes.
 - Password-reset request is enumeration-safe and creates a hashed, expiring reset challenge only for an eligible account.
+- Until a real email-delivery adapter exists, production registration and password-recovery requests fail closed with `503 auth_email_delivery_unavailable` before creating an account or challenge. The test-token seam is the only current challenge-delivery path.
 - Production responses never expose raw verification or reset secrets. The integration-test AppState may expose them so the existing HTTP seam can exercise the lifecycle end-to-end; the production binary hard-codes that capability off.
 - Password reset updates the Argon2 password hash and revokes all active sessions.
 - Account-deletion initiation records a pending deletion timestamp, revokes active sessions, and blocks subsequent login. Actual purge/retention propagation belongs to TRUST-02 and is not claimed by CORE-07.
@@ -72,6 +73,7 @@ Provider sign-in and real email delivery remain explicitly incomplete until real
 
 ## Out of Scope
 
+- Production email delivery until a real provider configuration/adaptor is supplied.
 - Google sign-in until a real Google identity configuration/adaptor is supplied.
 - Sign in with Apple until a real Apple identity configuration/adaptor is supplied.
 - Phone OTP.

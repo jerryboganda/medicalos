@@ -27,7 +27,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-04 | Multi-tenant role and audit foundations | tested (foundation scope: explicit tenant context, multi-role memberships, separate platform roles, owner bootstrap, tenant-admin assignment, idempotency, append-only audit receipts, tenant isolation) | .scratch/phase-1-core04-tenant-audit/; run 35425807184 |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
 | CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
-| CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | not-started | — |
+| CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | in-progress (email/password security, rotating device sessions, two-device cap, deletion initiation, single-study-session takeover, Account UI tested; production registration/recovery fail closed until real email delivery; Google/Apple sign-in pending) | `.scratch/phase-1-core07-accounts/`; run 35428827015 |
 | CORE-08 | Notification policy, push + in-app inbox | not-started | — |
 | CORE-09 | Guest trial before sign-up (SHOULD) | not-started | — |
 | CORE-10 | Navigational hierarchy mapped to concept identities | in-progress (Exam→Subject→System→Chapter nodes tested; concept-identity mapping pending) | run 35280682748 |
