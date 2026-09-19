@@ -6,7 +6,6 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;

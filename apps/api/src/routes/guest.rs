@@ -73,7 +73,7 @@ pub async fn next_question(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("trial_not_found"))?;
-    if trial.questions_served >= GUEST_QUESTION_CEILING {
+    if i64::from(trial.questions_served) >= GUEST_QUESTION_CEILING {
         return Err(ApiError::forbidden_with_details(
             "trial_finished",
             "The guest sample is finished. Create an account to keep studying.",

@@ -59,10 +59,24 @@ pub async fn export_account(
             "tier": profile.tier,
             "created_at": profile.created_at,
         },
-        "attempts": attempts,
-        "notes": notes,
-        "card_reviews": reviews,
-        "portfolio": portfolio,
+        "attempts": attempts.into_iter().map(|r| json!({
+            "question_version_id": r.question_version_id,
+            "chosen_index": r.chosen_index,
+            "correct": r.correct,
+            "confidence": r.confidence,
+            "assisted": r.assisted,
+            "created_at": r.created_at,
+        })).collect::<Vec<_>>(),
+        "notes": notes.into_iter().map(|r| json!({
+            "title": r.title, "body": r.body, "created_at": r.created_at,
+        })).collect::<Vec<_>>(),
+        "card_reviews": reviews.into_iter().map(|r| json!({
+            "card_id": r.card_id, "rating": r.rating, "reviewed_at": r.reviewed_at,
+        })).collect::<Vec<_>>(),
+        "portfolio": portfolio.into_iter().map(|r| json!({
+            "kind": r.kind, "title": r.title, "detail": r.detail,
+            "occurred_on": r.occurred_on,
+        })).collect::<Vec<_>>(),
     })))
 }
 
@@ -152,7 +166,7 @@ pub async fn pack_manifest(
             }));
         }
     }
-    let signature = hmac_sha256_hex(signing_key(&state), canonical.as_bytes());
+    let signature = hmac_sha256_hex(&signing_key(&state), canonical.as_bytes());
     Ok(Json(json!({
         "exam_id": exam_id,
         "chapters": chapter_ids,

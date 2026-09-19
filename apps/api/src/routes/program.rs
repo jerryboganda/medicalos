@@ -5,6 +5,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -288,7 +289,7 @@ pub async fn create_cohort(
 #[derive(Deserialize)]
 pub struct AssignmentReq {
     pub title: String,
-    pub due_at: Option<DateTime<chrono::Utc>>,
+    pub due_at: Option<DateTime<Utc>>,
 }
 
 pub async fn create_assignment(

@@ -11,7 +11,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::seed::QuestionOption;
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;

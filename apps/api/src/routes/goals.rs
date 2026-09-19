@@ -2,7 +2,7 @@
 //! commitments are NEVER agent-mutable (§9.3) — this module is the only
 //! writer and it is the learner.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::Json;
 use chrono::DateTime;
 use serde::Deserialize;
