@@ -181,6 +181,243 @@ async fn auth_register_login_and_reject_bad_credentials() {
 }
 
 #[tokio::test]
+async fn core07_account_security_lifecycle() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let email = format!("account-{}@example.test", Uuid::new_v4());
+    let password = "correct horse battery";
+
+    let (status, registered) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email, "password": password})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{registered}");
+    assert_eq!(registered["verification_required"], true);
+    let verification_token = registered["verification_token"]
+        .as_str()
+        .expect("test seam exposes verification token");
+
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({
+                "email": email,
+                "password": password,
+                "device_id": "device-a",
+                "device_name": "Laptop"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "email_not_verified");
+
+    let (status, verified) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/verify-email",
+            None,
+            Some(serde_json::json!({"token": verification_token})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{verified}");
+
+    let login = |device_id: &str, device_name: &str, password: &str| {
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({
+                "email": email,
+                "password": password,
+                "device_id": device_id,
+                "device_name": device_name
+            })),
+        )
+    };
+    let (status, device_a) = call(app.clone(), login("device-a", "Laptop", password)).await;
+    assert_eq!(status, StatusCode::OK, "{device_a}");
+    let token_a = device_a["token"]
+        .as_str()
+        .expect("access token")
+        .to_string();
+    let refresh_a = device_a["refresh_token"]
+        .as_str()
+        .expect("refresh token")
+        .to_string();
+    assert!(device_a["session_id"].as_str().is_some());
+    assert!(device_a["expires_at"].as_str().is_some());
+
+    let (status, device_b) = call(app.clone(), login("device-b", "Phone", password)).await;
+    assert_eq!(status, StatusCode::OK, "{device_b}");
+    let token_b = device_b["token"]
+        .as_str()
+        .expect("access token")
+        .to_string();
+
+    let (status, third) = call(app.clone(), login("device-c", "Tablet", password)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{third}");
+    assert_eq!(third["error"]["code"], "device_limit_reached");
+
+    let (status, sessions) = call(
+        app.clone(),
+        request("GET", "/v1/me/sessions", Some(&token_a), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sessions}");
+    assert_eq!(sessions["sessions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        sessions["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["current"] == true)
+            .count(),
+        1
+    );
+
+    let (status, refreshed) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/refresh",
+            None,
+            Some(serde_json::json!({"refresh_token": refresh_a})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    let token_a2 = refreshed["token"].as_str().expect("rotated access token");
+    let refresh_a2 = refreshed["refresh_token"]
+        .as_str()
+        .expect("rotated refresh token");
+    assert_ne!(token_a2, token_a);
+    assert_ne!(refresh_a2, refresh_a);
+
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/sessions", Some(&token_a), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "rotated access token is dead"
+    );
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/refresh",
+            None,
+            Some(serde_json::json!({"refresh_token": refresh_a})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "refresh replay is rejected"
+    );
+
+    let (status, signed_out) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/sessions/sign-out-others",
+            Some(token_a2),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{signed_out}");
+    assert_eq!(signed_out["revoked"], 1);
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/sessions", Some(&token_b), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, forgot) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/forgot-password",
+            None,
+            Some(serde_json::json!({"email": email})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{forgot}");
+    let reset_token = forgot["reset_token"]
+        .as_str()
+        .expect("test seam exposes reset token");
+    let new_password = "new correct horse battery";
+    let (status, reset) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/reset-password",
+            None,
+            Some(serde_json::json!({"token": reset_token, "password": new_password})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/sessions", Some(token_a2), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "password reset revokes sessions"
+    );
+    let (status, _) = call(app.clone(), login("device-a", "Laptop", password)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "old password is invalid");
+    let (status, relogin) = call(app.clone(), login("device-a", "Laptop", new_password)).await;
+    assert_eq!(status, StatusCode::OK, "{relogin}");
+    let final_token = relogin["token"].as_str().expect("access token");
+
+    let (status, deletion) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/account/deletion",
+            Some(final_token),
+            Some(serde_json::json!({"password": new_password})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{deletion}");
+    assert_eq!(deletion["status"], "pending");
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/sessions", Some(final_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = call(app.clone(), login("device-a", "Laptop", new_password)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "account_deletion_pending");
+}
+
+#[tokio::test]
 async fn authenticated_user_has_explicit_personal_and_tenant_contexts() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -906,6 +1143,78 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     // Cold-start task remains; the revision's added task is gone (only one
     // task in the latest version).
     assert_eq!(today["tasks"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn core07_single_active_study_session_requires_explicit_takeover() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let first_body = serde_json::json!({
+        "preset": "tutor",
+        "chapter_id": ids.chapter1,
+        "question_count": 1
+    });
+
+    let (status, first) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(first_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let first_id = first["session_id"].as_str().expect("session id");
+
+    let (status, conflict) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(first_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "active_study_session");
+    assert_eq!(conflict["error"]["details"]["session_id"], first_id);
+
+    let (status, replacement) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1,
+                "takeover": true
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replacement}");
+    assert_ne!(replacement["session_id"], first_id);
+
+    let (status, old) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{first_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old}");
+    assert_eq!(old["status"], "abandoned");
 }
 
 #[tokio::test]
