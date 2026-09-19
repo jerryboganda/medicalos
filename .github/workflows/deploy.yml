@@ -126,8 +126,8 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           # Inline the script (script_file + script_arguments silently sent
           # NOTHING in v1: the debug log showed empty CMD with success).
-          # The script content is identical to infra/vps/deploy.sh — keep
-          # both in sync; the file remains the VPS-side source of truth.
+          # SOURCE OF TRUTH: infra/vps/deploy.sh — after editing that file,
+          # copy its body here and keep both in sync.
           script: |
             set -euo pipefail
             SHA='${{ github.sha }}'
