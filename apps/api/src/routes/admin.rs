@@ -622,14 +622,8 @@ pub async fn audit_log(
 pub async fn psychometric_screening(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-    Query(q): Query<std::collections::HashMap<String, Uuid>>,
+    Path(vid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let Some(vid) = q.get("question_version_id").copied() else {
-        return Err(ApiError::unprocessable(
-            "question_required",
-            "pass ?question_version_id=",
-        ));
-    };
     let totals = sqlx::query!(
         r#"SELECT
              COALESCE(COUNT(*), 0) AS "attempts!",
