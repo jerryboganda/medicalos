@@ -988,7 +988,7 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    let ids = seed::seed(&state.pool).await.expect("seed");
+    let _ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
     // Seeded fixture mock: chapter1 both questions, pass mark 50, 2 attempts.
