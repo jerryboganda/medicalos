@@ -24,8 +24,7 @@ async fn setup() -> Arc<AppState> {
         .connect(&url)
         .await
         .expect("connect to test database");
-    schema::apply_down(&pool).await.expect("apply down");
-    schema::apply_up(&pool).await.expect("apply up");
+    schema::apply_up(&pool).await.expect("apply schema");
     Arc::new(AppState {
         pool,
         min_time_limit_seconds: 30,
