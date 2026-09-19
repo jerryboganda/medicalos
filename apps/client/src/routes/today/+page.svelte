@@ -10,6 +10,85 @@
 	let error = $state('');
 	let startingTask = $state('');
 	let undoing = $state('');
+	let goals = $state(null);
+	let goalsLoading = $state(true);
+	let goalsError = $state('');
+	let goalsEditorOpen = $state(false);
+	let goalsDailyMinutes = $state('');
+	let goalsExamDate = $state('');
+	let goalCommitments = $state([]);
+	let goalsStatus = $state('');
+	let savingGoals = $state(false);
+	let undoingGoals = $state(false);
+
+	function syncGoalEditor(profile) {
+		goalsDailyMinutes = profile.daily_minutes ?? '';
+		goalsExamDate = profile.exam_date ?? '';
+		goalCommitments = profile.protected_commitments.map((commitment) => ({ ...commitment }));
+	}
+
+	async function loadGoals() {
+		goalsLoading = true;
+		goalsError = '';
+		try {
+			goals = await Api.goals();
+			syncGoalEditor(goals);
+		} catch (err) {
+			goalsError = err instanceof ApiError ? err.message : 'Could not load your goals.';
+		} finally {
+			goalsLoading = false;
+		}
+	}
+
+	function addCommitment() {
+		goalCommitments = [...goalCommitments, { title: '', date: '' }];
+	}
+
+	function removeCommitment(index) {
+		goalCommitments = goalCommitments.filter((_, current) => current !== index);
+	}
+
+	async function saveGoals() {
+		if (!goals || savingGoals) return;
+		savingGoals = true;
+		goalsStatus = 'Saving…';
+		goalsError = '';
+		try {
+			goals = await Api.updateGoals({
+				expected_version: goals.version,
+				daily_minutes: goalsDailyMinutes === '' ? null : Number(goalsDailyMinutes),
+				exam_date: goalsExamDate || null,
+				protected_commitments: goalCommitments.map((commitment) => ({
+					title: commitment.title,
+					date: commitment.date
+				}))
+			});
+			syncGoalEditor(goals);
+			goalsStatus = 'Saved';
+		} catch (err) {
+			goalsError = err instanceof ApiError ? err.message : 'Could not save your goals.';
+			goalsStatus = '';
+		} finally {
+			savingGoals = false;
+		}
+	}
+
+	async function undoGoals() {
+		if (!goals?.can_undo || undoingGoals) return;
+		undoingGoals = true;
+		goalsStatus = 'Undoing…';
+		goalsError = '';
+		try {
+			goals = await Api.undoGoals(goals.version);
+			syncGoalEditor(goals);
+			goalsStatus = 'Saved';
+		} catch (err) {
+			goalsError = err instanceof ApiError ? err.message : 'Could not undo your last goal change.';
+			goalsStatus = '';
+		} finally {
+			undoingGoals = false;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -87,7 +166,7 @@
 			goto(`${base}/login`);
 			return;
 		}
-		await load();
+		await Promise.all([load(), loadGoals()]);
 	});
 </script>
 
@@ -99,6 +178,125 @@
 	<p class="error-text" role="alert">{error}</p>
 	<button class="btn" type="button" onclick={load}>Retry</button>
 {:else if today}
+	<section class="card goals-card" aria-labelledby="goals-heading">
+		<div class="goals-heading-row">
+			<div>
+				<h2 id="goals-heading">Study goals</h2>
+				{#if goalsLoading}
+					<p class="muted" data-testid="goal-summary">Loading goals…</p>
+				{:else if goals}
+					<div class="goal-summary" data-testid="goal-summary">
+						<strong>{goals.daily_minutes === null ? 'No daily target' : `${goals.daily_minutes} min/day`}</strong>
+						{#if goals.exam_date}
+							<span class="muted">Exam date {goals.exam_date}</span>
+						{/if}
+						{#if goals.protected_commitments.length > 0}
+							<ul>
+								{#each goals.protected_commitments as commitment}
+									<li>{commitment.title} · {commitment.date}</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				{/if}
+			</div>
+			<button
+				class="btn"
+				type="button"
+				data-testid="goals-editor-toggle"
+				aria-expanded={goalsEditorOpen}
+				disabled={goalsLoading || !goals}
+				onclick={() => (goalsEditorOpen = !goalsEditorOpen)}
+			>
+				{goalsEditorOpen ? 'Close' : 'Edit goals'}
+			</button>
+		</div>
+
+		{#if goalsError}
+			<p class="error-text" role="alert">{goalsError}</p>
+		{/if}
+
+		{#if goalsEditorOpen && goals}
+			<div class="goals-editor">
+				<label class="field">
+					<span>Daily study target (minutes)</span>
+					<input
+						type="number"
+						min="1"
+						max="1440"
+						inputmode="numeric"
+						bind:value={goalsDailyMinutes}
+						data-testid="goals-daily-minutes"
+					/>
+				</label>
+				<label class="field">
+					<span>Exam date (optional)</span>
+					<input type="date" bind:value={goalsExamDate} data-testid="goals-exam-date" />
+				</label>
+
+				<div class="commitments">
+					<div class="commitments-heading">
+						<strong>Protected commitments</strong>
+						<button class="btn" type="button" data-testid="add-commitment" onclick={addCommitment}>
+							Add commitment
+						</button>
+					</div>
+					{#each goalCommitments as commitment, index}
+						<div class="commitment-row">
+							<label class="field">
+								<span>Commitment {index + 1}</span>
+								<input
+									type="text"
+									maxlength="120"
+									bind:value={commitment.title}
+									data-testid={`commitment-title-${index}`}
+								/>
+							</label>
+							<label class="field">
+								<span>Date</span>
+								<input
+									type="date"
+									bind:value={commitment.date}
+									data-testid={`commitment-date-${index}`}
+								/>
+							</label>
+							<button class="btn danger-text" type="button" onclick={() => removeCommitment(index)}>
+								Remove
+							</button>
+						</div>
+					{/each}
+				</div>
+
+				<div class="goals-actions">
+					<button
+						class="btn primary"
+						type="button"
+						disabled={savingGoals || undoingGoals}
+						data-loading={savingGoals}
+						data-testid="save-goals"
+						onclick={saveGoals}
+					>
+						{savingGoals ? 'Saving…' : 'Save goals'}
+					</button>
+					{#if goals.can_undo}
+						<button
+							class="btn"
+							type="button"
+							disabled={savingGoals || undoingGoals}
+							data-testid="undo-goals"
+							onclick={undoGoals}
+						>
+							{undoingGoals ? 'Undoing…' : 'Undo last change'}
+						</button>
+					{/if}
+					<span class="muted" role="status" aria-live="polite" data-testid="goals-status">
+						{goalsStatus}
+					</span>
+				</div>
+			</div>
+		{/if}
+	</section>
+
 	{#if today.tasks.length === 0}
 		<div class="card">
 			<p class="muted">Nothing scheduled for today yet. Your plan appears as you study.</p>
@@ -187,3 +385,56 @@
 		{/each}
 	{/if}
 {/if}
+
+<style>
+	.goals-card {
+		display: grid;
+		gap: var(--space-md);
+	}
+
+	.goals-heading-row,
+	.commitments-heading,
+	.goals-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-md);
+		flex-wrap: wrap;
+	}
+
+	.goals-heading-row h2,
+	.goal-summary,
+	.goal-summary ul,
+	.goals-actions {
+		margin: 0;
+	}
+
+	.goal-summary {
+		display: grid;
+		gap: var(--space-xs);
+		margin-top: var(--space-xs);
+	}
+
+	.goal-summary ul {
+		padding-left: var(--space-lg);
+	}
+
+	.goals-editor,
+	.commitments {
+		display: grid;
+		gap: var(--space-md);
+	}
+
+	.commitment-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto;
+		gap: var(--space-md);
+		align-items: end;
+	}
+
+	@media (max-width: 640px) {
+		.commitment-row {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

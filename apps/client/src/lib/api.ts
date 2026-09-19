@@ -77,6 +77,20 @@ export interface Today {
 	learner: LearnerChapter[];
 }
 
+export interface GoalCommitment {
+	title: string;
+	date: string;
+}
+
+export interface LearnerGoals {
+	version: number;
+	daily_minutes: number | null;
+	exam_date: string | null;
+	protected_commitments: GoalCommitment[];
+	can_undo: boolean;
+	changed: boolean;
+}
+
 export interface SessionItem {
 	item_index: number;
 	question_version_id: string;
@@ -128,6 +142,15 @@ export const Api = {
 	login: (email: string, password: string) =>
 		call<{ token: string }>('POST', '/v1/auth/login', { email, password }),
 	today: () => call<Today>('GET', '/v1/me/today'),
+	goals: () => call<LearnerGoals>('GET', '/v1/me/goals'),
+	updateGoals: (body: {
+		expected_version: number;
+		daily_minutes: number | null;
+		exam_date: string | null;
+		protected_commitments: GoalCommitment[];
+	}) => call<LearnerGoals>('PUT', '/v1/me/goals', body),
+	undoGoals: (expectedVersion: number) =>
+		call<LearnerGoals>('POST', '/v1/me/goals/undo', { expected_version: expectedVersion }),
 	createSession: (body: {
 		preset: string;
 		chapter_id?: string;
