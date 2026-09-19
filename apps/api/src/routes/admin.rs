@@ -230,7 +230,7 @@ fn validate_question(req: &CreateQuestionReq) -> ApiResult<()> {
 }
 
 async fn insert_question_version(
-    pool: impl sqlx::PgExecutor<'_>,
+    pool: &mut sqlx::postgres::PgConnection,
     req: &CreateQuestionReq,
 ) -> ApiResult<(Uuid, Uuid)> {
     let count = option_count(req.options.len()).map_err(|_| {
@@ -272,7 +272,7 @@ async fn insert_question_version(
         req.high_yield.unwrap_or(false),
         req.source_ref,
     )
-    .execute(pool)
+    .execute(&mut *pool)
     .await?;
     Ok((qid, vid))
 }
@@ -285,7 +285,8 @@ pub async fn create_question(
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
     validate_question(&req)?;
-    let (qid, vid) = insert_question_version(&state.pool, &req).await?;
+    let mut conn = state.pool.acquire().await?;
+    let (qid, vid) = insert_question_version(&mut conn, &req).await?;
     audit(
         &state.pool,
         user.user_id,
@@ -449,7 +450,7 @@ pub async fn import(
     let mut tx = state.pool.begin().await?;
     let mut created: Vec<serde_json::Value> = Vec::new();
     for row in &req.rows {
-        let (qid, vid) = insert_question_version(&mut *tx, row).await?;
+        let (qid, vid) = insert_question_version(&mut **tx, row).await?;
         created.push(json!({"question_id": qid, "version_id": vid}));
     }
     sqlx::query!(

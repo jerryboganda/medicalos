@@ -161,10 +161,11 @@
 	<div class="card">
 		<h2>Bulk import (JSON rows)</h2>
 		<p class="muted" style="font-size: var(--text-sm);">
-			Rows: [{{ chapter_id, difficulty, vignette, lead_in, options: [{{ text,
-			rationale }}], correct_index, key_learning_point, source_ref }}]. Dry
-			run validates and creates nothing; rollback refuses once learners have
-			answered.
+			Rows is a JSON array of objects, each with: chapter_id, difficulty
+			(easy/medium/hard), vignette, lead_in, options (text + rationale,
+			2-10 of them), correct_index, key_learning_point (40 words max),
+			and source_ref. Dry run validates and creates nothing; rollback
+			refuses once learners have answered.
 		</p>
 		<label class="field" for="import-json">
 			<span>Rows JSON</span>
