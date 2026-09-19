@@ -70,7 +70,7 @@ pub async fn generate_pregen(
             Uuid::new_v4(),
             vid,
             ptype,
-            content
+            content.as_str().unwrap_or_default()
         )
         .execute(&state.pool)
         .await?;
