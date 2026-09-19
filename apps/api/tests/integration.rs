@@ -2793,7 +2793,7 @@ async fn settings_admin_gate_and_update() {
 }
 
 #[tokio::test]
-async fn migration_up_down_up_is_reversible() {async fn migration_up_down_up_is_reversible() {
+async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     schema::apply_down(&state.pool).await.expect("down");
