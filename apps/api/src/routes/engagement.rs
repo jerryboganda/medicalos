@@ -292,6 +292,8 @@ pub async fn submit_competition_entry(
         .await?
         .ok_or_else(|| ApiError::not_found("question_not_found"))?;
         let correct = chosen == qv.correct_index;
+        #[allow(unused_variables)]
+        let _ = correct;
         let difficulty = match qv.difficulty.as_str() {
             "easy" => Difficulty::Easy,
             "hard" => Difficulty::Hard,
