@@ -1911,7 +1911,7 @@ async fn notes_crud_links_export_and_isolation() {
     assert_eq!(with_links["backlinks"].as_array().unwrap().len(), 1);
 
     // Isolation: the other learner sees nothing, cannot delete.
-    let (status, other_list) =
+    let (_status, other_list) =
         call(app.clone(), request("GET", "/v1/notes", Some(&other), None)).await;
     assert_eq!(other_list["notes"].as_array().unwrap().len(), 0);
     let (status, _) = call(
@@ -2093,7 +2093,7 @@ async fn goals_and_protected_commitments_lifecycle() {
     assert_eq!(status, StatusCode::OK, "{goal}");
 
     // A new goal retires the old one; history is kept.
-    let (status, _) = call(
+    let (_status, _) = call(
         app.clone(),
         request(
             "POST",
@@ -2128,7 +2128,7 @@ async fn goals_and_protected_commitments_lifecycle() {
     .await;
     assert_eq!(status, StatusCode::OK, "{c}");
     let cid: Uuid = c["commitment_id"].as_str().unwrap().parse().unwrap();
-    let (status, list) = call(
+    let (_status, list) = call(
         app.clone(),
         request("GET", "/v1/me/goals", Some(&token), None),
     )
@@ -2201,7 +2201,7 @@ async fn feature_flags_roundtrip() {
     let app = router(state.clone());
     let token = register_and_login(app.clone()).await;
 
-    let (status, _) = call(
+    let (_status, _) = call(
         app.clone(),
         admin_req(
             "POST",
