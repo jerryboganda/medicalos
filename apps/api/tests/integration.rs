@@ -806,7 +806,9 @@ async fn core08_notification_preferences_push_registration_and_empty_inbox() {
 async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_sessions() {
     let _g = LOCK.lock().await;
     let state = setup().await;
-    let ids = seed::seed(&state.pool).await.expect("seed synthetic content");
+    let ids = seed::seed(&state.pool)
+        .await
+        .expect("seed synthetic content");
     let app = router(state.clone());
     let token = register_and_login(app.clone()).await;
     let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")
@@ -964,10 +966,11 @@ async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_session
         .expect("submitted session fixture");
     }
 
-    let protected_date: chrono::NaiveDate = sqlx::query_scalar("SELECT CURRENT_DATE - 1")
-        .fetch_one(&state.pool)
-        .await
-        .expect("fixture date");
+    let protected_date: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Karachi')::date - 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("fixture date");
     sqlx::query(
         "UPDATE learner_goal_versions SET protected_commitments = $2 WHERE user_id = $1 AND version = 1",
     )
@@ -989,6 +992,10 @@ async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_session
     assert_eq!(protected["daily_goal"]["met"], true);
     assert_eq!(protected["streak"]["length"], 8);
     assert_eq!(protected["streak"]["freezes_held"], 1);
+    let current_qotd = protected["qotd"][0]["question_version_id"]
+        .as_str()
+        .expect("current qotd question")
+        .to_string();
 
     sqlx::query(
         "UPDATE learner_goal_versions SET protected_commitments = '[]'::jsonb WHERE user_id = $1 AND version = 1",
@@ -1016,8 +1023,10 @@ async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_session
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{qotd_session}");
-    let sid = qotd_session["session_id"].as_str().expect("qotd session id");
-    assert_eq!(qotd_session["question_version_id"], first_qotd);
+    let sid = qotd_session["session_id"]
+        .as_str()
+        .expect("qotd session id");
+    assert_eq!(qotd_session["question_version_id"], current_qotd);
 
     let (status, blocked) = call(
         app.clone(),
@@ -1085,7 +1094,7 @@ async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_session
         1
     );
 
-    let selected = Uuid::parse_str(&first_qotd).unwrap();
+    let selected = Uuid::parse_str(&current_qotd).unwrap();
     sqlx::query(
         "INSERT INTO question_reports
            (id, reporter_id, question_version_id, category, status, note)
@@ -1098,14 +1107,11 @@ async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_session
     .await
     .expect("quarantine selected qotd fixture");
 
-    let (status, after_quarantine) = call(
-        app,
-        request("GET", "/v1/me/engagement", Some(&token), None),
-    )
-    .await;
+    let (status, after_quarantine) =
+        call(app, request("GET", "/v1/me/engagement", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{after_quarantine}");
     assert_ne!(
-        after_quarantine["qotd"][0]["question_version_id"], first_qotd,
+        after_quarantine["qotd"][0]["question_version_id"], current_qotd,
         "quarantined questions must be excluded from QOTD"
     );
 }

@@ -61,6 +61,15 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::goals::get_goals).put(routes::goals::put_goals),
         )
         .route("/v1/me/goals/undo", post(routes::goals::undo_goals))
+        .route("/v1/me/engagement", get(routes::engagement::get_engagement))
+        .route(
+            "/v1/me/engagement/preferences",
+            put(routes::engagement::update_preferences),
+        )
+        .route(
+            "/v1/me/engagement/qotd/{exam_id}/session",
+            post(routes::engagement::start_qotd_session),
+        )
         .route("/v1/me/contexts", get(routes::tenancy::my_contexts))
         .route("/v1/tenant/context", get(routes::tenancy::tenant_context))
         .route("/v1/platform/tenants", post(routes::tenancy::create_tenant))

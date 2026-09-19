@@ -140,6 +140,52 @@ export interface LearnerGoals {
 	changed: boolean;
 }
 
+export interface EngagementPreferences {
+	daily_goal_enabled: boolean;
+	streak_enabled: boolean;
+	qotd_enabled: boolean;
+	qotd_time: string | null;
+}
+
+export interface EngagementCommunityOption {
+	option_index: number;
+	count: number;
+	percentage: number;
+}
+
+export interface EngagementQotd {
+	exam_id: string;
+	exam_code: string;
+	exam_name: string;
+	question_version_id: string;
+	answered: boolean;
+	due: boolean;
+	community_split: {
+		total_answers: number;
+		options: EngagementCommunityOption[];
+	} | null;
+}
+
+export interface Engagement {
+	timezone: string;
+	local_date: string;
+	preferences: EngagementPreferences;
+	daily_goal: {
+		enabled: boolean;
+		target_minutes: number | null;
+		completed_minutes: number;
+		met: boolean;
+	};
+	streak: {
+		enabled: boolean;
+		length: number;
+		freezes_held: number;
+		goal_met_days: number;
+		next_freeze_in: number | null;
+	};
+	qotd: EngagementQotd[];
+}
+
 export interface SessionItem {
 	item_index: number;
 	question_version_id: string;
@@ -304,6 +350,15 @@ export const Api = {
 		call<{ read: boolean; read_at: string }>('POST', `/v1/notifications/${id}/read`),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	goals: () => call<LearnerGoals>('GET', '/v1/me/goals'),
+	engagement: () => call<Engagement>('GET', '/v1/me/engagement'),
+	updateEngagementPreferences: (body: EngagementPreferences) =>
+		call<EngagementPreferences>('PUT', '/v1/me/engagement/preferences', body),
+	startQotd: (examId: string, takeover = false) =>
+		call<CreateSessionResponse & { exam_id: string; question_version_id: string; local_date: string }>(
+			'POST',
+			`/v1/me/engagement/qotd/${examId}/session`,
+			{ takeover }
+		),
 	updateGoals: (body: {
 		expected_version: number;
 		daily_minutes: number | null;

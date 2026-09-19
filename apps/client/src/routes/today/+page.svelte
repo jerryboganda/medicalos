@@ -22,6 +22,58 @@
 	let savingGoals = $state(false);
 	let undoingGoals = $state(false);
 	let quickLoading = $state(false);
+	let engagement = $state(null);
+	let engagementLoading = $state(true);
+	let engagementError = $state('');
+	let engagementSettingsOpen = $state(false);
+	let engagementDailyGoalEnabled = $state(true);
+	let engagementStreakEnabled = $state(true);
+	let engagementQotdEnabled = $state(true);
+	let engagementQotdTime = $state('');
+	let engagementSaving = $state(false);
+	let engagementStatus = $state('');
+
+	function syncEngagementSettings(value) {
+		engagementDailyGoalEnabled = value.preferences.daily_goal_enabled;
+		engagementStreakEnabled = value.preferences.streak_enabled;
+		engagementQotdEnabled = value.preferences.qotd_enabled;
+		engagementQotdTime = value.preferences.qotd_time ?? '';
+	}
+
+	async function loadEngagement() {
+		engagementLoading = true;
+		engagementError = '';
+		try {
+			engagement = await Api.engagement();
+			syncEngagementSettings(engagement);
+		} catch (err) {
+			engagementError = err instanceof ApiError ? err.message : 'Could not load daily momentum.';
+		} finally {
+			engagementLoading = false;
+		}
+	}
+
+	async function saveEngagementSettings() {
+		if (engagementSaving) return;
+		engagementSaving = true;
+		engagementStatus = 'Saving…';
+		engagementError = '';
+		try {
+			await Api.updateEngagementPreferences({
+				daily_goal_enabled: engagementDailyGoalEnabled,
+				streak_enabled: engagementStreakEnabled,
+				qotd_enabled: engagementQotdEnabled,
+				qotd_time: engagementQotdTime || null
+			});
+			await loadEngagement();
+			engagementStatus = 'Saved';
+		} catch (err) {
+			engagementError = err instanceof ApiError ? err.message : 'Could not save engagement settings.';
+			engagementStatus = '';
+		} finally {
+			engagementSaving = false;
+		}
+	}
 
 	function syncGoalEditor(profile) {
 		goalsDailyMinutes = profile.daily_minutes ?? '';
@@ -72,6 +124,7 @@
 				}))
 			});
 			syncGoalEditor(goals);
+			await loadEngagement();
 			goalsStatus = 'Saved';
 		} catch (err) {
 			goalsError = err instanceof ApiError ? err.message : 'Could not save your goals.';
@@ -89,6 +142,7 @@
 		try {
 			goals = await Api.undoGoals(goals.version);
 			syncGoalEditor(goals);
+			await loadEngagement();
 			goalsStatus = 'Saved';
 		} catch (err) {
 			goalsError = err instanceof ApiError ? err.message : 'Could not undo your last goal change.';
@@ -123,11 +177,32 @@
 			goto(`${base}/session/${session_id}`);
 		} catch (err) {
 			if (err instanceof ApiError && err.code === 'active_study_session') {
-				pendingTakeover = { body, busyKey };
+				pendingTakeover = { kind: 'practice', body, busyKey };
 				error =
 					'Another study session is already active. Taking over will end that open session and start this one.';
 			} else {
 				error = err instanceof ApiError ? err.message : 'Could not start the session. Try again.';
+			}
+			startingTask = '';
+		}
+	}
+
+	async function startQotd(item) {
+		const busyKey = `qotd-${item.exam_id}`;
+		if (startingTask) return;
+		startingTask = busyKey;
+		error = '';
+		pendingTakeover = null;
+		try {
+			const { session_id } = await Api.startQotd(item.exam_id);
+			goto(`${base}/session/${session_id}`);
+		} catch (err) {
+			if (err instanceof ApiError && err.code === 'active_study_session') {
+				pendingTakeover = { kind: 'qotd', examId: item.exam_id, busyKey };
+				error =
+					'Another study session is already active. Taking over will end that open session and start this one.';
+			} else {
+				error = err instanceof ApiError ? err.message : 'Could not start question of the day.';
 			}
 			startingTask = '';
 		}
@@ -139,7 +214,10 @@
 		startingTask = pending.busyKey;
 		error = '';
 		try {
-			const { session_id } = await Api.createSession({ ...pending.body, takeover: true });
+			const { session_id } =
+				pending.kind === 'qotd'
+					? await Api.startQotd(pending.examId, true)
+					: await Api.createSession({ ...pending.body, takeover: true });
 			pendingTakeover = null;
 			goto(`${base}/session/${session_id}`);
 		} catch (err) {
@@ -216,7 +294,7 @@
 			goto(`${base}/login`);
 			return;
 		}
-		await Promise.all([load(), loadGoals()]);
+		await Promise.all([load(), loadGoals(), loadEngagement()]);
 	});
 </script>
 
@@ -253,6 +331,120 @@
 		<button class="btn" type="button" onclick={load}>Retry</button>
 	{/if}
 {:else if today}
+	<section class="card engagement-card" aria-labelledby="engagement-heading">
+		<div class="goals-heading-row">
+			<div>
+				<h2 id="engagement-heading">Daily momentum</h2>
+				{#if engagementLoading}
+					<p class="muted">Loading progress…</p>
+				{:else if engagement}
+					<div class="engagement-summary" data-testid="engagement-summary">
+						{#if engagement.preferences.daily_goal_enabled}
+							<span>
+								<strong>{engagement.daily_goal.completed_minutes} min</strong>
+								<span class="muted">
+									{engagement.daily_goal.target_minutes === null
+										? 'today · no daily target'
+										: `of ${engagement.daily_goal.target_minutes} min today`}
+								</span>
+							</span>
+						{:else}
+							<span class="muted">Daily goal off</span>
+						{/if}
+						{#if engagement.preferences.streak_enabled}
+							<span>
+								<strong>{engagement.streak.length} day streak</strong>
+								<span class="muted">· {engagement.streak.freezes_held} freezes held</span>
+							</span>
+						{:else}
+							<span class="muted">Streak off</span>
+						{/if}
+					</div>
+				{/if}
+			</div>
+			<button
+				class="btn"
+				type="button"
+				aria-expanded={engagementSettingsOpen}
+				disabled={engagementLoading || !engagement}
+				onclick={() => (engagementSettingsOpen = !engagementSettingsOpen)}
+			>
+				{engagementSettingsOpen ? 'Close' : 'Settings'}
+			</button>
+		</div>
+
+		{#if engagementError}
+			<p class="error-text" role="alert">{engagementError}</p>
+		{/if}
+
+		{#if engagement?.preferences.qotd_enabled && engagement.qotd.length > 0}
+			<div class="qotd-list" aria-label="Question of the day">
+				{#each engagement.qotd as item (item.exam_id)}
+					<div class="qotd-row">
+						<div>
+							<strong>Question of the day · {item.exam_code}</strong>
+							<p class="muted qotd-meta">
+								{item.answered ? 'Answered' : item.due ? 'Due now' : 'Available'}
+								{#if item.community_split}
+									· Community {item.community_split.options
+										.map((option) => `${String.fromCharCode(65 + option.option_index)} ${option.percentage}%`)
+										.join(' · ')}
+								{/if}
+							</p>
+						</div>
+						<button
+							class="btn primary"
+							type="button"
+							disabled={startingTask !== ''}
+							data-loading={startingTask === `qotd-${item.exam_id}`}
+							data-testid={`qotd-start-${item.exam_id}`}
+							onclick={() => startQotd(item)}
+						>
+							{startingTask === `qotd-${item.exam_id}`
+								? 'Starting…'
+								: item.answered
+									? 'Practice again'
+									: 'Start'}
+						</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		{#if engagementSettingsOpen && engagement}
+			<div class="engagement-settings">
+				<label class="switch-row">
+					<input type="checkbox" bind:checked={engagementDailyGoalEnabled} />
+					<span>Daily goal</span>
+				</label>
+				<label class="switch-row">
+					<input type="checkbox" bind:checked={engagementStreakEnabled} />
+					<span>Streak and earned freezes</span>
+				</label>
+				<label class="switch-row">
+					<input type="checkbox" bind:checked={engagementQotdEnabled} />
+					<span>Question of the day</span>
+				</label>
+				<label class="field engagement-time">
+					<span>QOTD reminder time</span>
+					<input type="time" bind:value={engagementQotdTime} disabled={!engagementQotdEnabled} />
+				</label>
+				<div class="goals-actions">
+					<button
+						class="btn primary"
+						type="button"
+						disabled={engagementSaving}
+						data-loading={engagementSaving}
+						onclick={saveEngagementSettings}
+					>
+						{engagementSaving ? 'Saving…' : 'Save settings'}
+					</button>
+					<span class="muted" role="status" aria-live="polite">{engagementStatus}</span>
+				</div>
+			</div>
+		{/if}
+	</section>
+
 	<section class="card" aria-labelledby="quick-practice-heading">
 		<h2 id="quick-practice-heading">Quick practice</h2>
 		<p class="muted">Start up to 10 available questions across the current question bank.</p>
@@ -486,6 +678,49 @@
 	.goals-card {
 		display: grid;
 		gap: var(--space-md);
+	}
+
+	.engagement-card,
+	.engagement-settings,
+	.qotd-list {
+		display: grid;
+		gap: var(--space-md);
+	}
+
+	.engagement-summary {
+		display: flex;
+		gap: var(--space-lg);
+		flex-wrap: wrap;
+		margin-top: var(--space-xs);
+	}
+
+	.engagement-summary > span {
+		display: flex;
+		gap: var(--space-xs);
+		align-items: baseline;
+		flex-wrap: wrap;
+	}
+
+	.qotd-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-md);
+		flex-wrap: wrap;
+	}
+
+	.qotd-meta {
+		margin: var(--space-xs) 0 0;
+	}
+
+	.switch-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+	}
+
+	.engagement-time {
+		max-width: 220px;
 	}
 
 	.takeover-actions {

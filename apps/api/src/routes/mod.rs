@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod engagement;
 pub mod goals;
 pub mod notifications;
 pub mod practice;

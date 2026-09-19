@@ -566,6 +566,75 @@ async fn insert_session(
     Ok(Json(serde_json::json!({"session_id": sid, "items": items})))
 }
 
+async fn check_free_allowance(state: &AppState, user_id: Uuid) -> ApiResult<()> {
+    let used = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!"
+           FROM attempts
+           WHERE user_id = $1 AND created_at::date = CURRENT_DATE"#,
+        user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    if used >= state.free_daily_questions {
+        return Err(ApiError::forbidden_with_details(
+            "free_allowance_reached",
+            format!(
+                "Daily free allowance of {} questions reached — it resets tomorrow.",
+                state.free_daily_questions
+            ),
+            serde_json::json!({
+                "allowance": { "limit": state.free_daily_questions, "used": used }
+            }),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) async fn create_single_question_session(
+    state: &AppState,
+    user_id: Uuid,
+    question_version_id: Uuid,
+    takeover: bool,
+) -> ApiResult<Json<serde_json::Value>> {
+    check_free_allowance(state, user_id).await?;
+    let question = sqlx::query_as::<_, (Uuid, Uuid, String, String, String, serde_json::Value)>(
+        r#"SELECT qv.id, qv.chapter_id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
+           FROM question_versions qv
+           WHERE qv.id = $1
+             AND qv.status = 'published'
+             AND NOT EXISTS (
+                 SELECT 1 FROM question_reports r
+                 WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
+             )"#,
+    )
+    .bind(question_version_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("question_version_not_available"))?;
+    let q = PoolQuestion {
+        id: question.0,
+        vignette: question.2,
+        lead_in: question.3,
+        difficulty: question.4,
+        options: question.5,
+    };
+    let questions = [q];
+    insert_session(
+        &state.pool,
+        SessionInsert {
+            user_id,
+            takeover,
+            preset: "qotd",
+            chapter_id: Some(question.1),
+            source_session_id: None,
+            time_limit_seconds: None,
+            questions: &questions,
+        },
+    )
+    .await
+}
+
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -576,27 +645,7 @@ pub async fn create_session(
     // # ponytail: revision sessions are exempt (they re-practice already-
     // served items); per-tier entitlement service lands with billing.
     if req.preset.as_str() != "revision" {
-        let used = sqlx::query!(
-            r#"SELECT COALESCE(COUNT(*), 0) AS "n!"
-               FROM attempts
-               WHERE user_id = $1 AND created_at::date = CURRENT_DATE"#,
-            user.user_id
-        )
-        .fetch_one(&state.pool)
-        .await?
-        .n;
-        if used >= state.free_daily_questions {
-            return Err(ApiError::forbidden_with_details(
-                "free_allowance_reached",
-                format!(
-                    "Daily free allowance of {} questions reached — it resets tomorrow.",
-                    state.free_daily_questions
-                ),
-                serde_json::json!({
-                    "allowance": { "limit": state.free_daily_questions, "used": used }
-                }),
-            ));
-        }
+        check_free_allowance(&state, user.user_id).await?;
     }
     match req.preset.as_str() {
         "tutor" | "timed" => {
