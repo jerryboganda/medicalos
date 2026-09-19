@@ -25,7 +25,7 @@ pub struct CreateMockReq {
     pub attempts_allowed: Option<i32>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct BlueprintEntry {
     pub chapter_id: Uuid,
     pub count: i32,
