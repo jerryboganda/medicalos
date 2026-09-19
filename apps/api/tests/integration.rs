@@ -2762,7 +2762,38 @@ async fn portfolio_and_ce_records() {
 }
 
 #[tokio::test]
-async fn migration_up_down_up_is_reversible() {
+#[tokio::test]
+async fn settings_admin_gate_and_update() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    // Update a settings key (admin-gated).
+    let (status, body) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({"community_min_sample": 15})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Read back.
+    let (status, got) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/settings", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["settings"]["community_min_sample"], 15);
+}
+
+#[tokio::test]
+async fn migration_up_down_up_is_reversible() {async fn migration_up_down_up_is_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     schema::apply_down(&state.pool).await.expect("down");
