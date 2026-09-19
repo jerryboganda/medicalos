@@ -147,6 +147,19 @@ async fn xp_competitions_coverage_flow() {
         assert_eq!(status, StatusCode::OK);
     }
 
+    // Submit closes the session; XP is awarded on submit for correct answers.
+    let (status, sub) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub}");
+
     // ENG-02: XP total is positive after correct answers.
     let (status, xp) = call(
         app.clone(),

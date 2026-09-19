@@ -14,8 +14,7 @@ use crate::state::AppState;
 
 #[derive(Deserialize)]
 pub struct ResultActionReq {
-    pub session_id: Uuid,
-    pub action: String, // retry_same | practice_incorrect | practice_weak_chapters
+    pub action: String, // retry | practice_incorrect
 }
 
 /// POST /v1/sessions/{sid}/action — creates a follow-up session from the
