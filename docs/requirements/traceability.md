@@ -55,7 +55,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
 | PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
 | PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
-| LIB-01 | Versioned articles and references | not-started | — |
+| LIB-01 | Versioned articles and references | blocked (implementation complete: stable article/reference identities, immutable numbered published versions, authenticated latest-list + historical-version APIs, concept/question-version links, synthetic fixtures, and Learn UI; local fmt/diff gates pass; final Actions acceptance cannot execute because GitHub billing/spending-limit state blocks all jobs before runner steps) | `.scratch/phase-1-lib01-library/`; blocked run 35446948317 |
 | NOTE-01 | Source-linked private notes | not-started | — |
 | ADMIN-01 | Real cross-tenant owner dashboard | not-started | — |
 | ADMIN-02 | Content and rights operations | not-started | — |
