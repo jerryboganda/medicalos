@@ -204,7 +204,16 @@ pub async fn list_competitions(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "competitions": rows })))
+    let comps: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "competition_id": r.id, "title": r.title, "starts_at": r.starts_at,
+                "ends_at": r.ends_at, "status": r.status, "entered": r.entered,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "competitions": comps })))
 }
 
 #[derive(Deserialize)]
