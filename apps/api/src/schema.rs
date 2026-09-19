@@ -29,6 +29,7 @@ migrations!(
     "0012_qb13_session_tools",
     "0013_eng01_engagement",
     "0014_core09_guest_trial",
+    "0015_lib01_library",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

@@ -84,6 +84,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::tenancy::get_audit_event),
         )
         .route("/v1/me/today", get(routes::today::today))
+        .route("/v1/library", get(routes::library::list))
+        .route(
+            "/v1/library/{item_id}/versions/{version}",
+            get(routes::library::version),
+        )
         .route("/v1/practice/builder", get(routes::practice::builder))
         .route("/v1/tools/calculate", post(routes::practice::calculate))
         .route(

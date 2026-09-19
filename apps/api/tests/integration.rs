@@ -41,11 +41,8 @@ async fn lib01_library_is_versioned_connected_and_authenticated() {
     seed::seed(&state.pool).await.expect("seed");
     let app = router(state);
 
-    let (status, unauthenticated) = call(
-        app.clone(),
-        request("GET", "/v1/library", None, None),
-    )
-    .await;
+    let (status, unauthenticated) =
+        call(app.clone(), request("GET", "/v1/library", None, None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{unauthenticated}");
 
     let token = register_and_login(app.clone()).await;
@@ -96,7 +93,9 @@ async fn lib01_library_is_versioned_connected_and_authenticated() {
     assert_eq!(historical["item_id"], article_id);
     assert_eq!(historical["kind"], "article");
     assert_eq!(historical["version"], 1);
-    assert!(historical["body"].as_str().is_some_and(|body| !body.is_empty()));
+    assert!(historical["body"]
+        .as_str()
+        .is_some_and(|body| !body.is_empty()));
     assert!(
         historical["concept_version_ids"]
             .as_array()

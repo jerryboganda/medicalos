@@ -6,6 +6,10 @@
 	import { auth, loadAuth } from '$lib/auth.svelte';
 
 	let queue = $state(null);
+	let library = $state([]);
+	let selectedLibrary = $state(null);
+	let libraryLoading = $state(false);
+	let libraryError = $state('');
 	let loading = $state(true);
 	let error = $state('');
 
@@ -13,11 +17,25 @@
 		loading = true;
 		error = '';
 		try {
-			queue = await Api.reviewQueue();
+			const [reviewQueue, libraryResponse] = await Promise.all([Api.reviewQueue(), Api.library()]);
+			queue = reviewQueue;
+			library = libraryResponse.items;
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Could not load your learning queue.';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function openLibrary(item) {
+		libraryLoading = true;
+		libraryError = '';
+		try {
+			selectedLibrary = await Api.libraryVersion(item.item_id, item.version);
+		} catch (err) {
+			libraryError = err instanceof ApiError ? err.message : 'Could not open this library item.';
+		} finally {
+			libraryLoading = false;
 		}
 	}
 
@@ -57,4 +75,49 @@
 		{/if}
 		<a class="btn primary" href={`${base}/review`} data-testid="learn-review">Start review</a>
 	</div>
+{/if}
+
+{#if !loading && !error}
+	<section class="card" aria-labelledby="library-heading" aria-busy={libraryLoading} data-testid="learn-library">
+		<h2 id="library-heading">Library</h2>
+		<p class="muted">Reviewed articles and references, with source date and jurisdiction shown explicitly.</p>
+
+		{#if library.length === 0}
+			<p class="muted">No published library items are available yet.</p>
+		{:else}
+			{#each library as item}
+				<article>
+					<h3>{item.title}</h3>
+					<p class="muted">
+						{item.kind === 'article' ? 'Article' : 'Reference'} · Version {item.version} ·
+						{item.effective_date} · {item.jurisdiction}
+					</p>
+					<p class="muted">Source: {item.source_label} · {item.provenance_class}</p>
+					<button class="btn" type="button" onclick={() => openLibrary(item)} disabled={libraryLoading}>
+						Read
+					</button>
+				</article>
+			{/each}
+		{/if}
+		{#if libraryLoading}
+			<p class="muted" aria-live="polite">Opening library item…</p>
+		{/if}
+		{#if libraryError}
+			<p class="error-text" role="alert">{libraryError}</p>
+		{/if}
+
+		{#if selectedLibrary}
+			<article aria-live="polite">
+				<h3>{selectedLibrary.title}</h3>
+				<p>{selectedLibrary.body}</p>
+				<p class="muted">
+					Effective {selectedLibrary.effective_date} · {selectedLibrary.jurisdiction} ·
+					{selectedLibrary.source_label}
+				</p>
+				{#if selectedLibrary.source_url}
+					<a href={selectedLibrary.source_url} target="_blank" rel="noreferrer">Open source</a>
+				{/if}
+			</article>
+		{/if}
+	</section>
 {/if}

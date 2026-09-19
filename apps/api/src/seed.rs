@@ -2,6 +2,7 @@
 //! fictional ("gloopoid gland") so nothing here can be mistaken for medical
 //! material (§27: synthetic fixtures only).
 
+use chrono::NaiveDate;
 use domain_contracts::option_count;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -352,6 +353,104 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         .execute(pool)
         .await?;
     }
+
+    async fn insert_library_version(
+        pool: &PgPool,
+        item_id: Uuid,
+        version: i32,
+        title: &str,
+        body: &str,
+        source_label: &str,
+        effective_date: NaiveDate,
+        jurisdiction: &str,
+        concept_version_id: Uuid,
+        question_version_ids: &[Uuid],
+    ) -> ApiResult<()> {
+        let library_version_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO library_versions
+             (id, library_item_id, version, status, title, body, provenance_class,
+              source_label, source_url, effective_date, jurisdiction)
+             VALUES ($1, $2, $3, 'published', $4, $5, 'editorial', $6, NULL, $7, $8)",
+        )
+        .bind(library_version_id)
+        .bind(item_id)
+        .bind(version)
+        .bind(title)
+        .bind(body)
+        .bind(source_label)
+        .bind(effective_date)
+        .bind(jurisdiction)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO library_version_concepts (library_version_id, concept_version_id)
+             VALUES ($1, $2)",
+        )
+        .bind(library_version_id)
+        .bind(concept_version_id)
+        .execute(pool)
+        .await?;
+        for question_version_id in question_version_ids {
+            sqlx::query(
+                "INSERT INTO library_version_questions
+                 (library_version_id, question_version_id) VALUES ($1, $2)",
+            )
+            .bind(library_version_id)
+            .bind(question_version_id)
+            .execute(pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    let article_id = Uuid::new_v4();
+    let reference_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO library_items (id, kind) VALUES ($1, 'article'), ($2, 'reference')")
+        .bind(article_id)
+        .bind(reference_id)
+        .execute(pool)
+        .await?;
+
+    insert_library_version(
+        pool,
+        article_id,
+        1,
+        "Gloopoid feedback essentials",
+        "Synthetic reviewed article: the fictional gloopoid loop uses feedback direction to regulate glorbin release.",
+        "Synthetic reviewed editorial fixture",
+        NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid fixture date"),
+        "Global synthetic fixture",
+        concept1,
+        &[v1],
+    )
+    .await?;
+    insert_library_version(
+        pool,
+        article_id,
+        2,
+        "Gloopoid feedback essentials",
+        "Synthetic reviewed article, version 2: feedback direction and storage are separate steps in the fictional gloopoid pathway.",
+        "Synthetic reviewed editorial fixture",
+        NaiveDate::from_ymd_opt(2026, 2, 1).expect("valid fixture date"),
+        "Global synthetic fixture",
+        concept1,
+        &[v1, v2],
+    )
+    .await?;
+    insert_library_version(
+        pool,
+        reference_id,
+        1,
+        "Glorbin reference range",
+        "Synthetic reviewed reference: the fictional glorbin interval in this fixture is 10-50 mu/mL.",
+        "Synthetic reviewed reference fixture",
+        NaiveDate::from_ymd_opt(2026, 1, 15).expect("valid fixture date"),
+        "Global synthetic fixture",
+        concept2,
+        &[v3],
+    )
+    .await?;
 
     Ok(SeedIds {
         exam_id,

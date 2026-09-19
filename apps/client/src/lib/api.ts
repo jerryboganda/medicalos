@@ -328,6 +328,24 @@ export interface InboxNotification {
 	read_at: string | null;
 }
 
+export interface LibraryItem {
+	item_id: string;
+	kind: 'article' | 'reference';
+	version: number;
+	title: string;
+	provenance_class: string;
+	source_label: string;
+	source_url: string | null;
+	effective_date: string;
+	jurisdiction: string;
+}
+
+export interface LibraryVersion extends LibraryItem {
+	body: string;
+	concept_version_ids: string[];
+	question_version_ids: string[];
+}
+
 export const Api = {
 	register: (email: string, password: string, guestTrialToken?: string) =>
 		call<{
@@ -378,6 +396,9 @@ export const Api = {
 	notifications: () => call<{ notifications: InboxNotification[] }>('GET', '/v1/notifications'),
 	markNotificationRead: (id: string) =>
 		call<{ read: boolean; read_at: string }>('POST', `/v1/notifications/${id}/read`),
+	library: () => call<{ items: LibraryItem[] }>('GET', '/v1/library'),
+	libraryVersion: (itemId: string, version: number) =>
+		call<LibraryVersion>('GET', `/v1/library/${itemId}/versions/${version}`),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	goals: () => call<LearnerGoals>('GET', '/v1/me/goals'),
 	engagement: () => call<Engagement>('GET', '/v1/me/engagement'),
