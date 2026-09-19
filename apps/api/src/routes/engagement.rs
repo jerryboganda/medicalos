@@ -347,7 +347,7 @@ pub async fn award_session_xp(
     if correct_count == 0 {
         return Ok(());
     }
-    let points = correct_count * 10; // base XP per correct answer
+    let points = (correct_count * 10) as i32; // base XP per correct answer
     sqlx::query!(
         "INSERT INTO xp_ledger (id, user_id, points, reason)
          VALUES ($1, $2, $3, 'session_correct')",
