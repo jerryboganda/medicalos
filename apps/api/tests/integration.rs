@@ -1782,6 +1782,7 @@ async fn coach_daily_allowance_enforced() {
         free_daily_coach_turns: 1,
         openai_api_key: None,
         openai_base_url: "https://api.openai.com/v1".into(),
+        pack_signing_key: None,
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
@@ -1864,7 +1865,7 @@ async fn notes_crud_links_export_and_isolation() {
     .await;
     assert_eq!(status, StatusCode::OK, "{n1}");
     let id1: Uuid = n1["note_id"].as_str().unwrap().parse().unwrap();
-    let (status, n2) = call(
+    let (_status, n2) = call(
         app.clone(),
         request(
             "POST",
@@ -1875,7 +1876,7 @@ async fn notes_crud_links_export_and_isolation() {
     )
     .await;
     let id2: Uuid = n2["note_id"].as_str().unwrap().parse().unwrap();
-    let (status, _) = call(
+    let (_, _) = call(
         app.clone(),
         request(
             "POST",
