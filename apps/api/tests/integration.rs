@@ -126,6 +126,127 @@ async fn register_and_login(app: Router) -> String {
     v["token"].as_str().expect("token").to_string()
 }
 
+#[tokio::test]
+async fn qb13_hint_records_assistance_and_calculators_use_shared_engine() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid = session["session_id"].as_str().expect("session id");
+
+    let (status, hint) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/items/0/hint"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hint}");
+    assert!(hint["hint"].as_str().is_some_and(|value| !value.is_empty()));
+
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "qb13-assisted"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let assisted: bool = sqlx::query_scalar(
+        "SELECT assisted FROM attempts WHERE session_id = $1 AND item_index = 0",
+    )
+    .bind(Uuid::parse_str(sid).unwrap())
+    .fetch_one(&state.pool)
+    .await
+    .expect("assisted attempt");
+    assert!(assisted, "using a tutor hint must persist assisted evidence");
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, timed) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "timed",
+                "chapter_id": ids.chapter1,
+                "question_count": 1,
+                "time_limit_seconds": 30
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed}");
+    let timed_sid = timed["session_id"].as_str().expect("timed session id");
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{timed_sid}/items/0/hint"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let (status, calc) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/tools/calculate",
+            Some(&token),
+            Some(serde_json::json!({
+                "calculator": "bmi",
+                "inputs": {"weight_kg": 70.0, "height_m": 1.75}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{calc}");
+    assert!((calc["value"].as_f64().unwrap() - 22.86).abs() < 0.02);
+    assert_eq!(calc["unit"], "kg/m2");
+}
+
 async fn current_user_id(app: Router, token: &str) -> Uuid {
     let (status, contexts) = call(app, request("GET", "/v1/me/contexts", Some(token), None)).await;
     assert_eq!(status, StatusCode::OK, "{contexts}");

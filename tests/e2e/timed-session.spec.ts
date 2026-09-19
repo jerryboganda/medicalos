@@ -48,6 +48,8 @@ test('timed session shows the server countdown and auto-submits', async ({
 
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 	await expect(page.getByTestId('timer')).toContainText(/left/);
+	await expect(page.getByTestId('auto-submit-warning')).toBeVisible();
+	await expect(page.getByTestId('hint-open')).toHaveCount(0);
 
 	// Answer the first item so the auto-submit has real content.
 	await page.getByTestId('option-0').click();
