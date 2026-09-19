@@ -2898,3 +2898,305 @@ async fn session_actions_retry_and_practice_incorrect() {
     assert_eq!(status, StatusCode::OK, "{incorrect}");
     assert!(incorrect["item_count"].as_i64().unwrap() >= 0);
 }
+
+#[tokio::test]
+async fn phase2_pools_marks_timing_insights() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // QB-06 marked pool: mark q1, list marks, serve a marked-only session.
+    let q1 = ids.question_versions[0];
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/{q1}/mark"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = call(
+        app.clone(),
+        request("GET", "/v1/me/marks", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["marks"].as_array().unwrap().len(), 1, "marks: {v}");
+
+    let (status, marked) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "source": "marked", "question_count": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+    let marked_items = marked["items"].as_array().unwrap();
+    assert_eq!(marked_items.len(), 1, "only the marked question serves");
+    assert_eq!(
+        marked_items[0]["question_version_id"].as_str().unwrap(),
+        q1.to_string()
+    );
+    let sid: Uuid = marked["session_id"].as_str().unwrap().parse().unwrap();
+
+    // Answer wrong with QB-17 elapsed reporting, submit, and check the
+    // timing analysis carries the reported time.
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 1,
+                "elapsed_ms": 8000, "idempotency_key": "p16-a"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    assert_eq!(ans["correct"], false, "fixture q1 key is index 0");
+    let (status, sub) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub}");
+    assert_eq!(
+        sub["time"]["items"][0]["elapsed_ms"].as_i64(),
+        Some(8000),
+        "timing: {sub}"
+    );
+    assert!(sub["time"]["duration_seconds"].as_i64().is_some());
+
+    // ENG-02 recap: real counters only — one answered question, no XP (no
+    // correct answers yet).
+    let (status, recap) = call(
+        app.clone(),
+        request("GET", "/v1/me/weekly-recap", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recap}");
+    assert_eq!(recap["questions_answered"].as_i64(), Some(1), "{recap}");
+    assert_eq!(recap["xp"].as_i64(), Some(0), "{recap}");
+
+    // QB-06 incorrect pool: both chapter1 questions come back as a pool.
+    let (status, incorrect) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "source": "incorrect", "question_count": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{incorrect}");
+    assert_eq!(incorrect["items"].as_array().unwrap().len(), 2);
+
+    // Answer q1 and q2 wrong (keys 0 and 1) — SR-09 files key-point cards.
+    let sid2: Uuid = incorrect["session_id"].as_str().unwrap().parse().unwrap();
+    for (idx, key) in [(0i16, 1i16), (1, 0)] {
+        let (status, ans) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid2}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index": idx, "chosen_index": key,
+                    "elapsed_ms": 5000, "idempotency_key": format!("p16-b{idx}")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{ans}");
+        assert_eq!(ans["correct"], false);
+    }
+    let (status, sub2) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid2}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub2}");
+
+    // SR-09: two distinct misses → two key-point cards in the review queue.
+    let (status, queue) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    let queue_len = queue["due"].as_array().map(|a| a.len()).unwrap_or(0)
+        + queue["new"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(queue_len >= 2, "key-point cards queued: {queue}");
+
+    // AI-03: two misses in one chapter surface exactly one hypothesis.
+    let (status, hyp) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/mistake-hypotheses",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hyp}");
+    let hyps = hyp["hypotheses"].as_array().unwrap();
+    assert_eq!(hyps.len(), 1, "hypotheses: {hyp}");
+    assert_eq!(hyps[0]["misses"].as_i64(), Some(3), "{hyp}");
+
+    // PROG-01: heatmap lists the chapter with an honest band.
+    let (status, hm) = call(
+        app.clone(),
+        request("GET", "/v1/me/heatmap", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hm}");
+    assert!(!hm["systems"].as_array().unwrap().is_empty(), "{hm}");
+
+    // QB-06 unseen pool: everything in chapter1 was seen → honest empty.
+    let (status, unseen) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "source": "unseen", "question_count": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{unseen}");
+
+    // QB-17 mock answer changes: a mock may revise an answer before
+    // submission and the change is counted; tutor kept first-answer-wins
+    // (already proven by the early conflict tests).
+    let (status, mocks) = call(
+        app.clone(),
+        request("GET", "/v1/mocks", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mocks}");
+    let mid = mocks["mocks"][0]["id"]
+        .as_str()
+        .expect("seeded mock")
+        .to_string();
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mid}/start"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let msid: Uuid = started["session_id"]
+        .as_str()
+        .or_else(|| started["sid"].as_str())
+        .expect("mock session id")
+        .parse()
+        .unwrap();
+    for (chosen, expect_change) in [(0i16, false), (1, true)] {
+        let (status, ans) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{msid}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index": 0, "chosen_index": chosen,
+                    "elapsed_ms": 1000, "idempotency_key": format!("p16-m{chosen}")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{ans}");
+        assert_eq!(
+            ans["answer_changed"].as_bool().unwrap_or(false),
+            expect_change,
+            "{ans}"
+        );
+    }
+
+    // Unmark, then the marked pool empties honestly too.
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/questions/{q1}/mark"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, marked2) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "source": "marked", "question_count": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{marked2}");
+
+    // QB-09 editorial queue: admin sees stats, gate blocks without token.
+    let (status, q) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/psychometrics?exam_id={}", ids.exam_id),
+            None,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert!(!q["items"].as_array().unwrap().is_empty(), "{q}");
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/admin/psychometrics?exam_id={}", ids.exam_id),
+            None,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+}

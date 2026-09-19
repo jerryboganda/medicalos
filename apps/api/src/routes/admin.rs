@@ -667,3 +667,84 @@ pub async fn psychometric_screening(
         "flags": flags,
     })))
 }
+
+// ---- QB-09: editorial review queue ------------------------------------------
+
+#[derive(Deserialize)]
+pub struct QueueParams {
+    pub exam_id: Uuid,
+    pub limit: Option<i64>,
+}
+
+/// GET /v1/admin/psychometrics?exam_id= — per-question attempt statistics
+/// across an exam so editors can find items needing review (QB-09/§11.4).
+/// Same honest flags as the per-item endpoint; below the 20-attempt floor
+/// the flag says so instead of pretending.
+pub async fn psychometric_queue(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<QueueParams>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let limit = q.limit.unwrap_or(100).clamp(1, 500) as i64;
+    let rows = sqlx::query!(
+        r#"SELECT t.vid,
+                  t.attempts AS "attempts!",
+                  t.correct AS "correct!",
+                  t.open_reports AS "open_reports!"
+           FROM (
+               SELECT qv.id AS vid,
+                      COUNT(a.id) AS attempts,
+                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS correct,
+                      (SELECT COUNT(*) FROM question_reports r
+                       WHERE r.question_version_id = qv.id
+                         AND r.status IN ('open','quarantined')) AS open_reports
+               FROM question_versions qv
+               JOIN curriculum_nodes ch ON ch.id = qv.chapter_id
+               JOIN curriculum_nodes sys ON sys.id = ch.parent_id
+               JOIN curriculum_nodes subj ON subj.id = sys.parent_id
+               LEFT JOIN attempts a
+                 ON a.question_version_id = qv.id AND a.chosen_index IS NOT NULL
+               WHERE qv.status = 'published' AND subj.parent_id = $1
+               GROUP BY qv.id
+           ) t
+           ORDER BY t.open_reports DESC, t.attempts ASC
+           LIMIT $2"#,
+        q.exam_id,
+        limit
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let items: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            let mut flags: Vec<&str> = Vec::new();
+            let p = if r.attempts >= 20 {
+                let p = r.correct * 100 / r.attempts;
+                if p < 20 {
+                    flags.push("too_hard");
+                }
+                if p > 95 {
+                    flags.push("too_easy");
+                }
+                Some(p as i32)
+            } else {
+                flags.push("insufficient_attempts");
+                None
+            };
+            if r.open_reports >= 3 {
+                flags.push("reported");
+            }
+            json!({
+                "question_version_id": r.vid,
+                "attempts": r.attempts,
+                "correct": r.correct,
+                "p_percent": p,
+                "open_reports": r.open_reports,
+                "flags": flags,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
+}

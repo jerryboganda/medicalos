@@ -194,6 +194,21 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/retests/result", post(routes::retest::retest_result))
         .route("/v1/config", get(routes::config::config))
         .route("/v1/me/xp", get(routes::engagement::my_xp))
+        .route("/v1/me/weekly-recap", get(routes::engagement::weekly_recap))
+        .route(
+            "/v1/me/mistake-hypotheses",
+            get(routes::insights::mistake_hypotheses),
+        )
+        .route("/v1/me/heatmap", get(routes::insights::mastery_heatmap))
+        .route("/v1/me/marks", get(routes::marks::my_marks))
+        .route(
+            "/v1/questions/{qid}/mark",
+            post(routes::marks::mark_question).delete(routes::marks::unmark_question),
+        )
+        .route(
+            "/v1/admin/psychometrics",
+            get(routes::admin::psychometric_queue),
+        )
         .route(
             "/v1/competitions",
             post(routes::engagement::create_competition).get(routes::engagement::list_competitions),
@@ -393,6 +408,24 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/api/v1/config", get(routes::config::config))
         .route("/api/v1/me/xp", get(routes::engagement::my_xp))
+        .route(
+            "/api/v1/me/weekly-recap",
+            get(routes::engagement::weekly_recap),
+        )
+        .route(
+            "/api/v1/me/mistake-hypotheses",
+            get(routes::insights::mistake_hypotheses),
+        )
+        .route("/api/v1/me/heatmap", get(routes::insights::mastery_heatmap))
+        .route("/api/v1/me/marks", get(routes::marks::my_marks))
+        .route(
+            "/api/v1/questions/{qid}/mark",
+            post(routes::marks::mark_question).delete(routes::marks::unmark_question),
+        )
+        .route(
+            "/api/v1/admin/psychometrics",
+            get(routes::admin::psychometric_queue),
+        )
         .route(
             "/api/v1/competitions",
             post(routes::engagement::create_competition).get(routes::engagement::list_competitions),

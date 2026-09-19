@@ -15,58 +15,6 @@ use crate::state::AppState;
 
 // ---- ENG-02: XP + achievements -----------------------------------------------
 
-fn xp_for_difficulty(difficulty: &str) -> i32 {
-    match difficulty {
-        "hard" => 30,
-        "medium" => 20,
-        _ => 10,
-    }
-}
-
-/// Called by the practice submit path: award XP for correct answers and
-/// check milestone achievements. Deterministic rules (§17.2 guardrails —
-/// never an optimization target).
-pub async fn award_xp_for_submit(
-    state: &AppState,
-    user_id: Uuid,
-    #[allow(unused_variables)] correct: i64,
-    difficulties: Vec<String>,
-) -> ApiResult<()> {
-    let total: i32 = difficulties.iter().map(|d| xp_for_difficulty(d)).sum();
-    if total == 0 {
-        return Ok(());
-    }
-    sqlx::query!(
-        "INSERT INTO xp_ledger (id, user_id, points, reason)
-         VALUES ($1, $2, $3, 'session_correct')",
-        Uuid::new_v4(),
-        user_id,
-        total
-    )
-    .execute(&state.pool)
-    .await?;
-    // Milestone achievements: 100 / 500 correct-answer XP totals.
-    let earned: i64 = sqlx::query!(
-        r#"SELECT COALESCE(SUM(points), 0) AS "total!" FROM xp_ledger WHERE user_id = $1"#,
-        user_id
-    )
-    .fetch_one(&state.pool)
-    .await?
-    .total;
-    for milestone in [100, 500] {
-        if earned >= milestone {
-            sqlx::query!(
-                "INSERT INTO achievements (user_id, code) VALUES ($1, $2)
-                 ON CONFLICT DO NOTHING",
-                user_id,
-                format!("xp_{milestone}")
-            )
-            .execute(&state.pool)
-            .await?;
-        }
-    }
-    Ok(())
-}
 
 pub async fn my_xp(
     State(state): State<Arc<AppState>>,
@@ -338,7 +286,9 @@ pub async fn submit_competition_entry(
     })))
 }
 
-/// Simple XP award called from the practice submit handler.
+/// Simple XP award called from the practice submit handler, with the
+/// §17.2 milestone achievements (deterministic, never an optimization
+/// target). Replaces the earlier per-difficulty duplicate.
 pub async fn award_session_xp(
     state: &AppState,
     user_id: Uuid,
@@ -357,5 +307,75 @@ pub async fn award_session_xp(
     )
     .execute(&state.pool)
     .await?;
+    let earned: i64 = sqlx::query!(
+        r#"SELECT COALESCE(SUM(points), 0) AS "total!" FROM xp_ledger WHERE user_id = $1"#,
+        user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .total;
+    for milestone in [100, 500] {
+        if earned >= milestone {
+            sqlx::query!(
+                "INSERT INTO achievements (user_id, code) VALUES ($1, $2)
+                 ON CONFLICT DO NOTHING",
+                user_id,
+                format!("xp_{milestone}")
+            )
+            .execute(&state.pool)
+            .await?;
+        }
+    }
     Ok(())
+}
+
+/// GET /v1/me/weekly-recap — ENG-02: the learner's last 7 days from real
+/// records only (XP earned, sessions submitted, accuracy, reviews done).
+/// Empty weeks report zeros honestly; nothing is synthesized.
+pub async fn weekly_recap(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let xp: i64 = sqlx::query!(
+        r#"SELECT COALESCE(SUM(points), 0) AS "total!" FROM xp_ledger
+           WHERE user_id = $1 AND created_at >= now() - interval '7 days'"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .total;
+    let sessions = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM practice_sessions
+           WHERE user_id = $1 AND status = 'submitted'
+             AND submitted_at >= now() - interval '7 days'"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    let attempts = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!",
+                  COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS "c!"
+           FROM attempts
+           WHERE user_id = $1 AND created_at >= now() - interval '7 days'"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let reviews = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM review_events
+           WHERE user_id = $1 AND reviewed_at >= now() - interval '7 days'"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    Ok(Json(json!({
+        "days": 7,
+        "xp": xp,
+        "sessions_submitted": sessions,
+        "questions_answered": attempts.n,
+        "questions_correct": attempts.c,
+        "reviews_done": reviews,
+    })))
 }

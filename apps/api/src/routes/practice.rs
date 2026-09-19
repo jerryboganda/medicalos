@@ -17,6 +17,10 @@ use crate::state::AppState;
 pub struct CreateSessionReq {
     pub preset: String,
     pub chapter_id: Option<Uuid>,
+    /// QB-06 targeted pool: several chapters at once (overrides chapter_id).
+    pub chapter_ids: Option<Vec<Uuid>>,
+    /// QB-06 pool filter: any (default) | unseen | incorrect | marked.
+    pub source: Option<String>,
     pub question_count: Option<i32>,
     pub source_session_id: Option<Uuid>,
     /// EX-08: required for the timed preset, validated server-side.
@@ -134,9 +138,38 @@ pub async fn create_session(
     }
     match req.preset.as_str() {
         "tutor" | "timed" => {
-            let chapter_id = req.chapter_id.ok_or_else(|| {
-                ApiError::unprocessable("chapter_required", "practice sessions need a chapter_id")
-            })?;
+            // QB-06 targeted pool: chapter_ids wins over a single chapter_id.
+            let chapter_id = match (&req.chapter_ids, req.chapter_id) {
+                (Some(ids), _) if !ids.is_empty() => {
+                    if ids.len() > 20 {
+                        return Err(ApiError::unprocessable(
+                            "too_many_chapters",
+                            "at most 20 chapters per targeted session",
+                        ));
+                    }
+                    // Any member proves hierarchy ownership; unknown ids fail
+                    // selection with an honest empty pool below.
+                    ids[0]
+                }
+                (_, Some(id)) => id,
+                _ => {
+                    return Err(ApiError::unprocessable(
+                        "chapter_required",
+                        "practice sessions need a chapter_id",
+                    ))
+                }
+            };
+            let chapters: Vec<Uuid> = match &req.chapter_ids {
+                Some(ids) if !ids.is_empty() => ids.clone(),
+                _ => vec![chapter_id],
+            };
+            let source = req.source.as_deref().unwrap_or("any");
+            if !matches!(source, "any" | "unseen" | "incorrect" | "marked") {
+                return Err(ApiError::unprocessable(
+                    "invalid_source",
+                    "source must be any|unseen|incorrect|marked",
+                ));
+            }
             // LIMIT binds as i64 in sqlx.
             let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
             // EX-08: timed sessions carry a server-issued deadline. The floor
@@ -161,17 +194,34 @@ pub async fn create_session(
             } else {
                 None
             };
+            // QB-06: pool filter in one static query — $3 selects the source
+            // predicate; $2 is the learner for unseen/incorrect/marked checks.
             let pool_qs = sqlx::query!(
                 r#"SELECT id, vignette, lead_in, difficulty, options
                    FROM question_versions qv
-                   WHERE status = 'published' AND chapter_id = $1
+                   WHERE status = 'published' AND chapter_id = ANY($1)
                      AND NOT EXISTS (
                          SELECT 1 FROM question_reports r
                          WHERE r.question_version_id = qv.id
                            AND r.status = 'quarantined'
                      )
-                   ORDER BY random() LIMIT $2"#,
-                chapter_id,
+                     AND (
+                         $3 = 'any'
+                         OR ($3 = 'unseen' AND NOT EXISTS (
+                             SELECT 1 FROM attempts a
+                             WHERE a.question_version_id = qv.id AND a.user_id = $2))
+                         OR ($3 = 'incorrect' AND EXISTS (
+                             SELECT 1 FROM attempts a
+                             WHERE a.question_version_id = qv.id AND a.user_id = $2
+                               AND a.correct = FALSE))
+                         OR ($3 = 'marked' AND EXISTS (
+                             SELECT 1 FROM question_marks m
+                             WHERE m.question_version_id = qv.id AND m.user_id = $2))
+                     )
+                   ORDER BY random() LIMIT $4"#,
+                chapters,
+                user.user_id,
+                source,
                 count
             )
             .fetch_all(&state.pool)
@@ -392,6 +442,9 @@ pub struct AnswerReq {
     pub chosen_index: Option<i16>,
     pub confidence: Option<String>,
     pub idempotency_key: String,
+    /// QB-17: client-measured time on item. Server clamps; absent stays
+    /// null (never synthesized).
+    pub elapsed_ms: Option<i64>,
 }
 
 pub async fn answer(
@@ -460,13 +513,44 @@ pub async fn answer(
     .ok_or_else(|| ApiError::not_found("unknown_item"))?;
 
     let already = sqlx::query!(
-        "SELECT 1 AS one FROM attempts WHERE session_id = $1 AND item_index = $2",
+        r#"SELECT a.id, a.chosen_index, a.answer_changes, qv.correct_index
+           FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
+           WHERE a.session_id = $1 AND a.item_index = $2"#,
         sid,
         req.item_index
     )
     .fetch_optional(&state.pool)
     .await?;
-    if already.is_some() {
+    if let Some(prev) = already {
+        // Mocks behave like an exam: answers may change until submission, and
+        // each real change is counted for the QB-17 answer-change analysis.
+        // Everything else keeps first-answer-wins (idempotency, EX-04).
+        if session.preset == "mock" {
+            let changed = req.chosen_index != Some(prev.chosen_index.unwrap_or(-1));
+            if changed {
+                let correct = req.chosen_index.map(|c| c == prev.correct_index);
+                sqlx::query!(
+                    r#"UPDATE attempts
+                       SET chosen_index = $3, correct = $4, answer_changes = answer_changes + 1
+                       WHERE id = $2 AND session_id = $1"#,
+                    sid,
+                    prev.id,
+                    req.chosen_index,
+                    correct
+                )
+                .execute(&state.pool)
+                .await?;
+                return Ok(Json(serde_json::json!({
+                    "already_recorded": true,
+                    "recorded": true,
+                    "answer_changed": true,
+                })));
+            }
+            return Ok(Json(serde_json::json!({
+                "already_recorded": true,
+                "recorded": true,
+            })));
+        }
         return Err(ApiError::conflict(
             "already_answered",
             "this item already has an answer (first answer wins)",
@@ -495,12 +579,17 @@ pub async fn answer(
         }
     }
     let correct = req.chosen_index.map(|c| c == item.correct_index);
+    // QB-17: clamp client-reported time into a sane range; out-of-range or
+    // negative reports are dropped to NULL rather than trusted.
+    let elapsed_ms = req
+        .elapsed_ms
+        .filter(|ms| (0..=3_600_000).contains(ms));
 
     let inserted = sqlx::query!(
         r#"INSERT INTO attempts
              (id, session_id, item_index, user_id, question_version_id,
-              chosen_index, correct, confidence, assisted, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9)
+              chosen_index, correct, confidence, assisted, idempotency_key, elapsed_ms)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10)
            ON CONFLICT DO NOTHING
            RETURNING id"#,
         Uuid::new_v4(),
@@ -511,7 +600,8 @@ pub async fn answer(
         req.chosen_index,
         correct,
         req.confidence,
-        req.idempotency_key
+        req.idempotency_key,
+        elapsed_ms
     )
     .fetch_optional(&state.pool)
     .await?;
@@ -539,6 +629,20 @@ pub async fn answer(
         )?));
     }
 
+    // SR-09: a miss files the key learning point as a review card so the
+    // fact resurfaces even after the question itself is mastered.
+    // Deduplicated per learner + question (source_question_version_id).
+    if correct == Some(false) {
+        ensure_key_point_card(
+            &state,
+            user.user_id,
+            item.id,
+            &item.key_learning_point,
+            item.exam_tip.as_deref(),
+        )
+        .await?;
+    }
+
     Ok(Json(response_for_preset(
         &session.preset,
         false,
@@ -548,6 +652,69 @@ pub async fn answer(
         item.key_learning_point.clone(),
         item.exam_tip.clone(),
     )?))
+}
+
+/// SR-09: idempotently file the question's key learning point as a review
+/// card in the learner's "Key points" deck. provenance via
+/// cards.source_question_version_id prevents duplicates across sessions.
+async fn ensure_key_point_card(
+    state: &AppState,
+    user_id: Uuid,
+    question_version_id: Uuid,
+    key_learning_point: &str,
+    exam_tip: Option<&str>,
+) -> ApiResult<()> {
+    let exists = sqlx::query!(
+        "SELECT 1 AS one FROM cards
+         WHERE user_id = $1 AND source_question_version_id = $2",
+        user_id,
+        question_version_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if exists.is_some() {
+        return Ok(());
+    }
+    let deck = sqlx::query!(
+        "SELECT id FROM decks WHERE user_id = $1 AND name = 'Key points'",
+        user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let deck_id = match deck {
+        Some(d) => d.id,
+        None => {
+            let id = Uuid::new_v4();
+            sqlx::query!(
+                "INSERT INTO decks (id, user_id, name) VALUES ($1, $2, 'Key points')",
+                id,
+                user_id
+            )
+            .execute(&state.pool)
+            .await?;
+            id
+        }
+    };
+    let scheduler = scheduler::Scheduler::new();
+    let card_state = serde_json::to_value(scheduler::to_state(&scheduler.new_card()))
+        .map_err(|_| ApiError::internal())?;
+    let back = exam_tip
+        .map(str::to_string)
+        .unwrap_or_else(|| key_learning_point.to_string());
+    sqlx::query!(
+        r#"INSERT INTO cards (id, deck_id, user_id, front, back, state, source_question_version_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+        Uuid::new_v4(),
+        deck_id,
+        user_id,
+        key_learning_point,
+        back,
+        card_state,
+        question_version_id
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(())
 }
 
 /// §11.2 one-session vocabulary: tutor reveals immediately; exam-style
@@ -664,6 +831,41 @@ pub async fn submit(
     let expected_score =
         expected_score_for_session(&state.pool, sid, state.community_min_sample).await?;
 
+    // QB-17: time + answer-change analysis — per-item elapsed (only where
+    // the client reported it) and mock answer changes; wall-clock duration
+    // from server timestamps. All numbers trace to records; missing time
+    // stays null.
+    let timing = sqlx::query!(
+        r#"SELECT created_at, submitted_at FROM practice_sessions WHERE id = $1"#,
+        sid
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let duration_seconds = timing
+        .submitted_at
+        .map(|end| (end - timing.created_at).num_seconds().max(0));
+    let item_timings = sqlx::query!(
+        r#"SELECT si.item_index, a.elapsed_ms, a.answer_changes
+           FROM session_items si
+           LEFT JOIN attempts a
+             ON a.session_id = si.session_id AND a.item_index = si.item_index
+           WHERE si.session_id = $1
+           ORDER BY si.item_index"#,
+        sid
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let time_items: Vec<serde_json::Value> = item_timings
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "item_index": t.item_index,
+                "elapsed_ms": t.elapsed_ms,
+                "answer_changes": t.answer_changes,
+            })
+        })
+        .collect();
+
     let mut body = serde_json::json!({
         "total": totals.total,
         "correct": totals.correct,
@@ -672,6 +874,10 @@ pub async fn submit(
         "score": score,
         "expected_score": expected_score,
         "mock": null,
+        "time": {
+            "duration_seconds": duration_seconds,
+            "items": time_items,
+        },
     });
 
     if let Some(mock_id) = session.mock_id {
