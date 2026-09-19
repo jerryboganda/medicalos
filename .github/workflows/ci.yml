@@ -53,7 +53,7 @@ jobs:
       - name: Dependency advisories + licenses
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
       # Offline query cache: committed to the repo so Docker/release builds
       # compile the same checked queries without a live database.
       - name: Install sqlx-cli
