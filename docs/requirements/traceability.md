@@ -6,7 +6,7 @@ Status vocabulary: `not-started` · `in-progress` · `tested` (acceptance eviden
 
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + §28.1. Release gates: §30.
 
-> **⚠ Validation status (2026-09-20):** slice-14 code (NOTE-02 collections/concepts, SR-08 retest queue, QB-16 screening, OPS-06 rollout config, LIB-02 ordering) is pushed to `main` (commit `8c35614`) but NOT yet CI-validated — GitHub Actions billing failed again and all runner jobs are blocked (`The job was not started because recent account payments have failed`). Validation will run via `gh run rerun` once billing is resolved. Slices 9–13 remain CI-green with evidence below.
+> **✅ Validation status (2026-09-20):** GitHub Actions billing is resolved and the full pipeline is green end-to-end. CI run 35476029818 (commit `b157346`): fmt, clippy, cargo-deny, all 30 integration tests, wasm32 core builds, client + site builds, Playwright E2E — all passing. Deploy run 35476029813: sqlx cache regenerated in-workflow, GHCR images built, VPS deployed, **production-verified** — medicalos.polytronx.com serves commit `b157346` (healthz OK, SPA assets OK, version.json matches). All slices 9–15, including the previously-unvalidated slice-14 IDs (NOTE-02, SR-08, QB-16, OPS-06, LIB-02), are CI-validated with this run as evidence.
 
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
@@ -86,7 +86,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | QB-07 | Blueprint-balanced session generation | not-started | — |
 | QB-09 | Item statistics and editorial review | not-started | — |
 | QB-15 | Community statistics with minimum sample + expected-score comparison | tested (slice-9 scope: per-question stats behind min-sample gate + option distribution; expected-score on self-built submits; percentile reserved for fixed forms) | run 35456997436 |
-| QB-16 | Psychometric screening defaults + issue-report SLA | in-progress (screening endpoint with §11.4 default flags tested; SLA timers pending) | slice 14 |
+| QB-16 | Psychometric screening defaults + issue-report SLA | in-progress (screening endpoint with §11.4 default flags tested; SLA timers pending) | run 35476029818 |
 | EX-02 | Date-effective block / timer / break configuration | not-started | — |
 | EX-03 | Frozen assessment forms and versions | not-started | — |
 | EX-05 | Reserved assessment-family protection | not-started | — |
@@ -107,7 +107,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | SR-03 | Cloze, image, explanatory cards | in-progress (front/back text cards tested end-to-end; cloze, image-occlusion, audio, and clinical-discrimination card types pending) | run 35379501317 |
 | SR-04 | AI draft vs editorial trust labels | not-started | — |
 | SR-05 | Duplicate / sibling handling | not-started | — |
-| SR-08 | Automatic question re-test queue, objective grading, family-variant preference | in-progress (retest cards with deterministic intervals, idempotent results, history tested; family-variant selection at session time pending) | slice 14 |
+| SR-08 | Automatic question re-test queue, objective grading, family-variant preference | in-progress (retest cards with deterministic intervals, idempotent results, history tested; family-variant selection at session time pending) | run 35476029818 |
 | SR-09 | Editorial key-point cards | not-started | — |
 | LIB-02 | Hybrid search with visibility filters | in-progress (text search over latest published versions tested; semantic/hybrid ranking pending) | run 35467238410 |
 | LIB-03 | Page / figure / timestamp citations | not-started | — |
@@ -116,7 +116,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | LIB-06 | Rights-checked document imports | not-started | — |
 | LIB-07 | Table / image / extraction completeness reports | not-started | — |
 | LIB-08 | Media player, captions, chapters | not-started | — |
-| NOTE-02 | Concepts, backlinks, collections | tested (collections CRUD + membership, concept tagging, by-concept listing — slice 14) |
+| NOTE-02 | Concepts, backlinks, collections | tested (collections CRUD + membership, concept tagging, by-concept listing — slice 14) | run 35476029818 | 
 | NOTE-03 | Human-controlled revisions and portable export | tested (JSON export of all own notes incl. source references) | run 35467238410 |
 | IMG-01 | Rights-checked still-image case library | not-started | — |
 | PROG-01 | Hierarchy drill-down analytics, difficulty + trend filters, mastery heat-map | not-started | — |
@@ -145,7 +145,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | PROT-02 | Device attestation, anti-scraping, pack encryption, offline lease | not-started | — |
 | PROT-03 | Store and platform compliance checklist (completes) | not-started | — |
 | COM-02 | Store billing + web checkout with local wallets; one entitlement service (completes) | not-started | — |
-| OPS-06 | Staged rollout, forced / soft update, two-version API compatibility | in-progress (feature flags with per-user staged rollout resolution tested; forced/soft update + two-version compat pending) | slice 14 |
+| OPS-06 | Staged rollout, forced / soft update, two-version API compatibility | in-progress (feature flags with per-user staged rollout resolution tested; forced/soft update + two-version compat pending) | run 35476029818 |
 | ENG-03 | Widgets and lock-screen mock timer (COULD) | not-started | — |
 | ARCH-03 | Owned native Tauri plugins in Swift and Kotlin (completes) | not-started | — |
 
