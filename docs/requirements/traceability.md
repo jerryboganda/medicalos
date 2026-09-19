@@ -121,7 +121,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | ENG-02 | XP, achievements, weekly recap | not-started | — |
 | COM-03 | Coupons, referrals, regional price tiers, trials, pause | not-started | — |
 | ADMIN-05 | Revenue, licenses, royalties, renewals | not-started | — |
-| ADMIN-06 | Editorial console baseline: hierarchy, questions, bulk import (dry run + rollback), settings | not-started | — |
+| ADMIN-06 | Editorial console baseline: hierarchy, questions, bulk import (dry run + rollback), settings | tested (slice-10 scope: hierarchy CRUD + node status, question create/search, JSON bulk import with per-row validation + dry run + transactional apply + rollback-refused-after-attempts, audit trail, /admin console page; CSV/Excel parser + settings UI pending) | run 35462664343 |
 | TRUST-07 | Provenance retained through derived resources | not-started | — |
 | OPS-04 | Recovery drills and failure-mode monitoring | not-started | — |
 
