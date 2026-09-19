@@ -803,6 +803,314 @@ async fn core08_notification_preferences_push_registration_and_empty_inbox() {
 }
 
 #[tokio::test]
+async fn eng01_engagement_is_optional_evidence_based_and_reuses_practice_sessions() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let ids = seed::seed(&state.pool).await.expect("seed synthetic content");
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("registered learner");
+
+    let (status, defaults) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{defaults}");
+    assert_eq!(defaults["timezone"], "UTC");
+    assert_eq!(defaults["preferences"]["daily_goal_enabled"], true);
+    assert_eq!(defaults["preferences"]["streak_enabled"], true);
+    assert_eq!(defaults["preferences"]["qotd_enabled"], true);
+    assert!(defaults["preferences"]["qotd_time"].is_null());
+    assert_eq!(defaults["qotd"].as_array().unwrap().len(), 1);
+    let first_qotd = defaults["qotd"][0]["question_version_id"]
+        .as_str()
+        .expect("qotd question")
+        .to_string();
+    assert_eq!(defaults["qotd"][0]["exam_id"], ids.exam_id.to_string());
+    assert_eq!(defaults["qotd"][0]["answered"], false);
+    assert!(defaults["qotd"][0]["community_split"].is_null());
+
+    let (_, same_day) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(
+        same_day["qotd"][0]["question_version_id"], first_qotd,
+        "QOTD must be stable for the learner, exam, and local date"
+    );
+
+    let (status, disabled) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/preferences",
+            Some(&token),
+            Some(serde_json::json!({
+                "daily_goal_enabled": false,
+                "streak_enabled": true,
+                "qotd_enabled": false,
+                "qotd_time": "08:30"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{disabled}");
+    assert_eq!(disabled["daily_goal_enabled"], false);
+    assert_eq!(disabled["streak_enabled"], true);
+    assert_eq!(disabled["qotd_enabled"], false);
+    assert_eq!(disabled["qotd_time"], "08:30");
+
+    let other_token = register_and_login(app.clone()).await;
+    let (status, other_defaults) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&other_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_defaults}");
+    assert_eq!(other_defaults["preferences"]["daily_goal_enabled"], true);
+    assert_eq!(other_defaults["preferences"]["streak_enabled"], true);
+    assert_eq!(other_defaults["preferences"]["qotd_enabled"], true);
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/preferences",
+            Some(&token),
+            Some(serde_json::json!({
+                "daily_goal_enabled": true,
+                "streak_enabled": true,
+                "qotd_enabled": true,
+                "qotd_time": "08:30"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let notification_categories = serde_json::json!({
+        "plan_review_reminders": true,
+        "mock_assignment": true,
+        "competition": true,
+        "duel_invitation": true,
+        "report_resolved": true,
+        "subscription_events": true
+    });
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/notification-preferences",
+            Some(&token),
+            Some(serde_json::json!({
+                "timezone": "Asia/Karachi",
+                "quiet_start": null,
+                "quiet_end": null,
+                "categories": notification_categories
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, goal) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/goals",
+            Some(&token),
+            Some(serde_json::json!({
+                "expected_version": 0,
+                "daily_minutes": 30,
+                "exam_date": null,
+                "protected_commitments": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goal}");
+
+    sqlx::query(
+        "UPDATE learner_goal_versions
+         SET created_at = CURRENT_TIMESTAMP - INTERVAL '8 days'
+         WHERE user_id = $1 AND version = 1",
+    )
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("backdate goal for streak fixture");
+
+    for days_ago in [8_i32, 7, 6, 5, 4, 3, 2, 0] {
+        sqlx::query(
+            "INSERT INTO practice_sessions
+               (id, user_id, preset, chapter_id, status, created_at, submitted_at)
+             VALUES (
+               $1, $2, 'tutor', $3, 'submitted',
+               CURRENT_TIMESTAMP - ($4 * INTERVAL '1 day') - INTERVAL '31 minutes',
+               CURRENT_TIMESTAMP - ($4 * INTERVAL '1 day')
+             )",
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(ids.chapter1)
+        .bind(days_ago)
+        .execute(&state.pool)
+        .await
+        .expect("submitted session fixture");
+    }
+
+    let protected_date: chrono::NaiveDate = sqlx::query_scalar("SELECT CURRENT_DATE - 1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("fixture date");
+    sqlx::query(
+        "UPDATE learner_goal_versions SET protected_commitments = $2 WHERE user_id = $1 AND version = 1",
+    )
+    .bind(user_id)
+    .bind(serde_json::json!([{"title": "Rest day", "date": protected_date}]))
+    .execute(&state.pool)
+    .await
+    .expect("protected rest fixture");
+
+    let (status, protected) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{protected}");
+    assert_eq!(protected["timezone"], "Asia/Karachi");
+    assert_eq!(protected["daily_goal"]["target_minutes"], 30);
+    assert_eq!(protected["daily_goal"]["completed_minutes"], 31);
+    assert_eq!(protected["daily_goal"]["met"], true);
+    assert_eq!(protected["streak"]["length"], 8);
+    assert_eq!(protected["streak"]["freezes_held"], 1);
+
+    sqlx::query(
+        "UPDATE learner_goal_versions SET protected_commitments = '[]'::jsonb WHERE user_id = $1 AND version = 1",
+    )
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("remove protected rest fixture");
+    let (_, frozen_miss) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(frozen_miss["streak"]["length"], 8);
+    assert_eq!(frozen_miss["streak"]["freezes_held"], 0);
+
+    let (status, qotd_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/me/engagement/qotd/{}/session", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({"takeover": false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qotd_session}");
+    let sid = qotd_session["session_id"].as_str().expect("qotd session id");
+    assert_eq!(qotd_session["question_version_id"], first_qotd);
+
+    let (status, blocked) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/me/engagement/qotd/{}/session", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({"takeover": false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{blocked}");
+    assert_eq!(blocked["error"]["code"], "active_study_session");
+
+    let (status, open_session) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_session}");
+    assert_eq!(open_session["items"].as_array().unwrap().len(), 1);
+    assert!(open_session["items"][0]["correct_index"].is_null());
+    assert!(open_session["items"][0]["key_learning_point"].is_null());
+    assert!(
+        open_session["items"][0]["options"][0]
+            .get("rationale")
+            .is_none(),
+        "QOTD must preserve the normal pre-answer secrecy contract"
+    );
+
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "eng01-qotd"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    let (status, after_answer) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_answer}");
+    assert_eq!(after_answer["qotd"][0]["answered"], true);
+    assert_eq!(
+        after_answer["qotd"][0]["community_split"]["total_answers"],
+        1
+    );
+    assert_eq!(
+        after_answer["qotd"][0]["community_split"]["options"][0]["count"],
+        1
+    );
+
+    let selected = Uuid::parse_str(&first_qotd).unwrap();
+    sqlx::query(
+        "INSERT INTO question_reports
+           (id, reporter_id, question_version_id, category, status, note)
+         VALUES ($1, $2, $3, 'other', 'quarantined', 'ENG-01 fixture')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(selected)
+    .execute(&state.pool)
+    .await
+    .expect("quarantine selected qotd fixture");
+
+    let (status, after_quarantine) = call(
+        app,
+        request("GET", "/v1/me/engagement", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_quarantine}");
+    assert_ne!(
+        after_quarantine["qotd"][0]["question_version_id"], first_qotd,
+        "quarantined questions must be excluded from QOTD"
+    );
+}
+
+#[tokio::test]
 async fn core10_seed_maps_taxonomy_and_questions_to_versioned_concepts() {
     let _g = LOCK.lock().await;
     let state = setup().await;
