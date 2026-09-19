@@ -30,6 +30,7 @@ struct NewQuestion {
     correct: usize,
     key_point: &'static str,
     exam_tip: Option<&'static str>,
+    hint: Option<&'static str>,
     high_yield: bool,
 }
 
@@ -55,10 +56,10 @@ async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiErro
     sqlx::query!(
         r#"INSERT INTO question_versions
            (id, question_id, version, status, chapter_id, difficulty, vignette,
-            lead_in, options, correct_index, key_learning_point, exam_tip,
+            lead_in, options, correct_index, key_learning_point, exam_tip, hint,
             high_yield, source_ref)
            VALUES ($1, $2, 1, 'published', $3, $4, $5, $6, $7, $8, $9, $10,
-                   $11, $12)"#,
+                   $11, $12, $13)"#,
         vid,
         qid,
         q.chapter,
@@ -69,6 +70,7 @@ async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiErro
         q.correct as i16,
         q.key_point,
         q.exam_tip,
+        q.hint,
         q.high_yield,
         "Synthetic CI fixture - fictional content, not medical material",
     )
@@ -204,6 +206,9 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         correct,
         key_point,
         exam_tip,
+        hint: Some(
+            "Use the relationship stated in the vignette and eliminate options that contradict it.",
+        ),
         high_yield,
     };
 

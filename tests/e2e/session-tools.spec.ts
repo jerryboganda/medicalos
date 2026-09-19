@@ -20,7 +20,9 @@ test('QB-13 tutor session exposes connected tools and records a hint-assisted an
 	await page.goto(`/session/${session.session_id}`);
 	await page.getByTestId('session-tools-open').click();
 	await expect(page.getByTestId('session-tools')).toBeVisible();
+	await expect(page.getByTestId('session-tools-close')).toBeFocused();
 	await expect(page.getByTestId('text-size-options').getByRole('button')).toHaveCount(4);
+	await page.getByTestId('text-size-options').getByRole('button', { name: 'Large' }).click();
 
 	await page.getByTestId('converter-value').fill('10');
 	await page.getByTestId('converter-kind').selectOption('cm-in');
@@ -32,6 +34,13 @@ test('QB-13 tutor session exposes connected tools and records a hint-assisted an
 	await page.getByTestId('calculator-run').click();
 	await expect(page.getByTestId('calculator-result')).toContainText('22.86');
 
+	await page.getByTestId('session-tools-close').click();
+	await expect(page.getByTestId('session-tools-open')).toBeFocused();
+	await page.reload();
+	await page.getByTestId('session-tools-open').click();
+	await expect(
+		page.getByTestId('text-size-options').getByRole('button', { name: 'Large' })
+	).toHaveAttribute('aria-pressed', 'true');
 	await page.getByTestId('session-tools-close').click();
 	await page.getByTestId('hint-open').click();
 	await expect(page.getByTestId('hint')).toBeVisible();

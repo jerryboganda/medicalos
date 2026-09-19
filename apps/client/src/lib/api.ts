@@ -221,6 +221,7 @@ export interface SubmitResult {
 	incorrect: number;
 	skipped: number;
 	score: number;
+	assisted: number;
 	time_taken_seconds: number;
 }
 
@@ -345,6 +346,10 @@ export const Api = {
 		sid: string,
 		body: { item_index: number; chosen_index: number | null; idempotency_key: string }
 	) => call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
+	hint: (sid: string, itemIndex: number) =>
+		call<{ hint: string }>('POST', `/v1/practice/sessions/${sid}/items/${itemIndex}/hint`),
+	calculate: (body: { calculator: string; inputs: Record<string, number | boolean> }) =>
+		call<{ value: number; unit: string }>('POST', '/v1/tools/calculate', body),
 	submit: (sid: string) => call<SubmitResult>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
 		call<{ plan_version: number }>(

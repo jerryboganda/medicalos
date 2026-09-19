@@ -129,7 +129,7 @@ pub async fn update_learner_state(
     session_id: Uuid,
 ) -> ApiResult<()> {
     let rows = sqlx::query!(
-        "SELECT qv.chapter_id, qv.difficulty, a.correct
+        "SELECT qv.chapter_id, qv.difficulty, a.correct, a.assisted
          FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
          WHERE a.session_id = $1 AND a.chosen_index IS NOT NULL",
         session_id
@@ -139,12 +139,13 @@ pub async fn update_learner_state(
     if rows.is_empty() {
         return Ok(());
     }
-    let mut per_chapter: HashMap<Uuid, Vec<(String, bool)>> = HashMap::new();
+    let mut per_chapter: HashMap<Uuid, Vec<(String, bool, bool)>> = HashMap::new();
     for r in &rows {
-        per_chapter
-            .entry(r.chapter_id)
-            .or_default()
-            .push((r.difficulty.clone(), r.correct == Some(true)));
+        per_chapter.entry(r.chapter_id).or_default().push((
+            r.difficulty.clone(),
+            r.correct == Some(true),
+            r.assisted,
+        ));
     }
     for (chapter_id, answers) in per_chapter {
         let existing = sqlx::query!(
@@ -159,11 +160,13 @@ pub async fn update_learner_state(
             Some(r) => (r.ability, r.evidence_count, r.independent_count),
             None => (1500.0, 0, 0),
         };
-        for (difficulty, correct) in &answers {
+        for (difficulty, correct, assisted) in &answers {
             let k = f32::max(8.0, 32.0 - 2.0 * independent as f32);
             ability = elo_update(ability, difficulty, *correct, k);
             evidence += 1;
-            independent += 1; // slice 1 has no assisted paths yet
+            if !assisted {
+                independent += 1;
+            }
         }
         sqlx::query!(
             "INSERT INTO learner_concept_state

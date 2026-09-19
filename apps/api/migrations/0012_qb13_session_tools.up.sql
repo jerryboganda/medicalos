@@ -1,0 +1,5 @@
+ALTER TABLE question_versions
+    ADD COLUMN IF NOT EXISTS hint TEXT;
+
+ALTER TABLE session_items
+    ADD COLUMN IF NOT EXISTS hint_used BOOLEAN NOT NULL DEFAULT false;

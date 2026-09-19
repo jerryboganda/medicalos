@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 domain-contracts = { path = "../../crates/domain-contracts" }
+calc-engine = { path = "../../crates/calc-engine" }
 scheduler = { path = "../../crates/scheduler" }
 telemetry = { path = "../../crates/telemetry" }
 axum = { workspace = true }

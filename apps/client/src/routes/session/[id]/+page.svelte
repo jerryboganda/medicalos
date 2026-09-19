@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { base } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Api, ApiError } from '$lib/api';
@@ -20,6 +20,38 @@
 	let actionError = $state('');
 	let markBusy = $state(false);
 	let markError = $state('');
+	let toolsOpen = $state(false);
+	let toolsOpenButton;
+	let toolsCloseButton;
+	let textSize = $state('default');
+	let hintText = $state('');
+	let hintBusy = $state(false);
+	let hintError = $state('');
+	let converterKind = $state('cm-in');
+	let converterValue = $state('');
+	let calcKind = $state('bmi');
+	let calcValues = $state({});
+	let calcBusy = $state(false);
+	let calcResult = $state(null);
+	let calcError = $state('');
+
+	const TEXT_SIZES = [
+		['small', 'Small'],
+		['default', 'Default'],
+		['large', 'Large'],
+		['xlarge', 'Extra large']
+	];
+
+	const CALCULATORS = [
+		{ value: 'bmi', label: 'BMI', fields: [['weight_kg', 'Weight (kg)'], ['height_m', 'Height (m)']] },
+		{ value: 'bsa', label: 'BSA (Mosteller)', fields: [['weight_kg', 'Weight (kg)'], ['height_cm', 'Height (cm)']] },
+		{ value: 'map', label: 'Mean arterial pressure', fields: [['systolic', 'Systolic (mmHg)'], ['diastolic', 'Diastolic (mmHg)']] },
+		{ value: 'gcs', label: 'Glasgow Coma Scale', fields: [['eye', 'Eye (1–4)'], ['verbal', 'Verbal (1–5)'], ['motor', 'Motor (1–6)']] },
+		{ value: 'cockcroft-gault', label: 'Cockcroft–Gault', fields: [['age_years', 'Age (years)'], ['weight_kg', 'Weight (kg)'], ['serum_creatinine_mg_dl', 'Creatinine (mg/dL)'], ['female', 'Sex factor', 'boolean']] },
+		{ value: 'ckd-epi-2021', label: 'CKD-EPI 2021', fields: [['serum_creatinine_mg_dl', 'Creatinine (mg/dL)'], ['age_years', 'Age (years)'], ['female', 'Sex factor', 'boolean']] },
+		{ value: 'anion-gap', label: 'Anion gap', fields: [['sodium_mmol_l', 'Sodium (mmol/L)'], ['chloride_mmol_l', 'Chloride (mmol/L)'], ['bicarbonate_mmol_l', 'Bicarbonate (mmol/L)']] },
+		{ value: 'corrected-calcium', label: 'Corrected calcium', fields: [['calcium_mg_dl', 'Calcium (mg/dL)'], ['albumin_g_dl', 'Albumin (g/dL)']] }
+	];
 
 	// QB-08: report-a-problem control on answered items.
 	let reportOpen = $state(false);
@@ -75,6 +107,106 @@
 		if (h > 0) return `${h}h ${m}m ${s}s`;
 		if (m > 0) return `${m}m ${s}s`;
 		return `${s}s`;
+	}
+
+	function autoSubmitWarning() {
+		if (remainingMs === null || remainingMs <= 0 || remainingMs > 300_000) return '';
+		return remainingMs <= 60_000
+			? 'Less than 1 minute remains. This session will submit automatically at zero.'
+			: 'Less than 5 minutes remain. This session will submit automatically at zero.';
+	}
+
+	function setTextSize(size) {
+		textSize = size;
+		try {
+			localStorage.setItem('mlos_session_text_size_v1', size);
+		} catch {
+			// Browser preference only; storage denial must not block the session.
+		}
+	}
+
+	function restoreTextSize() {
+		try {
+			const stored = localStorage.getItem('mlos_session_text_size_v1');
+			if (TEXT_SIZES.some(([value]) => value === stored)) textSize = stored;
+		} catch {
+			// Keep the default when storage is unavailable.
+		}
+	}
+
+	function convertValue(kind, raw) {
+		if (raw === '' || raw === null || raw === undefined) return 'Enter a number';
+		const value = Number(raw);
+		if (!Number.isFinite(value)) return 'Enter a number';
+		const converted = {
+			'cm-in': [value / 2.54, 'in'],
+			'in-cm': [value * 2.54, 'cm'],
+			'kg-lb': [value * 2.2046226218, 'lb'],
+			'lb-kg': [value / 2.2046226218, 'kg'],
+			'c-f': [(value * 9) / 5 + 32, '°F'],
+			'f-c': [((value - 32) * 5) / 9, '°C'],
+			'glucose-mgdl-mmol': [value / 18, 'mmol/L'],
+			'glucose-mmol-mgdl': [value * 18, 'mg/dL']
+		}[kind];
+		return converted ? `${converted[0].toFixed(2)} ${converted[1]}` : 'Choose a conversion';
+	}
+
+	function selectedCalculator() {
+		return CALCULATORS.find((calculator) => calculator.value === calcKind) ?? CALCULATORS[0];
+	}
+
+	function formattedCalculatorResult() {
+		if (!calcResult) return '';
+		return `${Number(calcResult.value).toFixed(2)} ${calcResult.unit}`;
+	}
+
+	async function openTools() {
+		toolsOpen = true;
+		await tick();
+		toolsCloseButton?.focus();
+	}
+
+	async function closeTools() {
+		toolsOpen = false;
+		await tick();
+		toolsOpenButton?.focus();
+	}
+
+	async function runCalculator() {
+		calcBusy = true;
+		calcError = '';
+		calcResult = null;
+		try {
+			const inputs = {};
+			for (const [key, label, type] of selectedCalculator().fields) {
+				if (type === 'boolean') {
+					inputs[key] = calcValues[key] === 'true';
+					continue;
+				}
+				const value = Number(calcValues[key]);
+				if (!Number.isFinite(value)) throw new Error(`${label} is required.`);
+				inputs[key] = value;
+			}
+			calcResult = await Api.calculate({ calculator: calcKind, inputs });
+		} catch (err) {
+			calcError = err instanceof ApiError || err instanceof Error ? err.message : 'Could not calculate.';
+		} finally {
+			calcBusy = false;
+		}
+	}
+
+	async function revealHint() {
+		if (!item || item.answered || session?.preset !== 'tutor' || hintBusy || hintText) return;
+		hintBusy = true;
+		hintError = '';
+		try {
+			const response = await Api.hint(sid, current);
+			hintText = response.hint;
+		} catch (err) {
+			hintError = err instanceof ApiError ? err.message : 'Could not load the hint.';
+		} finally {
+			hintBusy = false;
+		}
 	}
 
 	function storageKey(index) {
@@ -249,10 +381,17 @@
 		reportError = '';
 		reportNote = '';
 		markError = '';
+		hintText = '';
+		hintError = '';
 	});
 
 	function onKeydown(event) {
 		if ((result && !reviewing) || !session || !item) return;
+		if (event.key === 'Escape' && toolsOpen) {
+			closeTools();
+			return;
+		}
+		if (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName)) return;
 		if (reviewing) {
 			if (
 				(event.key === 'Enter' || event.key === 'n' || event.key === 'N') &&
@@ -263,7 +402,10 @@
 			return;
 		}
 		const letter = 'abcdefghij'.indexOf(event.key.toLowerCase());
-		if (letter >= 0 && !item.answered && letter < item.options.length) {
+		if (event.key.toLowerCase() === 'h' && session.preset === 'tutor' && !item.answered) {
+			event.preventDefault();
+			revealHint();
+		} else if (letter >= 0 && !item.answered && letter < item.options.length) {
 			selected = letter;
 		} else if (event.key === 'Enter' || event.key === 'n' || event.key === 'N') {
 			if (!item.answered && selected !== null) {
@@ -286,7 +428,10 @@
 		return String.fromCharCode(65 + index);
 	}
 
-	onMount(load);
+	onMount(() => {
+		restoreTextSize();
+		load();
+	});
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -302,6 +447,7 @@
 			<span>Correct<strong>{result.correct}</strong></span>
 			<span>Incorrect<strong>{result.incorrect}</strong></span>
 			<span>Skipped<strong>{result.skipped}</strong></span>
+			<span>Assisted<strong data-testid="assisted">{result.assisted}</strong></span>
 			<span>Total<strong data-testid="total">{result.total}</strong></span>
 			<span
 				>Time taken<strong data-testid="time-taken">{fmtDuration(result.time_taken_seconds)}</strong></span
@@ -377,6 +523,24 @@
 			</span>
 		{/if}
 	</p>
+	<div class="session-top-actions">
+		<button
+			class="btn"
+			type="button"
+			bind:this={toolsOpenButton}
+			aria-expanded={toolsOpen}
+			aria-controls="session-tools"
+			data-testid="session-tools-open"
+			onclick={openTools}
+		>
+			Tools
+		</button>
+	</div>
+	{#if !reviewing && autoSubmitWarning()}
+		<p class="deadline-warning" role="status" data-testid="auto-submit-warning">
+			{autoSubmitWarning()}
+		</p>
+	{/if}
 	{#if reviewing}
 		<button
 			class="linklike"
@@ -389,7 +553,7 @@
 	{/if}
 
 	{#if item}
-		<div class="card">
+		<div class={`card session-card text-${textSize}`}>
 			<div class="question-actions">
 				<button
 					class="btn"
@@ -403,9 +567,29 @@
 				>
 					{markBusy ? 'Saving…' : item.marked ? 'Marked' : 'Mark question'}
 				</button>
+				{#if !reviewing && session.preset === 'tutor' && session.status === 'open' && !item.answered}
+					<button
+						class="btn"
+						type="button"
+						disabled={hintBusy || !!hintText}
+						data-loading={hintBusy}
+						data-testid="hint-open"
+						onclick={revealHint}
+					>
+						{hintBusy ? 'Loading hint…' : hintText ? 'Hint shown' : 'Hint'}
+					</button>
+				{/if}
 			</div>
 			{#if markError}
 				<p class="error-text" role="alert">{markError}</p>
+			{/if}
+			{#if hintText}
+				<div class="hint-panel" data-testid="hint">
+					<strong>Hint</strong>
+					<p>{hintText}</p>
+				</div>
+			{:else if hintError}
+				<p class="error-text" role="alert">{hintError}</p>
 			{/if}
 			<p>{item.vignette}</p>
 			<p><strong>{item.lead_in}</strong></p>
@@ -609,6 +793,284 @@
 			{/if}
 		</div>
 	{/if}
+
+	{#if toolsOpen}
+		<aside
+			id="session-tools"
+			class="session-tools"
+			aria-label="Session tools"
+			data-testid="session-tools"
+		>
+			<div class="tools-heading">
+				<div>
+					<h2>Session tools</h2>
+					<p class="muted">Practice utilities stay separate from your answer evidence.</p>
+				</div>
+				<button
+					class="btn"
+					type="button"
+					bind:this={toolsCloseButton}
+					data-testid="session-tools-close"
+					onclick={closeTools}
+				>
+					Close
+				</button>
+			</div>
+
+			<section class="tool-section" aria-labelledby="calculator-heading">
+				<h3 id="calculator-heading">Calculator</h3>
+				<label class="field">
+					<span>Calculator</span>
+					<select
+						class="tool-select"
+						bind:value={calcKind}
+						data-testid="calculator-kind"
+						onchange={() => {
+							calcResult = null;
+							calcError = '';
+						}}
+					>
+						{#each CALCULATORS as calculator}
+							<option value={calculator.value}>{calculator.label}</option>
+						{/each}
+					</select>
+				</label>
+				<div class="calculator-fields">
+					{#each selectedCalculator().fields as [key, label, type]}
+						<label class="field">
+							<span>{label}</span>
+							{#if type === 'boolean'}
+								<select class="tool-select" bind:value={calcValues[key]} data-testid={`calc-${key}`}>
+									<option value="false">Not female</option>
+									<option value="true">Female</option>
+								</select>
+							{:else}
+								<input type="number" step="any" bind:value={calcValues[key]} data-testid={`calc-${key}`} />
+							{/if}
+						</label>
+					{/each}
+				</div>
+				<button
+					class="btn primary"
+					type="button"
+					disabled={calcBusy}
+					data-loading={calcBusy}
+					data-testid="calculator-run"
+					onclick={runCalculator}
+				>
+					{calcBusy ? 'Calculating…' : 'Calculate'}
+				</button>
+				{#if calcResult}
+					<p class="tool-result" data-testid="calculator-result">{formattedCalculatorResult()}</p>
+				{:else if calcError}
+					<p class="error-text" role="alert">{calcError}</p>
+				{/if}
+				<p class="muted tool-note">For exam practice only. Not for clinical use.</p>
+			</section>
+
+			<section class="tool-section" aria-labelledby="converter-heading">
+				<h3 id="converter-heading">Converter</h3>
+				<label class="field">
+					<span>Conversion</span>
+					<select class="tool-select" bind:value={converterKind} data-testid="converter-kind">
+						<option value="cm-in">cm → in</option>
+						<option value="in-cm">in → cm</option>
+						<option value="kg-lb">kg → lb</option>
+						<option value="lb-kg">lb → kg</option>
+						<option value="c-f">°C → °F</option>
+						<option value="f-c">°F → °C</option>
+						<option value="glucose-mgdl-mmol">Glucose mg/dL → mmol/L</option>
+						<option value="glucose-mmol-mgdl">Glucose mmol/L → mg/dL</option>
+					</select>
+				</label>
+				<label class="field">
+					<span>Value</span>
+					<input type="number" step="any" bind:value={converterValue} data-testid="converter-value" />
+				</label>
+				<p class="tool-result" data-testid="converter-result">
+					{convertValue(converterKind, converterValue)}
+				</p>
+			</section>
+
+			<section class="tool-section" aria-labelledby="text-size-heading">
+				<h3 id="text-size-heading">Text size</h3>
+				<div class="text-size-options" data-testid="text-size-options">
+					{#each TEXT_SIZES as [value, label]}
+						<button
+							class="btn"
+							class:primary={textSize === value}
+							type="button"
+							aria-pressed={textSize === value}
+							onclick={() => setTextSize(value)}
+						>
+							{label}
+						</button>
+					{/each}
+				</div>
+			</section>
+		</aside>
+	{/if}
 {:else}
 	<p class="muted">Loading the session…</p>
 {/if}
+
+<style>
+	/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4 */
+	.session-top-actions,
+	.question-actions,
+	.tools-heading,
+	.text-size-options {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		flex-wrap: wrap;
+	}
+
+	.session-top-actions {
+		justify-content: flex-end;
+		margin-bottom: var(--space-sm);
+	}
+
+	.question-actions {
+		justify-content: space-between;
+		margin-bottom: var(--space-md);
+	}
+
+	.deadline-warning,
+	.hint-panel,
+	.tool-result {
+		border: 1px solid var(--color-warning);
+		border-radius: var(--radius-control);
+		padding: var(--space-md);
+		background: var(--color-surface);
+	}
+
+	.deadline-warning {
+		margin: 0 0 var(--space-md);
+		color: var(--color-warning);
+		font-weight: 600;
+	}
+
+	.hint-panel {
+		margin-bottom: var(--space-lg);
+		border-color: var(--color-accent);
+	}
+
+	.hint-panel p,
+	.tool-result,
+	.tool-note,
+	.tools-heading p {
+		margin-bottom: 0;
+	}
+
+	.session-card.text-small {
+		font-size: var(--text-sm);
+	}
+
+	.session-card.text-default {
+		font-size: var(--text-body);
+	}
+
+	.session-card.text-large {
+		font-size: var(--text-body-lg);
+	}
+
+	.session-card.text-xlarge {
+		font-size: var(--text-xl);
+	}
+
+	.session-card :global(.option) {
+		font-size: inherit;
+	}
+
+	.session-tools {
+		position: fixed;
+		z-index: 30;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		max-height: 82vh;
+		overflow-y: auto;
+		box-sizing: border-box;
+		padding: var(--space-lg);
+		padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+		background: var(--color-surface);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-card) var(--radius-card) 0 0;
+	}
+
+	.tools-heading {
+		justify-content: space-between;
+		align-items: flex-start;
+		margin-bottom: var(--space-lg);
+	}
+
+	.tools-heading h2,
+	.tool-section h3 {
+		margin: 0 0 var(--space-xs);
+	}
+
+	.tool-section + .tool-section {
+		border-top: 1px solid var(--color-surface-elevated);
+		padding-top: var(--space-lg);
+		margin-top: var(--space-lg);
+	}
+
+	.tool-select {
+		width: 100%;
+		box-sizing: border-box;
+		min-height: 44px;
+		padding: 0 var(--space-md);
+		border-radius: var(--radius-control);
+		border: 1px solid var(--color-surface-elevated);
+		background: var(--color-canvas);
+		color: var(--color-text-primary);
+		font: var(--text-body) var(--font-body);
+	}
+
+	.tool-select:hover {
+		border-color: var(--color-accent);
+	}
+
+	.tool-select:focus-visible {
+		outline: 2px solid var(--color-focus);
+		outline-offset: 1px;
+		border-color: var(--color-focus);
+	}
+
+	.tool-select:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+		background: var(--color-surface-elevated);
+	}
+
+	.calculator-fields {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0 var(--space-md);
+	}
+
+	.tool-result {
+		margin-top: var(--space-md);
+		border-color: var(--color-surface-elevated);
+		font-weight: 700;
+	}
+
+	.text-size-options {
+		align-items: stretch;
+	}
+
+	@media (min-width: 768px) {
+		.session-tools {
+			left: auto;
+			top: 0;
+			width: min(420px, 42vw);
+			max-height: 100vh;
+			border-radius: var(--radius-card) 0 0 var(--radius-card);
+		}
+
+		.calculator-fields {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+</style>

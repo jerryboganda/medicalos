@@ -44,6 +44,135 @@ pub struct MarkReq {
     pub marked: bool,
 }
 
+#[derive(Deserialize)]
+pub struct CalculateReq {
+    pub calculator: String,
+    pub inputs: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct CalculateResponse {
+    value: f64,
+    unit: &'static str,
+}
+
+fn input_f64(inputs: &serde_json::Value, key: &'static str) -> ApiResult<f64> {
+    inputs
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .ok_or_else(|| {
+            ApiError::unprocessable("invalid_calculator_input", format!("{key} is required"))
+        })
+}
+
+fn input_bool(inputs: &serde_json::Value, key: &'static str) -> ApiResult<bool> {
+    inputs
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| {
+            ApiError::unprocessable("invalid_calculator_input", format!("{key} is required"))
+        })
+}
+
+fn input_u8(inputs: &serde_json::Value, key: &'static str) -> ApiResult<u8> {
+    let value = input_f64(inputs, key)?;
+    if value.fract() != 0.0 || !(0.0..=u8::MAX as f64).contains(&value) {
+        return Err(ApiError::unprocessable(
+            "invalid_calculator_input",
+            format!("{key} must be a whole number"),
+        ));
+    }
+    Ok(value as u8)
+}
+
+fn calc_error(error: calc_engine::InvalidInput) -> ApiError {
+    ApiError::unprocessable("invalid_calculator_input", error.to_string())
+}
+
+pub async fn calculate(
+    _user: AuthUser,
+    Json(req): Json<CalculateReq>,
+) -> ApiResult<Json<CalculateResponse>> {
+    let (value, unit) = match req.calculator.as_str() {
+        "bmi" => (
+            calc_engine::bmi(
+                input_f64(&req.inputs, "weight_kg")?,
+                input_f64(&req.inputs, "height_m")?,
+            )
+            .map_err(calc_error)?,
+            "kg/m2",
+        ),
+        "bsa" => (
+            calc_engine::mosteller_bsa(
+                input_f64(&req.inputs, "weight_kg")?,
+                input_f64(&req.inputs, "height_cm")?,
+            )
+            .map_err(calc_error)?,
+            "m2",
+        ),
+        "map" => (
+            calc_engine::mean_arterial_pressure(
+                input_f64(&req.inputs, "systolic")?,
+                input_f64(&req.inputs, "diastolic")?,
+            )
+            .map_err(calc_error)?,
+            "mmHg",
+        ),
+        "gcs" => (
+            calc_engine::glasgow_coma_scale(
+                input_u8(&req.inputs, "eye")?,
+                input_u8(&req.inputs, "verbal")?,
+                input_u8(&req.inputs, "motor")?,
+            )
+            .map_err(calc_error)? as f64,
+            "points",
+        ),
+        "cockcroft-gault" => (
+            calc_engine::cockcroft_gault_crcl(
+                input_f64(&req.inputs, "age_years")?,
+                input_f64(&req.inputs, "weight_kg")?,
+                input_f64(&req.inputs, "serum_creatinine_mg_dl")?,
+                input_bool(&req.inputs, "female")?,
+            )
+            .map_err(calc_error)?,
+            "mL/min",
+        ),
+        "ckd-epi-2021" => (
+            calc_engine::ckd_epi_2021_egfr(
+                input_f64(&req.inputs, "serum_creatinine_mg_dl")?,
+                input_f64(&req.inputs, "age_years")?,
+                input_bool(&req.inputs, "female")?,
+            )
+            .map_err(calc_error)?,
+            "mL/min/1.73m2",
+        ),
+        "anion-gap" => (
+            calc_engine::anion_gap(
+                input_f64(&req.inputs, "sodium_mmol_l")?,
+                input_f64(&req.inputs, "chloride_mmol_l")?,
+                input_f64(&req.inputs, "bicarbonate_mmol_l")?,
+            )
+            .map_err(calc_error)?,
+            "mmol/L",
+        ),
+        "corrected-calcium" => (
+            calc_engine::corrected_calcium(
+                input_f64(&req.inputs, "calcium_mg_dl")?,
+                input_f64(&req.inputs, "albumin_g_dl")?,
+            )
+            .map_err(calc_error)?,
+            "mg/dL",
+        ),
+        _ => {
+            return Err(ApiError::unprocessable(
+                "unknown_calculator",
+                "unknown calculator",
+            ))
+        }
+    };
+    Ok(Json(CalculateResponse { value, unit }))
+}
+
 #[derive(Serialize)]
 struct ItemPayload {
     item_index: i16,
@@ -734,7 +863,7 @@ pub async fn get_session(
     let items = sqlx::query!(
         r#"SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,
                   qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,
-                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct,
+                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct, a.assisted,
                   EXISTS (
                       SELECT 1 FROM question_reports r
                       WHERE r.question_version_id = qv.id
@@ -775,6 +904,7 @@ pub async fn get_session(
     let mut correct = 0_i64;
     let mut incorrect = 0_i64;
     let mut skipped = 0_i64;
+    let mut assisted = 0_i64;
     for it in items {
         if it.correct == Some(true) {
             correct += 1;
@@ -782,6 +912,9 @@ pub async fn get_session(
             incorrect += 1;
         } else {
             skipped += 1;
+        }
+        if it.assisted.unwrap_or(false) {
+            assisted += 1;
         }
         let opts: Vec<QuestionOption> =
             serde_json::from_value(it.options).map_err(|_| ApiError::internal())?;
@@ -833,6 +966,7 @@ pub async fn get_session(
             "incorrect": incorrect,
             "skipped": skipped,
             "score": score,
+            "assisted": assisted,
             "time_taken_seconds": time_taken_seconds,
         })
     } else {
@@ -861,6 +995,59 @@ pub struct AnswerReq {
     pub chosen_index: Option<i16>,
     pub confidence: Option<String>,
     pub idempotency_key: String,
+}
+
+pub async fn hint(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((sid, item_index)): Path<(Uuid, i16)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let row = sqlx::query!(
+        r#"SELECT ps.preset, ps.status, qv.hint,
+                  EXISTS (
+                      SELECT 1 FROM attempts a
+                      WHERE a.session_id = ps.id AND a.item_index = si.item_index
+                  ) AS "answered!"
+           FROM practice_sessions ps
+           JOIN session_items si ON si.session_id = ps.id
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           WHERE ps.id = $1 AND ps.user_id = $2 AND si.item_index = $3"#,
+        sid,
+        user.user_id,
+        item_index
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("unknown_item"))?;
+    if row.preset != "tutor" {
+        return Err(ApiError::forbidden(
+            "hint_unavailable",
+            "hints are available only in tutor sessions",
+        ));
+    }
+    if row.status != "open" {
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session already submitted",
+        ));
+    }
+    if row.answered {
+        return Err(ApiError::conflict(
+            "already_answered",
+            "hints are available only before answering this item",
+        ));
+    }
+    let hint = row
+        .hint
+        .ok_or_else(|| ApiError::not_found("hint_not_available"))?;
+    sqlx::query!(
+        "UPDATE session_items SET hint_used = TRUE WHERE session_id = $1 AND item_index = $2",
+        sid,
+        item_index
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(serde_json::json!({ "hint": hint })))
 }
 
 #[derive(Serialize)]
@@ -947,7 +1134,8 @@ pub async fn answer(
     }
 
     let item = sqlx::query!(
-        r#"SELECT qv.id, qv.correct_index, qv.options, qv.key_learning_point, qv.exam_tip
+        r#"SELECT qv.id, qv.correct_index, qv.options, qv.key_learning_point, qv.exam_tip,
+                  si.hint_used
            FROM session_items si JOIN question_versions qv ON qv.id = si.question_version_id
            WHERE si.session_id = $1 AND si.item_index = $2"#,
         sid,
@@ -998,7 +1186,7 @@ pub async fn answer(
         r#"INSERT INTO attempts
              (id, session_id, item_index, user_id, question_version_id,
               chosen_index, correct, confidence, assisted, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            ON CONFLICT DO NOTHING
            RETURNING id"#,
         Uuid::new_v4(),
@@ -1009,6 +1197,7 @@ pub async fn answer(
         req.chosen_index,
         correct,
         req.confidence,
+        item.hint_used,
         req.idempotency_key
     )
     .fetch_optional(&state.pool)
@@ -1053,6 +1242,7 @@ pub struct SubmitResponse {
     incorrect: i64,
     skipped: i64,
     score: i64,
+    assisted: i64,
     time_taken_seconds: i64,
 }
 
@@ -1101,7 +1291,8 @@ pub async fn submit(
              COUNT(*) AS "total!",
              COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!",
              COALESCE(COUNT(*) FILTER (WHERE a.chosen_index IS NOT NULL AND a.correct = FALSE), 0) AS "incorrect!",
-             COALESCE(COUNT(*) FILTER (WHERE a.id IS NULL OR a.chosen_index IS NULL), 0) AS "skipped!"
+             COALESCE(COUNT(*) FILTER (WHERE a.id IS NULL OR a.chosen_index IS NULL), 0) AS "skipped!",
+             COALESCE(COUNT(*) FILTER (WHERE a.assisted = TRUE), 0) AS "assisted!"
            FROM session_items si
            LEFT JOIN attempts a
              ON a.session_id = si.session_id AND a.item_index = si.item_index
@@ -1157,6 +1348,7 @@ pub async fn submit(
         incorrect: totals.incorrect,
         skipped: totals.skipped,
         score,
+        assisted: totals.assisted,
         time_taken_seconds,
     }))
 }

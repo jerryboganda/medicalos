@@ -74,6 +74,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/today", get(routes::today::today))
         .route("/v1/practice/builder", get(routes::practice::builder))
+        .route("/v1/tools/calculate", post(routes::practice::calculate))
         .route(
             "/v1/practice/sessions",
             post(routes::practice::create_session),
@@ -85,6 +86,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/practice/sessions/{sid}/answers",
             post(routes::practice::answer),
+        )
+        .route(
+            "/v1/practice/sessions/{sid}/items/{item_index}/hint",
+            post(routes::practice::hint),
         )
         .route(
             "/v1/practice/sessions/{sid}/submit",

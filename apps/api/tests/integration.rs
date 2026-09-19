@@ -186,7 +186,22 @@ async fn qb13_hint_records_assistance_and_calculators_use_shared_engine() {
     .fetch_one(&state.pool)
     .await
     .expect("assisted attempt");
-    assert!(assisted, "using a tutor hint must persist assisted evidence");
+    assert!(
+        assisted,
+        "using a tutor hint must persist assisted evidence"
+    );
+
+    let (status, denied_after_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/items/0/hint"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{denied_after_answer}");
 
     let (status, _) = call(
         app.clone(),
@@ -199,6 +214,19 @@ async fn qb13_hint_records_assistance_and_calculators_use_shared_engine() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+
+    let (evidence_count, independent_count): (i32, i32) = sqlx::query_as(
+        "SELECT evidence_count, independent_count FROM learner_concept_state WHERE chapter_id = $1",
+    )
+    .bind(ids.chapter1)
+    .fetch_one(&state.pool)
+    .await
+    .expect("learner state after assisted answer");
+    assert_eq!(evidence_count, 1);
+    assert_eq!(
+        independent_count, 0,
+        "assisted evidence must not count as independent"
+    );
 
     let (status, timed) = call(
         app.clone(),
@@ -245,6 +273,22 @@ async fn qb13_hint_records_assistance_and_calculators_use_shared_engine() {
     assert_eq!(status, StatusCode::OK, "{calc}");
     assert!((calc["value"].as_f64().unwrap() - 22.86).abs() < 0.02);
     assert_eq!(calc["unit"], "kg/m2");
+
+    let (status, invalid_calc) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/tools/calculate",
+            Some(&token),
+            Some(serde_json::json!({
+                "calculator": "bmi",
+                "inputs": {"weight_kg": 70.0}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_calc}");
+    assert_eq!(invalid_calc["error"]["code"], "invalid_calculator_input");
 }
 
 async fn current_user_id(app: Router, token: &str) -> Uuid {
