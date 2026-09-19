@@ -21,10 +21,10 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
+| CORE-01 | One identity with personal and institution contexts | in-progress (identity/auth plus explicit personal + multi-institution context resolution tested; downstream institution-scoped product data remains) | .scratch/phase-1-slice-1/; .scratch/phase-1-core04-tenant-audit/; run 35425807184 |
 | CORE-02 | Versioned goals, exam dates, protected commitments | tested | .scratch/phase-1-core02-goals/; run 35424883754 |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | in-progress (free-tier daily question allowance enforced server-side with honest 403 + details payload; media/retrieval/manifest entitlements pending) | run 35372696754 |
-| CORE-04 | Multi-tenant role and audit foundations | not-started | — |
+| CORE-04 | Multi-tenant role and audit foundations | tested (foundation scope: explicit tenant context, multi-role memberships, separate platform roles, owner bootstrap, tenant-admin assignment, idempotency, append-only audit receipts, tenant isolation) | .scratch/phase-1-core04-tenant-audit/; run 35425807184 |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
 | CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
 | CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | not-started | — |
@@ -51,7 +51,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | AI-06 | Permissioned action tools | in-progress (the only agent action so far — deterministic plan revision — respects §9.1; LLM tool scopes land with the Coach) | run 35280682748 |
 | AI-07 | Action receipts and undoable plan revisions | tested (slice-1 scope: revision receipt JSONB with triggering evidence + checks + diff, undo restores version) | run 35280682748 |
 | AI-13 | Cost limits, fallbacks, kill switches | in-progress (no model calls yet — deterministic slice; switches land with OPS-05 remote config) | run 35280682748 |
-| AI-14 | No cross-tenant private-memory access | in-progress (single-tenant slice; learner state is user-scoped by design, isolation tests with tenants pending) | run 35280682748 |
+| AI-14 | No cross-tenant private-memory access | in-progress (tenant authorization/audit isolation foundation tested; learner private-memory/storage tenantization and adversarial isolation tests remain) | runs 35280682748, 35425807184 |
 | AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
 | PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
 | PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
