@@ -164,6 +164,22 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
         )
+        .route(
+            "/v1/note-collections",
+            post(routes::retest::create_collection).get(routes::retest::list_collections),
+        )
+        .route(
+            "/v1/note-collections/{collection_id}/notes",
+            post(routes::retest::add_note_to_collection),
+        )
+        .route(
+            "/v1/notes/{note_id}/concepts",
+            post(routes::retest::tag_note_concept),
+        )
+        .route(
+            "/v1/concepts/{concept}/notes",
+            get(routes::retest::notes_by_concept),
+        )
         .route("/v1/me/export", get(routes::packs::export_account))
         .route(
             "/v1/packs/{exam_id}/manifest",
@@ -343,6 +359,22 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
+        )
+        .route(
+            "/api/v1/note-collections",
+            post(routes::retest::create_collection).get(routes::retest::list_collections),
+        )
+        .route(
+            "/api/v1/note-collections/{collection_id}/notes",
+            post(routes::retest::add_note_to_collection),
+        )
+        .route(
+            "/api/v1/notes/{note_id}/concepts",
+            post(routes::retest::tag_note_concept),
+        )
+        .route(
+            "/api/v1/concepts/{concept}/notes",
+            get(routes::retest::notes_by_concept),
         )
         .route("/api/v1/me/export", get(routes::packs::export_account))
         .route(
