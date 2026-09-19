@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { Api, ApiError } from '$lib/api';
 
 	let { data } = $props();
@@ -14,6 +15,9 @@
 	let error = $state('');
 	let result = $state(null);
 	let loadFailed = $state('');
+	let reviewing = $state(false);
+	let actionBusy = $state(false);
+	let actionError = $state('');
 
 	// QB-08: report-a-problem control on answered items.
 	let reportOpen = $state(false);
@@ -37,6 +41,7 @@
 	const allAnswered = $derived(
 		session?.items ? session.items.every((i) => i.answered) : false
 	);
+	const missedCount = $derived(result ? result.incorrect + result.skipped : 0);
 
 	// EX-08: countdown derives from the server-issued deadline and server_now,
 	// so changing the device clock never extends the timer.
@@ -60,6 +65,16 @@
 		return `${m}:${String(s).padStart(2, '0')}`;
 	}
 
+	function fmtDuration(seconds) {
+		const total = Math.max(0, Math.floor(seconds ?? 0));
+		const h = Math.floor(total / 3600);
+		const m = Math.floor((total % 3600) / 60);
+		const s = total % 60;
+		if (h > 0) return `${h}h ${m}m ${s}s`;
+		if (m > 0) return `${m}m ${s}s`;
+		return `${s}s`;
+	}
+
 	function storageKey(index) {
 		return `mlos_key_${sid}_${index}`;
 	}
@@ -76,6 +91,11 @@
 	async function load() {
 		try {
 			session = await Api.getSession(sid);
+			if (session.status === 'submitted' && session.result) {
+				result = session.result;
+				current = 0;
+				return;
+			}
 			const firstUnanswered = session.items.findIndex((i) => !i.answered);
 			current = firstUnanswered === -1 ? session.items.length - 1 : firstUnanswered;
 			if (session.deadline && session.server_now) {
@@ -128,10 +148,54 @@
 		error = '';
 		try {
 			result = await Api.submit(sid);
+			try {
+				session = await Api.getSession(sid);
+				if (session.result) result = session.result;
+			} catch {
+				if (session) session.status = 'submitted';
+			}
+			current = 0;
 		} catch (err) {
 			error = err instanceof ApiError ? err.message : 'Could not submit the session.';
 		} finally {
 			submitting = false;
+		}
+	}
+
+	function startReview() {
+		current = 0;
+		reviewing = true;
+		actionError = '';
+	}
+
+	async function startResultSession(kind) {
+		if (!session || actionBusy) return;
+		actionBusy = true;
+		actionError = '';
+		try {
+			let request;
+			if (kind === 'missed') {
+				request = { preset: 'revision', source_session_id: sid };
+			} else {
+				if (!session.chapter_id) throw new Error('This session cannot be retried by chapter.');
+				request = {
+					preset: session.preset === 'timed' ? 'timed' : 'tutor',
+					chapter_id: session.chapter_id,
+					question_count: session.items.length
+				};
+				if (request.preset === 'timed' && session.time_limit_seconds) {
+					request.time_limit_seconds = session.time_limit_seconds;
+				}
+			}
+			const { session_id } = await Api.createSession(request);
+			await goto(`${base}/session/${session_id}`);
+		} catch (err) {
+			actionError =
+				err instanceof ApiError || err instanceof Error
+					? err.message
+					: 'Could not start the next session.';
+		} finally {
+			actionBusy = false;
 		}
 	}
 
@@ -171,7 +235,16 @@
 	});
 
 	function onKeydown(event) {
-		if (result || !session || !item) return;
+		if ((result && !reviewing) || !session || !item) return;
+		if (reviewing) {
+			if (
+				(event.key === 'Enter' || event.key === 'n' || event.key === 'N') &&
+				current < session.items.length - 1
+			) {
+				current += 1;
+			}
+			return;
+		}
 		const letter = 'abcdefghij'.indexOf(event.key.toLowerCase());
 		if (letter >= 0 && !item.answered && letter < item.options.length) {
 			selected = letter;
@@ -204,7 +277,7 @@
 {#if loadFailed}
 	<p class="error-text" role="alert">{loadFailed}</p>
 	<button class="btn" type="button" onclick={load}>Retry</button>
-{:else if result}
+{:else if result && !reviewing}
 	<div class="card" data-testid="results">
 		<h1>Session submitted</h1>
 		<div class="stat-row">
@@ -212,15 +285,71 @@
 			<span>Correct<strong>{result.correct}</strong></span>
 			<span>Incorrect<strong>{result.incorrect}</strong></span>
 			<span>Skipped<strong>{result.skipped}</strong></span>
+			<span>Total<strong data-testid="total">{result.total}</strong></span>
+			<span
+				>Time taken<strong data-testid="time-taken">{fmtDuration(result.time_taken_seconds)}</strong></span
+			>
 		</div>
 		<p class="muted">This result is about this form — it is not a prediction of anything.</p>
-		<a class="btn primary" href={`${base}/today`} data-testid="back-today">Back to Today</a>
+		<div class="result-actions" aria-label="Result actions">
+			{#if missedCount > 0}
+				<button
+					class="btn primary"
+					type="button"
+					disabled={actionBusy}
+					data-loading={actionBusy}
+					data-testid="practice-missed"
+					onclick={() => startResultSession('missed')}
+				>
+					Practice missed questions
+				</button>
+			{:else if session?.chapter_id}
+				<button
+					class="btn primary"
+					type="button"
+					disabled={actionBusy}
+					data-loading={actionBusy}
+					data-testid="retry-session"
+					onclick={() => startResultSession('retry')}
+				>
+					Retry this session
+				</button>
+			{:else}
+				<a class="btn primary" href={`${base}/today`} data-testid="back-today">Back to Today</a>
+			{/if}
+
+			<button class="btn" type="button" data-testid="review-answers" onclick={startReview}>
+				Review answers
+			</button>
+
+			{#if missedCount > 0 && session?.chapter_id}
+				<button
+					class="btn"
+					type="button"
+					disabled={actionBusy}
+					data-loading={actionBusy}
+					data-testid="retry-session"
+					onclick={() => startResultSession('retry')}
+				>
+					Retry this session
+				</button>
+			{/if}
+
+			{#if missedCount > 0 || session?.chapter_id}
+				<a class="btn" href={`${base}/today`} data-testid="back-today">Back to Today</a>
+			{/if}
+		</div>
+		{#if actionError}
+			<p class="error-text" role="alert">{actionError}</p>
+		{/if}
 	</div>
 {:else if session}
 	<p class="muted" style="margin-bottom: var(--space-sm);">
-		Question {current + 1} of {session.items.length}
+		{reviewing
+			? `Reviewing question ${current + 1} of ${session.items.length}`
+			: `Question ${current + 1} of ${session.items.length}`}
 		· {session.preset === 'revision' ? 'Re-practice' : session.preset === 'timed' ? 'Timed' : 'Tutor mode'}
-		{#if remainingMs !== null}
+		{#if !reviewing && remainingMs !== null}
 			· <span
 				class="timer"
 				style:color={remainingMs < 60_000 ? 'var(--color-warning)' : 'inherit'}
@@ -231,6 +360,16 @@
 			</span>
 		{/if}
 	</p>
+	{#if reviewing}
+		<button
+			class="linklike"
+			type="button"
+			data-testid="back-results"
+			onclick={() => (reviewing = false)}
+		>
+			Back to results
+		</button>
+	{/if}
 
 	{#if item}
 		<div class="card">
@@ -241,10 +380,10 @@
 				{#each item.options as option, i (i)}
 					<button
 						type="button"
-						class="option {item.answered && i === item.correct_index ? 'correct' : ''}
+						class="option {(item.answered || reviewing || session.status === 'submitted') && i === item.correct_index ? 'correct' : ''}
 							{item.answered && item.chosen_index === i && item.correct === false ? 'incorrect' : ''}"
 						aria-pressed={!item.answered && selected === i}
-						disabled={item.answered || busy}
+						disabled={item.answered || busy || reviewing || session.status !== 'open'}
 						data-testid={`option-${i}`}
 						onclick={() => {
 							if (!item.answered) selected = selected === i ? null : i;
@@ -260,7 +399,7 @@
 				<p class="error-text" role="alert">{error}</p>
 			{/if}
 
-			{#if !item.answered}
+			{#if !item.answered && !reviewing && session.status === 'open'}
 				<button
 					class="btn primary"
 					type="button"
@@ -286,7 +425,13 @@
 					data-testid="feedback"
 				>
 					<p class="verdict">
-						{item.correct === true ? 'Correct.' : item.correct === false ? 'Not quite.' : 'Skipped.'}
+						{item.correct === true
+							? 'Correct.'
+							: item.correct === false
+								? 'Not quite.'
+								: item.answered
+									? 'Skipped.'
+									: 'Not answered.'}
 					</p>
 					{#each item.options as option, i (i)}
 						{#if option.rationale && (i === item.correct_index || i === item.chosen_index)}
@@ -395,6 +540,15 @@
 						onclick={() => (current += 1)}
 					>
 						Next
+					</button>
+				{:else if reviewing}
+					<button
+						class="btn"
+						type="button"
+						data-testid="back-results-end"
+						onclick={() => (reviewing = false)}
+					>
+						Back to results
 					</button>
 				{:else if allAnswered}
 					<button

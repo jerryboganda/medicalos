@@ -19,6 +19,7 @@ Answer-change analytics remains QB-17 Phase 2. No answer-change figures are infe
 5. As a learner, I can retry the same chapter with the same tutor/timed configuration when the source session has a chapter.
 6. As a learner, I can always return to Today.
 7. As a learner, I am not shown answer-change analysis until the evidence model actually records answer changes.
+8. As a learner, refreshing a submitted session still shows the same result summary and actions from persisted evidence.
 
 ## Implementation Decisions
 
@@ -27,6 +28,7 @@ Answer-change analytics remains QB-17 Phase 2. No answer-change figures are infe
 - `score` remains the integer percentage already used by the product; no duplicate percentage field is introduced.
 - The submitted-session review reuses the existing session route and question UI in read-only mode.
 - After submission, completed-session detail may reveal answer keys/rationales for review; open sessions keep the existing reveal restrictions.
+- Submitted-session detail reconstructs the same result projection from persisted attempts and session timestamps so refresh does not erase results.
 - Retry reuses `createSession` with the same chapter, question count, tutor/timed preset, and timed limit when applicable.
 - “Practice missed questions” reuses `preset=revision` with `source_session_id`.
 - The revision pool must include incorrect attempts, explicit skips (`chosen_index IS NULL`), and truly unanswered session items.

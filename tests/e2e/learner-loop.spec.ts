@@ -59,6 +59,12 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	await expect(page.getByTestId('review-answers')).toBeVisible();
 	await expect(page.getByTestId('retry-session')).toBeVisible();
 
+	// Results are reconstructed from persisted session evidence after reload.
+	await page.reload();
+	await expect(page.getByTestId('results')).toBeVisible();
+	await expect(page.getByTestId('score')).toHaveText('50%');
+	await expect(page.getByTestId('time-taken')).toContainText(/\d/);
+
 	// Review uses the submitted session itself; it must be read-only.
 	await page.getByTestId('review-answers').click();
 	await expect(page.getByText('Reviewing question 1 of 2')).toBeVisible();

@@ -270,13 +270,14 @@ pub async fn create_session(
                     "source session does not exist or is not submitted",
                 )
             })?;
-            let pool_qs = sqlx::query!(
+            let pool_qs = sqlx::query_as::<_, (Uuid, String, String, String, serde_json::Value)>(
                 r#"SELECT id, vignette, lead_in, difficulty, options FROM (
                        SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                        FROM question_versions qv
                        WHERE (qv.id IN (
                            SELECT question_version_id FROM attempts
-                           WHERE session_id = $1 AND correct = FALSE
+                           WHERE session_id = $1
+                             AND (correct = FALSE OR chosen_index IS NULL)
                        )
                        OR qv.id IN (
                            SELECT si.question_version_id FROM session_items si
@@ -293,8 +294,8 @@ pub async fn create_session(
                        )
                    ) t
                    ORDER BY random()"#,
-                src
             )
+            .bind(src)
             .fetch_all(&state.pool)
             .await?;
             if pool_qs.is_empty() {
@@ -305,13 +306,15 @@ pub async fn create_session(
             }
             let qs: Vec<PoolQuestion> = pool_qs
                 .into_iter()
-                .map(|r| PoolQuestion {
-                    id: r.id,
-                    vignette: r.vignette,
-                    lead_in: r.lead_in,
-                    difficulty: r.difficulty,
-                    options: r.options,
-                })
+                .map(
+                    |(id, vignette, lead_in, difficulty, options)| PoolQuestion {
+                        id,
+                        vignette,
+                        lead_in,
+                        difficulty,
+                        options,
+                    },
+                )
                 .collect();
             insert_session(
                 &state.pool,
@@ -335,8 +338,9 @@ pub async fn create_session(
 }
 
 /// Session detail for the client: full item list for the navigator, with
-/// answer keys and rationales revealed only for already-answered items
-/// (§11.3 — nothing unreleased reaches the client).
+/// While a session is open, answer keys and rationales are revealed only for
+/// already-answered items. Once submitted, the full closed-session review is
+/// safe to reveal (§11.3 — nothing unreleased reaches an active attempt).
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -379,7 +383,17 @@ pub async fn get_session(
     .await?;
 
     let mut out = Vec::with_capacity(items.len());
+    let mut correct = 0_i64;
+    let mut incorrect = 0_i64;
+    let mut skipped = 0_i64;
     for it in items {
+        if it.correct == Some(true) {
+            correct += 1;
+        } else if it.chosen_index.is_some() && it.correct == Some(false) {
+            incorrect += 1;
+        } else {
+            skipped += 1;
+        }
         let opts: Vec<QuestionOption> =
             serde_json::from_value(it.options).map_err(|_| ApiError::internal())?;
         let answered = it.attempt_id.is_some();
@@ -410,7 +424,7 @@ pub async fn get_session(
             "exam_tip": null,
             "report_status": report_status,
         });
-        if answered {
+        if answered || session.status == "submitted" {
             item["correct_index"] = serde_json::json!(it.correct_index);
             item["options"] = serde_json::json!(opts);
             item["key_learning_point"] = serde_json::json!(it.key_learning_point);
@@ -418,6 +432,22 @@ pub async fn get_session(
         }
         out.push(item);
     }
+
+    let result = if session.status == "submitted" {
+        let total = out.len() as i64;
+        let score = if total == 0 { 0 } else { correct * 100 / total };
+        let time_taken_seconds = session_time_taken_seconds(&state.pool, user.user_id, sid).await?;
+        serde_json::json!({
+            "total": total,
+            "correct": correct,
+            "incorrect": incorrect,
+            "skipped": skipped,
+            "score": score,
+            "time_taken_seconds": time_taken_seconds,
+        })
+    } else {
+        serde_json::Value::Null
+    };
 
     Ok(Json(serde_json::json!({
         "session_id": sid,
@@ -431,6 +461,7 @@ pub async fn get_session(
         "deadline": session.deadline,
         "server_now": chrono::Utc::now(),
         "items": out,
+        "result": result,
     })))
 }
 
@@ -632,6 +663,26 @@ pub struct SubmitResponse {
     incorrect: i64,
     skipped: i64,
     score: i64,
+    time_taken_seconds: i64,
+}
+
+async fn session_time_taken_seconds(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    sid: Uuid,
+) -> ApiResult<i64> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        r#"SELECT GREATEST(
+                 0,
+                 FLOOR(EXTRACT(EPOCH FROM (submitted_at - created_at)))::bigint
+             )
+           FROM practice_sessions
+           WHERE id = $1 AND user_id = $2"#,
+    )
+    .bind(sid)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?)
 }
 
 pub async fn submit(
@@ -684,6 +735,8 @@ pub async fn submit(
         ));
     }
 
+    let time_taken_seconds = session_time_taken_seconds(&state.pool, user.user_id, sid).await?;
+
     agent::mark_matching_task_done(
         &state.pool,
         user.user_id,
@@ -714,5 +767,6 @@ pub async fn submit(
         incorrect: totals.incorrect,
         skipped: totals.skipped,
         score,
+        time_taken_seconds,
     }))
 }

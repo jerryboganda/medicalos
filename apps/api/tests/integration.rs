@@ -1325,6 +1325,19 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         2
     );
 
+    let (status, submitted_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submitted_detail}");
+    assert_eq!(submitted_detail["result"], result);
+
     // Double submit is rejected.
     let (status, _) = call(
         app.clone(),

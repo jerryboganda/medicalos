@@ -398,6 +398,13 @@ input[aria-invalid='true'] {
 	font-family: var(--font-display);
 }
 
+.result-actions {
+	display: flex;
+	gap: var(--space-sm);
+	flex-wrap: wrap;
+	align-items: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	* {
 		transition-duration: 0ms !important;

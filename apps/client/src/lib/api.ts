@@ -160,12 +160,15 @@ export interface SessionItem {
 export interface PracticeSession {
 	session_id: string;
 	preset: string;
+	chapter_id: string | null;
+	source_session_id: string | null;
 	status: string;
 	time_limit_seconds: number | null;
 	/** EX-08: server-issued; the countdown derives from deadline − server_now. */
 	deadline: string | null;
 	server_now: string | null;
 	items: SessionItem[];
+	result: SubmitResult | null;
 }
 
 export interface AnswerResult {
@@ -183,6 +186,7 @@ export interface SubmitResult {
 	incorrect: number;
 	skipped: number;
 	score: number;
+	time_taken_seconds: number;
 }
 
 export interface DeviceSession {
