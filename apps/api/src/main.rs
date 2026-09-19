@@ -30,6 +30,7 @@ async fn main() {
         pool,
         min_time_limit_seconds: min_time_limit,
         free_daily_questions,
+        expose_test_auth_tokens: false,
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

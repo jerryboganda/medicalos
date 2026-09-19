@@ -19,6 +19,8 @@ pub struct CreateSessionReq {
     pub chapter_id: Option<Uuid>,
     pub question_count: Option<i32>,
     pub source_session_id: Option<Uuid>,
+    /// CORE-07: a second live study session requires explicit user takeover.
+    pub takeover: Option<bool>,
     /// EX-08: required for the timed preset, validated server-side.
     pub time_limit_seconds: Option<i64>,
 }
@@ -44,12 +46,44 @@ struct PoolQuestion {
 async fn insert_session(
     pool: &sqlx::PgPool,
     user_id: Uuid,
+    takeover: bool,
     preset: &str,
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
     time_limit_seconds: Option<i32>,
     pool_questions: &[PoolQuestion],
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Serialize session creation per learner so concurrent requests cannot
+    // produce two open study sessions.
+    let mut tx = pool.begin().await?;
+    sqlx::query!("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let active = sqlx::query!(
+        "SELECT id FROM practice_sessions
+         WHERE user_id = $1 AND status = 'open'
+         ORDER BY created_at DESC LIMIT 1",
+        user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(active) = active {
+        if !takeover {
+            return Err(ApiError::conflict_with_details(
+                "active_study_session",
+                "another study session is already active",
+                serde_json::json!({"session_id": active.id}),
+            ));
+        }
+        sqlx::query!(
+            "UPDATE practice_sessions SET status = 'abandoned'
+             WHERE user_id = $1 AND status = 'open'",
+            user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // EX-08: the server issues the deadline — the client never sets it, and
     // answer acceptance is checked against it server-side.
     let deadline = time_limit_seconds
@@ -67,7 +101,7 @@ async fn insert_session(
         time_limit_seconds,
         deadline
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     let mut items = Vec::with_capacity(pool_questions.len());
     for (i, q) in pool_questions.iter().enumerate() {
@@ -80,7 +114,7 @@ async fn insert_session(
             idx,
             q.id
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         let opts: Vec<QuestionOption> =
             serde_json::from_value(q.options.clone()).map_err(|_| ApiError::internal())?;
@@ -97,6 +131,7 @@ async fn insert_session(
                 .collect(),
         });
     }
+    tx.commit().await?;
     Ok(Json(serde_json::json!({"session_id": sid, "items": items})))
 }
 
@@ -195,6 +230,7 @@ pub async fn create_session(
             insert_session(
                 &state.pool,
                 user.user_id,
+                req.takeover.unwrap_or(false),
                 &req.preset,
                 Some(chapter_id),
                 None,
@@ -270,6 +306,7 @@ pub async fn create_session(
             insert_session(
                 &state.pool,
                 user.user_id,
+                req.takeover.unwrap_or(false),
                 "revision",
                 None,
                 Some(src),

@@ -41,6 +41,19 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, code, message)
     }
 
+    pub fn conflict_with_details(
+        code: &'static str,
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code,
+            message: message.into(),
+            details: Some(details),
+        }
+    }
+
     pub fn unprocessable(code: &'static str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message)
     }

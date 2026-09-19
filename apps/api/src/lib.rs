@@ -19,6 +19,26 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
+        .route("/v1/auth/verify-email", post(routes::auth::verify_email))
+        .route("/v1/auth/refresh", post(routes::auth::refresh))
+        .route(
+            "/v1/auth/forgot-password",
+            post(routes::auth::forgot_password),
+        )
+        .route(
+            "/v1/auth/reset-password",
+            post(routes::auth::reset_password),
+        )
+        .route("/v1/me/sessions", get(routes::auth::sessions))
+        .route(
+            "/v1/me/sessions/sign-out-others",
+            post(routes::auth::sign_out_others),
+        )
+        .route("/v1/me/sessions/logout", post(routes::auth::logout))
+        .route(
+            "/v1/me/account/deletion",
+            post(routes::auth::request_account_deletion),
+        )
         .route(
             "/v1/me/goals",
             get(routes::goals::get_goals).put(routes::goals::put_goals),

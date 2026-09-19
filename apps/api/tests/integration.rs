@@ -30,6 +30,7 @@ async fn setup() -> Arc<AppState> {
         pool,
         min_time_limit_seconds: 30,
         free_daily_questions: 10,
+        expose_test_auth_tokens: true,
     })
 }
 
@@ -91,13 +92,33 @@ async fn register_and_login(app: Router) -> String {
     )
     .await;
     assert!(v["user_id"].as_str().is_some(), "register: {v}");
+    let verification_token = v["verification_token"]
+        .as_str()
+        .expect("test verification token");
+    let (status, verified) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/verify-email",
+            None,
+            Some(serde_json::json!({"token": verification_token})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "verify: {verified}");
+    let device_id = format!("test-device-{}", Uuid::new_v4());
     let (status, v) = call(
         app.clone(),
         request(
             "POST",
             "/v1/auth/login",
             None,
-            Some(serde_json::json!({"email": email, "password": "correct horse"})),
+            Some(serde_json::json!({
+                "email": email,
+                "password": "correct horse",
+                "device_id": device_id,
+                "device_name": "Integration test"
+            })),
         ),
     )
     .await;
@@ -134,6 +155,10 @@ async fn auth_register_login_and_reject_bad_credentials() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
+    let verification_token = v["verification_token"]
+        .as_str()
+        .expect("test verification token")
+        .to_string();
 
     let (status, _) = call(
         app.clone(),
@@ -157,7 +182,12 @@ async fn auth_register_login_and_reject_bad_credentials() {
             "POST",
             "/v1/auth/login",
             None,
-            Some(serde_json::json!({"email": email, "password": "wrong password"})),
+            Some(serde_json::json!({
+                "email": email,
+                "password": "wrong password",
+                "device_id": "auth-test",
+                "device_name": "Test device"
+            })),
         ),
     )
     .await;
@@ -166,13 +196,30 @@ async fn auth_register_login_and_reject_bad_credentials() {
     let (status, _) = call(app.clone(), request("GET", "/v1/me/today", None, None)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "missing token rejected");
 
+    let (status, verified) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/verify-email",
+            None,
+            Some(serde_json::json!({"token": verification_token})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{verified}");
+
     let (status, v) = call(
         app.clone(),
         request(
             "POST",
             "/v1/auth/login",
             None,
-            Some(serde_json::json!({"email": email, "password": "longenough"})),
+            Some(serde_json::json!({
+                "email": email,
+                "password": "longenough",
+                "device_id": "auth-test",
+                "device_name": "Test device"
+            })),
         ),
     )
     .await;
@@ -1307,7 +1354,7 @@ async fn revision_pool_is_exactly_wrong_and_skipped() {
             Some(&token),
             Some(
                 serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter1,
-                                   "question_count": 1}),
+                                   "question_count": 1, "takeover": true}),
             ),
         ),
     )
@@ -1447,7 +1494,7 @@ async fn free_daily_allowance_blocks_new_sessions_with_details() {
                 Some(&token),
                 Some(
                     serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter2,
-                                       "question_count": 2}),
+                                       "question_count": 2, "takeover": n > 0}),
                 ),
             ),
         )

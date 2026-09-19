@@ -1,6 +1,6 @@
-//! Password hashing (Argon2id), opaque bearer tokens, and the authenticated
-//! user extractor. Tokens are stored hashed (SHA-256) — the webview and the
-//! database never hold the raw token beyond the response (§25).
+//! Password hashing (Argon2id), opaque bearer/refresh tokens, and the
+//! authenticated user extractor. Raw tokens exist only at issuance; durable
+//! storage is SHA-256 hashed (§25).
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-pub struct NewSession {
+pub struct NewToken {
     pub token: String,
     pub expires_at: chrono::DateTime<Utc>,
 }
@@ -40,16 +40,28 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     }
 }
 
-pub fn new_session_token() -> NewSession {
+pub fn new_token(lifetime: Duration) -> NewToken {
     let token: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(48)
         .map(char::from)
         .collect();
-    NewSession {
-        expires_at: Utc::now() + Duration::days(30),
+    NewToken {
+        expires_at: Utc::now() + lifetime,
         token,
     }
+}
+
+pub fn new_access_token() -> NewToken {
+    new_token(Duration::minutes(15))
+}
+
+pub fn new_refresh_token() -> NewToken {
+    new_token(Duration::days(30))
+}
+
+pub fn new_challenge_token() -> NewToken {
+    new_token(Duration::hours(1))
 }
 
 pub fn sha256_hex(input: &str) -> String {
@@ -61,6 +73,7 @@ pub fn sha256_hex(input: &str) -> String {
 
 pub struct AuthUser {
     pub user_id: Uuid,
+    pub session_id: Uuid,
 }
 
 impl FromRequestParts<Arc<AppState>> for AuthUser {
@@ -75,7 +88,12 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .ok_or_else(ApiError::unauthorized)?;
         let token_hash = sha256_hex(raw);
         let row = sqlx::query!(
-            "SELECT user_id FROM auth_sessions WHERE token_hash = $1 AND expires_at > now()",
+            "UPDATE auth_sessions
+             SET last_seen_at = now()
+             WHERE token_hash = $1
+               AND expires_at > now()
+               AND revoked_at IS NULL
+             RETURNING user_id, id",
             token_hash
         )
         .fetch_optional(&state.pool)
@@ -83,6 +101,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         .ok_or_else(ApiError::unauthorized)?;
         Ok(AuthUser {
             user_id: row.user_id,
+            session_id: row.id,
         })
     }
 }
