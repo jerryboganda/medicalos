@@ -22,6 +22,7 @@
 	<a class="brand" href={`${base}/today`}>Medical Learning OS</a>
 	{#if auth.token}
 		<nav style="display:flex; gap:12px; align-items:center;">
+			<a class="btn" href={`${base}/progress`} data-testid="nav-progress">Progress</a>
 			<a class="btn" href={`${base}/coach`} data-testid="nav-coach">Coach</a>
 			<a class="btn" href={`${base}/notes`} data-testid="nav-notes">Notes</a>
 			<a class="btn" href={`${base}/library`} data-testid="nav-library">Library</a>

@@ -160,6 +160,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
+        .route(
+            "/v1/scenarios/runs/{run_id}/debrief",
+            get(routes::sim::debrief),
+        )
+        .route("/v1/appeals", post(routes::sim::submit_appeal))
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -312,6 +317,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/debrief",
+            get(routes::sim::debrief),
+        )
+        .route("/api/v1/appeals", post(routes::sim::submit_appeal))
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
             "/api/v1/decks/{deck_id}/cards",

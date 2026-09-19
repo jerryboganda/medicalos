@@ -12,4 +12,5 @@ pub mod practice;
 pub mod program;
 pub mod reports;
 pub mod review;
+pub mod sim;
 pub mod today;
