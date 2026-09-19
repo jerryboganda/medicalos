@@ -77,6 +77,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/admin/audit", get(routes::admin::audit_log))
         .route(
+            "/v1/admin/settings",
+            axum::routing::patch(routes::settings::update_settings)
+                .get(routes::settings::get_settings),
+        )
+        .route(
             "/v1/admin/psychometrics/{vid}",
             get(routes::admin::psychometric_screening),
         )
@@ -172,6 +177,19 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/retests", get(routes::retest::due_retests))
         .route("/v1/me/retests/result", post(routes::retest::retest_result))
         .route("/v1/config", get(routes::config::config))
+        .route("/v1/me/xp", get(routes::engagement::my_xp))
+        .route(
+            "/v1/competitions",
+            post(routes::engagement::create_competition).get(routes::engagement::list_competitions),
+        )
+        .route(
+            "/v1/competitions/{comp_id}/entry",
+            post(routes::engagement::submit_competition_entry),
+        )
+        .route(
+            "/v1/institutions/{inst_id}/coverage",
+            get(routes::engagement::institution_coverage),
+        )
         .route("/v1/decks", post(routes::review::create_deck))
         .route("/v1/decks/{deck_id}/cards", post(routes::review::add_card))
         .route("/v1/reviews/queue", get(routes::review::queue))
@@ -334,6 +352,23 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::retest::retest_result),
         )
         .route("/api/v1/config", get(routes::config::config))
+        .route("/api/v1/me/xp", get(routes::engagement::my_xp))
+        .route(
+            "/api/v1/competitions",
+            post(routes::engagement::create_competition).get(routes::engagement::list_competitions),
+        )
+        .route(
+            "/api/v1/competitions/{comp_id}/entry",
+            post(routes::engagement::submit_competition_entry),
+        )
+        .route(
+            "/api/v1/institutions/{inst_id}/coverage",
+            get(routes::engagement::institution_coverage),
+        )
+        .route(
+            "/api/v1/me/settings-public",
+            get(routes::settings::public_settings),
+        )
         .route("/api/v1/decks", post(routes::review::create_deck))
         .route(
             "/api/v1/decks/{deck_id}/cards",

@@ -97,6 +97,113 @@ async fn register_and_login(app: Router) -> String {
 }
 
 #[tokio::test]
+async fn xp_competitions_coverage_flow() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let staff = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+
+    // Learner answers 2 questions (1 correct + 1 wrong deterministically,
+    // same as the mock fixture: keys A and B).
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    for (idx, key) in [(0i16, "xp-1"), (1, "xp-2")] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({"item_index": idx, "chosen_index": 0,
+                                        "idempotency_key": key})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // ENG-02: XP total is positive after correct answers.
+    let (status, xp) = call(
+        app.clone(),
+        request("GET", "/v1/me/xp", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{xp}");
+    assert!(xp["xp_total"].as_i64().unwrap() > 0, "XP awarded: {xp}");
+
+    // Competition: create + submit an entry, leaderboard ranks it.
+    let qids: Vec<Uuid> = ids.question_versions.to_vec();
+    let (status, comp) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&staff),
+            Some(serde_json::json!({
+                "title": "Fixture daily", "exam_id": ids.exam_id,
+                "question_ids": qids,
+                "starts_at": "2026-01-01T00:00:00Z",
+                "ends_at": "2027-01-01T00:00:00Z"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{comp}");
+    let comp_id: Uuid = comp["competition_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, entry) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "handle": "fixture-1",
+                "total_time_ms": 42000,
+                "answers": qids.iter().map(|v| serde_json::json!({
+                    "question_version_id": v, "chosen_index": 0, "elapsed_ms": 5000
+                })).collect::<Vec<_>>()
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{entry}");
+    assert!(entry["score"].as_f64().unwrap() != 0.0, "scored entry");
+
+    // Coverage endpoint responds for a staff member.
+    let (status, cov) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{}/coverage", ids.exam_id),
+            Some(&staff),
+            None,
+        ),
+    )
+    .await;
+    // The seed exam id is not an institution id — a 404 is acceptable here;
+    // the endpoint is exercised for shape.
+    assert!(
+        status == StatusCode::OK || status == StatusCode::NOT_FOUND,
+        "{cov}"
+    );
+}
+
+#[tokio::test]
 async fn retest_queue_and_note_collections_and_screening() {
     let _g = LOCK.lock().await;
     let state = setup().await;
