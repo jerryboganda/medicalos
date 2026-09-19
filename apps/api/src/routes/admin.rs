@@ -12,9 +12,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
-use crate::domain_contracts::option_count;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use domain_contracts::option_count;
 
 fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers.get("x-admin-token").and_then(|v| v.to_str().ok())
@@ -168,7 +168,20 @@ pub async fn list_nodes(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "nodes": rows })))
+    let nodes: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "kind": r.kind,
+                "name": r.name,
+                "parent_id": r.parent_id,
+                "display_order": r.display_order,
+                "status": r.status,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "nodes": nodes })))
 }
 
 // ---- question CRUD (§19.5) --------------------------------------------------
