@@ -113,7 +113,7 @@ fn extractive_answer(
     }
     if prompt_type == "socratic" {
         let _ = source_ref; // not used in guided mode
-        // AI-10: guided self-explanation without direct reveal.
+                            // AI-10: guided self-explanation without direct reveal.
         parts.insert(
             0,
             "Work through these prompts before checking below:".into(),
