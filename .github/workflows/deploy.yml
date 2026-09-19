@@ -39,6 +39,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Export GHCR pull credentials for the VPS
+        run: |
+          echo "GHCR_USER=${{ github.actor }}" >> "$GITHUB_ENV"
+          echo "GHCR_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> "$GITHUB_ENV"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -122,7 +126,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script_file: infra/vps/deploy.sh
           script_arguments: ${{ github.sha }}
-          envs: VPS_DATABASE_URL_AS_ARG
+          envs: VPS_DATABASE_URL_AS_ARG,GHCR_USER,GHCR_TOKEN
         env:
           VPS_DATABASE_URL_AS_ARG: ${{ secrets.VPS_DATABASE_URL }}
 

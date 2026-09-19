@@ -11,6 +11,12 @@ set -euo pipefail
 SHA="${1:?usage: deploy.sh <sha>}"
 DATABASE_URL="${DATABASE_URL:-${VPS_DATABASE_URL_AS_ARG:?VPS_DATABASE_URL secret missing}}"
 REGISTRY="${REGISTRY:-ghcr.io/jerryboganda}"
+# GHCR needs auth even for pulls when the package inherits the repo's
+# visibility: the workflow exports GHCR_USER/GHCR_TOKEN (GITHUB_TOKEN with
+# packages:read) and we log in once here.
+if [ -n "${GHCR_TOKEN:-}" ]; then
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-github}" --password-stdin
+fi
 API_IMAGE="$REGISTRY/medicalos-api:$SHA"
 WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
 : "${DATABASE_URL:?DATABASE_URL must be exported (VPS_DATABASE_URL secret)}"
