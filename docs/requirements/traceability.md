@@ -22,14 +22,14 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
-| CORE-02 | Versioned goals, exam dates, protected commitments | not-started | — |
+| CORE-02 | Versioned goals, exam dates, protected commitments | tested (goal create/list with retirement history; protected commitments learner-only CRUD, §9.3) | run 35467238410 |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | in-progress (free-tier daily question allowance enforced server-side with honest 403 + details payload; media/retrieval/manifest entitlements pending) | run 35372696754 |
 | CORE-04 | Multi-tenant role and audit foundations | not-started | — |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
 | CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
 | CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | not-started | — |
-| CORE-08 | Notification policy, push + in-app inbox | not-started | — |
-| CORE-09 | Guest trial before sign-up (SHOULD) | not-started | — |
+| CORE-08 | Notification policy, push + in-app inbox | tested (slice-12 scope: in-app inbox, per-category preferences, quiet hours, delivery gate; remote push tokens pending owned plugin) | run 35467238410 |
+| CORE-09 | Guest trial before sign-up (SHOULD) | tested (guest key trial: 5-question ceiling, no keys for guests, honest upgrade refusal) | run 35467238410 |
 | CORE-10 | Navigational hierarchy mapped to concept identities | in-progress (Exam→Subject→System→Chapter nodes tested; concept-identity mapping pending) | run 35280682748 |
 | QB-01 | Immutable published question versions | tested (slice-1 scope: versioned, published-only serving) | run 35280682748 |
 | QB-02 | Question-family and variant identities | in-progress (family_id column exists; variant flows pending) | run 35280682748 |
@@ -48,21 +48,21 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | AI-02 | Cold-start plan with honest sparse-data behavior | tested (slice-1 scope: modest first plan, low_evidence level, no fake mastery under 10 attempts) | run 35280682748 |
 | AI-04 | Time-budgeted next-best-action selection | in-progress (cold-start task only; capacity-constrained selection pending) | run 35280682748 |
 | AI-05 | Bounded event-driven orchestration | in-progress (deterministic in-request handlers; event/queue layer arrives with workers) | run 35280682748 |
-| AI-06 | Permissioned action tools | in-progress (the only agent action so far — deterministic plan revision — respects §9.1; LLM tool scopes land with the Coach) | run 35280682748 |
+| AI-06 | Permissioned action tools | tested (slice-11 scope: Coach reads ONLY reviewed material of answered questions + own attempt — permissioning enforced and tested; broader tool scopes pending) | run 35466880140 |
 | AI-07 | Action receipts and undoable plan revisions | tested (slice-1 scope: revision receipt JSONB with triggering evidence + checks + diff, undo restores version) | run 35280682748 |
-| AI-13 | Cost limits, fallbacks, kill switches | in-progress (no model calls yet — deterministic slice; switches land with OPS-05 remote config) | run 35280682748 |
+| AI-13 | Cost limits, fallbacks, kill switches | tested (slice-11 scope: daily AI allowance enforced with honest 403 + details; extractive fallback means study never blocks; remote kill switch via OPS-05 flags pending) | run 35466880140 |
 | AI-14 | No cross-tenant private-memory access | in-progress (single-tenant slice; learner state is user-scoped by design, isolation tests with tenants pending) | run 35280682748 |
 | AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
 | PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
 | PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
-| LIB-01 | Versioned articles and references | not-started | — |
-| NOTE-01 | Source-linked private notes | not-started | — |
+| LIB-01 | Versioned articles and references | tested (seed-level: versioned published articles readable; editorial authoring surface pending) | run 35467238410 |
+| NOTE-01 | Source-linked private notes | tested (CRUD + user-scoped isolation + deletion) | run 35467238410 |
 | ADMIN-01 | Real cross-tenant owner dashboard | not-started | — |
 | ADMIN-02 | Content and rights operations | not-started | — |
 | ADMIN-03 | AI model / cost / policy administration | not-started | — |
 | ADMIN-04 | Support, incidents, audit trails | not-started | — |
 | TRUST-01 | No fake scores, charts, citations, active-agent states | not-started | — |
-| TRUST-02 | Privacy, deletion, export workflows | not-started | — |
+| TRUST-02 | Privacy, deletion, export workflows | tested (full account export: profile + attempts + notes + card reviews + portfolio in one user-scoped call) | run 35467238410 |
 | TRUST-03 | Prompt-injection and tenant-isolation tests | not-started | — |
 | TRUST-04 | Clinically reviewed shared medical content | not-started | — |
 | UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
@@ -93,11 +93,11 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | in-progress (server-issued deadline, server-side answer cutoff after expiry, auto-submit semantics, skew-corrected client countdown — all tested incl. browser E2E; device-clock-tamper tests, grace windows, integrity signals pending) | run 35372696754 |
 | AI-03 | Mistake hypotheses, not assumed diagnoses | not-started | — |
 | AI-08 | Protected tasks and plan-churn controls | not-started | — |
-| AI-09 | Source-grounded contextual tutoring | not-started | — |
+| AI-09 | Source-grounded contextual tutoring | tested (slice-11 scope: extractive adapter answers only from reviewed rationale/key-point/exam-tip/source of answered questions; Socratic/contrast modes pending) | run 35466880140 |
 | AI-10 | Socratic, explain-back, contrast modes | not-started | — |
 | AI-11 | Learner-viewable editable memory | not-started | — |
 | AI-12 | Delayed intervention outcome tracking | not-started | — |
-| AI-16 | Qualified model routing and regression suites | not-started | — |
+| AI-16 | Qualified model routing and regression suites | in-progress (adapter routing extractive → OpenAI-compatible when key set; grounding regression seam tests live; full §23 eval harness pending) | run 35466880140 |
 | AI-18 | Pre-generated one-tap tutoring, cached and offline | not-started | — |
 | PLAN-03 | Review debt recovery and buffer time | not-started | — |
 | SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (product scope: decks, cards, review-events API, review UI — all through the official MIT rs-fsrs implementation behind the shared scheduler crate; native+wasm; browser-E2E tested) | run 35379501317 |
@@ -107,15 +107,15 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | SR-05 | Duplicate / sibling handling | not-started | — |
 | SR-08 | Automatic question re-test queue, objective grading, family-variant preference | not-started | — |
 | SR-09 | Editorial key-point cards | not-started | — |
-| LIB-02 | Hybrid search with visibility filters | not-started | — |
+| LIB-02 | Hybrid search with visibility filters | in-progress (text search over latest published versions tested; semantic/hybrid ranking pending) | run 35467238410 |
 | LIB-03 | Page / figure / timestamp citations | not-started | — |
 | LIB-04 | Guideline country / date overlays | not-started | — |
 | LIB-05 | Source-change propagation | not-started | — |
 | LIB-06 | Rights-checked document imports | not-started | — |
 | LIB-07 | Table / image / extraction completeness reports | not-started | — |
 | LIB-08 | Media player, captions, chapters | not-started | — |
-| NOTE-02 | Concepts, backlinks, collections | not-started | — |
-| NOTE-03 | Human-controlled revisions and portable export | not-started | — |
+| NOTE-02 | Concepts, backlinks, collections | in-progress (backlinks tested; concept tagging + collections API pending) | run 35467238410 |
+| NOTE-03 | Human-controlled revisions and portable export | tested (JSON export of all own notes incl. source references) | run 35467238410 |
 | IMG-01 | Rights-checked still-image case library | not-started | — |
 | PROG-01 | Hierarchy drill-down analytics, difficulty + trend filters, mastery heat-map | not-started | — |
 | ENG-02 | XP, achievements, weekly recap | not-started | — |
@@ -131,7 +131,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 |---|---|---|---|
 | SR-06 | Offline reviews and synchronized history | not-started | — |
 | SR-07 | Authorized import / export compatibility | not-started | — |
-| OFF-01 | Signed resource manifests and resumable downloads | not-started | — |
+| OFF-01 | Signed resource manifests and resumable downloads | tested (HMAC-SHA256 signed pack manifests with per-question checksums; tamper detection + resumable download client pending) | run 35467238410 |
 | OFF-02 | Idempotent event reconciliation | not-started | — |
 | OFF-03 | Note conflicts and versioned plan resolution | not-started | — |
 | OFF-04 | Offline entitlement and freshness disclosure | not-started | — |
@@ -151,8 +151,8 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| INST-01 | Programs, cohorts, assignments | not-started | — |
-| INST-02 | Distinct faculty and institution workspaces | not-started | — |
+| INST-01 | Programs, cohorts, assignments | tested (slice-13 scope: institutions, member roles, cohorts with members, assignments with staff gating; SSO/LTI pending) | run 35467238410 |
+| INST-02 | Distinct faculty and institution workspaces | in-progress (staff-gated cohort/assignment creation tested; dedicated workspace UI pending) | run 35467238410 |
 | INST-03 | SSO and scoped enrollment integrations | not-started | — |
 | INST-04 | Curriculum mapping and coverage | not-started | — |
 | INST-05 | Assessment author / reviewer / publisher separation | not-started | — |
@@ -166,18 +166,18 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | COMP-03 | Leagues and duels | not-started | — |
 | COMP-04 | Anti-cheat, integrity review, prizes only after review | not-started | — |
 | GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | not-started | — |
-| CAREER-01 | Longitudinal learning portfolio | not-started | — |
+| CAREER-01 | Longitudinal learning portfolio | tested (portfolio entries: rotation/case_reflection/procedure_observation/certificate with list) | run 35467238410 |
 | PLAN-05 | Optional calendar read / write scopes | not-started | — |
 
 ## Phase 5 — Clinical practice labs
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| SIM-01 | Versioned fictional / approved case scripts | not-started | — |
-| SIM-02 | Separate patient and examiner contexts | not-started | — |
+| SIM-01 | Versioned fictional / approved case scripts | tested (slice-13 scope: scenario create with authored state machines; voice/LLM voicing pending) | run 35467238410 |
+| SIM-02 | Separate patient and examiner contexts | in-progress (runs are per-learner with transcript evidence; separate examiner rubric flow pending) | run 35467238410 |
 | SIM-03 | Voice / text with transcript uncertainty | not-started | — |
 | SIM-04 | Rubric evidence per criterion | not-started | — |
-| SIM-05 | Authoritative state transitions and timers | not-started | — |
+| SIM-05 | Authoritative state transitions and timers | tested (slice-13 scope: deterministic transition engine — invalid events refused, transcript immutable) | run 35467238410 |
 | SIM-06 | Counterfactual replay and debrief timeline | not-started | — |
 | SIM-07 | Human review / appeal for consequential use | not-started | — |
 | IMG-02 | Stack viewer and reviewed annotations | not-started | — |
@@ -199,7 +199,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 |---|---|---|---|
 | QB-10 | Validated advanced calibration when supported | not-started | — |
 | TRUST-05 | Validated readiness before predictive claims | not-started | — |
-| CAREER-03 | Continuing-education records and provider workflow | not-started | — |
+| CAREER-03 | Continuing-education records and provider workflow | in-progress (CE activity records with honest non-accredited labelling tested; accreditation/provider workflow is a Phase 7 gate) | run 35467238410 |
 
 ## Awaiting owner approval (no phase commitment)
 
