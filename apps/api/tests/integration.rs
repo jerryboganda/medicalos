@@ -155,6 +155,33 @@ async fn auth_register_login_and_reject_bad_credentials() {
 }
 
 #[tokio::test]
+async fn authenticated_user_has_explicit_personal_and_tenant_contexts() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, contexts) = call(
+        app.clone(),
+        request("GET", "/v1/me/contexts", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{contexts}");
+    assert_eq!(contexts["personal"]["kind"], "personal");
+    assert!(contexts["personal"]["user_id"].as_str().is_some());
+    assert_eq!(contexts["tenants"].as_array().unwrap().len(), 0);
+    assert_eq!(contexts["platform_roles"].as_array().unwrap().len(), 0);
+
+    let (status, missing_scope) = call(
+        app.clone(),
+        request("GET", "/v1/tenant/context", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_scope}");
+    assert_eq!(missing_scope["error"]["code"], "tenant_scope_required");
+}
+
+#[tokio::test]
 async fn learner_goals_are_versioned_validated_isolated_and_reversible() {
     let _g = LOCK.lock().await;
     let state = setup().await;
