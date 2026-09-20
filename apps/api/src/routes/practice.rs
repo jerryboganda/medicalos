@@ -513,7 +513,7 @@ pub async fn answer(
     .ok_or_else(|| ApiError::not_found("unknown_item"))?;
 
     let already = sqlx::query!(
-        r#"SELECT a.id, a.chosen_index, a.answer_changes, qv.correct_index
+        r#"SELECT a.id, a.chosen_index, qv.correct_index
            FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
            WHERE a.session_id = $1 AND a.item_index = $2"#,
         sid,
@@ -843,7 +843,7 @@ pub async fn submit(
         .submitted_at
         .map(|end| (end - timing.created_at).num_seconds().max(0));
     let item_timings = sqlx::query!(
-        r#"SELECT si.item_index, a.elapsed_ms, a.answer_changes
+        r#"SELECT si.item_index, a.elapsed_ms, a.answer_changes AS "answer_changes?"
            FROM session_items si
            LEFT JOIN attempts a
              ON a.session_id = si.session_id AND a.item_index = si.item_index
