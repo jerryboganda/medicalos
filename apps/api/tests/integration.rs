@@ -3011,27 +3011,31 @@ async fn phase2_pools_marks_timing_insights() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{incorrect}");
-    assert_eq!(incorrect["items"].as_array().unwrap().len(), 2);
+    // Only q1 has a wrong answer so far — the pool is exactly that question.
+    let incorrect_items = incorrect["items"].as_array().unwrap();
+    assert_eq!(incorrect_items.len(), 1, "{incorrect}");
+    assert_eq!(
+        incorrect_items[0]["question_version_id"].as_str().unwrap(),
+        q1.to_string()
+    );
 
-    // Answer q1 and q2 wrong (keys 0 and 1) — SR-09 files key-point cards.
+    // Answer q1 wrong again — SR-09 must not duplicate its key-point card.
     let sid2: Uuid = incorrect["session_id"].as_str().unwrap().parse().unwrap();
-    for (idx, key) in [(0i16, 1i16), (1, 0)] {
-        let (status, ans) = call(
-            app.clone(),
-            request(
-                "POST",
-                &format!("/v1/practice/sessions/{sid2}/answers"),
-                Some(&learner),
-                Some(serde_json::json!({
-                    "item_index": idx, "chosen_index": key,
-                    "elapsed_ms": 5000, "idempotency_key": format!("p16-b{idx}")
-                })),
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{ans}");
-        assert_eq!(ans["correct"], false);
-    }
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid2}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 1,
+                "elapsed_ms": 5000, "idempotency_key": "p16-b0"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    assert_eq!(ans["correct"], false);
     let (status, sub2) = call(
         app.clone(),
         request(
@@ -3044,7 +3048,63 @@ async fn phase2_pools_marks_timing_insights() {
     .await;
     assert_eq!(status, StatusCode::OK, "{sub2}");
 
-    // SR-09: two distinct misses → two key-point cards in the review queue.
+    // QB-06 unseen pool: q1 was seen, so the pool serves exactly q2.
+    let q2 = ids.question_versions[1];
+    let (status, unseen_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "source": "unseen", "question_count": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unseen_session}");
+    let unseen_items = unseen_session["items"].as_array().unwrap();
+    assert_eq!(unseen_items.len(), 1, "{unseen_session}");
+    assert_eq!(
+        unseen_items[0]["question_version_id"].as_str().unwrap(),
+        q2.to_string()
+    );
+    let sid3: Uuid = unseen_session["session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // q2's key is index 1 — answering 0 is wrong and files a second card.
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid3}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0,
+                "elapsed_ms": 4000, "idempotency_key": "p16-c0"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    assert_eq!(ans["correct"], false);
+    let (status, sub3) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid3}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub3}");
+
+    // SR-09: two distinct missed questions → two key-point cards queued
+    // (q1 answered wrong twice must still produce exactly one card).
     let (status, queue) = call(
         app.clone(),
         request("GET", "/v1/reviews/queue", Some(&learner), None),
@@ -3053,9 +3113,9 @@ async fn phase2_pools_marks_timing_insights() {
     assert_eq!(status, StatusCode::OK, "{queue}");
     let queue_len = queue["due"].as_array().map(|a| a.len()).unwrap_or(0)
         + queue["new"].as_array().map(|a| a.len()).unwrap_or(0);
-    assert!(queue_len >= 2, "key-point cards queued: {queue}");
+    assert_eq!(queue_len, 2, "key-point cards queued: {queue}");
 
-    // AI-03: two misses in one chapter surface exactly one hypothesis.
+    // AI-03: repeated misses in one chapter surface exactly one hypothesis.
     let (status, hyp) = call(
         app.clone(),
         request("GET", "/v1/me/mistake-hypotheses", Some(&learner), None),
