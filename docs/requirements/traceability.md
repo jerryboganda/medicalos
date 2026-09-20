@@ -43,7 +43,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | QB-12 | Qbank builder: hierarchy multi-select, four pools, counts, availability rule, presets, Quick 10 | in-progress (chapter pool + honest empty-pool message tested; full builder is the UI slice) | run 35280682748 |
 | QB-13 | Session tools baseline: calculator, converter, text size, hint, auto-submit warnings, submission summary | in-progress (deterministic calc-engine crate tested — BMI, BSA, MAP, GCS, Cockcroft-Gault, CKD-EPI 2021, anion gap, corrected calcium, native+wasm; tool-tray UI, converter, text size, hint, auto-submit pending) | runs 35366131810, 35367410576 |
 | QB-14 | Key learning point, exam tip, high-yield flag, authored + empirical difficulty | tested (slice-1 scope: fields stored, served in tutor feedback; empirical rating via Elo state) | run 35280682748 |
-| QB-17 | Session results with time + answer-change analysis and result actions (part 1 in P1, part 2 in P2) | not-started | — |
+| QB-17 | Session results with time + answer-change analysis and result actions (part 1 in P1, part 2 in P2) | tested (slice 16: per-item elapsed, mock answer-change counts, session duration; result actions tested slice 15) | run 35479440275 |
 | EX-01 | Official-source exam registry with aliases | in-progress (registry table tested; aliases + official-source records pending) | run 35280682748 |
 | EX-04 | Durable answer persistence and submission receipts | tested (slice-1 scope: idempotent replay, first-answer-wins, double-submit rejected) | run 35280682748 |
 | AI-01 | Structured learner-concept state and uncertainty | tested (slice-1 scope: per-chapter Elo state + evidence counts, server-authoritative) | run 35280682748 |
@@ -82,9 +82,9 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
-| QB-06 | Targeted, unseen, marked, incorrect filters | not-started | — |
+| QB-06 | Targeted, unseen, marked, incorrect filters | tested (slice 16: multi-chapter targeting + unseen/incorrect/marked pools with honest empty-pool refusals) | run 35479440275 |
 | QB-07 | Blueprint-balanced session generation | not-started | — |
-| QB-09 | Item statistics and editorial review | not-started | — |
+| QB-09 | Item statistics and editorial review | tested (slice 16: per-exam review queue + per-item psychometrics with honest insufficient-attempts flagging; editorial resolution flows continue) | run 35479440275 |
 | QB-15 | Community statistics with minimum sample + expected-score comparison | tested (slice-9 scope: per-question stats behind min-sample gate + option distribution; expected-score on self-built submits; percentile reserved for fixed forms) | run 35456997436 |
 | QB-16 | Psychometric screening defaults + issue-report SLA | in-progress (screening endpoint with §11.4 default flags tested; SLA timers pending) | run 35476029818 |
 | EX-02 | Date-effective block / timer / break configuration | not-started | — |
@@ -93,7 +93,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | EX-06 | Accommodations and assessment-specific AI restrictions | not-started | — |
 | EX-07 | Administrator-configured mock tests, types, results | tested (slice-9 scope: admin-token mock configuration, frozen blueprint forms, deferred feedback, pass mark + per-chapter breakdown + attempts; form types and time analysis pending) | run 35456997436 |
 | EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | in-progress (server-issued deadline, server-side answer cutoff after expiry, auto-submit semantics, skew-corrected client countdown — all tested incl. browser E2E; device-clock-tamper tests, grace windows, integrity signals pending) | run 35372696754 |
-| AI-03 | Mistake hypotheses, not assumed diagnoses | not-started | — |
+| AI-03 | Mistake hypotheses, not assumed diagnoses | tested (slice 16: per-chapter miss patterns labelled hypothesis with evidence counts, min-evidence floor) | run 35479440275 |
 | AI-08 | Protected tasks and plan-churn controls | not-started | — |
 | AI-09 | Source-grounded contextual tutoring | tested (slice-11 scope: extractive adapter answers only from reviewed rationale/key-point/exam-tip/source of answered questions; Socratic/contrast modes pending) | run 35466880140 |
 | AI-10 | Socratic, explain-back, contrast modes | not-started | — |
@@ -108,7 +108,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | SR-04 | AI draft vs editorial trust labels | not-started | — |
 | SR-05 | Duplicate / sibling handling | not-started | — |
 | SR-08 | Automatic question re-test queue, objective grading, family-variant preference | in-progress (retest cards with deterministic intervals, idempotent results, history tested; family-variant selection at session time pending) | run 35476029818 |
-| SR-09 | Editorial key-point cards | not-started | — |
+| SR-09 | Editorial key-point cards | tested (slice 16: misses file deduplicated key-point cards with question provenance into the review queue) | run 35479440275 |
 | LIB-02 | Hybrid search with visibility filters | in-progress (text search over latest published versions tested; semantic/hybrid ranking pending) | run 35467238410 |
 | LIB-03 | Page / figure / timestamp citations | not-started | — |
 | LIB-04 | Guideline country / date overlays | not-started | — |
@@ -119,8 +119,8 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | NOTE-02 | Concepts, backlinks, collections | tested (collections CRUD + membership, concept tagging, by-concept listing — slice 14) | run 35476029818 | 
 | NOTE-03 | Human-controlled revisions and portable export | tested (JSON export of all own notes incl. source references) | run 35467238410 |
 | IMG-01 | Rights-checked still-image case library | not-started | — |
-| PROG-01 | Hierarchy drill-down analytics, difficulty + trend filters, mastery heat-map | not-started | — |
-| ENG-02 | XP, achievements, weekly recap | not-started | — |
+| PROG-01 | Hierarchy drill-down analytics, difficulty + trend filters, mastery heat-map | in-progress (slice 16: system→chapter heat-map with configurable bands + unassessed honesty; drill-down/trend filters pending) | run 35479440275 |
+| ENG-02 | XP, achievements, weekly recap | tested (slice 16: XP on submit, milestone achievements, 7-day recap from real records only) | run 35479440275 |
 | COM-03 | Coupons, referrals, regional price tiers, trials, pause | not-started | — |
 | ADMIN-05 | Revenue, licenses, royalties, renewals | not-started | — |
 | ADMIN-06 | Editorial console baseline: hierarchy, questions, bulk import (dry run + rollback), settings | tested (slice-10 scope: hierarchy CRUD + node status, question create/search, JSON bulk import with per-row validation + dry run + transactional apply + rollback-refused-after-attempts, audit trail, /admin console page; CSV/Excel parser + settings UI pending) | run 35462664343 |
