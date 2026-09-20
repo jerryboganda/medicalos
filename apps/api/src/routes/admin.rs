@@ -687,7 +687,7 @@ pub async fn psychometric_queue(
     Query(q): Query<QueueParams>,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
-    let limit = q.limit.unwrap_or(100).clamp(1, 500) as i64;
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let rows = sqlx::query!(
         r#"SELECT t.vid,
                   t.attempts AS "attempts!",
