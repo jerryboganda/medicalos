@@ -706,7 +706,7 @@ pub async fn psychometric_queue(
                JOIN curriculum_nodes subj ON subj.id = sys.parent_id
                LEFT JOIN attempts a
                  ON a.question_version_id = qv.id AND a.chosen_index IS NOT NULL
-               WHERE qv.status = 'published' AND subj.parent_id = $1
+               WHERE qv.status = 'published' AND subj.exam_id = $1
                GROUP BY qv.id
            ) t
            ORDER BY t.open_reports DESC, t.attempts ASC
