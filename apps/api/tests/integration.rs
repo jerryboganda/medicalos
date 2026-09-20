@@ -3160,7 +3160,7 @@ async fn phase2_pools_marks_timing_insights() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{mocks}");
-    let mid = mocks["mocks"][0]["id"]
+    let mid = mocks["mocks"][0]["mock_id"]
         .as_str()
         .expect("seeded mock")
         .to_string();

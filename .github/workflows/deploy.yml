@@ -190,6 +190,9 @@ jobs:
             API_IMAGE="$REGISTRY/medicalos-api:$SHA"
             WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
             echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
+            # Fresh GHCR login per deploy: the package may be private or the
+            # VPS's stored credential stale — the job token is valid now.
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
             docker pull "$API_IMAGE"
             docker pull "$WEB_IMAGE"
             echo "[medicalos] pulled:"
