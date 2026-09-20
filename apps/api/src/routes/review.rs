@@ -206,6 +206,15 @@ pub async fn review_event(
     user: AuthUser,
     Json(req): Json<ReviewEventReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    apply_review(&state, user_id, req).await
+}
+
+/// OFF-02: shared with the offline sync endpoint — one review path, no drift.
+pub async fn apply_review(
+    state: &AppState,
+    user_id: Uuid,
+    req: ReviewEventReq,
+) -> ApiResult<Json<serde_json::Value>> {
     let rating = parse_rating(&req.rating)?;
     let reviewed_at = chrono::Utc::now();
 
@@ -214,7 +223,7 @@ pub async fn review_event(
         "SELECT reviewed_at FROM review_events
          WHERE card_id = $1 AND user_id = $2 AND idempotency_key = $3",
         req.card_id,
-        user.user_id,
+        user_id,
         req.idempotency_key
     )
     .fetch_optional(&state.pool)
@@ -223,7 +232,7 @@ pub async fn review_event(
         let card = sqlx::query!(
             "SELECT state FROM cards WHERE id = $1 AND user_id = $2",
             req.card_id,
-            user.user_id
+            user_id
         )
         .fetch_optional(&state.pool)
         .await?
@@ -240,7 +249,7 @@ pub async fn review_event(
     let row = sqlx::query!(
         "SELECT state FROM cards WHERE id = $1 AND user_id = $2 AND suspended = false",
         req.card_id,
-        user.user_id
+        user_id
     )
     .fetch_optional(&state.pool)
     .await?
@@ -260,7 +269,7 @@ pub async fn review_event(
          RETURNING id",
         Uuid::new_v4(),
         req.card_id,
-        user.user_id,
+        user_id,
         req.rating,
         reviewed_at,
         req.idempotency_key
@@ -287,5 +296,148 @@ pub async fn review_event(
         "already_recorded": false,
         "due": next_state.due,
         "reviewed_at": reviewed_at,
+    })))
+}
+
+// ---- SR-07: authorized deck import / export ---------------------------------
+
+/// GET /v1/me/decks/export — every deck and card (with scheduling state) as
+/// one JSON document. The format is versioned so other tools can rely on it.
+pub async fn export_decks(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let decks = sqlx::query!(
+        "SELECT id, name, created_at FROM decks WHERE user_id = $1 ORDER BY created_at",
+        user.user_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut out: Vec<serde_json::Value> = Vec::with_capacity(decks.len());
+    for d in &decks {
+        let cards = sqlx::query!(
+            r#"SELECT front, back, state, suspended, created_at FROM cards
+               WHERE deck_id = $1 AND user_id = $2 ORDER BY created_at"#,
+            d.id,
+            user.user_id
+        )
+        .fetch_all(&state.pool)
+        .await?;
+        out.push(serde_json::json!({
+            "name": d.name,
+            "created_at": d.created_at,
+            "cards": cards.iter().map(|c| serde_json::json!({
+                "front": c.front,
+                "back": c.back,
+                "state": c.state,
+                "suspended": c.suspended,
+                "created_at": c.created_at,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(Json(
+        serde_json::json!({ "format": "medical-os-decks/1", "decks": out }),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct ImportCard {
+    pub front: String,
+    pub back: String,
+}
+
+#[derive(Deserialize)]
+pub struct ImportDeck {
+    pub name: String,
+    pub cards: Vec<ImportCard>,
+}
+
+#[derive(Deserialize)]
+pub struct ImportDecksReq {
+    pub decks: Vec<ImportDeck>,
+}
+
+/// POST /v1/me/decks/import — import decks from the export format. Cards
+/// already known to the learner (same front) are skipped, so re-importing a
+/// file never duplicates a deck; imported cards start a fresh schedule.
+pub async fn import_decks(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<ImportDecksReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if req.decks.len() > 50 {
+        return Err(ApiError::unprocessable(
+            "batch_too_large",
+            "at most 50 decks per import",
+        ));
+    }
+    let mut decks_created = 0i64;
+    let mut cards_created = 0i64;
+    let mut cards_skipped = 0i64;
+    for d in &req.decks {
+        let name = d.name.trim();
+        if name.is_empty() || name.len() > 120 {
+            return Err(ApiError::unprocessable(
+                "invalid_name",
+                "deck name must be 1-120 characters",
+            ));
+        }
+        let existing = sqlx::query!(
+            "SELECT id FROM decks WHERE user_id = $1 AND name = $2",
+            user.user_id,
+            name
+        )
+        .fetch_optional(&state.pool)
+        .await?;
+        let deck_id = match existing {
+            Some(row) => row.id,
+            None => {
+                let id = Uuid::new_v4();
+                sqlx::query!(
+                    "INSERT INTO decks (id, user_id, name) VALUES ($1, $2, $3)",
+                    id,
+                    user.user_id,
+                    name
+                )
+                .execute(&state.pool)
+                .await?;
+                decks_created += 1;
+                id
+            }
+        };
+        for c in &d.cards {
+            let known = sqlx::query!(
+                "SELECT 1 AS one FROM cards WHERE user_id = $1 AND front = $2",
+                user.user_id,
+                c.front
+            )
+            .fetch_optional(&state.pool)
+            .await?;
+            if known.is_some() {
+                cards_skipped += 1;
+                continue;
+            }
+            let scheduler = Scheduler::new();
+            let state_json = serde_json::to_value(to_state(&scheduler.new_card()))
+                .map_err(|_| ApiError::internal())?;
+            sqlx::query!(
+                "INSERT INTO cards (id, deck_id, user_id, front, back, state)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+                Uuid::new_v4(),
+                deck_id,
+                user.user_id,
+                c.front,
+                c.back,
+                state_json
+            )
+            .execute(&state.pool)
+            .await?;
+            cards_created += 1;
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "decks_created": decks_created,
+        "cards_created": cards_created,
+        "cards_skipped": cards_skipped,
     })))
 }

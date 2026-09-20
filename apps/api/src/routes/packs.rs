@@ -175,3 +175,139 @@ pub async fn pack_manifest(
         "algorithm": "hmac-sha256",
     })))
 }
+
+// ---- OFF-04 / PROT-02 / §22: pack leases ------------------------------------
+
+#[derive(Deserialize)]
+pub struct LeaseReq {
+    pub exam_id: Uuid,
+    /// Opaque per-device identifier (install-scoped, never a user id).
+    pub device_id: String,
+    pub chapters: Vec<Uuid>,
+}
+
+/// POST /v1/packs/lease — grant or renew a 14-day offline lease bound to one
+/// device. Entitlement-gated (CORE-03): free-tier learners get an honest
+/// refusal with the upgrade payload, never a degraded pack. The pack key is
+/// disclosed only in this response — the client encrypts the local pack
+/// with it, so another device holding copied files cannot open them (§22).
+pub async fn create_lease(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<LeaseReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    if req.device_id.is_empty() || req.device_id.len() > 128 {
+        return Err(ApiError::unprocessable(
+            "invalid_device",
+            "device_id must be 1-128 characters",
+        ));
+    }
+    let tier = sqlx::query!("SELECT tier FROM users WHERE id = $1", user.user_id)
+        .fetch_one(&state.pool)
+        .await?
+        .tier;
+    if tier == "free" {
+        return Err(ApiError::forbidden_with_details(
+            "offline_pack_entitlement",
+            "Offline packs are part of the paid plan.",
+            serde_json::json!({
+                "entitlement": { "required_tier": "paid", "current_tier": tier }
+            }),
+        ));
+    }
+    if req.chapters.is_empty() || req.chapters.len() > 50 {
+        return Err(ApiError::unprocessable(
+            "invalid_chapters",
+            "1-50 chapters per pack lease",
+        ));
+    }
+
+    // Per-device pack key: random 32 bytes, rotated on renewal.
+    use rand::RngCore;
+    let mut key_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key_bytes);
+    let pack_key: String = key_bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let expires = chrono::Utc::now() + chrono::Duration::days(14);
+
+    let row = sqlx::query!(
+        r#"INSERT INTO pack_leases (id, user_id, device_id, exam_id, chapters, pack_key, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (user_id, device_id, exam_id) DO UPDATE SET
+             chapters = $5, pack_key = $6, expires_at = $7, updated_at = now()
+           RETURNING id, expires_at"#,
+        Uuid::new_v4(),
+        user.user_id,
+        req.device_id,
+        req.exam_id,
+        serde_json::to_value(&req.chapters).map_err(|_| ApiError::internal())?,
+        pack_key,
+        expires
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(json!({
+        "lease_id": row.id,
+        "expires_at": row.expires_at,
+        "pack_key": pack_key,
+        "algorithm": "xchacha20-poly1305 (client-side; key shown once per renewal)",
+    })))
+}
+
+/// GET /v1/me/packs — active leases with freshness disclosure (OFF-04):
+/// content_as_of is the newest published question in the leased chapters,
+/// so the client can say "pack data as of <date>" truthfully.
+pub async fn list_leases(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT pl.id, pl.exam_id, pl.device_id, pl.chapters, pl.expires_at,
+                  (SELECT COALESCE(MAX(qv.created_at), pl.created_at)
+                   FROM question_versions qv
+                   WHERE qv.status = 'published'
+                     AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(pl.chapters) c(x)
+                                 WHERE c.x::uuid = qv.chapter_id))
+                  AS "content_as_of!"
+           FROM pack_leases pl
+           WHERE pl.user_id = $1 AND pl.expires_at > now()
+           ORDER BY pl.expires_at"#,
+        user.user_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let leases: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "lease_id": r.id,
+                "exam_id": r.exam_id,
+                "device_id": r.device_id,
+                "chapters": r.chapters,
+                "expires_at": r.expires_at,
+                "content_as_of": r.content_as_of,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "leases": leases })))
+}
+
+/// DELETE /v1/packs/lease/{lease_id} — revoke. The stored key becomes
+/// useless at the next manifest verification (PROT-02).
+pub async fn revoke_lease(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(lease_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let deleted = sqlx::query!(
+        "DELETE FROM pack_leases WHERE id = $1 AND user_id = $2",
+        lease_id,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    if deleted.rows_affected() == 0 {
+        return Err(ApiError::not_found("lease_not_found"));
+    }
+    Ok(Json(json!({ "revoked": true })))
+}

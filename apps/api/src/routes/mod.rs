@@ -21,4 +21,5 @@ pub mod retest;
 pub mod review;
 pub mod settings;
 pub mod sim;
+pub mod sync;
 pub mod today;

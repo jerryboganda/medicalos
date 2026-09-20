@@ -453,10 +453,23 @@ pub async fn answer(
     Path(sid): Path<Uuid>,
     Json(req): Json<AnswerReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    apply_answer(&state, user_id, sid, req).await
+}
+
+/// OFF-02: the entire answer path — open-session check, server deadline,
+/// idempotent insert, mock answer-change rule, SR-09 key-point card — lives
+/// here so the offline sync endpoint applies exactly the same semantics
+/// (no second implementation to drift).
+pub async fn apply_answer(
+    state: &AppState,
+    user_id: Uuid,
+    sid: Uuid,
+    req: AnswerReq,
+) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
         "SELECT status, deadline, preset FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
-        user.user_id
+        user_id
     )
     .fetch_optional(&state.pool)
     .await?
@@ -593,7 +606,7 @@ pub async fn answer(
         Uuid::new_v4(),
         sid,
         req.item_index,
-        user.user_id,
+        user_id,
         item.id,
         req.chosen_index,
         correct,
@@ -633,7 +646,7 @@ pub async fn answer(
     if correct == Some(false) {
         ensure_key_point_card(
             &state,
-            user.user_id,
+            user_id,
             item.id,
             &item.key_learning_point,
             item.exam_tip.as_deref(),

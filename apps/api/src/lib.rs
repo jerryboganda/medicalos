@@ -10,7 +10,7 @@ pub mod seed;
 pub mod state;
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 
@@ -185,6 +185,15 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
+        .route("/v1/packs/lease", post(routes::packs::create_lease))
+        .route("/v1/me/packs", get(routes::packs::list_leases))
+        .route(
+            "/v1/packs/lease/{lease_id}",
+            delete(routes::packs::revoke_lease),
+        )
+        .route("/v1/sync/events", post(routes::sync::sync_events))
+        .route("/v1/me/decks/export", get(routes::review::export_decks))
+        .route("/v1/me/decks/import", post(routes::review::import_decks))
         .route(
             "/v1/scenarios/runs/{run_id}/debrief",
             get(routes::sim::debrief),
@@ -395,6 +404,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
+        )
+        .route("/api/v1/packs/lease", post(routes::packs::create_lease))
+        .route("/api/v1/me/packs", get(routes::packs::list_leases))
+        .route(
+            "/api/v1/packs/lease/{lease_id}",
+            delete(routes::packs::revoke_lease),
+        )
+        .route("/api/v1/sync/events", post(routes::sync::sync_events))
+        .route("/api/v1/me/decks/export", get(routes::review::export_decks))
+        .route(
+            "/api/v1/me/decks/import",
+            post(routes::review::import_decks),
         )
         .route(
             "/api/v1/scenarios/runs/{run_id}/debrief",

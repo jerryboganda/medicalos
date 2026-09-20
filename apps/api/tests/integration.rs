@@ -3255,3 +3255,292 @@ async fn phase2_pools_marks_timing_insights() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
 }
+
+#[tokio::test]
+async fn offline_leases_sync_conflicts_deckio() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // ---- OFF-04/PROT-02: pack leases ------------------------------------
+    // Free tier: honest entitlement refusal with the upgrade payload.
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&learner),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "device_id": "device-a",
+                "chapters": [ids.chapter1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["details"]["entitlement"]["current_tier"], "free", "{v}");
+
+    // Paid tier: lease granted with a per-device key.
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("tier bump");
+    let (status, lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&learner),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "device_id": "device-a",
+                "chapters": [ids.chapter1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lease}");
+    let key1 = lease["pack_key"].as_str().expect("pack key").to_string();
+    assert_eq!(key1.len(), 64, "32-byte hex key");
+    let lease_id: Uuid = lease["lease_id"].as_str().unwrap().parse().unwrap();
+
+    // Renewal rotates the key.
+    let (status, renewal) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&learner),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "device_id": "device-a",
+                "chapters": [ids.chapter1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renewal}");
+    assert_ne!(renewal["pack_key"].as_str().unwrap(), key1, "key rotated");
+
+    // Freshness disclosure + revocation.
+    let (status, packs) = call(
+        app.clone(),
+        request("GET", "/v1/me/packs", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{packs}");
+    assert_eq!(packs["leases"].as_array().unwrap().len(), 1);
+    assert!(packs["leases"][0]["content_as_of"].is_string(), "{packs}");
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/packs/lease/{lease_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // ---- OFF-02: idempotent sync of offline events -----------------------
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    // A deck + card so the sync batch can also carry a review event.
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&learner),
+            Some(serde_json::json!({"name": "Sync deck"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+    let (status, card) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({"front": "sync front", "back": "sync back"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    let card_id: Uuid = card["card_id"].as_str().unwrap().parse().unwrap();
+
+    let batch = serde_json::json!({"events": [
+        {"event_id": "e1", "kind": "answer", "payload": {
+            "session_id": sid.to_string(), "item_index": 0, "chosen_index": 0,
+            "idempotency_key": "sync-a1"}},
+        {"event_id": "e2", "kind": "review", "payload": {
+            "card_id": card_id.to_string(), "rating": "good",
+            "idempotency_key": "sync-r1"}},
+        {"event_id": "e3", "kind": "teleport", "payload": {}}
+    ]});
+    let (status, synced) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/sync/events",
+            Some(&learner),
+            Some(batch.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{synced}");
+    let results = synced["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0]["status"], "applied_or_duplicate", "{synced}");
+    assert_eq!(results[1]["status"], "applied_or_duplicate");
+    assert_eq!(results[2]["status"], "rejected");
+
+    // Replay the identical batch: same outcomes, nothing double-counted.
+    let (status, replay) = call(
+        app.clone(),
+        request("POST", "/v1/sync/events", Some(&learner), Some(batch)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    let reread = replay["results"].as_array().unwrap();
+    assert_eq!(reread[0]["status"], "applied_or_duplicate");
+    assert_eq!(reread[0]["already_recorded"], true, "{replay}");
+    assert_eq!(reread[1]["already_recorded"], true, "{replay}");
+
+    // The synced answer is real: the session submits and scores it.
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 1, "chosen_index": 1,
+                "idempotency_key": "online-a2"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    let (status, sub) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sub}");
+    assert_eq!(
+        sub["total"].as_i64(),
+        Some(2),
+        "synced answer counted once: {sub}"
+    );
+
+    // ---- OFF-03: note conflict resolution --------------------------------
+    let (status, note) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&learner),
+            Some(serde_json::json!({"title": "t", "body": "v1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{note}");
+    let note_id: Uuid = note["note_id"].as_str().unwrap().parse().unwrap();
+
+    // Stale base (unix epoch) → 409 with the server version disclosed.
+    let (status, conflict) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            &format!("/v1/notes/{note_id}"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "body": "offline edit",
+                "base_updated_at": "1970-01-01T00:00:00Z"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    let server_at = conflict["details"]["server_updated_at"]
+        .as_str()
+        .expect("server version")
+        .to_string();
+
+    // Correct base → applies; the second pass proves the base moved forward.
+    let mut last_at = server_at;
+    for body in ["v2", "v3"] {
+        let (status, upd) = call(
+            app.clone(),
+            request(
+                "PATCH",
+                &format!("/v1/notes/{note_id}"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "body": body,
+                    "base_updated_at": last_at
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{upd}");
+        last_at = upd["updated_at"].as_str().expect("updated_at").to_string();
+    }
+
+    // ---- SR-07: deck export / import --------------------------------------
+    let (status, exported) = call(
+        app.clone(),
+        request("GET", "/v1/me/decks/export", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{exported}");
+    assert_eq!(exported["format"], "medical-os-decks/1", "{exported}");
+    assert!(!exported["decks"].as_array().unwrap().is_empty());
+
+    // Re-importing an existing deck skips known cards; a new deck imports.
+    let (status, imp) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/decks/import",
+            Some(&learner),
+            Some(serde_json::json!({
+                "decks": [
+                    {"name": "Sync deck", "cards": [
+                        {"front": "sync front", "back": "sync back"},
+                        {"front": "fresh front", "back": "fresh back"}
+                    ]},
+                    {"name": "Imported deck", "cards": [
+                        {"front": "i1", "back": "i1b"}
+                    ]}
+                ]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{imp}");
+    assert_eq!(imp["decks_created"].as_i64(), Some(1), "{imp}");
+    assert_eq!(imp["cards_created"].as_i64(), Some(2), "{imp}");
+    assert_eq!(imp["cards_skipped"].as_i64(), Some(1), "{imp}");
+}

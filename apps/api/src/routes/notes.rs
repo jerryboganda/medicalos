@@ -19,6 +19,10 @@ pub struct NoteReq {
     pub title: Option<String>,
     pub body: Option<String>,
     pub source_question_version_id: Option<Uuid>,
+    /// OFF-03: offline edits carry the updated_at they were based on. When
+    /// it is stale, the update is refused with the server version instead of
+    /// silently overwriting newer changes.
+    pub base_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub async fn create_note(
@@ -47,6 +51,25 @@ pub async fn update_note(
     Path(note_id): Path<Uuid>,
     Json(req): Json<NoteReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // OFF-03: versioned note resolution — a stale base refuses with the
+    // server's current version; the client then merges or force-writes.
+    if let Some(base) = req.base_updated_at {
+        let current = sqlx::query!(
+            "SELECT updated_at FROM notes WHERE id = $1 AND user_id = $2",
+            note_id,
+            user.user_id
+        )
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("note_not_found"))?;
+        if current.updated_at > base {
+            return Err(ApiError::conflict_with_details(
+                "note_conflict",
+                "This note changed on another device. Merge your edit with the stored version.",
+                serde_json::json!({ "server_updated_at": current.updated_at }),
+            ));
+        }
+    }
     let result = sqlx::query!(
         "UPDATE notes SET
             title = COALESCE($3, title),
