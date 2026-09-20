@@ -3236,7 +3236,7 @@ async fn phase2_pools_marks_timing_insights() {
         admin_req(
             "GET",
             &format!("/v1/admin/psychometrics?exam_id={}", ids.exam_id),
-            None,
+            Some(&learner),
             None,
         ),
     )
@@ -3248,7 +3248,7 @@ async fn phase2_pools_marks_timing_insights() {
         request(
             "GET",
             &format!("/v1/admin/psychometrics?exam_id={}", ids.exam_id),
-            None,
+            Some(&learner),
             None,
         ),
     )
