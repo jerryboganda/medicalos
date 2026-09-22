@@ -6626,7 +6626,7 @@ async fn rights_ledger_incidents_and_ai_admin_flow() {
     let incident_id: Uuid = incident["incident_id"].as_str().unwrap().parse().unwrap();
     let (status, _) = call(
         app.clone(),
-        request(
+        admin_req(
             "PATCH",
             &format!("/v1/admin/incidents/{incident_id}"),
             Some(&token),
@@ -6747,12 +6747,16 @@ async fn prompt_injection_never_steers_the_extractive_coach() {
     let answer = turn["answer"].as_str().unwrap();
     // TRUST-03: the extractive adapter answers only from reviewed material.
     assert!(answer.contains("reviewed material"), "{answer}");
-    assert!(!answer.to_lowercase().contains("system prompt"), "{answer}");
     assert!(
-        !answer.to_lowercase().contains("every answer key"),
-        "{answer}"
+        answer.contains("Key learning point: Normal synthesis plus absent granules"),
+        "reviewed grounding missing: {answer}"
+    );
+    assert!(
+        !answer.to_lowercase().contains("as requested"),
+        "compliance language leaked: {answer}"
     );
     // No credential/secret surface in the payload.
+    assert!(!turn.to_string().contains("test-admin"), "{turn}");
     assert!(
         !turn.to_string().to_lowercase().contains("password"),
         "{turn}"
