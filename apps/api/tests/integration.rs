@@ -6062,6 +6062,7 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
     let learner = register_and_login(app.clone()).await;
 
     // Cold start: one 10-question practice task (10 committed minutes).
