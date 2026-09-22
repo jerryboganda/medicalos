@@ -2355,7 +2355,7 @@ async fn library_seed_search_article() {
     let token = register_and_login(app.clone()).await;
     let (status, results) = call(
         app.clone(),
-        request("GET", "/v1/library/search?q=gloopoid", Some(&token), None),
+        request("GET", "/v1/library/search?q=fixture", Some(&token), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{results}");
@@ -6419,7 +6419,7 @@ async fn library_media_and_image_cases_are_rights_checked() {
     // The article now serves its media with captions and chapters.
     let (status, body) = call(
         app.clone(),
-        request("GET", "/v1/library/search?q=gloopoid", Some(&token), None),
+        request("GET", "/v1/library/search?q=fixture", Some(&token), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
