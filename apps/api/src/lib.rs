@@ -112,6 +112,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/admin/audit", get(routes::admin::audit_log))
         .route(
+            "/v1/admin/assessment-workflow",
+            post(routes::admin::assessment_workflow),
+        )
+        .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
                 .get(routes::settings::get_settings),
@@ -201,6 +205,14 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/institutions/{institution_id}/interop",
             post(routes::program::record_interop),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/audit",
+            get(routes::program::institution_audit),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/analytics",
+            get(routes::program::institution_analytics),
         )
         .route(
             "/v1/cohorts/{cohort_id}/assignments",
@@ -397,6 +409,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/api/v1/admin/audit", get(routes::admin::audit_log))
+        .route(
+            "/api/v1/admin/assessment-workflow",
+            post(routes::admin::assessment_workflow),
+        )
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
         .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))
@@ -480,6 +496,14 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/institutions/{institution_id}/interop",
             post(routes::program::record_interop),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/audit",
+            get(routes::program::institution_audit),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/analytics",
+            get(routes::program::institution_analytics),
         )
         .route(
             "/api/v1/cohorts/{cohort_id}/assignments",

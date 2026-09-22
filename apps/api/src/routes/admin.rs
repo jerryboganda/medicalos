@@ -43,6 +43,33 @@ async fn audit(
     Ok(())
 }
 
+/// CORE-04: institution-scoped audit event (§18.3 audit exports). Used by
+/// routes::program for tenant-side mutations.
+pub(crate) async fn audit_scoped(
+    pool: impl sqlx::PgExecutor<'_>,
+    actor: Uuid,
+    institution_id: Uuid,
+    action: &str,
+    entity: &str,
+    entity_id: Uuid,
+    new_value: serde_json::Value,
+) -> ApiResult<()> {
+    sqlx::query!(
+        "INSERT INTO audit_events (id, actor, action, entity, entity_id, new_value, institution_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        Uuid::new_v4(),
+        actor,
+        action,
+        entity,
+        entity_id,
+        new_value,
+        institution_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ---- hierarchy management (§5.5) -------------------------------------------
 
 #[derive(Deserialize)]
@@ -232,6 +259,8 @@ fn validate_question(req: &CreateQuestionReq) -> ApiResult<()> {
 async fn insert_question_version(
     pool: &mut sqlx::postgres::PgConnection,
     req: &CreateQuestionReq,
+    status: &str,
+    created_by: Uuid,
 ) -> ApiResult<(Uuid, Uuid)> {
     let count = option_count(req.options.len()).map_err(|_| {
         ApiError::unprocessable(
@@ -256,11 +285,12 @@ async fn insert_question_version(
         r#"INSERT INTO question_versions
            (id, question_id, version, status, chapter_id, difficulty, vignette,
             lead_in, options, correct_index, key_learning_point, exam_tip,
-            high_yield, source_ref)
-           VALUES ($1, $2, 1, 'published', $3, $4, $5, $6, $7, $8, $9, $10,
-                   $11, $12)"#,
+            high_yield, source_ref, created_by)
+           VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10,
+                   $11, $12, $13, $14)"#,
         vid,
         qid,
+        status,
         req.chapter_id,
         req.difficulty,
         req.vignette,
@@ -271,6 +301,7 @@ async fn insert_question_version(
         req.exam_tip,
         req.high_yield.unwrap_or(false),
         req.source_ref,
+        created_by,
     )
     .execute(&mut *pool)
     .await?;
@@ -286,7 +317,10 @@ pub async fn create_question(
     state.require_admin(admin_headers(&headers))?;
     validate_question(&req)?;
     let mut conn = state.pool.acquire().await?;
-    let (qid, vid) = insert_question_version(&mut conn, &req).await?;
+    // §19.3 editorial workflow: authored items are born drafts and reach
+    // learners only through the submit -> review -> approve -> publish gate
+    // (assessment_workflow below). Bulk import follows the same gate.
+    let (qid, vid) = insert_question_version(&mut conn, &req, "draft", user.user_id).await?;
     audit(
         &state.pool,
         user.user_id,
@@ -297,6 +331,188 @@ pub async fn create_question(
     )
     .await?;
     Ok(Json(json!({ "question_id": qid, "version_id": vid })))
+}
+
+// ---- INST-05: assessment author/reviewer/publisher separation (§19.3) ------
+//
+// Authored and imported items are born drafts. submit -> in_review;
+// approve -> approved; reject -> draft; publish -> published (learner
+// visible). §19.3: the author of an item can never be its approver.
+
+#[derive(Deserialize)]
+pub struct AssessmentWorkflowReq {
+    /// submit | approve | reject | publish
+    pub action: String,
+    pub version_ids: Vec<Uuid>,
+    pub note: Option<String>,
+}
+
+/// Single transition function so every duty-separation rule lives in
+/// exactly one place. Bulk-friendly: the console and import flow pass all
+/// version ids in one call and get a per-id outcome.
+async fn transition_version(
+    state: &AppState,
+    actor: Uuid,
+    action: &str,
+    vid: Uuid,
+    note: Option<&str>,
+) -> ApiResult<serde_json::Value> {
+    let v = sqlx::query!(
+        r#"SELECT status AS "status!", created_by FROM question_versions WHERE id = $1"#,
+        vid
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    match action {
+        "submit" => {
+            if v.status != "draft" {
+                return Err(ApiError::conflict(
+                    "invalid_transition",
+                    "only drafts can be submitted for review",
+                ));
+            }
+            sqlx::query!(
+                "UPDATE question_versions SET status = 'in_review', created_by = $2 WHERE id = $1",
+                vid,
+                actor
+            )
+            .execute(&state.pool)
+            .await?;
+            audit(
+                &state.pool,
+                actor,
+                "assessment_submitted",
+                "question_version",
+                vid,
+                json!({}),
+            )
+            .await?;
+            Ok(json!({ "version_id": vid, "status": "in_review" }))
+        }
+        "approve" | "reject" => {
+            if v.status != "in_review" {
+                return Err(ApiError::conflict(
+                    "invalid_transition",
+                    "only in-review versions can be approved or rejected",
+                ));
+            }
+            if v.created_by == Some(actor) {
+                return Err(ApiError::forbidden(
+                    "separation_violation",
+                    "the author of an item cannot be its approver (§19.3)",
+                ));
+            }
+            let (decision, new_status) = if action == "approve" {
+                ("approved", "approved")
+            } else {
+                ("rejected", "draft")
+            };
+            sqlx::query!(
+                "INSERT INTO assessment_reviews (id, question_version_id, reviewer, decision, note)
+                 VALUES ($1, $2, $3, $4, $5)",
+                Uuid::new_v4(),
+                vid,
+                actor,
+                decision,
+                note
+            )
+            .execute(&state.pool)
+            .await?;
+            if action == "approve" {
+                sqlx::query!(
+                    "UPDATE question_versions SET status = 'approved', reviewed_by = $2 WHERE id = $1",
+                    vid,
+                    actor
+                )
+                .execute(&state.pool)
+                .await?;
+            } else {
+                sqlx::query!(
+                    "UPDATE question_versions SET status = 'draft' WHERE id = $1",
+                    vid
+                )
+                .execute(&state.pool)
+                .await?;
+            }
+            audit(
+                &state.pool,
+                actor,
+                if action == "approve" {
+                    "assessment_approved"
+                } else {
+                    "assessment_rejected"
+                },
+                "question_version",
+                vid,
+                json!({ "decision": decision }),
+            )
+            .await?;
+            Ok(json!({ "version_id": vid, "status": new_status }))
+        }
+        "publish" => {
+            if v.status != "approved" {
+                return Err(ApiError::conflict(
+                    "invalid_transition",
+                    "only approved versions can be published",
+                ));
+            }
+            if v.created_by == Some(actor) {
+                return Err(ApiError::forbidden(
+                    "separation_violation",
+                    "the author of an item cannot publish it (§19.3)",
+                ));
+            }
+            sqlx::query!(
+                "UPDATE question_versions SET status = 'published', published_by = $2 WHERE id = $1",
+                vid,
+                actor
+            )
+            .execute(&state.pool)
+            .await?;
+            audit(
+                &state.pool,
+                actor,
+                "assessment_published",
+                "question_version",
+                vid,
+                json!({}),
+            )
+            .await?;
+            Ok(json!({ "version_id": vid, "status": "published" }))
+        }
+        _ => Err(ApiError::unprocessable(
+            "invalid_action",
+            "action must be submit, approve, reject, or publish",
+        )),
+    }
+}
+
+pub async fn assessment_workflow(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<AssessmentWorkflowReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    if req.version_ids.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_request",
+            "version_ids must not be empty",
+        ));
+    }
+    let mut results = Vec::with_capacity(req.version_ids.len());
+    for vid in &req.version_ids {
+        match transition_version(&state, user.user_id, &req.action, *vid, req.note.as_deref()).await
+        {
+            Ok(v) => results.push(v),
+            Err(e) => results.push(json!({
+                "version_id": vid,
+                "error": { "code": e.code, "message": e.message }
+            })),
+        }
+    }
+    Ok(Json(json!({ "results": results })))
 }
 
 pub async fn search_questions(
@@ -454,7 +670,7 @@ pub async fn import(
     let mut tx = state.pool.begin().await?;
     let mut created: Vec<serde_json::Value> = Vec::new();
     for row in &req.rows {
-        let (qid, vid) = insert_question_version(&mut tx, row).await?;
+        let (qid, vid) = insert_question_version(&mut tx, row, "draft", user.user_id).await?;
         created.push(json!({"question_id": qid, "version_id": vid}));
     }
     sqlx::query!(

@@ -339,6 +339,43 @@ export const Api = {
 			'POST',
 			`/v1/admin/import/${batchId}/rollback`
 		),
+	assessmentWorkflow: (
+		action: 'submit' | 'approve' | 'reject' | 'publish',
+		versionIds: string[]
+	) =>
+		call<{
+			results: {
+				version_id: string;
+				status?: string;
+				error?: { code: string; message: string };
+			}[];
+		}>('POST', '/v1/admin/assessment-workflow', {
+			action,
+			version_ids: versionIds
+		}),
+	institutionAnalytics: (institutionId: string, cohortId: string) =>
+		call<{
+			cohort_id: string;
+			cohort_size: number;
+			suppressed: boolean;
+			reason?: string;
+			minimum?: number;
+			chapters?: {
+				chapter: string | null;
+				attempts: number;
+				correct: number;
+				accuracy: number;
+				learners: number;
+			}[];
+		}>(
+			'GET',
+			`/v1/institutions/${institutionId}/analytics?cohort_id=${cohortId}`
+		),
+	institutionAudit: (institutionId: string) =>
+		call<{ events: unknown[] }>(
+			'GET',
+			`/v1/institutions/${institutionId}/audit`
+		),
 	reviewEvent: (cardId: string, rating: string, idempotencyKey: string) =>
 		call<{ already_recorded: boolean; due: string }>(
 			'POST',

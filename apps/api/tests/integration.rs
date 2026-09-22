@@ -1898,6 +1898,44 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(status, StatusCode::OK, "{applied2}");
     let batch2: Uuid = applied2["batch_id"].as_str().unwrap().parse().unwrap();
 
+    // Imported items go through the same §19.3 gate before pool entry:
+    // a second admin submits the batch, the importer approves and publishes.
+    let co_reviewer = register_and_login(app.clone()).await;
+    let vids: Vec<Uuid> = applied2["created"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["version_id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let (status, wf) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/assessment-workflow",
+            Some(&co_reviewer),
+            Some(serde_json::json!({"action": "submit", "version_ids": vids})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    for action in ["approve", "publish"] {
+        let (status, wf) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                "/v1/admin/assessment-workflow",
+                Some(&token),
+                Some(serde_json::json!({"action": action, "version_ids": vids})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{wf}");
+        assert!(
+            wf["results"][0]["status"].is_string(),
+            "transition {action} failed: {wf}"
+        );
+    }
+
     // A learner answers the imported question via a tutor session.
     let (status, session) = call(
         app.clone(),
@@ -4475,4 +4513,438 @@ async fn engagement_freeze_bridges_one_missed_day() {
     assert_eq!(status, StatusCode::OK, "{eng}");
     assert_eq!(eng["streak"]["count"], 4, "{eng}");
     assert_eq!(eng["streak"]["freezes"], 0, "{eng}");
+}
+
+#[tokio::test]
+async fn assessment_author_reviewer_publisher_separation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+
+    // A fresh chapter so pool visibility is provable without seed noise.
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&author),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter",
+                "name": "Separation Chapter", "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let chapter_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+
+    let question_body = serde_json::json!({
+        "chapter_id": chapter_id,
+        "difficulty": "medium",
+        "vignette": "Separation-of-duties fixture vignette.",
+        "lead_in": "What applies?",
+        "options": [
+            {"text": "Right", "rationale": "Correct per the fixture."},
+            {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+        ],
+        "correct_index": 0,
+        "key_learning_point": "Authors cannot approve their own items.",
+        "source_ref": "Fixture"
+    });
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(question_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+
+    // A draft is invisible to learners: the honest empty pool, not a leak.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "empty_pool", "{body}");
+
+    // Publishing before approval is refused as an invalid transition.
+    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(
+        wf["results"][0]["error"]["code"], "invalid_transition",
+        "{wf}"
+    );
+
+    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(wf["results"][0]["status"], "in_review", "{wf}");
+
+    // §19.3: the author of an item cannot be its approver.
+    let (status, wf) = workflow(&app, &author, "approve", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(
+        wf["results"][0]["error"]["code"], "separation_violation",
+        "{wf}"
+    );
+
+    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(wf["results"][0]["status"], "approved", "{wf}");
+
+    // The reviewer may publish — only the author is barred.
+    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(wf["results"][0]["status"], "published", "{wf}");
+
+    // The published question is a real pool member now.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+
+    // Reject path: the review decision returns the item to draft.
+    let (status, created2) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(question_body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created2}");
+    let vid2: Uuid = created2["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, wf) = workflow(&app, &author, "submit", [vid2]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "reject", [vid2]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(wf["results"][0]["status"], "draft", "{wf}");
+
+    // A rejected item can re-enter review (fresh cycle, same version).
+    let (status, wf) = workflow(&app, &author, "submit", [vid2]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    assert_eq!(wf["results"][0]["status"], "in_review", "{wf}");
+
+    // The platform audit trail records every transition (§19.5).
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    let actions: Vec<&str> = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["action"].as_str())
+        .collect();
+    for expected in [
+        "assessment_submitted",
+        "assessment_approved",
+        "assessment_published",
+        "assessment_rejected",
+    ] {
+        assert!(
+            actions.contains(&expected),
+            "missing {expected} in {actions:?}"
+        );
+    }
+}
+
+async fn workflow(
+    app: Router,
+    token: &str,
+    action: &str,
+    version_ids: [Uuid; 1],
+) -> (StatusCode, Value) {
+    call(
+        app,
+        admin_req(
+            "POST",
+            "/v1/admin/assessment-workflow",
+            Some(token),
+            Some(serde_json::json!({"action": action, "version_ids": version_ids})),
+        ),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let staff_a = register_and_login(app.clone()).await;
+    let staff_b = register_and_login(app.clone()).await;
+
+    // Two independent institutions, each seeded by its own admin.
+    let (status, inst_a) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff_a),
+            Some(serde_json::json!({"name": "Isolation A"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst_a}");
+    let inst_a_id: Uuid = inst_a["institution_id"].as_str().unwrap().parse().unwrap();
+    let (status, inst_b) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff_b),
+            Some(serde_json::json!({"name": "Isolation B"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst_b}");
+    let _inst_b_id: Uuid = inst_b["institution_id"].as_str().unwrap().parse().unwrap();
+
+    // Register plain accounts for cohort seats; return their user ids.
+    let register_id = |app: Router| async move {
+        let email = format!("analytics-{}@example.test", Uuid::new_v4());
+        let (_, v) = call(
+            app,
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        v["user_id"].as_str().unwrap().parse::<Uuid>().unwrap()
+    };
+    let m1 = register_id(app.clone()).await;
+    let m2 = register_id(app.clone()).await;
+    let m3 = register_id(app.clone()).await;
+    let m4 = register_id(app.clone()).await;
+
+    // §18.1 role vocabulary includes content roles now.
+    let (status, member) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/institutions/{inst_a_id}/members"),
+            Some(&staff_a),
+            Some(serde_json::json!({"user_id": m1, "role": "author"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{member}");
+
+    // Below the minimum group size, cohort analytics are suppressed (§18.3).
+    let (status, cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_a_id}/cohorts"),
+            Some(&staff_a),
+            Some(serde_json::json!({"name": "Small", "member_ids": [m1, m2]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cohort}");
+    let small_cohort: Uuid = cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/analytics?cohort_id={small_cohort}"),
+            Some(&staff_a),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["suppressed"], true, "{report}");
+    assert_eq!(report["reason"], "minimum_group_size", "{report}");
+
+    // One cohort member answers a seeded question through a real session.
+    let member_email = format!("analytics-member-{}@example.test", Uuid::new_v4());
+    let (status, reg) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": member_email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reg}");
+    let member_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": member_email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let member_token = login["token"].as_str().unwrap().to_string();
+
+    let (status, cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_a_id}/cohorts"),
+            Some(&staff_a),
+            Some(serde_json::json!({
+                "name": "Big", "member_ids": [m1, m2, m3, m4, member_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cohort}");
+    let big_cohort: Uuid = cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&member_token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&member_token),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "confidence": "sure",
+                "idempotency_key": "analytics-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&member_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // At the minimum group size the aggregate opens — honestly aggregated.
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/analytics?cohort_id={big_cohort}"),
+            Some(&staff_a),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["suppressed"], false, "{report}");
+    assert_eq!(report["cohort_size"], 5, "{report}");
+    let chapters = report["chapters"].as_array().unwrap();
+    assert_eq!(chapters.len(), 1, "{report}");
+    assert!(chapters[0]["attempts"].as_i64().unwrap() >= 1, "{report}");
+
+    // Cross-tenant reads are refused: staff B cannot see institution A.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/analytics?cohort_id={big_cohort}"),
+            Some(&staff_b),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "staff_required", "{body}");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/audit"),
+            Some(&staff_b),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Learners (non-staff) are refused too.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/audit"),
+            Some(&member_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // A's own audit export records the tenant-scoped mutations (§18.3).
+    let (status, audit) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_a_id}/audit"),
+            Some(&staff_a),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    let actions: Vec<&str> = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"membership_set"), "{actions:?}");
+    assert!(actions.contains(&"cohort_created"), "{actions:?}");
 }

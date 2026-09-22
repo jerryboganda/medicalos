@@ -35,6 +35,7 @@ migrations!(
     "0018_completion_kernel",
     "0019_engagement",
     "0020_assessment_form_immutability",
+    "0021_tenant_foundations",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

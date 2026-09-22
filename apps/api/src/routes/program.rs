@@ -198,17 +198,20 @@ pub struct JoinReq {
 
 pub async fn add_member(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(institution_id): Path<Uuid>,
     Json(req): Json<JoinReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     admin(&state, &headers)?;
     let role = req.role.unwrap_or_else(|| "learner".into());
-    if !matches!(role.as_str(), "admin" | "instructor" | "learner") {
+    if !matches!(
+        role.as_str(),
+        "admin" | "instructor" | "author" | "reviewer" | "learner"
+    ) {
         return Err(ApiError::unprocessable(
             "invalid_role",
-            "role must be admin, instructor, or learner",
+            "role must be admin, instructor, author, reviewer, or learner (§18.1)",
         ));
     }
     let exists = sqlx::query!("SELECT 1 AS one FROM users WHERE id = $1", req.user_id)
@@ -225,6 +228,16 @@ pub async fn add_member(
         role
     )
     .execute(&state.pool)
+    .await?;
+    crate::routes::admin::audit_scoped(
+        &state.pool,
+        user.user_id,
+        institution_id,
+        "membership_set",
+        "institution_member",
+        req.user_id,
+        json!({ "role": role }),
+    )
     .await?;
     Ok(Json(json!({ "member": req.user_id, "role": role })))
 }
@@ -283,6 +296,16 @@ pub async fn create_cohort(
         .execute(&state.pool)
         .await?;
     }
+    crate::routes::admin::audit_scoped(
+        &state.pool,
+        user.user_id,
+        institution_id,
+        "cohort_created",
+        "cohort",
+        cohort_id,
+        json!({ "name": name }),
+    )
+    .await?;
     Ok(Json(json!({ "cohort_id": cohort_id })))
 }
 
@@ -664,4 +687,144 @@ pub async fn scenario_event(
     .execute(&state.pool)
     .await?;
     Ok(Json(json!({ "run_id": run_id, "current_state": next })))
+}
+
+// ---- CORE-04: institution-scoped audit export (§18.3) -----------------------
+
+/// Staff-only tenant audit trail: every institution-scoped mutation recorded
+/// by this institution's staff actions. Aggregates never; this IS the log.
+pub async fn institution_audit(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let rows = sqlx::query!(
+        r#"SELECT action, entity, entity_id, new_value, created_at
+           FROM audit_events WHERE institution_id = $1
+           ORDER BY created_at DESC LIMIT 200"#,
+        institution_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let events: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "action": r.action,
+                "entity": r.entity,
+                "entity_id": r.entity_id,
+                "new_value": r.new_value,
+                "at": r.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "events": events })))
+}
+
+async fn require_institution_staff(
+    state: &AppState,
+    institution_id: Uuid,
+    user_id: Uuid,
+) -> ApiResult<()> {
+    sqlx::query!(
+        "SELECT 1 AS one FROM institution_members
+         WHERE institution_id = $1 AND user_id = $2 AND role IN ('admin','instructor')",
+        institution_id,
+        user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::forbidden("staff_required", "institution staff access required"))?;
+    Ok(())
+}
+
+// ---- INST-07: privacy-preserving cohort analytics (§18.3) -------------------
+//
+// Aggregate-only per-chapter accuracy for one cohort. §18.3: cohort
+// aggregates require minimum group size — below MIN_COHORT_SIZE the report
+// is suppressed, never partially disclosed.
+
+/// ponytail: fixed k=5 per §18.3 "minimum group-size"; per-deployment
+/// configuration only if an institution ever asks.
+const MIN_COHORT_SIZE: i64 = 5;
+
+pub async fn institution_analytics(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+    axum::extract::Query(q): axum::extract::Query<AnalyticsQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let cohort_id = q.cohort_id.ok_or_else(|| {
+        ApiError::unprocessable("cohort_required", "cohort_id query parameter is required")
+    })?;
+    // The cohort must belong to THIS institution — no cross-tenant reads.
+    let cohort = sqlx::query!(
+        "SELECT id FROM cohorts WHERE id = $1 AND institution_id = $2",
+        cohort_id,
+        institution_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("cohort_not_found"))?;
+    let _ = cohort;
+    let size: i64 = sqlx::query!(
+        r#"SELECT COUNT(*) AS "n!" FROM cohort_members WHERE cohort_id = $1"#,
+        cohort_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    if size < MIN_COHORT_SIZE {
+        return Ok(Json(json!({
+            "cohort_id": cohort_id,
+            "cohort_size": size,
+            "suppressed": true,
+            "reason": "minimum_group_size",
+            "minimum": MIN_COHORT_SIZE,
+        })));
+    }
+    let rows = sqlx::query!(
+        r#"SELECT c.name AS chapter,
+                  COUNT(*) AS "attempts!",
+                  COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!",
+                  COUNT(DISTINCT a.user_id) AS "learners!"
+           FROM attempts a
+           JOIN cohort_members cm ON cm.user_id = a.user_id AND cm.cohort_id = $1
+           JOIN question_versions qv ON qv.id = a.question_version_id
+           LEFT JOIN curriculum_nodes c ON c.id = qv.chapter_id
+           GROUP BY c.name ORDER BY c.name"#,
+        cohort_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let chapters: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            let accuracy = if r.attempts > 0 {
+                r.correct as f64 / r.attempts as f64
+            } else {
+                0.0
+            };
+            json!({
+                "chapter": r.chapter,
+                "attempts": r.attempts,
+                "correct": r.correct,
+                "accuracy": accuracy,
+                "learners": r.learners,
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "cohort_id": cohort_id,
+        "cohort_size": size,
+        "suppressed": false,
+        "chapters": chapters,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct AnalyticsQuery {
+    pub cohort_id: Option<Uuid>,
 }
