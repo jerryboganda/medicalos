@@ -201,20 +201,46 @@ pub async fn queue(
         cloze: Option<String>,
     }
     let mut meta: std::collections::HashMap<String, CardMeta> = std::collections::HashMap::new();
-    // The two query! records are distinct types - index each separately.
-    for rows in [&due_rows, &new_rows] {
-        for r in rows.iter() {
-            meta.insert(
-                r.id.to_string(),
-                CardMeta {
-                    front: r.front.clone(),
-                    back: r.back.clone(),
-                    card_type: r.card_type.clone(),
-                    trust: r.trust.clone(),
-                    cloze: r.cloze.clone(),
-                },
-            );
-        }
+    // The two query! records are distinct types - fill the map per query.
+    let insert_meta = |meta: &mut std::collections::HashMap<String, CardMeta>,
+                       id: &Uuid,
+                       front: &String,
+                       back: &String,
+                       card_type: &String,
+                       trust: &String,
+                       cloze: &Option<String>| {
+        meta.insert(
+            id.to_string(),
+            CardMeta {
+                front: front.clone(),
+                back: back.clone(),
+                card_type: card_type.clone(),
+                trust: trust.clone(),
+                cloze: cloze.clone(),
+            },
+        );
+    };
+    for r in &due_rows {
+        insert_meta(
+            &mut meta,
+            &r.id,
+            &r.front,
+            &r.back,
+            &r.card_type,
+            &r.trust,
+            &r.cloze,
+        );
+    }
+    for r in &new_rows {
+        insert_meta(
+            &mut meta,
+            &r.id,
+            &r.front,
+            &r.back,
+            &r.card_type,
+            &r.trust,
+            &r.cloze,
+        );
     }
 
     let due_cards: Vec<QueueCard> = due_rows
