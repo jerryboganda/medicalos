@@ -6344,8 +6344,7 @@ async fn cards_types_trust_and_duplicate_refusal() {
     assert!(
         new_cards
             .iter()
-            .any(|c| c["trust"] == serde_json::Value::from("ai_draft")
-                && c["ai_draft"] == serde_json::Value::from(true)),
+            .any(|c| c["trust"] == "ai_draft" && c["ai_draft"] == true),
         "{queue}"
     );
 }
