@@ -6649,7 +6649,6 @@ async fn client_update_defaults_to_none_and_flag_drives_modes() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    let token = register_and_login(app.clone()).await;
 
     // No flag: honest default — no update required.
     let (status, update) = call(app.clone(), request("GET", "/v1/client-update", None, None)).await;
