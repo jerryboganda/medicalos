@@ -215,6 +215,9 @@ export const Api = {
 	createSession: (body: {
 		preset: string;
 		chapter_id?: string;
+		chapter_ids?: string[];
+		blueprint?: { chapter_id: string; count: number }[];
+		source?: 'any' | 'unseen' | 'incorrect' | 'marked';
 		question_count?: number;
 		source_session_id?: string;
 		time_limit_seconds?: number;
