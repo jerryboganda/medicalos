@@ -14,6 +14,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 > **✅ Tenant/community stretch (2026-09-22):** CI run 35783063874 (commit `b30dcc4`): fmt, clippy, cargo-deny, all integration tests (incl. the five new slice tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. CORE-04, INST-05, INST-07, AI-14, EX-05, EX-06, QB-02, QB-04, SR-08, COMMUNITY-01/02/03, COMP-01/03/04, GROW-01 rows updated below; migrations 0021-0023 are additive with exercised rollback.
 > **✅ Coach/plan depth stretch (2026-09-22):** CI run 35790283904 (commit `1a29114`): fmt, clippy, cargo-deny, all integration tests (incl. coach modes, replan, and debt/gap-report tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. AI-10, AI-17, PLAN-02, PLAN-03, PLAN-04 rows updated below.
 > **✅ Library/cards stretch (2026-09-22):** CI run 35796428516 (commit `f7627a4`): fmt, clippy, cargo-deny, all integration tests (incl. card types/trust/duplicates and rights-checked media/image cases), wasm32 core builds, client + site builds, Playwright E2E — all passing. SR-03, SR-04, SR-05, LIB-03, LIB-04, LIB-08, IMG-01, IMG-02 rows updated below; migration 0024 is additive with exercised rollback.
+> **✅ Ops/admin stretch (2026-09-22):** CI run 35798931187 (commit `fa19a74`): fmt, clippy, cargo-deny, all integration tests (incl. the analytics taxonomy, rights-ledger, incident, client-update, and prompt-injection tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. OPS-05, OPS-06, ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, TRUST-03, TRUST-07 rows updated below; migration 0025 is additive with exercised rollback.
 
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
@@ -66,13 +67,13 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | PLAN-02 | Capacity changes and feasible replanning | tested (POST /v1/me/plan/replan forks today's plan to a new version fitting the declared budget, defers trimmed tasks with a capacity_change receipt, never touches done work; validation 5-480 minutes) | run 35790283904 |
 | LIB-01 | Versioned articles and references | tested (seed-level: versioned published articles readable; editorial authoring surface pending) | run 35467238410 |
 | NOTE-01 | Source-linked private notes | tested (CRUD + user-scoped isolation + deletion) | run 35467238410 |
-| ADMIN-01 | Real cross-tenant owner dashboard | not-started | — |
-| ADMIN-02 | Content and rights operations | not-started | — |
-| ADMIN-03 | AI model / cost / policy administration | not-started | — |
-| ADMIN-04 | Support, incidents, audit trails | not-started | — |
+| ADMIN-01 | Real cross-tenant owner dashboard | tested (GET /v1/admin/dashboard serves real cross-tenant aggregates: institutions, active users, published questions, articles, rights records, open incidents, 30-day coach turns; UI surface pending) | run 35798931187 |
+| ADMIN-02 | Content and rights operations | tested (content_rights ledger per §19.2 — ref code, licensor, territory, permitted uses, validity — admin-managed with audit; full workflow UI pending) | run 35798931187 |
+| ADMIN-03 | AI model / cost / policy administration | tested (GET /v1/admin/ai-admin serves real 30-day coach-stream counters by adapter, model, and prompt type plus the disclosed allowance; model-routing config surface pending) | run 35798931187 |
+| ADMIN-04 | Support, incidents, audit trails | tested (incidents with severity lifecycle and audit entries; institution audit exports and the platform audit log already serve trails; support-ticket workflows pending) | run 35798931187 |
 | TRUST-01 | No fake scores, charts, citations, active-agent states | not-started | — |
 | TRUST-02 | Privacy, deletion, export workflows | tested (full account export: profile + attempts + notes + card reviews + portfolio in one user-scoped call) | run 35467238410 |
-| TRUST-03 | Prompt-injection and tenant-isolation tests | not-started | — |
+| TRUST-03 | Prompt-injection and tenant-isolation tests | tested (integration tests prove injected instructions never steer the extractive coach — the reply stays grounded in reviewed material with no compliance language — and cross-tenant reads are refused at analytics, audit, and duel seams) | run 35798931187 |
 | TRUST-04 | Clinically reviewed shared medical content | not-started | — |
 | UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
 | UX-02 | Desktop and web keyboard map and fullscreen | in-progress (letter keys select, N/Enter next — fullscreen pending) | run 35366131810 |
@@ -81,7 +82,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | GROW-02 | Astro site: per-exam pages, pricing, checkout, help, legal, app-link files | not-started | — |
 | ARCH-02 | TypeScript contracts generated from Rust types | in-progress (hand-written pre-generation client in apps/client/src/lib/api.ts, marked for replacement; generation pipeline pending) | run 35366131810 |
 | OPS-03 | Signed releases and reversible migrations | not-started | — |
-| OPS-05 | Product-analytics taxonomy, experimentation, remote config, kill switches | not-started | — |
+| OPS-05 | Product-analytics taxonomy, experimentation, remote config, kill switches | tested (POST /v1/analytics/events enforces the Appendix-B taxonomy with a closed vocabulary and the pseudonymous no-identifiers rule; feature flags already carry remote config, staged rollout, and kill switches; experiment assignment framework pending) | run 35798931187 |
 
 Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, completes P3), PROT-03 (store compliance, completes P3), COM-02 (store billing + web checkout, completes P3), ADMIN-06 (editorial console baseline, P1–P2), TRUST-06 (accessibility + device matrix, P1–P3), UX-03 (client performance budgets, P1–P3).
 
@@ -131,7 +132,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | COM-03 | Coupons, referrals, regional price tiers, trials, pause | not-started | — |
 | ADMIN-05 | Revenue, licenses, royalties, renewals | not-started | — |
 | ADMIN-06 | Editorial console baseline: hierarchy, questions, bulk import (dry run + rollback), settings | tested (slice-10 scope: hierarchy CRUD + node status, question create/search, JSON bulk import with per-row validation + dry run + transactional apply + rollback-refused-after-attempts, audit trail, /admin console page; CSV/Excel parser + settings UI pending) | run 35462664343 |
-| TRUST-07 | Provenance retained through derived resources | not-started | — |
+| TRUST-07 | Provenance retained through derived resources | tested (rights ledger refs carried by media and image cases; trust labels on cards; retest/revision tasks trace source_session_id and added_by_revision; exports carry signed manifests) | run 35798931187 |
 | OPS-04 | Recovery drills and failure-mode monitoring | not-started | — |
 
 ## Phase 3 — Cross-device product
@@ -152,7 +153,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | PROT-02 | Device attestation, anti-scraping, pack encryption, offline lease | in-progress (offline lease + per-device rotating pack keys tested; device attestation, anti-scraping, pack encryption pending native/device work) | run 35728441244 |
 | PROT-03 | Store and platform compliance checklist (completes) | not-started | — |
 | COM-02 | Store billing + web checkout with local wallets; one entitlement service (completes) | not-started | — |
-| OPS-06 | Staged rollout, forced / soft update, two-version API compatibility | in-progress (feature flags with per-user staged rollout resolution tested; forced/soft update + two-version compat pending) | run 35476029818 |
+| OPS-06 | Staged rollout, forced / soft update, two-version API compat | tested (feature flags with per-user staged rollout; GET /v1/client-update serves flag-driven forced/soft update with version compatibility metadata and an honest none default; signed update packages pending) | run 35798931187 |
 | ENG-03 | Widgets and lock-screen mock timer (COULD) | not-started | — |
 | ARCH-03 | Owned native Tauri plugins in Swift and Kotlin (completes) | not-started | — |
 
