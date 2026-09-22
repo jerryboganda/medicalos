@@ -59,10 +59,12 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
     if !settings.daily_goal_enabled {
         return Ok(());
     }
-    // Attempts + QOTD both count toward the daily goal (one answer each).
+    // Answered attempts + QOTD each count as one answered question.
     let answered: i64 = sqlx::query!(
         r#"SELECT (SELECT COUNT(*) FROM attempts
-                   WHERE user_id = $1 AND created_at::date = CURRENT_DATE)
+                   WHERE user_id = $1
+                     AND created_at::date = CURRENT_DATE
+                     AND chosen_index IS NOT NULL)
               + (SELECT COUNT(*) FROM qotd_answers
                    WHERE user_id = $1 AND day = CURRENT_DATE) AS "n!""#,
         user_id
@@ -71,13 +73,6 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
     .await?
     .n;
     let met = answered >= settings.daily_goal_questions as i64;
-    let yesterday = sqlx::query!(
-        r#"SELECT streak_count, goal_met FROM engagement_days
-           WHERE user_id = $1 AND day = CURRENT_DATE - 1"#,
-        user_id
-    )
-    .fetch_optional(&state.pool)
-    .await?;
     let today = sqlx::query!(
         r#"SELECT goal_met FROM engagement_days
            WHERE user_id = $1 AND day = CURRENT_DATE"#,
@@ -98,27 +93,39 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
             .execute(&state.pool)
             .await?;
         } else {
-            // First time today's goal is met — advance streak from yesterday.
-            // (Today's row may already exist from partial progress or QOTD.)
-            let prev = yesterday.as_ref().map(|y| y.streak_count).unwrap_or(0);
-            let continuous = yesterday.as_ref().map(|y| y.goal_met).unwrap_or(false);
-            let streak = if continuous {
-                prev + 1
-            } else if yesterday.is_some() && settings.freeze_bank > 0 {
-                // A freeze bridges the gap: streak continues, bank shrinks.
-                sqlx::query!(
-                    r#"UPDATE engagement_settings
-                       SET freeze_bank = freeze_bank - 1, updated_at = now()
-                       WHERE user_id = $1"#,
-                    user_id
-                )
-                .execute(&state.pool)
-                .await?;
-                prev + 1
+            // First time today's goal is met. A freeze covers one missed day;
+            // multiple held freezes can bridge the same number of missed days.
+            let previous = sqlx::query!(
+                r#"SELECT streak_count, (CURRENT_DATE - day - 1) AS "gap_days!"
+                   FROM engagement_days
+                   WHERE user_id = $1 AND day < CURRENT_DATE AND goal_met = true
+                   ORDER BY day DESC
+                   LIMIT 1"#,
+                user_id
+            )
+            .fetch_optional(&state.pool)
+            .await?;
+            let streak = if let Some(prev) = previous {
+                if prev.gap_days == 0 {
+                    prev.streak_count + 1
+                } else if prev.gap_days > 0 && prev.gap_days <= settings.freeze_bank {
+                    let used = prev.gap_days;
+                    sqlx::query!(
+                        r#"UPDATE engagement_settings
+                           SET freeze_bank = freeze_bank - $2, updated_at = now()
+                           WHERE user_id = $1"#,
+                        user_id,
+                        used
+                    )
+                    .execute(&state.pool)
+                    .await?;
+                    prev.streak_count + 1
+                } else {
+                    1
+                }
             } else {
                 1
             };
-            // Earn a freeze every 7-day streak, cap 2 (§17.2).
             if streak > 0 && streak % 7 == 0 {
                 sqlx::query!(
                     r#"UPDATE engagement_settings
@@ -209,6 +216,57 @@ pub async fn engagement_status(
     })))
 }
 
+pub async fn qotd(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    if !engagement_global_enabled(&state).await? {
+        return Ok(Json(json!({ "enabled": false })));
+    }
+    ensure_engagement(&state, user.user_id).await?;
+    let settings = sqlx::query!(
+        r#"SELECT qotd_enabled FROM engagement_settings WHERE user_id = $1"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    if !settings.qotd_enabled {
+        return Ok(Json(json!({ "enabled": false })));
+    }
+    Ok(Json(qotd_payload(&state, user.user_id).await?))
+}
+
+async fn selected_qotd_id(state: &AppState, user_id: Uuid) -> ApiResult<Option<Uuid>> {
+    let count: i64 = sqlx::query!(
+        r#"SELECT COUNT(*) AS "n!" FROM question_versions WHERE status = 'published'"#
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    if count == 0 {
+        return Ok(None);
+    }
+    let seed = sqlx::query!(
+        r#"SELECT hashtext($1::text || CURRENT_DATE::text) AS "h!"#,
+        user_id.to_string()
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .h;
+    let offset = (seed as i64).rem_euclid(count);
+    let selected = sqlx::query!(
+        r#"SELECT id
+           FROM question_versions
+           WHERE status = 'published'
+           ORDER BY id
+           OFFSET $1 LIMIT 1"#,
+        offset
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    Ok(selected.map(|q| q.id))
+}
+
 /// Deterministic one-question-per-day pick: stable hash of (user, day) over
 /// published questions. Answered state and community split after answering.
 async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::Value> {
@@ -224,7 +282,7 @@ async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::
         let split = sqlx::query!(
             r#"SELECT chosen_index, COUNT(*) AS "n!"
                FROM qotd_answers
-               WHERE question_version_id = $1
+               WHERE question_version_id = $1 AND day = CURRENT_DATE
                GROUP BY chosen_index ORDER BY chosen_index"#,
             a.question_version_id
         )
@@ -241,31 +299,14 @@ async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::
             "community_total": total,
         }));
     }
-    // Deterministic pick: hash user+day mod published question count.
-    let count: i64 = sqlx::query!(
-        r#"SELECT COUNT(*) AS "n!" FROM question_versions WHERE status = 'published'"#
-    )
-    .fetch_one(&state.pool)
-    .await?
-    .n;
-    if count == 0 {
+    let Some(question_id) = selected_qotd_id(state, user_id).await? else {
         return Ok(json!({ "enabled": true, "answered": false, "available": false }));
-    }
-    let seed = sqlx::query!(
-        r#"SELECT hashtext($1::text || CURRENT_DATE::text) AS "h!"#,
-        user_id.to_string()
-    )
-    .fetch_one(&state.pool)
-    .await?
-    .h;
-    let offset = (seed as i64).rem_euclid(count);
+    };
     let q = sqlx::query!(
         r#"SELECT qv.id, qv.vignette, qv.options, qv.correct_index
            FROM question_versions qv
-           WHERE qv.status = 'published'
-           ORDER BY qv.id
-           OFFSET $1 LIMIT 1"#,
-        offset
+           WHERE qv.id = $1 AND qv.status = 'published'"#,
+        question_id
     )
     .fetch_one(&state.pool)
     .await?;
@@ -312,6 +353,15 @@ pub async fn answer_qotd(
             "question of the day is disabled",
         ));
     }
+    let selected = selected_qotd_id(&state, user.user_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("qotd_unavailable"))?;
+    if req.question_version_id != selected {
+        return Err(ApiError::unprocessable(
+            "qotd_mismatch",
+            "question_version_id is not today's question of the day",
+        ));
+    }
     let q = sqlx::query!(
         r#"SELECT correct_index, jsonb_array_length(options) AS "n!"
            FROM question_versions WHERE id = $1 AND status = 'published'"#,
@@ -342,20 +392,11 @@ pub async fn answer_qotd(
             "today's question of the day is already answered",
         ));
     }
-    // Also counts toward the daily goal (one real attempt-equivalent).
-    sqlx::query!(
-        r#"INSERT INTO engagement_days (user_id, day, questions_answered, goal_met, streak_count)
-           VALUES ($1, CURRENT_DATE, 1, false, 0)
-           ON CONFLICT (user_id, day) DO UPDATE
-             SET questions_answered = engagement_days.questions_answered + 1"#,
-        user.user_id
-    )
-    .execute(&state.pool)
-    .await?;
+    record_daily_progress(&state, user.user_id).await?;
     let split = sqlx::query!(
         r#"SELECT chosen_index, COUNT(*) AS "n!"
            FROM qotd_answers
-           WHERE question_version_id = $1
+           WHERE question_version_id = $1 AND day = CURRENT_DATE
            GROUP BY chosen_index ORDER BY chosen_index"#,
         req.question_version_id
     )

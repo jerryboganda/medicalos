@@ -3976,6 +3976,56 @@ async fn engagement_goal_streak_and_qotd() {
     );
     assert!(eng["qotd"].get("correct_index").is_none(), "{eng}");
 
+    // Canonical QOTD route returns the same server-selected question.
+    let (status, canonical_qotd) =
+        call(app.clone(), request("GET", "/v1/qotd", Some(&user), None)).await;
+    assert_eq!(status, StatusCode::OK, "{canonical_qotd}");
+    assert_eq!(
+        canonical_qotd["question_version_id"], qv,
+        "{canonical_qotd}"
+    );
+
+    // A learner cannot answer an arbitrary published question as today's QOTD.
+    let qv_uuid: Uuid = qv.parse().expect("qotd uuid");
+    let other_qv = sqlx::query!(
+        r#"SELECT id FROM question_versions
+           WHERE status = 'published' AND id <> $1
+           ORDER BY id LIMIT 1"#,
+        qv_uuid
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("seed has another published question")
+    .id;
+    let (status, mismatch) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({"question_version_id": other_qv, "chosen_index": 0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{mismatch}");
+    assert_eq!(mismatch["error"]["code"], "qotd_mismatch", "{mismatch}");
+
+    // Community split is per day, not historical responses to the same question.
+    let engagement_user_id = sqlx::query!("SELECT user_id FROM engagement_settings LIMIT 1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("engagement settings")
+        .user_id;
+    sqlx::query!(
+        r#"INSERT INTO qotd_answers (user_id, day, question_version_id, chosen_index)
+           VALUES ($1, CURRENT_DATE - 1, $2, 1)"#,
+        engagement_user_id,
+        qv_uuid
+    )
+    .execute(&state.pool)
+    .await
+    .expect("historical qotd answer");
+
     // Answering twice: first wins, second is an honest conflict.
     let (status, ans) = call(
         app.clone(),
@@ -3989,7 +4039,7 @@ async fn engagement_goal_streak_and_qotd() {
     .await;
     assert_eq!(status, StatusCode::OK, "{ans}");
     assert!(ans["correct"].is_boolean(), "{ans}");
-    assert!(ans["community_total"].as_i64().unwrap() >= 1, "{ans}");
+    assert_eq!(ans["community_total"], 1, "{ans}");
     let (status, dup) = call(
         app.clone(),
         request(
@@ -4003,14 +4053,24 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::CONFLICT, "{dup}");
     assert_eq!(dup["error"]["code"], "already_answered", "{dup}");
 
-    // Out-of-range option is rejected before insert.
+    // Out-of-range option is rejected for that learner's own QOTD.
+    let other_user = register_and_login(app.clone()).await;
+    let (status, other_qotd) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&other_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_qotd}");
+    let other_user_qv = other_qotd["question_version_id"]
+        .as_str()
+        .expect("other qotd version");
     let (status, oob) = call(
         app.clone(),
         request(
             "POST",
             "/v1/me/qotd/answers",
-            Some(&register_and_login(app.clone()).await),
-            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 99})),
+            Some(&other_user),
+            Some(serde_json::json!({"question_version_id": other_user_qv, "chosen_index": 99})),
         ),
     )
     .await;
@@ -4104,4 +4164,170 @@ async fn engagement_goal_streak_and_qotd() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     assert_eq!(refused["error"]["code"], "engagement_disabled", "{refused}");
+}
+
+#[tokio::test]
+async fn engagement_skipped_answer_does_not_meet_daily_goal() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let user = register_and_login(app.clone()).await;
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({
+                "daily_goal_questions": 1,
+                "qotd_enabled": false
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&user),
+            Some(
+                serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&user),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": null, "idempotency_key": "eng-skip"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&user),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["daily_goal"]["answered_today"], 0, "{eng}");
+    assert_eq!(eng["daily_goal"]["met"], false, "{eng}");
+    assert_eq!(eng["streak"]["count"], 0, "{eng}");
+}
+
+#[tokio::test]
+async fn engagement_freeze_bridges_one_missed_day() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let user = register_and_login(app.clone()).await;
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({
+                "daily_goal_questions": 1,
+                "qotd_enabled": false
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let user_id = sqlx::query!("SELECT user_id FROM engagement_settings LIMIT 1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("engagement settings")
+        .user_id;
+    sqlx::query!(
+        "UPDATE engagement_settings SET freeze_bank = 1 WHERE user_id = $1",
+        user_id
+    )
+    .execute(&state.pool)
+    .await
+    .expect("seed freeze");
+    sqlx::query!(
+        r#"INSERT INTO engagement_days
+             (user_id, day, questions_answered, goal_met, streak_count)
+           VALUES ($1, CURRENT_DATE - 2, 1, true, 3)"#,
+        user_id
+    )
+    .execute(&state.pool)
+    .await
+    .expect("seed previous streak");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&user),
+            Some(
+                serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&user),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "eng-freeze"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&user),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["streak"]["count"], 4, "{eng}");
+    assert_eq!(eng["streak"]["freezes"], 0, "{eng}");
 }

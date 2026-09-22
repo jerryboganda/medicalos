@@ -56,7 +56,8 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/me/engagement/settings",
             axum::routing::put(routes::engagement::update_engagement_settings),
         )
-        .route("/v1/me/qotd", get(routes::engagement::engagement_status))
+        .route("/v1/qotd", get(routes::engagement::qotd))
+        .route("/v1/me/qotd", get(routes::engagement::qotd))
         .route("/v1/me/qotd/answers", post(routes::engagement::answer_qotd))
         .route(
             "/v1/practice/sessions",
@@ -335,10 +336,8 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/me/engagement/settings",
             axum::routing::put(routes::engagement::update_engagement_settings),
         )
-        .route(
-            "/api/v1/me/qotd",
-            get(routes::engagement::engagement_status),
-        )
+        .route("/api/v1/qotd", get(routes::engagement::qotd))
+        .route("/api/v1/me/qotd", get(routes::engagement::qotd))
         .route(
             "/api/v1/me/qotd/answers",
             post(routes::engagement::answer_qotd),
