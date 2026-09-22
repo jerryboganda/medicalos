@@ -3544,3 +3544,240 @@ async fn offline_leases_sync_conflicts_deckio() {
     assert_eq!(imp["cards_created"].as_i64(), Some(2), "{imp}");
     assert_eq!(imp["cards_skipped"].as_i64(), Some(1), "{imp}");
 }
+
+#[tokio::test]
+async fn completion_kernel_account_exam_and_readiness_flow() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let (status, device) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/devices",
+            Some(&token),
+            Some(serde_json::json!({"device_key": "ci-browser", "label": "CI browser"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{device}");
+    assert_eq!(device["device_key"], "ci-browser");
+
+    let (status, exams) = call(
+        app.clone(),
+        request("GET", "/v1/exams", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{exams}");
+    let exam_id = exams["exams"][0]["exam_id"]
+        .as_str()
+        .expect("seed exam id");
+
+    let (status, spec) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exams/{exam_id}/specs"),
+            Some(&token),
+            Some(serde_json::json!({
+                "effective_from": "2026-10-01",
+                "config": {
+                    "blocks": 2,
+                    "block_seconds": 3600,
+                    "break_seconds": 600,
+                    "grace_seconds": 30
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{spec}");
+    let spec_id = spec["spec_id"].as_str().expect("spec id");
+
+    let (status, form) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exam-specs/{spec_id}/forms"),
+            Some(&token),
+            Some(serde_json::json!({
+                "name": "Pilot Form A",
+                "assessment_family": "pilot",
+                "blueprint": {"chapters": []},
+                "reserved": true,
+                "ai_allowed": false
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{form}");
+    assert_eq!(form["reserved"], true);
+    assert_eq!(form["ai_allowed"], false);
+
+    let (status, outcome) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/outcomes",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": exam_id,
+                "sat_on": "2026-09-20",
+                "outcome": {"result": "pass"},
+                "consented": true
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{outcome}");
+
+    let (status, readiness) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/readiness?exam_id={exam_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{readiness}");
+    assert_eq!(readiness["available"], false);
+    assert_eq!(readiness["reason"], "validation_required");
+}
+
+#[tokio::test]
+async fn completion_kernel_coach_memory_and_outcomes_are_user_scoped() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let owner = register_and_login(app.clone()).await;
+    let other = register_and_login(app.clone()).await;
+
+    let (status, saved) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/coach-memory/exam_focus",
+            Some(&owner),
+            Some(serde_json::json!({"value": "cardiology"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    let (status, memory) = call(
+        app.clone(),
+        request("GET", "/v1/me/coach-memory", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{memory}");
+    assert_eq!(memory["items"][0]["value"], "cardiology");
+
+    let (status, other_memory) = call(
+        app.clone(),
+        request("GET", "/v1/me/coach-memory", Some(&other), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_memory}");
+    assert_eq!(other_memory["items"].as_array().unwrap().len(), 0);
+
+    let (status, intervention) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/interventions",
+            Some(&owner),
+            Some(serde_json::json!({
+                "intervention_type": "retest",
+                "concept_key": "cardiology",
+                "triggered_at": "2026-09-20T00:00:00Z"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intervention}");
+    let intervention_id = intervention["intervention_id"].as_str().unwrap();
+
+    let (status, measured) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            &format!("/v1/me/interventions/{intervention_id}"),
+            Some(&owner),
+            Some(serde_json::json!({
+                "outcome": {"correct": true},
+                "measured_at": "2026-09-22T00:00:00Z"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{measured}");
+    assert_eq!(measured["measured"], true);
+}
+
+#[tokio::test]
+async fn completion_kernel_institution_program_and_interop_are_staff_scoped() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let staff = register_and_login(app.clone()).await;
+    let outsider = register_and_login(app.clone()).await;
+
+    let (status, inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "Completion Institute"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst}");
+    let inst_id = inst["institution_id"].as_str().unwrap();
+
+    let (status, program) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "MBBS"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{program}");
+
+    let (status, receipt) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/interop"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "standard": "qti",
+                "direction": "export",
+                "external_id": "pilot-form-a",
+                "payload": {"version": "3.0"}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    assert_eq!(receipt["status"], "recorded");
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&outsider),
+            Some(serde_json::json!({"name": "Should fail"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

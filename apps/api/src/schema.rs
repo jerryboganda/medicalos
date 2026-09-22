@@ -32,6 +32,7 @@ migrations!(
     "0015_integrity",
     "0016_phase2_completion",
     "0017_offline",
+    "0018_completion_kernel",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
