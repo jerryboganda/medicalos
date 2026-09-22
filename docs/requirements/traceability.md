@@ -10,6 +10,8 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 
 > **✅ Remaining-phases completion kernel (2026-09-22):** CI run 35728441244 (commit `df35f40`, branch `codex/remaining-phases`): fmt, clippy, cargo-deny, all integration tests, wasm32 core builds, client + site builds, Playwright E2E — all passing. Evidence for CORE-07, EX-02/03/05/06, AI-11/12, INST-04/06, TRUST-05, OFF-02/03/04, PROT-02, SR-07 rows updated below.
 
+> **✅ ENG-01 engagement slice + main sync (2026-09-22):** CI run 35756191515 (commit `edbb22c`): fmt, clippy, cargo-deny, all integration tests (incl. `engagement_goal_streak_and_qotd`, `engagement_skipped_answer_does_not_meet_daily_goal`, `engagement_freeze_bridges_one_missed_day`), wasm32 core builds, client + site builds, Playwright E2E — all passing. Deploy run 35756558245: sqlx cache regenerated, GHCR images built, migration 0019 applied on deploy, VPS deployed, **production-verified** — medicalos.polytronx.com serves `edbb22c` (healthz OK, version.json matches). This run also completes the deferred 15-commit main sync (completion kernel + offline sync + ENG-01).
+
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
 ## Phase 0 — Decisions and evidence
@@ -71,7 +73,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | TRUST-04 | Clinically reviewed shared medical content | not-started | — |
 | UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
 | UX-02 | Desktop and web keyboard map and fullscreen | in-progress (letter keys select, N/Enter next — fullscreen pending) | run 35366131810 |
-| ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | in-progress (daily question goal, streak/freeze, per-learner disable + global kill switch, canonical QOTD answer/community split tested; available-time/minutes goal derivation and shared per-exam daily QOTD/push timing pending) | run 35756191515 |
+| ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | in-progress (daily question goal, streak/freeze, per-learner disable + global kill switch, canonical QOTD answer/community split tested — deployed and production-verified at `edbb22c`; available-time/minutes goal derivation and shared per-exam daily QOTD/push timing pending) | run 35756191515 |
 | COM-01 | Upgrade triggers and free allowance inside the 7C tiers | in-progress (allowance + offline-download triggers tested — both originate from entitlement checks only, never the Coach; remaining triggers: full mock, chapter analytics) | runs 35372696754, 35728441244 |
 | GROW-02 | Astro site: per-exam pages, pricing, checkout, help, legal, app-link files | not-started | — |
 | ARCH-02 | TypeScript contracts generated from Rust types | in-progress (hand-written pre-generation client in apps/client/src/lib/api.ts, marked for replacement; generation pipeline pending) | run 35366131810 |
