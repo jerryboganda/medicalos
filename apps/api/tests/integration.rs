@@ -6006,33 +6006,36 @@ async fn coach_socratic_explain_back_and_contrast_modes() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let turn = |app: Router, mode: &str, key: &str| async move {
-        call(
-            app,
-            request(
-                "POST",
-                "/v1/coach/turns",
-                Some(&learner),
-                Some(serde_json::json!({
-                    "question_version_id": format!("{vid}"),
-                    "prompt_type": mode,
-                    "message": "My rule is: pick the option the stem finding points at",
-                    "idempotency_key": key
-                })),
-            ),
-        )
-        .await
+    let turn = |app: Router, mode: String, key: String| {
+        let learner = learner.clone();
+        async move {
+            call(
+                app,
+                request(
+                    "POST",
+                    "/v1/coach/turns",
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "question_version_id": format!("{vid}"),
+                        "prompt_type": mode,
+                        "message": "My rule is: pick the option the stem finding points at",
+                        "idempotency_key": key
+                    })),
+                ),
+            )
+            .await
+        }
     };
 
     // Socratic guides without the reveal.
-    let (status, soc) = turn(app.clone(), "socratic", "mode-socratic").await;
+    let (status, soc) = turn(app.clone(), "socratic".into(), "mode-socratic".into()).await;
     assert_eq!(status, StatusCode::OK, "{soc}");
     let soc_text = soc["answer"].as_str().unwrap();
     assert!(soc_text.contains("Work through these prompts"), "{soc}");
     assert!(!soc_text.contains("Key learning point"), "{soc}");
 
     // Explain-back mirrors the learner's own words.
-    let (status, back) = turn(app.clone(), "explain_back", "mode-back").await;
+    let (status, back) = turn(app.clone(), "explain_back".into(), "mode-back".into()).await;
     assert_eq!(status, StatusCode::OK, "{back}");
     assert!(
         back["answer"]
@@ -6043,7 +6046,7 @@ async fn coach_socratic_explain_back_and_contrast_modes() {
     );
 
     // Contrast compares the defensible choice against a distractor.
-    let (status, contrast) = turn(app.clone(), "contrast", "mode-contrast").await;
+    let (status, contrast) = turn(app.clone(), "contrast".into(), "mode-contrast".into()).await;
     assert_eq!(status, StatusCode::OK, "{contrast}");
     assert!(
         contrast["answer"]
