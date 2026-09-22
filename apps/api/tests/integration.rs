@@ -5666,8 +5666,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
             Some(serde_json::json!({
                 "opponent": format!("{bob_id}"),
                 "exam_id": format!("{}", ids.exam_id),
-                "chapter_id": format!("{}", ids.chapter1),
-                "question_count": 2
+                "question_count": 3
             })),
         ),
     )
@@ -5726,7 +5725,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{accepted}");
-    assert_eq!(accepted["question_count"], 2, "{accepted}");
+    assert_eq!(accepted["question_count"], 3, "{accepted}");
     let bob_session: Uuid = accepted["your_session_id"]
         .as_str()
         .unwrap()
@@ -5755,7 +5754,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
         .unwrap();
 
     let play = |app: Router, token: String, sid: Uuid, key: String| async move {
-        for i in 0..2 {
+        for i in 0..3 {
             let (status, _) = call(
                 app.clone(),
                 request(
