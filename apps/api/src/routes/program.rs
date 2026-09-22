@@ -959,10 +959,7 @@ pub async fn exam_switch_gap_report(
             })
         })
         .collect();
-    let covered = chapters
-        .iter()
-        .filter(|c| c["covered"] == serde_json::Value::from(true))
-        .count();
+    let covered = chapters.iter().filter(|c| c["covered"] == true).count();
     Ok(Json(json!({
         "to_exam_id": to_exam_id,
         "coverage_rule": "at least 10 independent (non-assisted) answered attempts",
