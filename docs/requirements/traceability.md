@@ -11,6 +11,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 > **✅ Remaining-phases completion kernel (2026-09-22):** CI run 35728441244 (commit `df35f40`, branch `codex/remaining-phases`): fmt, clippy, cargo-deny, all integration tests, wasm32 core builds, client + site builds, Playwright E2E — all passing. Evidence for CORE-07, EX-02/03/05/06, AI-11/12, INST-04/06, TRUST-05, OFF-02/03/04, PROT-02, SR-07 rows updated below.
 
 > **✅ ENG-01 engagement slice + main sync (2026-09-22):** CI run 35756191515 (commit `edbb22c`): fmt, clippy, cargo-deny, all integration tests (incl. `engagement_goal_streak_and_qotd`, `engagement_skipped_answer_does_not_meet_daily_goal`, `engagement_freeze_bridges_one_missed_day`), wasm32 core builds, client + site builds, Playwright E2E — all passing. Deploy run 35756558245: sqlx cache regenerated, GHCR images built, migration 0019 applied on deploy, VPS deployed, **production-verified** — medicalos.polytronx.com serves `edbb22c` (healthz OK, version.json matches). This run also completes the deferred 15-commit main sync (completion kernel + offline sync + ENG-01).
+> **✅ Tenant/community stretch (2026-09-22):** CI run 35783063874 (commit `b30dcc4`): fmt, clippy, cargo-deny, all integration tests (incl. the five new slice tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. CORE-04, INST-05, INST-07, AI-14, EX-05, EX-06, QB-02, QB-04, SR-08, COMMUNITY-01/02/03, COMP-01/03/04, GROW-01 rows updated below; migrations 0021-0023 are additive with exercised rollback.
 
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
@@ -30,7 +31,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-01 | One identity with personal and institution contexts | in-progress (identity + auth tested, slice-1 scope; institution contexts pending) | .scratch/phase-1-slice-1/ |
 | CORE-02 | Versioned goals, exam dates, protected commitments | tested (goal create/list with retirement history; protected commitments learner-only CRUD, §9.3) | run 35467238410 |
 | CORE-03 | Entitlement checks across API, media, retrieval, offline manifests | in-progress (free-tier daily question allowance + offline pack lease both enforce server-side with honest 403 + details; media/retrieval entitlements pending) | runs 35372696754, 35728441244 |
-| CORE-04 | Multi-tenant role and audit foundations | not-started | — |
+| CORE-04 | Multi-tenant role and audit foundations | in-progress (institution-scoped audit events + staff-gated audit export, extended §18.1 role vocabulary, cross-tenant isolation tests proven; dedicated tenant partitioning pending) | run 35783063874 |
 | CORE-05 | Five-destination learner navigation | in-progress (Today + session flow shipped and E2E-tested; Practice/Learn/Coach/Progress destinations pending) | run 35366131810 |
 | CORE-06 | Truthful loading, error, empty, permission states | tested (slice-2 scope: loading/error+retry/empty/no-evidence states in the learner UI; no fake analytics anywhere) | run 35366131810 |
 | CORE-07 | Sign-in methods, in-app account deletion, device limit, single active session | in-progress (device register/list/revoke, soft account deletion, revoked-session rejection tested; SSO/magic-link methods, hard device-limit policy, single-active-session enforcement pending) | run 35728441244 |
@@ -38,9 +39,9 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | CORE-09 | Guest trial before sign-up (SHOULD) | tested (guest key trial: 5-question ceiling, no keys for guests, honest upgrade refusal) | run 35467238410 |
 | CORE-10 | Navigational hierarchy mapped to concept identities | in-progress (Exam→Subject→System→Chapter nodes tested; concept-identity mapping pending) | run 35280682748 |
 | QB-01 | Immutable published question versions | tested (slice-1 scope: versioned, published-only serving) | run 35280682748 |
-| QB-02 | Question-family and variant identities | in-progress (family_id column exists; variant flows pending) | run 35280682748 |
+| QB-02 | Question-family and variant identities | in-progress (family_id + sibling-variant serving at retest time with seen-variant fallback; full variant authoring flows pending) | run 35783063874 |
 | QB-03 | Timed / untimed / tutor practice | in-progress (tutor, timed, and revision presets all tested; untimed-with-optional-per-question timer pending) | runs 35280682748, 35372696754 |
-| QB-04 | Confidence and assistance evidence separation | in-progress (confidence stored; assisted paths pending) | run 35280682748 |
+| QB-04 | Confidence and assistance evidence separation | tested (answers carry confidence and declared assistance; the Coach answer-first gate bounds what assistance can exist; assisted attempts excluded from community stats and psychometric screening) | run 35783063874 |
 | QB-05 | Per-option explanations and source anchors | tested (slice-1 scope: rationale per option + source_ref, tutor feedback) | run 35280682748 |
 | QB-08 | Issue reporting and quarantined-item exclusion | in-progress (report API + 3-vote quarantine + pool exclusion + report UI, CI-green on feat/qb08-item-reports run 35405398143; resolve route honestly 501 until the Phase 2 editorial console) | .scratch/phase-1-qb08-reports/ |
 | QB-11 | Two to ten options with generated labels | tested (engine rule in domain-contracts + OptionCount validation on ingestion) | run 35280682748 |
@@ -57,7 +58,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | AI-06 | Permissioned action tools | tested (slice-11 scope: Coach reads ONLY reviewed material of answered questions + own attempt — permissioning enforced and tested; broader tool scopes pending) | run 35466880140 |
 | AI-07 | Action receipts and undoable plan revisions | tested (slice-1 scope: revision receipt JSONB with triggering evidence + checks + diff, undo restores version) | run 35280682748 |
 | AI-13 | Cost limits, fallbacks, kill switches | tested (slice-11 scope: daily AI allowance enforced with honest 403 + details; extractive fallback means study never blocks; remote kill switch via OPS-05 flags pending) | run 35466880140 |
-| AI-14 | No cross-tenant private-memory access | in-progress (single-tenant slice; learner state is user-scoped by design, isolation tests with tenants pending) | run 35280682748 |
+| AI-14 | No cross-tenant private-memory access | in-progress (learner memory is user-scoped by design with user-scope tests; institution isolation tests added — cross-tenant analytics/audit/duel reads refused; multi-tenant deployments pending) | run 35783063874 |
 | AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
 | PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
 | PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
@@ -93,8 +94,8 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | QB-16 | Psychometric screening defaults + issue-report SLA | in-progress (screening endpoint with §11.4 default flags tested; SLA timers pending) | run 35476029818 |
 | EX-02 | Date-effective block / timer / break configuration | tested (exam specs with effective_from/to + block/timer/break/grace seconds create and list under admin gate) | run 35728441244 |
 | EX-03 | Frozen assessment forms and versions | tested (frozen assessment-form rows reject update/delete at the PostgreSQL boundary; mock starts snapshot concrete question_version IDs into session_items; migration rollback/reapply verified) | run 35758054988 |
-| EX-05 | Reserved assessment-family protection | in-progress (reserved flag stored and returned on forms; reserved-family access enforcement in session generation pending) | run 35728441244 |
-| EX-06 | Accommodations and assessment-specific AI restrictions | in-progress (learner accommodation upsert tested, user-scoped; ai_allowed form flag stored — session-time AI restriction enforcement pending) | run 35728441244 |
+| EX-05 | Reserved assessment-family protection | tested (reserved forms bind published question sets; bound questions never leak into open pools, QOTD, or retest variants; served only via the fixed assessment-form session with deterministic snapshot) | run 35783063874 |
+| EX-06 | Accommodations and assessment-specific AI restrictions | tested (learner accommodations user-scoped; ai_allowed snapshotted onto form sessions; Coach refuses tutoring on restricted reserved questions — ai_restricted_for_assessment) | run 35783063874 |
 | EX-07 | Administrator-configured mock tests, types, results | tested (slice-9 scope: admin-token mock configuration, frozen blueprint forms, deferred feedback, pass mark + per-chapter breakdown + attempts; form types and time analysis pending) | run 35456997436 |
 | EX-08 | Monotonic client timer, grace windows, integrity signals, per-test policy | in-progress (server-issued deadline, server-side answer cutoff after expiry, auto-submit semantics, skew-corrected client countdown — all tested incl. browser E2E; device-clock-tamper tests, grace windows, integrity signals pending) | run 35372696754 |
 | AI-03 | Mistake hypotheses, not assumed diagnoses | tested (slice 16: per-chapter miss patterns labelled hypothesis with evidence counts, min-evidence floor) | run 35479440275 |
@@ -111,7 +112,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | SR-03 | Cloze, image, explanatory cards | in-progress (front/back text cards tested end-to-end; cloze, image-occlusion, audio, and clinical-discrimination card types pending) | run 35379501317 |
 | SR-04 | AI draft vs editorial trust labels | not-started | — |
 | SR-05 | Duplicate / sibling handling | not-started | — |
-| SR-08 | Automatic question re-test queue, objective grading, family-variant preference | in-progress (retest cards with deterministic intervals, idempotent results, history tested; family-variant selection at session time pending) | run 35476029818 |
+| SR-08 | Automatic question re-test queue, objective grading, family- | in-progress (retest cards with deterministic intervals, idempotent results, history, family-variant serving with fallback tested; SLA timers pending) | run 35783063874 |
 | SR-09 | Editorial key-point cards | tested (slice 16: misses file deduplicated key-point cards with question provenance into the review queue) | run 35479440275 |
 | LIB-02 | Hybrid search with visibility filters | in-progress (text search over latest published versions tested; semantic/hybrid ranking pending) | run 35467238410 |
 | LIB-03 | Page / figure / timestamp citations | not-started | — |
@@ -161,17 +162,17 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | INST-02 | Distinct faculty and institution workspaces | in-progress (staff-gated cohort/assignment creation tested; dedicated workspace UI pending) | run 35467238410 |
 | INST-03 | SSO and scoped enrollment integrations | not-started | — |
 | INST-04 | Curriculum mapping and coverage | in-progress (institution programs create + staff-scoped access tested; curriculum-node mapping and coverage report against programs pending) | run 35728441244 |
-| INST-05 | Assessment author / reviewer / publisher separation | not-started | — |
+| INST-05 | Assessment author/reviewer/publisher separation | tested (§19.3 gate on the editorial flow: authored and imported items are drafts; submit→review→approve→publish with durable review decisions; the author of an item can neither approve nor publish it — separation enforced in one transition function) | run 35783063874 |
 | INST-06 | LTI and selected QTI interoperability | in-progress (interop receipt recording for qti export tested, staff-gated; actual LTI launch / QTI package exchange pending) | run 35728441244 |
-| INST-07 | Privacy-preserving cohort analytics | not-started | — |
-| COMMUNITY-01 | Moderated groups and discussions | not-started | — |
-| COMMUNITY-02 | Permitted shared content and private challenges | not-started | — |
-| COMMUNITY-03 | Optional gamification without coercive defaults | not-started | — |
-| COMP-01 | Daily / weekly / monthly / live competitions; same-exam population; opt-in handle | not-started | — |
+| INST-07 | Privacy-preserving cohort analytics | tested (aggregate-only per-chapter cohort accuracy; suppressed below minimum group size k=5 with honest reason; staff-gated, cross-tenant reads refused) | run 35783063874 |
+| COMMUNITY-01 | Moderated groups and discussions | tested (opt-in groups with moderator role, members-only reading, moderation as honest tombstones; non-participants never named) | run 35783063874 |
+| COMMUNITY-02 | Permitted shared content and private challenges | in-progress (private duels with challenge/accept/decline and capability share tokens; permitted shared-content flows pending) | run 35783063874 |
+| COMMUNITY-03 | Optional gamification without coercive defaults | tested (community identity strictly opt-in; non-participants shown as anonymous members; competition entries must use the learner's own registered handle) | run 35783063874 |
+| COMP-01 | Daily / weekly / monthly / live competitions; same-exam population; opt-in handle | in-progress (competition cadences + opt-in handle entry enforcement landed; live event scheduling infrastructure pending) | run 35783063874 |
 | COMP-02 | Scoring with guess penalty, capped speed bonus, tie-breaks | tested (engine scope: competition-scoring crate — 5/10/15 configurable points, 25% wrong penalty, 20% capped correct-only speed bonus, tie-break ladder score→accuracy→time→submission; native+wasm; live-event wiring lands with COMP-01) | run 35367410576 |
-| COMP-03 | Leagues and duels | not-started | — |
-| COMP-04 | Anti-cheat, integrity review, prizes only after review | not-started | — |
-| GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | not-started | — |
+| COMP-03 | Leagues and duels | in-progress (private duels: same-rules sessions per side, settle on second submit with time tie-break and honest draws; leagues pending) | run 35783063874 |
+| COMP-04 | Anti-cheat, integrity review, prizes only after review | tested (prize claims require a closed competition, completed integrity review, and an unflagged entry; leaderboard marks flagged entries and computes prize_eligible honestly) | run 35783063874 |
+| GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | in-progress (duel share tokens resolving to the deep-link payload landed; share cards and ambassador codes pending) | run 35783063874 |
 | CAREER-01 | Longitudinal learning portfolio | tested (portfolio entries: rotation/case_reflection/procedure_observation/certificate with list) | run 35467238410 |
 | PLAN-05 | Optional calendar read / write scopes | not-started | — |
 
