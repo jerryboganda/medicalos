@@ -331,7 +331,7 @@ pub async fn create_duel(
 /// requires the opponent's explicit accept — the link never auto-enters.
 pub async fn duel_by_token(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    _user: AuthUser,
     Path(token): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let duel = sqlx::query!(
@@ -384,7 +384,7 @@ pub async fn accept_duel(
     }
     // Same selection rules for both sides: random published, non-reserved,
     // non-quarantined questions from the chapter (or exam-wide without one).
-    let pick = |count: i32| async {
+    let pick = |count: i32| async move {
         let rows = sqlx::query!(
             r#"SELECT qv.id FROM question_versions qv
                JOIN curriculum_nodes c ON c.id = qv.chapter_id
