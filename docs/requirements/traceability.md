@@ -71,7 +71,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | TRUST-04 | Clinically reviewed shared medical content | not-started | — |
 | UX-01 | Touch-first session workspace: gestures, tool tray, navigator, Focus Mode | in-progress (tutor flow: options, feedback, skip, letter-key+Enter navigator, honest results — browser-E2E tested; gestures, tool tray, Focus Mode pending) | run 35366131810 |
 | UX-02 | Desktop and web keyboard map and fullscreen | in-progress (letter keys select, N/Enter next — fullscreen pending) | run 35366131810 |
-| ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | not-started | — |
+| ENG-01 | Daily goal, streak with freezes, question of the day; all disableable | in-progress (daily question goal, streak/freeze, per-learner disable + global kill switch, canonical QOTD answer/community split tested; available-time/minutes goal derivation and shared per-exam daily QOTD/push timing pending) | run 35756191515 |
 | COM-01 | Upgrade triggers and free allowance inside the 7C tiers | in-progress (allowance + offline-download triggers tested — both originate from entitlement checks only, never the Coach; remaining triggers: full mock, chapter analytics) | runs 35372696754, 35728441244 |
 | GROW-02 | Astro site: per-exam pages, pricing, checkout, help, legal, app-link files | not-started | — |
 | ARCH-02 | TypeScript contracts generated from Rust types | in-progress (hand-written pre-generation client in apps/client/src/lib/api.ts, marked for replacement; generation pipeline pending) | run 35366131810 |
