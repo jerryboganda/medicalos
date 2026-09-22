@@ -3280,7 +3280,10 @@ async fn offline_leases_sync_conflicts_deckio() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
-    assert_eq!(v["details"]["entitlement"]["current_tier"], "free", "{v}");
+    assert_eq!(
+        v["error"]["details"]["entitlement"]["current_tier"], "free",
+        "{v}"
+    );
 
     // Paid tier: lease granted with a per-device key.
     sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
@@ -3483,7 +3486,7 @@ async fn offline_leases_sync_conflicts_deckio() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
-    let server_at = conflict["details"]["server_updated_at"]
+    let server_at = conflict["error"]["details"]["server_updated_at"]
         .as_str()
         .expect("server version")
         .to_string();
@@ -3550,6 +3553,7 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
     let (status, device) = call(
@@ -3567,7 +3571,15 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
 
     let (status, exams) = call(app.clone(), request("GET", "/v1/exams", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{exams}");
-    let exam_id = exams["exams"][0]["exam_id"].as_str().expect("seed exam id");
+    let exam_id = ids.exam_id;
+    assert!(
+        exams["exams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["exam_id"] == exam_id.to_string()),
+        "{exams}"
+    );
 
     let (status, spec) = call(
         app.clone(),
