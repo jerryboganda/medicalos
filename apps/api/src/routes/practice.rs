@@ -214,6 +214,10 @@ pub async fn create_session(
                          WHERE r.question_version_id = qv.id
                            AND r.status = 'quarantined'
                      )
+                     AND NOT EXISTS (
+                         SELECT 1 FROM reserved_questions rq
+                         WHERE rq.question_version_id = qv.id
+                     )
                      AND (
                          $3 = 'any'
                          OR ($3 = 'unseen' AND NOT EXISTS (
@@ -562,6 +566,9 @@ pub struct AnswerReq {
     pub item_index: i16,
     pub chosen_index: Option<i16>,
     pub confidence: Option<String>,
+    /// QB-04: client-declared assistance (in-session tools). The server also
+    /// marks answers assisted when a coach turn preceded them on the question.
+    pub assisted: Option<bool>,
     pub idempotency_key: String,
     /// QB-17: client-measured time on item. Server clamps; absent stays
     /// null (never synthesized).
@@ -716,12 +723,24 @@ pub async fn apply_answer(
     // QB-17: clamp client-reported time into a sane range; out-of-range or
     // negative reports are dropped to NULL rather than trusted.
     let elapsed_ms = req.elapsed_ms.filter(|ms| (0..=3_600_000).contains(ms));
+    // QB-04: assistance evidence is what the client declares OR what the
+    // server can prove (a coach turn happened on this question first).
+    let coached = sqlx::query!(
+        r#"SELECT 1 AS "one!" FROM coach_turns
+           WHERE user_id = $1 AND question_version_id = $2"#,
+        user_id,
+        item.id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .is_some();
+    let assisted = req.assisted.unwrap_or(false) || coached;
 
     let inserted = sqlx::query!(
         r#"INSERT INTO attempts
              (id, session_id, item_index, user_id, question_version_id,
               chosen_index, correct, confidence, assisted, idempotency_key, elapsed_ms)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT DO NOTHING
            RETURNING id"#,
         Uuid::new_v4(),
@@ -732,6 +751,7 @@ pub async fn apply_answer(
         req.chosen_index,
         correct,
         req.confidence,
+        assisted,
         req.idempotency_key,
         elapsed_ms
     )
@@ -1135,7 +1155,8 @@ pub async fn community_stats(
              COALESCE(COUNT(*), 0) AS "attempts!",
              COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS "correct!"
            FROM attempts
-           WHERE question_version_id = $1 AND chosen_index IS NOT NULL"#,
+           WHERE question_version_id = $1 AND chosen_index IS NOT NULL
+             AND assisted = FALSE"#,
         vid
     )
     .fetch_one(&state.pool)
@@ -1144,6 +1165,7 @@ pub async fn community_stats(
         r#"SELECT chosen_index, COALESCE(COUNT(*), 0) AS "picks!"
            FROM attempts
            WHERE question_version_id = $1 AND chosen_index IS NOT NULL
+             AND assisted = FALSE
            GROUP BY chosen_index ORDER BY chosen_index"#,
         vid
     )

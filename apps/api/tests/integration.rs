@@ -4948,3 +4948,542 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
     assert!(actions.contains(&"membership_set"), "{actions:?}");
     assert!(actions.contains(&"cohort_created"), "{actions:?}");
 }
+
+#[tokio::test]
+async fn reserved_family_form_session_and_ai_gate() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+
+    // Fresh chapter so pool visibility is provable without seed noise.
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&author),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter",
+                "name": "Reserved Chapter", "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let chapter_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+
+    // Author + publish a question through the §19.3 gate.
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(serde_json::json!({
+                "chapter_id": chapter_id,
+                "difficulty": "medium",
+                "vignette": "Reserved fixture vignette.",
+                "lead_in": "What applies?",
+                "options": [
+                    {"text": "Right", "rationale": "Correct per the fixture."},
+                    {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+                ],
+                "correct_index": 0,
+                "key_learning_point": "Reserved families stay behind their form.",
+                "source_ref": "Fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+
+    // Date-effective spec, then a reserved form binding the question.
+    let (status, spec) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exams/{}/specs", ids.exam_id),
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "effective_from": "2026-01-01",
+                "config": {"pass_mark": 60}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{spec}");
+    let spec_id: Uuid = spec["spec_id"].as_str().unwrap().parse().unwrap();
+
+    // A reserved form without a bound question set is refused.
+    let (status, body) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exam-specs/{spec_id}/forms"),
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "name": "Empty reserved", "assessment_family": "past-paper",
+                "blueprint": {}, "reserved": true, "ai_allowed": false
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_reserved_form", "{body}");
+
+    let (status, form) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exam-specs/{spec_id}/forms"),
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "name": "2026 Past Paper", "assessment_family": "past-paper",
+                "blueprint": {}, "reserved": true, "ai_allowed": false,
+                "question_ids": [vid]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{form}");
+    assert_eq!(form["reserved_questions"], 1, "{form}");
+    let form_id: Uuid = form["form_id"].as_str().unwrap().parse().unwrap();
+
+    // EX-05: the reserved question no longer appears in the open pool.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "empty_pool", "{body}");
+
+    // The fixed form serves it, with the AI policy snapshotted.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/assessments/{form_id}/sessions"),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["question_count"], 1, "{session}");
+    assert_eq!(session["ai_allowed"], false, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    // EX-06: no AI tutoring on the reserved question (ai_allowed=false).
+    let (status, coach) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/coach/turns",
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "question_version_id": format!("{vid}"),
+                "prompt_type": "explain",
+                "message": "Explain the answer please",
+                "idempotency_key": "reserved-coach-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{coach}");
+    assert_eq!(
+        coach["error"]["code"], "ai_restricted_for_assessment",
+        "{coach}"
+    );
+
+    // The standard pipeline handles answers for the form session.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "reserved-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn assisted_evidence_never_becomes_community_signal() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let coached = register_and_login(app.clone()).await;
+    let clean = register_and_login(app.clone()).await;
+    let declared = register_and_login(app.clone()).await;
+
+    // One published question in a fresh chapter: every session serves it.
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&author),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter",
+                "name": "Assist Chapter", "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let chapter_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(serde_json::json!({
+                "chapter_id": chapter_id,
+                "difficulty": "easy",
+                "vignette": "Assisted-evidence fixture vignette.",
+                "lead_in": "What applies?",
+                "options": [
+                    {"text": "Right", "rationale": "Correct per the fixture."},
+                    {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+                ],
+                "correct_index": 0,
+                "key_learning_point": "Assisted answers are not community evidence.",
+                "source_ref": "Fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+
+    let answer_in_session = |app: Router, token: String, key: String, body: Value| async move {
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&token),
+                Some(serde_json::json!({
+                    "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&token),
+                Some(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/submit"),
+                Some(&token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    };
+
+    // Learner A asks the Coach first — the server can prove assistance.
+    let (status, coach) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/coach/turns",
+            Some(&coached),
+            Some(serde_json::json!({
+                "question_version_id": format!("{vid}"),
+                "prompt_type": "explain",
+                "message": "Walk me through this one",
+                "idempotency_key": "assist-coach-a"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{coach}");
+    answer_in_session(
+        app.clone(),
+        coached.clone(),
+        "assist-ans-a".into(),
+        serde_json::json!({
+            "item_index": 0, "chosen_index": 0, "idempotency_key": "assist-ans-a"
+        }),
+    )
+    .await;
+
+    // Learner B answers clean.
+    answer_in_session(
+        app.clone(),
+        clean.clone(),
+        "assist-ans-b".into(),
+        serde_json::json!({
+            "item_index": 0, "chosen_index": 0, "idempotency_key": "assist-ans-b"
+        }),
+    )
+    .await;
+
+    // Learner C declares assistance up front (in-session tools).
+    answer_in_session(
+        app.clone(),
+        declared.clone(),
+        "assist-ans-c".into(),
+        serde_json::json!({
+            "item_index": 0, "chosen_index": 0, "assisted": true,
+            "idempotency_key": "assist-ans-c"
+        }),
+    )
+    .await;
+
+    // QB-04: only the clean answer is community evidence.
+    let (status, stats) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{vid}/community-stats"),
+            Some(&clean),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stats}");
+    assert_eq!(stats["attempts"], 1, "{stats}");
+
+    // Screening sees the same honest signal.
+    let (status, screen) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/psychometrics/{vid}"),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{screen}");
+    assert_eq!(screen["attempts"], 1, "{screen}");
+}
+
+#[tokio::test]
+async fn retest_serves_unattempted_family_variant() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let original = ids.question_versions[0];
+
+    // The learner failed the original: a re-test card exists (+1 day).
+    let (status, res) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&learner),
+            Some(serde_json::json!({
+                "question_version_id": format!("{original}"),
+                "correct": false, "idempotency_key": "variant-res-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+
+    // Publish a second question, then adopt the original's family (QB-02).
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&author),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "kind": "chapter",
+                "name": "Variant Chapter", "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let chapter_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(serde_json::json!({
+                "chapter_id": chapter_id,
+                "difficulty": "medium",
+                "vignette": "Family-variant fixture vignette (numbers changed).",
+                "lead_in": "What applies?",
+                "options": [
+                    {"text": "Right", "rationale": "Correct per the fixture."},
+                    {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+                ],
+                "correct_index": 1,
+                "key_learning_point": "Variants probe the same concept differently.",
+                "source_ref": "Fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let variant: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, wf) = workflow(&app, &author, "submit", [variant]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "approve", [variant]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(&app, &reviewer, "publish", [variant]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    sqlx::query(
+        r#"UPDATE questions SET family_id = (
+               SELECT q.family_id FROM questions q
+               JOIN question_versions qv ON qv.question_id = q.id
+               WHERE qv.id = $1)
+           WHERE id = (SELECT question_id FROM question_versions WHERE id = $2)"#,
+    )
+    .bind(original)
+    .bind(variant)
+    .execute(&state.pool)
+    .await
+    .expect("adopt family");
+
+    // Force the card due and serve the queue.
+    sqlx::query("UPDATE retest_cards SET due = now() - INTERVAL '1 minute'")
+        .execute(&state.pool)
+        .await
+        .expect("force due");
+    let (status, queue) = call(
+        app.clone(),
+        request("GET", "/v1/me/retests", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    let items = queue["retests"].as_array().unwrap();
+    assert!(!items.is_empty(), "{queue}");
+    let mine = items
+        .iter()
+        .find(|i| i["card_version_id"] == serde_json::json!(format!("{original}")))
+        .expect("card in queue");
+    assert_eq!(mine["served_variant"], true, "{queue}");
+    assert_eq!(
+        mine["question_version_id"],
+        serde_json::json!(format!("{variant}")),
+        "{queue}"
+    );
+
+    // Once the learner has actually attempted the variant, the queue falls
+    // back to the original card version.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 1, "idempotency_key": "variant-seen-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, queue) = call(
+        app.clone(),
+        request("GET", "/v1/me/retests", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    let mine = queue["retests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["card_version_id"] == serde_json::json!(format!("{original}")))
+        .expect("card still in queue");
+    assert_eq!(mine["served_variant"], false, "{queue}");
+    assert_eq!(
+        mine["question_version_id"],
+        serde_json::json!(format!("{original}")),
+        "{queue}"
+    );
+}

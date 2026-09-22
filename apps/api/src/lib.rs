@@ -116,6 +116,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::assessment_workflow),
         )
         .route(
+            "/v1/assessments/{form_id}/sessions",
+            post(routes::exams::start_assessment_session),
+        )
+        .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
                 .get(routes::settings::get_settings),
@@ -412,6 +416,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/admin/assessment-workflow",
             post(routes::admin::assessment_workflow),
+        )
+        .route(
+            "/api/v1/assessments/{form_id}/sessions",
+            post(routes::exams::start_assessment_session),
         )
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))

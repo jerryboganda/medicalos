@@ -109,6 +109,9 @@ pub struct AssessmentFormReq {
     pub reserved: bool,
     #[serde(default)]
     pub ai_allowed: bool,
+    /// EX-05: published versions bound to a reserved form are served only
+    /// through that form — required when reserved is true.
+    pub question_ids: Option<Vec<Uuid>>,
 }
 
 pub async fn create_assessment_form(
@@ -140,6 +143,31 @@ pub async fn create_assessment_form(
     if exists.is_none() {
         return Err(ApiError::not_found("exam_spec_not_found"));
     }
+    // EX-05: a reserved family must bind its fixed question set, and every
+    // bound version must be published — reserved content is reviewed content.
+    let question_ids = req.question_ids.unwrap_or_default();
+    if req.reserved {
+        if question_ids.is_empty() {
+            return Err(ApiError::unprocessable(
+                "invalid_reserved_form",
+                "reserved forms must bind their question_ids",
+            ));
+        }
+        for vid in &question_ids {
+            let published = sqlx::query!(
+                "SELECT 1 AS one FROM question_versions WHERE id = $1 AND status = 'published'",
+                vid
+            )
+            .fetch_optional(&state.pool)
+            .await?;
+            if published.is_none() {
+                return Err(ApiError::unprocessable(
+                    "invalid_reserved_question",
+                    "reserved forms may only bind published question versions",
+                ));
+            }
+        }
+    }
     let id = Uuid::new_v4();
     sqlx::query!(
         r#"INSERT INTO assessment_forms
@@ -155,10 +183,86 @@ pub async fn create_assessment_form(
     )
     .execute(&state.pool)
     .await?;
+    if req.reserved {
+        for vid in &question_ids {
+            sqlx::query!(
+                "INSERT INTO reserved_questions (question_version_id, form_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (question_version_id) DO NOTHING",
+                vid,
+                id
+            )
+            .execute(&state.pool)
+            .await?;
+        }
+    }
     Ok(Json(json!({
         "form_id": id,
         "reserved": req.reserved,
         "ai_allowed": req.ai_allowed,
+        "reserved_questions": if req.reserved { question_ids.len() } else { 0 },
+    })))
+}
+
+/// EX-05: start the fixed session a reserved form exists for. The form's
+/// bound questions are snapshotted in stable order; the standard answer and
+/// submit pipeline takes over from there.
+pub async fn start_assessment_session(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(form_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let form = sqlx::query!(
+        "SELECT id, ai_allowed FROM assessment_forms WHERE id = $1",
+        form_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("assessment_form_not_found"))?;
+    let items = sqlx::query!(
+        r#"SELECT rq.question_version_id
+           FROM reserved_questions rq
+           JOIN question_versions qv ON qv.id = rq.question_version_id
+           WHERE rq.form_id = $1 AND qv.status = 'published'
+           ORDER BY rq.question_version_id"#,
+        form_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    if items.is_empty() {
+        return Err(ApiError::unprocessable(
+            "form_empty",
+            "this assessment form has no published reserved questions",
+        ));
+    }
+    let sid = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO practice_sessions (id, user_id, preset, form_id, ai_allowed)
+         VALUES ($1, $2, 'exam', $3, $4)",
+        sid,
+        user.user_id,
+        form.id,
+        form.ai_allowed
+    )
+    .execute(&state.pool)
+    .await?;
+    for (i, q) in items.iter().enumerate() {
+        let idx = i as i16;
+        sqlx::query!(
+            "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+             VALUES ($1, $2, $3, $4)",
+            Uuid::new_v4(),
+            sid,
+            idx,
+            q.question_version_id
+        )
+        .execute(&state.pool)
+        .await?;
+    }
+    Ok(Json(json!({
+        "session_id": sid,
+        "question_count": items.len(),
+        "ai_allowed": form.ai_allowed,
     })))
 }
 

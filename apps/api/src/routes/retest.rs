@@ -270,16 +270,45 @@ pub async fn due_retests(
     )
     .fetch_all(&state.pool)
     .await?;
-    let items: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|r| {
-            json!({
-                "question_version_id": r.question_version_id,
-                "vignette": r.vignette,
-                "passes": r.passes,
-                "due": r.due,
-            })
-        })
-        .collect();
+    // QB-02/SR-08 (§13): prefer an unattempted published sibling variant of
+    // the same family at serving time; the original card stays the fallback
+    // and the result is still recorded against the card's version.
+    let mut items: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
+    for r in rows {
+        let variant = sqlx::query!(
+            r#"SELECT qv.id, qv.vignette
+               FROM question_versions qv
+               JOIN questions q ON q.id = qv.question_id
+               WHERE q.family_id = (
+                       SELECT q2.family_id FROM questions q2
+                       JOIN question_versions qv2 ON qv2.question_id = q2.id
+                       WHERE qv2.id = $1)
+                 AND qv.id <> $1 AND qv.status = 'published'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM attempts a
+                     WHERE a.question_version_id = qv.id AND a.user_id = $2)
+                 AND NOT EXISTS (
+                     SELECT 1 FROM reserved_questions rq
+                     WHERE rq.question_version_id = qv.id)
+               ORDER BY qv.version
+               LIMIT 1"#,
+            r.question_version_id,
+            user.user_id
+        )
+        .fetch_optional(&state.pool)
+        .await?;
+        let (served_id, served_vignette, swapped) = match &variant {
+            Some(v) => (v.id, v.vignette.clone(), true),
+            None => (r.question_version_id, r.vignette.clone(), false),
+        };
+        items.push(json!({
+            "question_version_id": served_id,
+            "vignette": served_vignette,
+            "passes": r.passes,
+            "due": r.due,
+            "card_version_id": r.question_version_id,
+            "served_variant": swapped,
+        }));
+    }
     Ok(Json(json!({ "retests": items })))
 }

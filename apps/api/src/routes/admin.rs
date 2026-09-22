@@ -845,7 +845,8 @@ pub async fn psychometric_screening(
              COALESCE(COUNT(*), 0) AS "attempts!",
              COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS "correct!"
            FROM attempts
-           WHERE question_version_id = $1 AND chosen_index IS NOT NULL"#,
+           WHERE question_version_id = $1 AND chosen_index IS NOT NULL
+             AND assisted = FALSE"#,
         vid
     )
     .fetch_one(&state.pool)

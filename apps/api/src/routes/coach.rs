@@ -135,6 +135,27 @@ pub async fn coach_turn(
 ) -> ApiResult<Json<serde_json::Value>> {
     check_daily_allowance(&state, user.user_id).await?;
 
+    // EX-06: assessment-specific AI restrictions bind at the question —
+    // a version reserved by a form with ai_allowed=false gets no tutoring.
+    if let Some(vid) = req.question_version_id {
+        let restricted = sqlx::query!(
+            r#"SELECT f.ai_allowed AS "ai_allowed!" FROM reserved_questions rq
+               JOIN assessment_forms f ON f.id = rq.form_id
+               WHERE rq.question_version_id = $1"#,
+            vid
+        )
+        .fetch_optional(&state.pool)
+        .await?;
+        if let Some(r) = restricted {
+            if !r.ai_allowed {
+                return Err(ApiError::forbidden(
+                    "ai_restricted_for_assessment",
+                    "AI assistance is not allowed for this reserved assessment",
+                ));
+            }
+        }
+    }
+
     let message = req.message.trim().to_string();
     if message.is_empty() || message.len() > 2000 {
         return Err(ApiError::unprocessable(

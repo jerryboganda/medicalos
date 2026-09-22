@@ -237,7 +237,11 @@ pub async fn qotd(
 
 async fn selected_qotd_id(state: &AppState, user_id: Uuid) -> ApiResult<Option<Uuid>> {
     let count: i64 = sqlx::query!(
-        r#"SELECT COUNT(*) AS "n!" FROM question_versions WHERE status = 'published'"#
+        r#"SELECT COUNT(*) AS "n!" FROM question_versions qv
+           WHERE qv.status = 'published'
+             AND NOT EXISTS (
+                 SELECT 1 FROM reserved_questions rq
+                 WHERE rq.question_version_id = qv.id)"#
     )
     .fetch_one(&state.pool)
     .await?
@@ -254,10 +258,13 @@ async fn selected_qotd_id(state: &AppState, user_id: Uuid) -> ApiResult<Option<U
     .h;
     let offset = (seed as i64).rem_euclid(count);
     let selected = sqlx::query!(
-        r#"SELECT id
-           FROM question_versions
-           WHERE status = 'published'
-           ORDER BY id
+        r#"SELECT qv.id
+           FROM question_versions qv
+           WHERE qv.status = 'published'
+             AND NOT EXISTS (
+                 SELECT 1 FROM reserved_questions rq
+                 WHERE rq.question_version_id = qv.id)
+           ORDER BY qv.id
            OFFSET $1 LIMIT 1"#,
         offset
     )
