@@ -8,7 +8,6 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};

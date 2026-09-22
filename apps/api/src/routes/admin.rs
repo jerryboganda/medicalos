@@ -1112,14 +1112,14 @@ pub async fn ai_admin(
     let by_adapter = sqlx::query!(
         r#"SELECT adapter AS "adapter!", model AS "model!", COUNT(*) AS "n!"
            FROM coach_turns WHERE created_at >= now() - interval '30 days'
-           GROUP BY adapter, model ORDER BY n DESC"#
+           GROUP BY adapter, model ORDER BY COUNT(*) DESC"#
     )
     .fetch_all(&state.pool)
     .await?;
     let by_prompt = sqlx::query!(
         r#"SELECT prompt_type AS "prompt_type!", COUNT(*) AS "n!"
            FROM coach_turns WHERE created_at >= now() - interval '30 days'
-           GROUP BY prompt_type ORDER BY n DESC"#
+           GROUP BY prompt_type ORDER BY COUNT(*) DESC"#
     )
     .fetch_all(&state.pool)
     .await?;
