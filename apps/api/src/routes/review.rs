@@ -61,6 +61,13 @@ pub async fn create_deck(
 pub struct AddCardReq {
     pub front: String,
     pub back: String,
+    /// SR-03: basic (default) | cloze | image.
+    pub card_type: Option<String>,
+    /// SR-04: editorial (default) | ai_draft. AI-drafted cards carry the
+    /// label everywhere they render; they never masquerade as reviewed.
+    pub trust: Option<String>,
+    /// SR-03 cloze text with {{c1::deletion}} markers; required for cloze.
+    pub cloze: Option<String>,
 }
 
 pub async fn add_card(
@@ -77,6 +84,32 @@ pub async fn add_card(
             "front and back must be 1-5000 characters",
         ));
     }
+    let card_type = req.card_type.unwrap_or_else(|| "basic".into());
+    if !matches!(card_type.as_str(), "basic" | "cloze" | "image") {
+        return Err(ApiError::unprocessable(
+            "invalid_card_type",
+            "card_type must be basic, cloze, or image",
+        ));
+    }
+    if card_type == "cloze" {
+        let cloze_ok = req
+            .cloze
+            .as_deref()
+            .is_some_and(|c| c.contains("{{c1::") && c.contains("}}"));
+        if !cloze_ok {
+            return Err(ApiError::unprocessable(
+                "invalid_cloze",
+                "cloze cards need deletion markers like {{c1::answer}}",
+            ));
+        }
+    }
+    let trust = req.trust.unwrap_or_else(|| "editorial".into());
+    if !matches!(trust.as_str(), "editorial" | "ai_draft") {
+        return Err(ApiError::unprocessable(
+            "invalid_trust",
+            "trust must be editorial or ai_draft",
+        ));
+    }
     let owns = sqlx::query!(
         "SELECT 1 AS one FROM decks WHERE id = $1 AND user_id = $2",
         deck_id,
@@ -87,25 +120,47 @@ pub async fn add_card(
     .ok_or_else(|| ApiError::not_found("deck_not_found"))?;
     let _ = owns;
 
+    // SR-05: a sibling with the same normalized front already exists in this
+    // deck — refuse rather than silently grow duplicates.
+    let duplicate = sqlx::query!(
+        "SELECT 1 AS one FROM cards
+         WHERE deck_id = $1 AND lower(btrim(front)) = lower(btrim($2))",
+        deck_id,
+        front
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if duplicate.is_some() {
+        return Err(ApiError::conflict(
+            "duplicate_card",
+            "a card with the same front already exists in this deck",
+        ));
+    }
+
     let scheduler = Scheduler::new();
     let state_json =
         serde_json::to_value(to_state(&scheduler.new_card())).map_err(|_| ApiError::internal())?;
     let card_id = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO cards (id, deck_id, user_id, front, back, state)
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO cards
+           (id, deck_id, user_id, front, back, state, card_type, trust, cloze)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         card_id,
         deck_id,
         user.user_id,
         front,
         back,
-        state_json
+        state_json,
+        card_type,
+        trust,
+        req.cloze
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(
-        serde_json::json!({ "card_id": card_id, "due": null, "state": "new" }),
-    ))
+    Ok(Json(serde_json::json!({
+        "card_id": card_id, "due": null, "state": "new",
+        "card_type": card_type, "trust": trust,
+    })))
 }
 
 /// Today's review queue: due cards first (most-at-risk-first), then new
@@ -117,7 +172,7 @@ pub async fn queue(
 ) -> ApiResult<Json<serde_json::Value>> {
     let now = chrono::Utc::now();
     let due_rows = sqlx::query!(
-        r#"SELECT id, front, back, state FROM cards
+        r#"SELECT id, front, back, state, card_type, trust, cloze FROM cards
            WHERE user_id = $1 AND suspended = false
              AND (state->>'state')::int <> 0
              AND (state->>'due')::timestamptz <= $2
@@ -128,7 +183,7 @@ pub async fn queue(
     .fetch_all(&state.pool)
     .await?;
     let new_rows = sqlx::query!(
-        r#"SELECT id, front, back, state FROM cards
+        r#"SELECT id, front, back, state, card_type, trust, cloze FROM cards
            WHERE user_id = $1 AND suspended = false
              AND (state->>'state')::int = 0
            ORDER BY created_at"#,
@@ -138,13 +193,25 @@ pub async fn queue(
     .await?;
 
     // Lookup map built from borrowed rows before they are consumed below.
-    let mut meta: std::collections::HashMap<String, (String, String)> =
-        std::collections::HashMap::new();
-    for r in &due_rows {
-        meta.insert(r.id.to_string(), (r.front.clone(), r.back.clone()));
+    struct CardMeta {
+        front: String,
+        back: String,
+        card_type: String,
+        trust: String,
+        cloze: Option<String>,
     }
-    for r in &new_rows {
-        meta.insert(r.id.to_string(), (r.front.clone(), r.back.clone()));
+    let mut meta: std::collections::HashMap<String, CardMeta> = std::collections::HashMap::new();
+    for r in due_rows.iter().chain(new_rows.iter()) {
+        meta.insert(
+            r.id.to_string(),
+            CardMeta {
+                front: r.front.clone(),
+                back: r.back.clone(),
+                card_type: r.card_type.clone(),
+                trust: r.trust.clone(),
+                cloze: r.cloze.clone(),
+            },
+        );
     }
 
     let due_cards: Vec<QueueCard> = due_rows
@@ -175,11 +242,15 @@ pub async fn queue(
         cards
             .iter()
             .filter_map(|qc| {
-                meta.get(&qc.id).map(|(front, back)| {
+                meta.get(&qc.id).map(|m| {
                     serde_json::json!({
                         "card_id": qc.id,
-                        "front": front,
-                        "back": back,
+                        "front": m.front,
+                        "back": m.back,
+                        "card_type": m.card_type,
+                        "cloze": m.cloze,
+                        "trust": m.trust,
+                        "ai_draft": m.trust == "ai_draft",
                     })
                 })
             })

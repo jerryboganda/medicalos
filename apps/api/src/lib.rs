@@ -180,6 +180,15 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/review-debt", get(routes::review::review_debt))
         .route(
+            "/v1/admin/articles/{article_id}/media",
+            post(routes::library::attach_media),
+        )
+        .route(
+            "/v1/admin/image-cases",
+            post(routes::library::create_image_case),
+        )
+        .route("/v1/me/image-cases", get(routes::library::list_image_cases))
+        .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
                 .get(routes::settings::get_settings),
@@ -544,6 +553,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::program::selection_policy),
         )
         .route("/api/v1/me/review-debt", get(routes::review::review_debt))
+        .route(
+            "/api/v1/admin/articles/{article_id}/media",
+            post(routes::library::attach_media),
+        )
+        .route(
+            "/api/v1/admin/image-cases",
+            post(routes::library::create_image_case),
+        )
+        .route(
+            "/api/v1/me/image-cases",
+            get(routes::library::list_image_cases),
+        )
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
         .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))

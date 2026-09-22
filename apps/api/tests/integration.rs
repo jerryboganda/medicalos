@@ -6226,3 +6226,256 @@ async fn review_debt_and_exam_switch_gap_report_are_honest() {
         .expect("estimator state exists after a real session");
     assert!(ch1_policy["current_k"].as_f64().unwrap() >= 8.0, "{policy}");
 }
+
+#[tokio::test]
+async fn cards_types_trust_and_duplicate_refusal() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&learner),
+            Some(serde_json::json!({"name": "SR-03 deck"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, card) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "Normal card",
+                "back": "Normal back"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    assert_eq!(card["card_type"], "basic", "{card}");
+
+    // Cloze needs deletion markers; with them it is stored as typed.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "Cloze card", "back": "ignored",
+                "card_type": "cloze", "cloze": "no markers here"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_cloze", "{body}");
+    let (status, cloze) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "Cloze card", "back": "ignored",
+                "card_type": "cloze",
+                "cloze": "The gloopoid stores {{c1::glorbin}} before release."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cloze}");
+    assert_eq!(cloze["card_type"], "cloze", "{cloze}");
+
+    // AI-drafted cards carry the trust label.
+    let (status, ai) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "AI drafted card", "back": "back", "trust": "ai_draft"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ai}");
+    assert_eq!(ai["trust"], "ai_draft", "{ai}");
+
+    // SR-05: the same front (case/space-insensitive) is refused.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "  normal CARD ", "back": "dup"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "duplicate_card", "{body}");
+
+    // The queue renders the type and trust labels honestly.
+    let (status, queue) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    let new_cards = queue["new"].as_array().unwrap();
+    assert!(new_cards.len() >= 3, "{queue}");
+    assert!(
+        new_cards.iter().all(|c| c["card_type"].is_string()),
+        "{queue}"
+    );
+    assert!(
+        new_cards
+            .iter()
+            .any(|c| c["trust"] == serde_json::Value::from("ai_draft")
+                && c["ai_draft"] == serde_json::Value::from(true)),
+        "{queue}"
+    );
+}
+
+#[tokio::test]
+async fn library_media_and_image_cases_are_rights_checked() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    seed::seed(&state.pool).await.expect("seed");
+
+    let article_id: Uuid = sqlx::query!("SELECT id FROM articles LIMIT 1")
+        .fetch_one(&state.pool)
+        .await
+        .expect("seeded article")
+        .id;
+
+    // LIB-06: media without a rights reference is refused.
+    let (status, body) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/media"),
+            Some(&token),
+            Some(serde_json::json!({
+                "url": "https://cdn.example.test/lecture.mp4",
+                "kind": "video",
+                "captions": [],
+                "chapters": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "rights_ref_required", "{body}");
+
+    let (status, media) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/media"),
+            Some(&token),
+            Some(serde_json::json!({
+                "url": "https://cdn.example.test/lecture.mp4",
+                "kind": "video",
+                "duration_seconds": 600,
+                "captions": [{"start_ms": 0, "end_ms": 2000, "text": "Welcome"}],
+                "chapters": [{"at_ms": 0, "title": "Intro"}],
+                "rights_ref": "LIC-2026-014"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{media}");
+
+    // The article now serves its media with captions and chapters.
+    let (status, body) = call(
+        app.clone(),
+        request("GET", "/v1/library/search?q=gloopoid", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let results = body["results"].as_array().unwrap();
+    assert!(!results.is_empty(), "{body}");
+    let slug = results[0]["slug"].as_str().unwrap().to_string();
+    let (status, article) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/library/articles/{slug}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{article}");
+    let media_list = article["media"].as_array().unwrap();
+    assert_eq!(media_list.len(), 1, "{article}");
+    assert_eq!(media_list[0]["rights_ref"], "LIC-2026-014", "{article}");
+    assert_eq!(media_list[0]["captions"][0]["text"], "Welcome", "{article}");
+    assert_eq!(media_list[0]["chapters"][0]["title"], "Intro", "{article}");
+
+    // IMG-01: every image needs a rights reference.
+    let (status, body) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Chest series", "kind": "stack",
+                "images": [{"url": "https://cdn.example.test/slice-1.png",
+                            "rights_ref": ""}],
+                "findings": "No acute findings in the fixture."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_image", "{body}");
+
+    let (status, case) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Chest series", "kind": "stack", "modality": "CT",
+                "images": [
+                    {"url": "https://cdn.example.test/slice-1.png", "rights_ref": "LIC-2026-015"},
+                    {"url": "https://cdn.example.test/slice-2.png", "rights_ref": "LIC-2026-015"}
+                ],
+                "findings": "Fixture findings on the stack."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{case}");
+
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/me/image-cases", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let cases = list["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 1, "{list}");
+    assert_eq!(cases[0]["kind"], "stack", "{list}");
+    assert_eq!(cases[0]["images"].as_array().unwrap().len(), 2, "{list}");
+    assert!(cases[0]["findings"].as_str().is_some(), "{list}");
+}

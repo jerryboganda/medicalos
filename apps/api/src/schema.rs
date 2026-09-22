@@ -38,6 +38,7 @@ migrations!(
     "0021_tenant_foundations",
     "0022_reserved_families",
     "0023_community",
+    "0024_library_cards",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
