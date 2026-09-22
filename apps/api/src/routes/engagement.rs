@@ -167,7 +167,6 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
     Ok(())
 }
 
-#[axum::debug_handler]
 pub async fn engagement_status(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -247,7 +246,7 @@ async fn selected_qotd_id(state: &AppState, user_id: Uuid) -> ApiResult<Option<U
         return Ok(None);
     }
     let seed = sqlx::query!(
-        r#"SELECT hashtext($1::text || CURRENT_DATE::text) AS "h!"#,
+        r##"SELECT hashtext($1::text || CURRENT_DATE::text) AS "h!""##,
         user_id.to_string()
     )
     .fetch_one(&state.pool)
@@ -403,7 +402,7 @@ pub async fn answer_qotd(
     .fetch_all(&state.pool)
     .await?;
     let total: i64 = split.iter().map(|r| r.n).sum();
-    let correct = req.chosen_index == q.correct_index;
+    let correct = i32::from(q.correct_index) == req.chosen_index;
     Ok(Json(json!({
         "correct": correct,
         "correct_index": q.correct_index,
