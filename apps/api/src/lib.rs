@@ -169,6 +169,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/admin/competitions/{comp_id}/prize-review",
             post(routes::community::prize_review),
         )
+        .route("/v1/me/plan/replan", post(routes::program::replan_plan))
+        .route(
+            "/v1/me/exam-switch/{to_exam_id}/gap-report",
+            get(routes::program::exam_switch_gap_report),
+        )
+        .route(
+            "/v1/me/selection-policy",
+            get(routes::program::selection_policy),
+        )
+        .route("/v1/me/review-debt", get(routes::review::review_debt))
         .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
@@ -524,6 +534,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/admin/competitions/{comp_id}/prize-review",
             post(routes::community::prize_review),
         )
+        .route("/api/v1/me/plan/replan", post(routes::program::replan_plan))
+        .route(
+            "/api/v1/me/exam-switch/{to_exam_id}/gap-report",
+            get(routes::program::exam_switch_gap_report),
+        )
+        .route(
+            "/api/v1/me/selection-policy",
+            get(routes::program::selection_policy),
+        )
+        .route("/api/v1/me/review-debt", get(routes::review::review_debt))
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
         .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))

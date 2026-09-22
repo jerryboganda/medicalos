@@ -30,6 +30,9 @@ fn prompt_type_of(raw: &Option<String>) -> &'static str {
     match raw.as_deref() {
         Some("why_wrong") => "why_wrong",
         Some("explain") => "explain",
+        Some("socratic") => "socratic",
+        Some("explain_back") => "explain_back",
+        Some("contrast") => "contrast",
         _ => "free",
     }
 }
@@ -76,6 +79,57 @@ fn extractive_answer(
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
     match prompt_type {
+        "socratic" => {
+            // AI-10: guided self-explanation. The direct reveal, key point,
+            // and exam tip are deliberately withheld in this mode.
+            parts.push("Work through these prompts before checking anything:".into());
+            parts.push("• What exactly is the stem asking for?".into());
+            parts.push("• Which finding rules options out?".into());
+            parts.push("• State your choice and the single rule that decides it.".into());
+            if let Some(o) = options.first() {
+                parts.push(format!(
+                    "When you are done, compare each option against this anchor: {}.",
+                    o.rationale
+                ));
+            }
+            return parts.join(" ");
+        }
+        "explain_back" => {
+            // AI-10: the learner explains; the coach mirrors it against the
+            // reviewed material so the learner can find their own gap.
+            parts.push(format!(
+                "Your explanation, in your words: \"{}\"",
+                message.trim()
+            ));
+            for (i, o) in options.iter().enumerate() {
+                let letter = (b'A' + i as u8) as char;
+                parts.push(format!(
+                    "• Check {}: {} — does your rule account for this?",
+                    letter, o.rationale
+                ));
+            }
+        }
+        "contrast" => {
+            // AI-10: contrast the defensible choice against the picked
+            // distractor (or the first one when nothing was picked).
+            let correct = options.get(correct_index as usize);
+            let distractor = chosen
+                .filter(|c| *c != correct_index)
+                .and_then(|c| options.get(c as usize))
+                .or_else(|| {
+                    options
+                        .iter()
+                        .enumerate()
+                        .find(|(i, _)| *i != correct_index as usize)
+                        .map(|(_, o)| o)
+                });
+            if let (Some(c), Some(d)) = (correct, distractor) {
+                parts.push(format!(
+                    "Compare: the defensible choice is \"{}\" ({}). Against \"{}\" ({}).",
+                    c.text, c.rationale, d.text, d.rationale
+                ));
+            }
+        }
         "why_wrong" => {
             if let Some(c) = chosen {
                 if c != correct_index {
@@ -111,16 +165,7 @@ fn extractive_answer(
             ));
         }
     }
-    if prompt_type == "socratic" {
-        let _ = source_ref; // not used in guided mode
-                            // AI-10: guided self-explanation without direct reveal.
-        parts.insert(
-            0,
-            "Work through these prompts before checking below:".into(),
-        );
-        parts.insert(1, "• What exactly is the stem asking for?".into());
-        parts.push("• Now compare each option against your rule.".into());
-    }
+    let _ = source_ref; // cited material arrives with grounded retrieval
     parts.push(format!("Key learning point: {key_point}"));
     if let Some(tip) = exam_tip {
         parts.push(format!("Exam tip: {tip}"));

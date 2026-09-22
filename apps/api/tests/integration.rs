@@ -5952,3 +5952,273 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
     assert_eq!(first["flagged"], true, "{board}");
     assert_eq!(first["prize_eligible"], false, "{board}");
 }
+
+#[tokio::test]
+async fn coach_socratic_explain_back_and_contrast_modes() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // Answer-first gate: a real session on chapter1 before any coaching.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let vid: Uuid = session["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "modes-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let turn = |app: Router, mode: &str, key: &str| async move {
+        call(
+            app,
+            request(
+                "POST",
+                "/v1/coach/turns",
+                Some(&learner),
+                Some(serde_json::json!({
+                    "question_version_id": format!("{vid}"),
+                    "prompt_type": mode,
+                    "message": "My rule is: pick the option the stem finding points at",
+                    "idempotency_key": key
+                })),
+            ),
+        )
+        .await
+    };
+
+    // Socratic guides without the reveal.
+    let (status, soc) = turn(app.clone(), "socratic", "mode-socratic").await;
+    assert_eq!(status, StatusCode::OK, "{soc}");
+    let soc_text = soc["answer"].as_str().unwrap();
+    assert!(soc_text.contains("Work through these prompts"), "{soc}");
+    assert!(!soc_text.contains("Key learning point"), "{soc}");
+
+    // Explain-back mirrors the learner's own words.
+    let (status, back) = turn(app.clone(), "explain_back", "mode-back").await;
+    assert_eq!(status, StatusCode::OK, "{back}");
+    assert!(
+        back["answer"]
+            .as_str()
+            .unwrap()
+            .contains("My rule is: pick the option the stem finding points at"),
+        "{back}"
+    );
+
+    // Contrast compares the defensible choice against a distractor.
+    let (status, contrast) = turn(app.clone(), "contrast", "mode-contrast").await;
+    assert_eq!(status, StatusCode::OK, "{contrast}");
+    assert!(
+        contrast["answer"]
+            .as_str()
+            .unwrap()
+            .contains("Compare: the defensible choice is"),
+        "{contrast}"
+    );
+}
+
+#[tokio::test]
+async fn plan_replan_trims_to_capacity_with_receipt() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+
+    // Cold start: one 10-question practice task (10 committed minutes).
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Replan below capacity is refused as invalid; above it is a no-op.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes": 1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes": 60})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["replanned"], false, "{body}");
+    assert_eq!(body["reason"], "within_capacity", "{body}");
+
+    // Trim to 5 minutes: the 10-minute task is deferred with a receipt.
+    let (status, replanned) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes": 5})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replanned}");
+    assert_eq!(replanned["replanned"], true, "{replanned}");
+    assert_eq!(replanned["deferred_tasks"], 1, "{replanned}");
+    assert_eq!(replanned["kept_tasks"], 0, "{replanned}");
+
+    // The revision is on today's plan with its receipt (PLAN-01 union).
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+}
+
+#[tokio::test]
+async fn review_debt_and_exam_switch_gap_report_are_honest() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // PLAN-03: no history means no projection — never an invented number.
+    let (status, debt) = call(
+        app.clone(),
+        request("GET", "/v1/me/review-debt", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{debt}");
+    assert_eq!(debt["due_now"], 0, "{debt}");
+    assert_eq!(debt["completed_last_7_days"], 0, "{debt}");
+    assert!(debt["projected_backlog_days"].is_null(), "{debt}");
+
+    // PLAN-04: attempt chapter1 for real, then read the switch report.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "gap-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/exam-switch/{}/gap-report", ids.exam_id),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let chapters = report["chapters"].as_array().unwrap();
+    let ch1 = chapters
+        .iter()
+        .find(|c| c["chapter_id"] == serde_json::json!(format!("{}", ids.chapter1)))
+        .expect("chapter1 in report");
+    assert!(
+        ch1["independent_attempts"].as_i64().unwrap() >= 1,
+        "{report}"
+    );
+    assert_eq!(ch1["covered"], false, "{report}"); // 1 attempt < 10-rule
+    assert_eq!(ch1["evidence"], "low_evidence", "{report}");
+    let untouched = chapters
+        .iter()
+        .find(|c| c["chapter_id"] != serde_json::json!(format!("{}", ids.chapter1)))
+        .expect("other chapters");
+    assert_eq!(untouched["evidence"], "no_evidence", "{report}");
+
+    // AI-17: the selection policy discloses the real estimator state.
+    let (status, policy) = call(
+        app.clone(),
+        request("GET", "/v1/me/selection-policy", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{policy}");
+    assert_eq!(policy["estimator"]["model"], "elo_baseline", "{policy}");
+    let mine = policy["your_chapters"].as_array().unwrap();
+    let ch1_policy = mine
+        .iter()
+        .find(|c| c["chapter"] != serde_json::Value::Null)
+        .expect("estimator state exists after a real session");
+    assert!(ch1_policy["current_k"].as_f64().unwrap() >= 8.0, "{policy}");
+}
