@@ -3859,7 +3859,6 @@ async fn completion_kernel_institution_program_and_interop_are_staff_scoped() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-
 #[tokio::test]
 async fn blueprint_balanced_session_generation() {
     let _g = LOCK.lock().await;
@@ -3943,8 +3942,7 @@ async fn blueprint_balanced_session_generation() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{shortfall}");
     assert_eq!(
-        shortfall["error"]["code"],
-        "blueprint_pool_shortfall",
+        shortfall["error"]["code"], "blueprint_pool_shortfall",
         "{shortfall}"
     );
     let after = sqlx::query!(r#"SELECT COUNT(*) AS "n!" FROM practice_sessions"#)
