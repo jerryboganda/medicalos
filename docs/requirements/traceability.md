@@ -85,7 +85,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | QB-06 | Targeted, unseen, marked, incorrect filters | tested (slice 16: multi-chapter targeting + unseen/incorrect/marked pools with honest empty-pool refusals) | run 35479440275 |
-| QB-07 | Blueprint-balanced session generation | not-started | — |
+| QB-07 | Blueprint-balanced session generation | tested (exact per-chapter quotas, one-exam validation, quarantine/source filters, fail-closed pool shortfall with no partial session) | run 35757216704 |
 | QB-09 | Item statistics and editorial review | tested (slice 16: per-exam review queue + per-item psychometrics with honest insufficient-attempts flagging; editorial resolution flows continue) | run 35479440275 |
 | QB-15 | Community statistics with minimum sample + expected-score comparison | tested (slice-9 scope: per-question stats behind min-sample gate + option distribution; expected-score on self-built submits; percentile reserved for fixed forms) | run 35456997436 |
 | QB-16 | Psychometric screening defaults + issue-report SLA | in-progress (screening endpoint with §11.4 default flags tested; SLA timers pending) | run 35476029818 |
