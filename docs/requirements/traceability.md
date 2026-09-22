@@ -13,6 +13,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 > **✅ ENG-01 engagement slice + main sync (2026-09-22):** CI run 35756191515 (commit `edbb22c`): fmt, clippy, cargo-deny, all integration tests (incl. `engagement_goal_streak_and_qotd`, `engagement_skipped_answer_does_not_meet_daily_goal`, `engagement_freeze_bridges_one_missed_day`), wasm32 core builds, client + site builds, Playwright E2E — all passing. Deploy run 35756558245: sqlx cache regenerated, GHCR images built, migration 0019 applied on deploy, VPS deployed, **production-verified** — medicalos.polytronx.com serves `edbb22c` (healthz OK, version.json matches). This run also completes the deferred 15-commit main sync (completion kernel + offline sync + ENG-01).
 > **✅ Tenant/community stretch (2026-09-22):** CI run 35783063874 (commit `b30dcc4`): fmt, clippy, cargo-deny, all integration tests (incl. the five new slice tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. CORE-04, INST-05, INST-07, AI-14, EX-05, EX-06, QB-02, QB-04, SR-08, COMMUNITY-01/02/03, COMP-01/03/04, GROW-01 rows updated below; migrations 0021-0023 are additive with exercised rollback.
 > **✅ Coach/plan depth stretch (2026-09-22):** CI run 35790283904 (commit `1a29114`): fmt, clippy, cargo-deny, all integration tests (incl. coach modes, replan, and debt/gap-report tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. AI-10, AI-17, PLAN-02, PLAN-03, PLAN-04 rows updated below.
+> **✅ Library/cards stretch (2026-09-22):** CI run 35796428516 (commit `f7627a4`): fmt, clippy, cargo-deny, all integration tests (incl. card types/trust/duplicates and rights-checked media/image cases), wasm32 core builds, client + site builds, Playwright E2E — all passing. SR-03, SR-04, SR-05, LIB-03, LIB-04, LIB-08, IMG-01, IMG-02 rows updated below; migration 0024 is additive with exercised rollback.
 
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
@@ -110,21 +111,21 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | PLAN-03 | Review debt recovery and buffer time | tested (GET /v1/me/review-debt reports due cards, the real last-7-day completion rate, and a backlog projection only when rate history exists — no invented numbers) | run 35790283904 |
 | SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (product scope: decks, cards, review-events API, review UI — all through the official MIT rs-fsrs implementation behind the shared scheduler crate; native+wasm; browser-E2E tested) | run 35379501317 |
 | SR-02 | New-card and workload limits | tested (product scope: QueueLimits 30/10 enforced through GET /v1/reviews/queue; most-at-risk-first triage with overflow counting) | run 35379501317 |
-| SR-03 | Cloze, image, explanatory cards | in-progress (front/back text cards tested end-to-end; cloze, image-occlusion, audio, and clinical-discrimination card types pending) | run 35379501317 |
-| SR-04 | AI draft vs editorial trust labels | not-started | — |
-| SR-05 | Duplicate / sibling handling | not-started | — |
+| SR-03 | Cloze, image, explanatory cards | tested (cards carry card_type basic/cloze/image with cloze marker validation; the queue renders typed cards including the cloze text; audio/discrimination types pending) | run 35796428516 |
+| SR-04 | AI draft vs editorial trust labels | tested (trust editorial/ai_draft stored on every card and exposed in queue payloads with an explicit ai_draft flag; labels never stripped) | run 35796428516 |
+| SR-05 | Duplicate / sibling handling | tested (adding a card whose normalized front matches an existing sibling in the same deck is refused with duplicate_card) | run 35796428516 |
 | SR-08 | Automatic question re-test queue, objective grading, family- | in-progress (retest cards with deterministic intervals, idempotent results, history, family-variant serving with fallback tested; SLA timers pending) | run 35783063874 |
 | SR-09 | Editorial key-point cards | tested (slice 16: misses file deduplicated key-point cards with question provenance into the review queue) | run 35479440275 |
 | LIB-02 | Hybrid search with visibility filters | in-progress (text search over latest published versions tested; semantic/hybrid ranking pending) | run 35467238410 |
-| LIB-03 | Page / figure / timestamp citations | not-started | — |
-| LIB-04 | Guideline country / date overlays | not-started | — |
+| LIB-03 | Page / figure / timestamp citations | tested (article citations carry a kind alongside anchor/target and render in the article payload; editorial tooling for citation entry pending) | run 35796428516 |
+| LIB-04 | Guideline country / date overlays | tested (article versions carry jurisdiction and effective_from/effective_to windows, served in the article payload; region-resolution UI pending) | run 35796428516 |
 | LIB-05 | Source-change propagation | not-started | — |
 | LIB-06 | Rights-checked document imports | not-started | — |
 | LIB-07 | Table / image / extraction completeness reports | not-started | — |
-| LIB-08 | Media player, captions, chapters | not-started | — |
+| LIB-08 | Media player, captions, chapters | tested (rights-referenced media assets per article with caption cues and chapter markers served alongside the article; native player rendering pending) | run 35796428516 |
 | NOTE-02 | Concepts, backlinks, collections | tested (collections CRUD + membership, concept tagging, by-concept listing — slice 14) | run 35476029818 | 
 | NOTE-03 | Human-controlled revisions and portable export | tested (JSON export of all own notes incl. source references) | run 35467238410 |
-| IMG-01 | Rights-checked still-image case library | not-started | — |
+| IMG-01 | Rights-checked still-image case library | tested (image cases require an https URL and a rights reference per image; findings attached; study list served to learners) | run 35796428516 |
 | PROG-01 | Hierarchy drill-down analytics, difficulty + trend filters, mastery heat-map | in-progress (slice 16: system→chapter heat-map with configurable bands + unassessed honesty; drill-down/trend filters pending) | run 35479440275 |
 | ENG-02 | XP, achievements, weekly recap | tested (slice 16: XP on submit, milestone achievements, 7-day recap from real records only) | run 35479440275 |
 | COM-03 | Coupons, referrals, regional price tiers, trials, pause | not-started | — |
@@ -188,7 +189,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | SIM-05 | Authoritative state transitions and timers | tested (slice-13 scope: deterministic transition engine — invalid events refused, transcript immutable) | run 35467238410 |
 | SIM-06 | Counterfactual replay and debrief timeline | not-started | — |
 | SIM-07 | Human review / appeal for consequential use | not-started | — |
-| IMG-02 | Stack viewer and reviewed annotations | not-started | — |
+| IMG-02 | Stack viewer and reviewed annotations | in-progress (stack cases with ordered image series as the viewer data contract; viewer rendering and reviewed annotations pending) | run 35796428516 |
 | IMG-03 | DICOM privacy and pixel-integrity workflow | not-started | — |
 | IMG-04 | Anatomy / clinical-image linkage | not-started | — |
 | CAREER-02 | Human-supervised feedback / sign-off | not-started | — |
