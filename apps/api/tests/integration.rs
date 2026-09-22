@@ -4584,31 +4584,31 @@ async fn assessment_author_reviewer_publisher_separation() {
     assert_eq!(body["error"]["code"], "empty_pool", "{body}");
 
     // Publishing before approval is refused as an invalid transition.
-    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(
         wf["results"][0]["error"]["code"], "invalid_transition",
         "{wf}"
     );
 
-    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "in_review", "{wf}");
 
     // §19.3: the author of an item cannot be its approver.
-    let (status, wf) = workflow(&app, &author, "approve", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &author, "approve", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(
         wf["results"][0]["error"]["code"], "separation_violation",
         "{wf}"
     );
 
-    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "approve", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "approved", "{wf}");
 
     // The reviewer may publish — only the author is barred.
-    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "published", "{wf}");
 
@@ -4640,14 +4640,14 @@ async fn assessment_author_reviewer_publisher_separation() {
     .await;
     assert_eq!(status, StatusCode::OK, "{created2}");
     let vid2: Uuid = created2["version_id"].as_str().unwrap().parse().unwrap();
-    let (status, wf) = workflow(&app, &author, "submit", [vid2]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [vid2]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "reject", [vid2]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "reject", [vid2]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "draft", "{wf}");
 
     // A rejected item can re-enter review (fresh cycle, same version).
-    let (status, wf) = workflow(&app, &author, "submit", [vid2]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [vid2]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "in_review", "{wf}");
 
@@ -5000,11 +5000,11 @@ async fn reserved_family_form_session_and_ai_gate() {
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
     let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
-    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "approve", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
 
     // Date-effective spec, then a reserved form binding the question.
@@ -5192,11 +5192,11 @@ async fn assisted_evidence_never_becomes_community_signal() {
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
     let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
-    let (status, wf) = workflow(&app, &author, "submit", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "approve", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "approve", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "publish", [vid]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
 
     let answer_in_session = |app: Router, token: String, key: String, body: Value| async move {
@@ -5384,11 +5384,11 @@ async fn retest_serves_unattempted_family_variant() {
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
     let variant: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
-    let (status, wf) = workflow(&app, &author, "submit", [variant]).await;
+    let (status, wf) = workflow(app.clone(), &author, "submit", [variant]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "approve", [variant]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "approve", [variant]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    let (status, wf) = workflow(&app, &reviewer, "publish", [variant]).await;
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [variant]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     sqlx::query(
         r#"UPDATE questions SET family_id = (
@@ -5524,7 +5524,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
         let token = login["token"].as_str().unwrap().to_string();
         (user_id, token)
     };
-    let (alice_id, alice) = register(app.clone(), "alice".into()).await;
+    let (_alice_id, alice) = register(app.clone(), "alice".into()).await;
     let (bob_id, bob) = register(app.clone(), "bob".into()).await;
     let (_, carol) = register(app.clone(), "carol".into()).await;
 
@@ -5755,14 +5755,14 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
         .parse()
         .unwrap();
 
-    let play = |app: Router, token: &str, sid: Uuid, key: String| async move {
+    let play = |app: Router, token: String, sid: Uuid, key: String| async move {
         for i in 0..3 {
             let (status, _) = call(
                 app.clone(),
                 request(
                     "POST",
                     &format!("/v1/practice/sessions/{sid}/answers"),
-                    Some(token),
+                    Some(token.as_str()),
                     Some(serde_json::json!({
                         "item_index": i, "chosen_index": 0,
                         "elapsed_ms": 1000,
@@ -5778,15 +5778,15 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
             request(
                 "POST",
                 &format!("/v1/practice/sessions/{sid}/submit"),
-                Some(token),
+                Some(token.as_str()),
                 None,
             ),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
     };
-    play(app.clone(), &bob, bob_session, "duel-b".into()).await;
-    play(app.clone(), &alice, alice_session, "duel-a".into()).await;
+    play(app.clone(), bob.clone(), bob_session, "duel-b".into()).await;
+    play(app.clone(), alice.clone(), alice_session, "duel-a".into()).await;
     let (status, final_state) = call(
         app.clone(),
         request(
