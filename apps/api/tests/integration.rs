@@ -3859,6 +3859,118 @@ async fn completion_kernel_institution_program_and_interop_are_staff_scoped() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+
+#[tokio::test]
+async fn blueprint_balanced_session_generation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, balanced) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "blueprint",
+                "blueprint": [
+                    {"chapter_id": ids.chapter1, "count": 1},
+                    {"chapter_id": ids.chapter2, "count": 2}
+                ],
+                "source": "any"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{balanced}");
+    assert_eq!(balanced["items"].as_array().unwrap().len(), 3, "{balanced}");
+
+    let sid: Uuid = balanced["session_id"].as_str().unwrap().parse().unwrap();
+    let rows = sqlx::query!(
+        r#"SELECT qv.chapter_id, COUNT(*) AS "n!"
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           WHERE si.session_id = $1
+           GROUP BY qv.chapter_id"#,
+        sid
+    )
+    .fetch_all(&state.pool)
+    .await
+    .expect("blueprint counts");
+    let chapter1_count = rows
+        .iter()
+        .find(|row| row.chapter_id == ids.chapter1)
+        .map(|row| row.n)
+        .unwrap_or(0);
+    let chapter2_count = rows
+        .iter()
+        .find(|row| row.chapter_id == ids.chapter2)
+        .map(|row| row.n)
+        .unwrap_or(0);
+    assert_eq!(chapter1_count, 1);
+    assert_eq!(chapter2_count, 2);
+
+    let stored = sqlx::query!(
+        "SELECT preset, chapter_id FROM practice_sessions WHERE id = $1",
+        sid
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("stored blueprint session");
+    assert_eq!(stored.preset, "blueprint");
+    assert_eq!(stored.chapter_id, None);
+
+    let before = sqlx::query!(r#"SELECT COUNT(*) AS "n!" FROM practice_sessions"#)
+        .fetch_one(&state.pool)
+        .await
+        .expect("session count")
+        .n;
+    let (status, shortfall) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "blueprint",
+                "blueprint": [{"chapter_id": ids.chapter3, "count": 2}]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{shortfall}");
+    assert_eq!(
+        shortfall["error"]["code"],
+        "blueprint_pool_shortfall",
+        "{shortfall}"
+    );
+    let after = sqlx::query!(r#"SELECT COUNT(*) AS "n!" FROM practice_sessions"#)
+        .fetch_one(&state.pool)
+        .await
+        .expect("session count")
+        .n;
+    assert_eq!(after, before, "shortfall must not create a partial session");
+
+    let (status, invalid) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "blueprint",
+                "blueprint": [{"chapter_id": ids.chapter1, "count": 51}]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    assert_eq!(invalid["error"]["code"], "invalid_blueprint", "{invalid}");
+}
+
 #[tokio::test]
 async fn engagement_goal_streak_and_qotd() {
     let _g = LOCK.lock().await;
