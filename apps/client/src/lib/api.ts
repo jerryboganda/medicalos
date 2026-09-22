@@ -162,12 +162,56 @@ export interface MockResult {
 	breakdown: { chapter: string; total: number; correct: number }[];
 }
 
+export interface EngagementQotd {
+	enabled: boolean;
+	answered?: boolean;
+	available?: boolean;
+	question_version_id?: string;
+	vignette?: string;
+	options?: { text: string }[];
+	community_split?: { chosen_index: number; count: number }[];
+	community_total?: number;
+}
+
+export interface Engagement {
+	enabled: boolean;
+	daily_goal: { enabled: boolean; target: number; answered_today: number; met: boolean };
+	streak: { enabled: boolean; count: number; freezes: number };
+	qotd: EngagementQotd;
+}
+
+export interface EngagementSettings {
+	daily_goal_questions?: number;
+	daily_goal_enabled?: boolean;
+	streak_enabled?: boolean;
+	qotd_enabled?: boolean;
+}
+
 export const Api = {
 	register: (email: string, password: string) =>
 		call<{ user_id: string }>('POST', '/v1/auth/register', { email, password }),
 	login: (email: string, password: string) =>
 		call<{ token: string }>('POST', '/v1/auth/login', { email, password }),
 	today: () => call<Today>('GET', '/v1/me/today'),
+	engagement: () => call<Engagement>('GET', '/v1/me/engagement'),
+	updateEngagementSettings: (body: EngagementSettings) =>
+		call<{
+			daily_goal_questions: number;
+			daily_goal_enabled: boolean;
+			streak_enabled: boolean;
+			qotd_enabled: boolean;
+			freezes: number;
+		}>('PUT', '/v1/me/engagement/settings', body),
+	answerQotd: (questionVersionId: string, chosenIndex: number) =>
+		call<{
+			correct: boolean;
+			correct_index: number;
+			community_split: { chosen_index: number; count: number }[];
+			community_total: number;
+		}>('POST', '/v1/me/qotd/answers', {
+			question_version_id: questionVersionId,
+			chosen_index: chosenIndex
+		}),
 	createSession: (body: {
 		preset: string;
 		chapter_id?: string;

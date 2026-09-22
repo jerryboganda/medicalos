@@ -49,6 +49,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/readiness", get(routes::exams::readiness))
         .route("/v1/me/today", get(routes::today::today))
         .route(
+            "/v1/me/engagement",
+            get(routes::engagement::engagement_status),
+        )
+        .route(
+            "/v1/me/engagement/settings",
+            axum::routing::put(routes::engagement::update_engagement_settings),
+        )
+        .route("/v1/me/qotd", get(routes::engagement::engagement_status))
+        .route("/v1/me/qotd/answers", post(routes::engagement::answer_qotd))
+        .route(
             "/v1/practice/sessions",
             post(routes::practice::create_session),
         )
@@ -317,6 +327,22 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/me/outcomes", post(routes::exams::add_outcome))
         .route("/api/v1/me/readiness", get(routes::exams::readiness))
         .route("/api/v1/me/today", get(routes::today::today))
+        .route(
+            "/api/v1/me/engagement",
+            get(routes::engagement::engagement_status),
+        )
+        .route(
+            "/api/v1/me/engagement/settings",
+            axum::routing::put(routes::engagement::update_engagement_settings),
+        )
+        .route(
+            "/api/v1/me/qotd",
+            get(routes::engagement::engagement_status),
+        )
+        .route(
+            "/api/v1/me/qotd/answers",
+            post(routes::engagement::answer_qotd),
+        )
         .route(
             "/api/v1/practice/sessions",
             post(routes::practice::create_session),

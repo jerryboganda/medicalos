@@ -809,6 +809,7 @@ pub async fn submit(
     }
 
     crate::routes::engagement::award_session_xp(&state, user.user_id, totals.correct).await?;
+    crate::routes::engagement::record_daily_progress(&state, user.user_id).await?;
     agent::mark_matching_task_done(
         &state.pool,
         user.user_id,

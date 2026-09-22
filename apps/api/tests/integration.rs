@@ -32,7 +32,7 @@ async fn setup() -> Arc<AppState> {
     .await
     .expect("clean data");
     // Clean all data for test isolation (CASCADE handles FK ordering).
-    sqlx::query("TRUNCATE question_reports, retest_history, retest_cards, integrity_events, appeals, coach_turns, import_batches, audit_events, app_settings, xp_ledger, achievements, competition_entries, competitions, assignments, cohort_members, cohorts, institution_members, institutions, scenarios, scenario_runs, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, guest_trials, notification_preferences, notifications, note_collection_items, note_collections, note_links, notes, goals, protected_commitments, mock_attempts, attempts, session_items, practice_sessions, learner_concept_state, plan_revisions, plan_tasks, plans, question_versions, questions, curriculum_nodes, exams, auth_sessions, users, decks, cards, review_events CASCADE")
+    sqlx::query("TRUNCATE question_reports, retest_history, retest_cards, integrity_events, appeals, coach_turns, import_batches, audit_events, app_settings, xp_ledger, achievements, competition_entries, competitions, assignments, cohort_members, cohorts, institution_members, institutions, scenarios, scenario_runs, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, guest_trials, notification_preferences, notifications, note_collection_items, note_collections, note_links, notes, goals, protected_commitments, mock_attempts, attempts, session_items, practice_sessions, learner_concept_state, plan_revisions, plan_tasks, plans, question_versions, questions, curriculum_nodes, exams, auth_sessions, users, decks, cards, review_events, engagement_settings, engagement_days, qotd_answers CASCADE")
         .execute(&pool)
         .await
         .expect("clean database");
@@ -3857,4 +3857,251 @@ async fn completion_kernel_institution_program_and_interop_are_staff_scoped() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn engagement_goal_streak_and_qotd() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let user = register_and_login(app.clone()).await;
+
+    // Defaults: goal 20, streak + QOTD on, engagement globally enabled.
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["enabled"], true, "{eng}");
+    assert_eq!(eng["daily_goal"]["enabled"], true, "{eng}");
+    assert_eq!(eng["daily_goal"]["target"], 20, "{eng}");
+    assert_eq!(eng["streak"]["enabled"], true, "{eng}");
+    assert_eq!(eng["qotd"]["enabled"], true, "{eng}");
+    assert_eq!(eng["qotd"]["answered"], false, "{eng}");
+
+    // Shrink the goal so one real attempt meets it.
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({"daily_goal_questions": 1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(set["daily_goal_questions"], 1, "{set}");
+
+    // Invalid goal is rejected.
+    let (status, bad) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({"daily_goal_questions": 0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    assert_eq!(bad["error"]["code"], "invalid_daily_goal", "{bad}");
+
+    // One practice attempt meets the goal and starts the streak.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&user),
+            Some(
+                serde_json::json!({"preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&user),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "eng-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&user),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["daily_goal"]["met"], true, "{eng}");
+    assert!(
+        eng["daily_goal"]["answered_today"].as_i64().unwrap() >= 1,
+        "{eng}"
+    );
+    assert_eq!(eng["streak"]["count"], 1, "{eng}");
+    assert_eq!(eng["streak"]["freezes"], 0, "{eng}");
+
+    // QOTD: published question is offered; correct_index is withheld until answered.
+    assert_eq!(eng["qotd"]["available"], true, "{eng}");
+    let qv = eng["qotd"]["question_version_id"]
+        .as_str()
+        .expect("qotd version")
+        .to_string();
+    assert!(eng["qotd"]["vignette"].as_str().is_some(), "{eng}");
+    assert!(
+        eng["qotd"]["options"].as_array().unwrap().len() >= 2,
+        "{eng}"
+    );
+    assert!(eng["qotd"].get("correct_index").is_none(), "{eng}");
+
+    // Answering twice: first wins, second is an honest conflict.
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+    assert!(ans["correct"].is_boolean(), "{ans}");
+    assert!(ans["community_total"].as_i64().unwrap() >= 1, "{ans}");
+    let (status, dup) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{dup}");
+    assert_eq!(dup["error"]["code"], "already_answered", "{dup}");
+
+    // Out-of-range option is rejected before insert.
+    let (status, oob) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&register_and_login(app.clone()).await),
+            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 99})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{oob}");
+    assert_eq!(oob["error"]["code"], "invalid_option", "{oob}");
+
+    // After answering: answered=true with community split, correct_index still withheld.
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["qotd"]["answered"], true, "{eng}");
+    assert!(
+        eng["qotd"]["community_split"].as_array().unwrap().len() >= 1,
+        "{eng}"
+    );
+    assert!(eng["qotd"].get("correct_index").is_none(), "{eng}");
+
+    // Each mechanic is independently disableable.
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({
+                "daily_goal_enabled": false,
+                "streak_enabled": false,
+                "qotd_enabled": false
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(set["daily_goal_enabled"], false, "{set}");
+    assert_eq!(set["streak_enabled"], false, "{set}");
+    assert_eq!(set["qotd_enabled"], false, "{set}");
+
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["daily_goal"]["enabled"], false, "{eng}");
+    assert_eq!(eng["streak"]["enabled"], false, "{eng}");
+    assert_eq!(eng["qotd"]["enabled"], false, "{eng}");
+
+    // Disabled QOTD refuses answers at the API, not just in the UI.
+    let (status, refused) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["error"]["code"], "qotd_disabled", "{refused}");
+
+    // Global kill switch (OPS-05-style): engagement_mechanics=false.
+    sqlx::query(
+        r#"INSERT INTO feature_flags (key, value) VALUES ('engagement_mechanics', 'false'::jsonb)
+           ON CONFLICT (key) DO UPDATE SET value = 'false'::jsonb, updated_at = now()"#,
+    )
+    .execute(&state.pool)
+    .await
+    .expect("set kill switch");
+    let (status, eng) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_eq!(eng["enabled"], false, "{eng}");
+    assert_eq!(eng["daily_goal"]["enabled"], false, "{eng}");
+    assert_eq!(eng["qotd"]["enabled"], false, "{eng}");
+    let (status, refused) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({"question_version_id": qv, "chosen_index": 0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["error"]["code"], "engagement_disabled", "{refused}");
 }

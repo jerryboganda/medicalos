@@ -12,12 +12,48 @@
 	let undoing = $state('');
 	let mocks = $state(null);
 	let startingMock = $state('');
+	let engagement = $state(null);
+	let answeringQotd = $state(false);
+	let qotdError = $state('');
+	let qotdResult = $state(null);
 
 	async function loadMocks() {
 		try {
 			mocks = (await Api.listMocks()).mocks;
 		} catch {
 			mocks = [];
+		}
+	}
+
+	async function loadEngagement() {
+		try {
+			engagement = await Api.engagement();
+		} catch {
+			engagement = null;
+		}
+	}
+
+	async function setEngagement(patch) {
+		qotdError = '';
+		try {
+			await Api.updateEngagementSettings(patch);
+			engagement = await Api.engagement();
+		} catch (err) {
+			qotdError = err instanceof ApiError ? err.message : 'Could not update settings.';
+		}
+	}
+
+	async function answerQotd(index) {
+		if (answeringQotd || !engagement?.qotd?.question_version_id) return;
+		answeringQotd = true;
+		qotdError = '';
+		try {
+			qotdResult = await Api.answerQotd(engagement.qotd.question_version_id, index);
+			engagement = await Api.engagement();
+		} catch (err) {
+			qotdError = err instanceof ApiError ? err.message : 'Could not save your answer.';
+		} finally {
+			answeringQotd = false;
 		}
 	}
 
@@ -110,12 +146,98 @@
 			goto(`${base}/login`);
 			return;
 		}
-		await load();
-		await loadMocks();
+		await Promise.all([load(), loadMocks(), loadEngagement()]);
 	});
 </script>
 
 <h1>Today</h1>
+
+{#if engagement?.enabled}
+	<div class="card" data-testid="engagement-card">
+		{#if engagement.daily_goal.enabled}
+			<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+				<strong data-testid="daily-goal">
+					Daily goal {engagement.daily_goal.answered_today}/{engagement.daily_goal.target}
+				</strong>
+				{#if engagement.daily_goal.met}
+					<span class="chip done" data-testid="goal-met">Met</span>
+				{/if}
+			</div>
+		{/if}
+		{#if engagement.streak.enabled}
+			<p class="muted" style="margin: var(--space-sm) 0;" data-testid="streak">
+				{engagement.streak.count}-day streak · {engagement.streak.freezes} freezes held
+			</p>
+		{/if}
+		{#if engagement.qotd.enabled}
+			{#if engagement.qotd.answered}
+				<div data-testid="qotd-answered">
+					{#if qotdResult}
+						<p style="margin: var(--space-sm) 0;" data-testid="qotd-verdict">
+							{qotdResult.correct ? 'Correct' : 'Not correct'} — correct answer was
+							option {qotdResult.correct_index + 1}.
+						</p>
+					{:else}
+						<p class="muted" style="margin: var(--space-sm) 0;">Question of the day — answered.</p>
+					{/if}
+					{#if engagement.qotd.community_split?.length}
+						<p class="muted" style="margin: 0;" data-testid="qotd-community">
+							{#each engagement.qotd.community_split as part (part.chosen_index)}
+								<span class="chip">Option {part.chosen_index + 1}: {part.count}</span>
+							{/each}
+							<span class="muted">of {engagement.qotd.community_total} answered</span>
+						</p>
+					{/if}
+				</div>
+			{:else if engagement.qotd.available}
+				<p class="muted" style="margin: var(--space-sm) 0 4px;">Question of the day</p>
+				<p style="margin: 0 0 var(--space-sm);" data-testid="qotd-vignette">{engagement.qotd.vignette}</p>
+				<div style="display:flex; flex-direction:column; gap:8px;">
+					{#each engagement.qotd.options ?? [] as option, i (i)}
+						<button
+							class="btn"
+							type="button"
+							disabled={answeringQotd}
+							data-testid={`qotd-option-${i}`}
+							onclick={() => answerQotd(i)}
+						>
+							{answeringQotd ? 'Saving…' : option.text}
+						</button>
+					{/each}
+				</div>
+			{/if}
+		{/if}
+		{#if qotdError}
+			<p class="error-text" role="alert" data-testid="qotd-error">{qotdError}</p>
+		{/if}
+		<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:var(--space-sm);">
+			<button
+				class="btn"
+				type="button"
+				data-testid="toggle-goal"
+				onclick={() => setEngagement({ daily_goal_enabled: !engagement.daily_goal.enabled })}
+			>
+				{engagement.daily_goal.enabled ? 'Turn off daily goal' : 'Turn on daily goal'}
+			</button>
+			<button
+				class="btn"
+				type="button"
+				data-testid="toggle-streak"
+				onclick={() => setEngagement({ streak_enabled: !engagement.streak.enabled })}
+			>
+				{engagement.streak.enabled ? 'Turn off streak' : 'Turn on streak'}
+			</button>
+			<button
+				class="btn"
+				type="button"
+				data-testid="toggle-qotd"
+				onclick={() => setEngagement({ qotd_enabled: !engagement.qotd.enabled })}
+			>
+				{engagement.qotd.enabled ? 'Turn off question of the day' : 'Turn on question of the day'}
+			</button>
+		</div>
+	</div>
+{/if}
 
 {#if loading}
 	<p class="muted">Loading your plan…</p>
