@@ -129,7 +129,7 @@ pub struct MediaReq {
     pub captions: serde_json::Value,
     #[serde(default)]
     pub chapters: serde_json::Value,
-    pub rights_ref: String,
+    pub rights_ref: Option<String>,
 }
 
 pub async fn attach_media(
@@ -160,7 +160,11 @@ pub async fn attach_media(
             "captions and chapters must be arrays",
         ));
     }
-    if req.rights_ref.trim().is_empty() {
+    let rights_ref = req
+        .rights_ref
+        .map(|r| r.trim().to_string())
+        .unwrap_or_default();
+    if rights_ref.is_empty() {
         return Err(ApiError::unprocessable(
             "rights_ref_required",
             "media needs a rights reference (LIB-06)",
@@ -183,7 +187,7 @@ pub async fn attach_media(
         req.duration_seconds,
         req.captions,
         req.chapters,
-        req.rights_ref.trim()
+        rights_ref
     )
     .execute(&state.pool)
     .await?;
