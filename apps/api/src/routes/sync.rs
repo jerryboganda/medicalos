@@ -52,17 +52,27 @@ pub async fn sync_events(
     let mut results = Vec::with_capacity(req.events.len());
     for event in req.events {
         let outcome = match event.kind.as_str() {
-            "answer" => {
-                apply::<AnswerPayload, _, _>(&state, &user, &event, |state, user, payload| {
-                    practice::apply_answer(state, user, payload.session_id, payload.rest)
-                })
-                .await
-            }
+            "answer" => match serde_json::from_value::<AnswerPayload>(event.payload.clone()) {
+                Ok(payload) => finish(
+                    &event.event_id,
+                    practice::apply_answer(
+                        &state,
+                        user.user_id,
+                        payload.session_id,
+                        payload.rest,
+                    )
+                    .await,
+                ),
+                Err(_) => invalid_payload(&event.event_id),
+            },
             "review" => {
-                apply::<review::ReviewEventReq, _, _>(&state, &user, &event, |state, user, payload| {
-                    review::apply_review(state, user, payload)
-                })
-                .await
+                match serde_json::from_value::<review::ReviewEventReq>(event.payload.clone()) {
+                    Ok(payload) => finish(
+                        &event.event_id,
+                        review::apply_review(&state, user.user_id, payload).await,
+                    ),
+                    Err(_) => invalid_payload(&event.event_id),
+                }
             }
             _ => json!({
                 "event_id": event.event_id,
@@ -75,35 +85,23 @@ pub async fn sync_events(
     Ok(Json(json!({ "results": results })))
 }
 
-async fn apply<T, F, Fut>(
-    state: &Arc<AppState>,
-    user: &AuthUser,
-    event: &SyncEvent,
-    f: F,
-) -> serde_json::Value
-where
-    T: serde::de::DeserializeOwned,
-    F: FnOnce(&AppState, Uuid, T) -> Fut,
-    Fut: std::future::Future<Output = ApiResult<Json<serde_json::Value>>>,
-{
-    let payload: T = match serde_json::from_value(event.payload.clone()) {
-        Ok(p) => p,
-        Err(_) => {
-            return json!({
-                "event_id": event.event_id,
-                "status": "rejected",
-                "code": "invalid_payload",
-            })
-        }
-    };
-    match f(state, user.user_id, payload).await {
+fn invalid_payload(event_id: &str) -> serde_json::Value {
+    json!({
+        "event_id": event_id,
+        "status": "rejected",
+        "code": "invalid_payload",
+    })
+}
+
+fn finish(event_id: &str, result: ApiResult<Json<serde_json::Value>>) -> serde_json::Value {
+    match result {
         Ok(mut value) => {
-            value.0["event_id"] = json!(event.event_id);
+            value.0["event_id"] = json!(event_id);
             value.0["status"] = json!("applied_or_duplicate");
             value.0
         }
         Err(e) => json!({
-            "event_id": event.event_id,
+            "event_id": event_id,
             "status": "rejected",
             "code": e.code,
             "message": e.message,

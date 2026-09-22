@@ -1,9 +1,11 @@
 pub mod actions;
+pub mod accounts;
 pub mod admin;
 pub mod auth;
 pub mod coach;
 pub mod config;
 pub mod engagement;
+pub mod exams;
 pub mod goals;
 pub mod guest;
 pub mod inbox;

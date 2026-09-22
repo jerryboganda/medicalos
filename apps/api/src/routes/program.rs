@@ -336,6 +336,105 @@ pub async fn create_assignment(
     Ok(Json(json!({ "assignment_id": id })))
 }
 
+#[derive(Deserialize)]
+pub struct CreateProgramReq {
+    pub name: String,
+}
+
+async fn require_institution_staff(
+    state: &AppState,
+    institution_id: Uuid,
+    user_id: Uuid,
+) -> ApiResult<()> {
+    let row = sqlx::query!(
+        r#"SELECT 1 AS one FROM institution_members
+           WHERE institution_id = $1 AND user_id = $2
+             AND role IN ('admin', 'instructor')"#,
+        institution_id,
+        user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if row.is_none() {
+        return Err(ApiError::forbidden(
+            "instructor_required",
+            "institution staff access required",
+        ));
+    }
+    Ok(())
+}
+
+pub async fn create_program(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+    Json(req): Json<CreateProgramReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let name = req.name.trim();
+    if name.is_empty() || name.len() > 200 {
+        return Err(ApiError::unprocessable(
+            "invalid_name",
+            "program name must be 1-200 characters",
+        ));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO institution_programs (id, institution_id, name) VALUES ($1, $2, $3)",
+        id,
+        institution_id,
+        name
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "program_id": id })))
+}
+
+#[derive(Deserialize)]
+pub struct InteropReq {
+    pub standard: String,
+    pub direction: String,
+    pub external_id: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+pub async fn record_interop(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+    Json(req): Json<InteropReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    if !matches!(req.standard.as_str(), "lti" | "qti") {
+        return Err(ApiError::unprocessable(
+            "invalid_standard",
+            "standard must be lti or qti",
+        ));
+    }
+    if !matches!(req.direction.as_str(), "import" | "export") {
+        return Err(ApiError::unprocessable(
+            "invalid_direction",
+            "direction must be import or export",
+        ));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        r#"INSERT INTO interoperability_receipts
+           (id, institution_id, standard, direction, external_id, payload, status, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, 'recorded', $7)"#,
+        id,
+        institution_id,
+        req.standard,
+        req.direction,
+        req.external_id,
+        req.payload,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "receipt_id": id, "status": "recorded" })))
+}
+
 // ---- CAREER-01 portfolio + CAREER-03 CE --------------------------------------
 
 #[derive(Deserialize)]

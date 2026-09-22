@@ -11,7 +11,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::seed::QuestionOption;
 use crate::state::AppState;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
@@ -320,4 +320,145 @@ pub async fn answerable_questions(
         })
         .collect();
     Ok(Json(json!({ "questions": questions })))
+}
+
+// ---- AI-11/12: learner-editable memory and delayed intervention evidence -----
+
+#[derive(Deserialize)]
+pub struct MemoryReq {
+    pub value: String,
+}
+
+pub async fn put_memory(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(key): Path<String>,
+    Json(req): Json<MemoryReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let key = key.trim();
+    let value = req.value.trim();
+    if key.is_empty() || key.len() > 100 || value.len() > 2000 {
+        return Err(ApiError::unprocessable(
+            "invalid_memory",
+            "memory key must be 1-100 characters and value at most 2000 characters",
+        ));
+    }
+    sqlx::query!(
+        r#"INSERT INTO coach_memory (user_id, memory_key, value)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (user_id, memory_key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = now()"#,
+        user.user_id,
+        key,
+        value
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "key": key, "value": value })))
+}
+
+pub async fn list_memory(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT memory_key, value, updated_at
+           FROM coach_memory
+           WHERE user_id = $1
+           ORDER BY memory_key"#,
+        user.user_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let items: Vec<_> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "key": r.memory_key,
+                "value": r.value,
+                "updated_at": r.updated_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "items": items })))
+}
+
+pub async fn delete_memory(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(key): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    sqlx::query!(
+        "DELETE FROM coach_memory WHERE user_id = $1 AND memory_key = $2",
+        user.user_id,
+        key
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "deleted": true })))
+}
+
+#[derive(Deserialize)]
+pub struct InterventionReq {
+    pub intervention_type: String,
+    pub concept_key: Option<String>,
+    pub triggered_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn create_intervention(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<InterventionReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let kind = req.intervention_type.trim();
+    if kind.is_empty() || kind.len() > 100 {
+        return Err(ApiError::unprocessable(
+            "invalid_intervention",
+            "intervention_type must be 1-100 characters",
+        ));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        r#"INSERT INTO intervention_outcomes
+           (id, user_id, intervention_type, concept_key, triggered_at)
+           VALUES ($1, $2, $3, $4, $5)"#,
+        id,
+        user.user_id,
+        kind,
+        req.concept_key,
+        req.triggered_at
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({ "intervention_id": id })))
+}
+
+#[derive(Deserialize)]
+pub struct MeasureInterventionReq {
+    pub outcome: serde_json::Value,
+    pub measured_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn measure_intervention(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<MeasureInterventionReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let updated = sqlx::query!(
+        r#"UPDATE intervention_outcomes
+           SET measured_at = $3, outcome = $4
+           WHERE id = $1 AND user_id = $2 AND measured_at IS NULL
+           RETURNING id"#,
+        id,
+        user.user_id,
+        req.measured_at,
+        req.outcome
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if updated.is_none() {
+        return Err(ApiError::not_found("intervention_not_found"));
+    }
+    Ok(Json(json!({ "intervention_id": id, "measured": true })))
 }

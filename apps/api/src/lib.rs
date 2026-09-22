@@ -23,6 +23,33 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
+        .route(
+            "/v1/me/devices",
+            post(routes::accounts::register_device).get(routes::accounts::list_devices),
+        )
+        .route(
+            "/v1/me/devices/{device_id}",
+            delete(routes::accounts::revoke_device),
+        )
+        .route(
+            "/v1/me/account",
+            delete(routes::accounts::delete_account),
+        )
+        .route("/v1/exams", get(routes::exams::list_exams))
+        .route(
+            "/v1/admin/exams/{exam_id}/specs",
+            post(routes::exams::create_exam_spec),
+        )
+        .route(
+            "/v1/admin/exam-specs/{spec_id}/forms",
+            post(routes::exams::create_assessment_form),
+        )
+        .route(
+            "/v1/me/accommodations",
+            post(routes::exams::set_accommodation),
+        )
+        .route("/v1/me/outcomes", post(routes::exams::add_outcome))
+        .route("/v1/me/readiness", get(routes::exams::readiness))
         .route("/v1/me/today", get(routes::today::today))
         .route(
             "/v1/practice/sessions",
@@ -87,6 +114,19 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/v1/coach/history", get(routes::coach::history))
+        .route("/v1/me/coach-memory", get(routes::coach::list_memory))
+        .route(
+            "/v1/me/coach-memory/{key}",
+            axum::routing::put(routes::coach::put_memory).delete(routes::coach::delete_memory),
+        )
+        .route(
+            "/v1/me/interventions",
+            post(routes::coach::create_intervention),
+        )
+        .route(
+            "/v1/me/interventions/{id}",
+            axum::routing::patch(routes::coach::measure_intervention),
+        )
         .route(
             "/v1/coach/answerable-questions",
             get(routes::coach::answerable_questions),
@@ -145,6 +185,14 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/institutions/{institution_id}/cohorts",
             post(routes::program::create_cohort),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/programs",
+            post(routes::program::create_program),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/interop",
+            post(routes::program::record_interop),
         )
         .route(
             "/v1/cohorts/{cohort_id}/assignments",
@@ -244,6 +292,33 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/reviews/events", post(routes::review::review_event))
         .route("/api/v1/auth/register", post(routes::auth::register))
         .route("/api/v1/auth/login", post(routes::auth::login))
+        .route(
+            "/api/v1/me/devices",
+            post(routes::accounts::register_device).get(routes::accounts::list_devices),
+        )
+        .route(
+            "/api/v1/me/devices/{device_id}",
+            delete(routes::accounts::revoke_device),
+        )
+        .route(
+            "/api/v1/me/account",
+            delete(routes::accounts::delete_account),
+        )
+        .route("/api/v1/exams", get(routes::exams::list_exams))
+        .route(
+            "/api/v1/admin/exams/{exam_id}/specs",
+            post(routes::exams::create_exam_spec),
+        )
+        .route(
+            "/api/v1/admin/exam-specs/{spec_id}/forms",
+            post(routes::exams::create_assessment_form),
+        )
+        .route(
+            "/api/v1/me/accommodations",
+            post(routes::exams::set_accommodation),
+        )
+        .route("/api/v1/me/outcomes", post(routes::exams::add_outcome))
+        .route("/api/v1/me/readiness", get(routes::exams::readiness))
         .route("/api/v1/me/today", get(routes::today::today))
         .route(
             "/api/v1/practice/sessions",
@@ -302,6 +377,22 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/admin/audit", get(routes::admin::audit_log))
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
+        .route(
+            "/api/v1/me/coach-memory",
+            get(routes::coach::list_memory),
+        )
+        .route(
+            "/api/v1/me/coach-memory/{key}",
+            axum::routing::put(routes::coach::put_memory).delete(routes::coach::delete_memory),
+        )
+        .route(
+            "/api/v1/me/interventions",
+            post(routes::coach::create_intervention),
+        )
+        .route(
+            "/api/v1/me/interventions/{id}",
+            axum::routing::patch(routes::coach::measure_intervention),
+        )
         .route(
             "/api/v1/coach/answerable-questions",
             get(routes::coach::answerable_questions),
@@ -362,6 +453,14 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/institutions/{institution_id}/cohorts",
             post(routes::program::create_cohort),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/programs",
+            post(routes::program::create_program),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/interop",
+            post(routes::program::record_interop),
         )
         .route(
             "/api/v1/cohorts/{cohort_id}/assignments",
