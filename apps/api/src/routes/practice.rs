@@ -645,7 +645,7 @@ pub async fn apply_answer(
     // Deduplicated per learner + question (source_question_version_id).
     if correct == Some(false) {
         ensure_key_point_card(
-            &state,
+            state,
             user_id,
             item.id,
             &item.key_learning_point,
