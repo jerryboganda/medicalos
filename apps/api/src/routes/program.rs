@@ -722,23 +722,6 @@ pub async fn institution_audit(
     Ok(Json(json!({ "events": events })))
 }
 
-async fn require_institution_staff(
-    state: &AppState,
-    institution_id: Uuid,
-    user_id: Uuid,
-) -> ApiResult<()> {
-    sqlx::query!(
-        "SELECT 1 AS one FROM institution_members
-         WHERE institution_id = $1 AND user_id = $2 AND role IN ('admin','instructor')",
-        institution_id,
-        user_id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::forbidden("staff_required", "institution staff access required"))?;
-    Ok(())
-}
-
 // ---- INST-07: privacy-preserving cohort analytics (§18.3) -------------------
 //
 // Aggregate-only per-chapter accuracy for one cohort. §18.3: cohort

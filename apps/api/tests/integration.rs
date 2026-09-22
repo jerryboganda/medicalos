@@ -4902,7 +4902,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["error"]["code"], "staff_required", "{body}");
+    assert_eq!(body["error"]["code"], "instructor_required", "{body}");
     let (status, body) = call(
         app.clone(),
         request(

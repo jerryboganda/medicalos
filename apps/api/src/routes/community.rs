@@ -335,8 +335,8 @@ pub async fn duel_by_token(
     Path(token): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let duel = sqlx::query!(
-        r#"SELECT d.id, d.status, d.question_count, c.name AS chapter,
-                  ch.handle AS challenger_handle, oh.handle AS opponent_handle
+        r#"SELECT d.id, d.status, d.question_count, c.name AS "chapter?",
+                  ch.handle AS "challenger_handle?", oh.handle AS "opponent_handle?"
            FROM duels d
            LEFT JOIN curriculum_nodes c ON c.id = d.chapter_id
            LEFT JOIN community_profiles ch ON ch.user_id = d.challenger
@@ -363,7 +363,8 @@ pub async fn accept_duel(
     Path(duel_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let duel = sqlx::query!(
-        "SELECT id, opponent, status, chapter_id, question_count FROM duels WHERE id = $1",
+        "SELECT id, challenger, opponent, status, chapter_id, question_count
+         FROM duels WHERE id = $1",
         duel_id
     )
     .fetch_optional(&state.pool)
@@ -397,7 +398,7 @@ pub async fn accept_duel(
                ORDER BY random() LIMIT $3"#,
             duel.id,
             duel.chapter_id,
-            count
+            count as i64
         )
         .fetch_all(&state.pool)
         .await?;
@@ -473,7 +474,7 @@ pub async fn on_session_submitted(state: &AppState, session_id: Uuid) -> ApiResu
     };
     let score = sqlx::query!(
         r#"SELECT COALESCE(COUNT(*) FILTER (WHERE correct), 0) AS "c!",
-                  COALESCE(SUM(elapsed_ms), 0) AS "ms!"
+                  COALESCE(SUM(elapsed_ms), 0)::bigint AS "ms!"
            FROM attempts WHERE session_id = $1"#,
         session_id
     )
