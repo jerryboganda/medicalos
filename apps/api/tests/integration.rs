@@ -5199,7 +5199,7 @@ async fn assisted_evidence_never_becomes_community_signal() {
     let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
 
-    let answer_in_session = |app: Router, token: String, key: String, body: Value| async move {
+    let answer_in_session = |app: Router, token: String, _key: String, body: Value| async move {
         let (status, session) = call(
             app.clone(),
             request(
