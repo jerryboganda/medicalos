@@ -3568,6 +3568,62 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{device}");
     assert_eq!(device["device_key"], "ci-browser");
+    let device_id = device["device_id"].as_str().expect("device id").to_string();
+
+    let (status, devices) = call(
+        app.clone(),
+        request("GET", "/v1/me/devices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{devices}");
+    assert_eq!(devices["devices"].as_array().unwrap().len(), 1, "{devices}");
+
+    let (status, rev) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/me/devices/{device_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rev}");
+    assert_eq!(rev["revoked"], true);
+
+    let (status, devices) = call(
+        app.clone(),
+        request("GET", "/v1/me/devices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{devices}");
+    assert!(devices["devices"][0]["revoked_at"].is_string(), "{devices}");
+
+    // EX-06: learner accommodations are stored per key and overwrite on update.
+    let (status, acc) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/accommodations",
+            Some(&token),
+            Some(serde_json::json!({"key": "extra_time", "value": {"multiplier": 1.5}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{acc}");
+    assert_eq!(acc["saved"], "extra_time");
+
+    let (status, acc2) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/accommodations",
+            Some(&token),
+            Some(serde_json::json!({"key": "extra_time", "value": {"multiplier": 2.0}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{acc2}");
 
     let (status, exams) = call(app.clone(), request("GET", "/v1/exams", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{exams}");
@@ -3652,6 +3708,21 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     assert_eq!(status, StatusCode::OK, "{readiness}");
     assert_eq!(readiness["available"], false);
     assert_eq!(readiness["reason"], "validation_required");
+
+    // CORE-07: in-app account deletion revokes sessions and marks the row.
+    let (status, deleted) = call(
+        app.clone(),
+        request("DELETE", "/v1/me/account", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert_eq!(deleted["deleted"], true);
+    let (status, after) = call(
+        app.clone(),
+        request("GET", "/v1/me/devices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{after}");
 }
 
 #[tokio::test]

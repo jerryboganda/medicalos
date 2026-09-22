@@ -75,7 +75,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .ok_or_else(ApiError::unauthorized)?;
         let token_hash = sha256_hex(raw);
         let row = sqlx::query!(
-            "SELECT user_id FROM auth_sessions WHERE token_hash = $1 AND expires_at > now()",
+            "SELECT user_id FROM auth_sessions WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL",
             token_hash
         )
         .fetch_optional(&state.pool)
