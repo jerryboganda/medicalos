@@ -369,7 +369,7 @@ pub async fn answer_qotd(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
-    if req.chosen_index < 0 || req.chosen_index as i32 >= q.n {
+    if req.chosen_index < 0 || req.chosen_index >= q.n {
         return Err(ApiError::unprocessable(
             "invalid_option",
             "chosen_index is out of range",
