@@ -12,6 +12,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 
 > **✅ ENG-01 engagement slice + main sync (2026-09-22):** CI run 35756191515 (commit `edbb22c`): fmt, clippy, cargo-deny, all integration tests (incl. `engagement_goal_streak_and_qotd`, `engagement_skipped_answer_does_not_meet_daily_goal`, `engagement_freeze_bridges_one_missed_day`), wasm32 core builds, client + site builds, Playwright E2E — all passing. Deploy run 35756558245: sqlx cache regenerated, GHCR images built, migration 0019 applied on deploy, VPS deployed, **production-verified** — medicalos.polytronx.com serves `edbb22c` (healthz OK, version.json matches). This run also completes the deferred 15-commit main sync (completion kernel + offline sync + ENG-01).
 > **✅ Tenant/community stretch (2026-09-22):** CI run 35783063874 (commit `b30dcc4`): fmt, clippy, cargo-deny, all integration tests (incl. the five new slice tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. CORE-04, INST-05, INST-07, AI-14, EX-05, EX-06, QB-02, QB-04, SR-08, COMMUNITY-01/02/03, COMP-01/03/04, GROW-01 rows updated below; migrations 0021-0023 are additive with exercised rollback.
+> **✅ Coach/plan depth stretch (2026-09-22):** CI run 35790283904 (commit `1a29114`): fmt, clippy, cargo-deny, all integration tests (incl. coach modes, replan, and debt/gap-report tests), wasm32 core builds, client + site builds, Playwright E2E — all passing. AI-10, AI-17, PLAN-02, PLAN-03, PLAN-04 rows updated below.
 
 **Evidence run for Phase 1 slice 1 (backend loop):** https://github.com/jerryboganda/medicalos/actions/runs/35280682748 — IDs marked `tested (slice-1 scope)` have seam-test coverage for the scope defined in `.scratch/phase-1-slice-1/spec.md`; they remain in scope for the rest of Phase 1 (UI, multi-exam, timed presets, etc.).
 
@@ -59,9 +60,9 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29. Phase definitions: §28 + 
 | AI-07 | Action receipts and undoable plan revisions | tested (slice-1 scope: revision receipt JSONB with triggering evidence + checks + diff, undo restores version) | run 35280682748 |
 | AI-13 | Cost limits, fallbacks, kill switches | tested (slice-11 scope: daily AI allowance enforced with honest 403 + details; extractive fallback means study never blocks; remote kill switch via OPS-05 flags pending) | run 35466880140 |
 | AI-14 | No cross-tenant private-memory access | in-progress (learner memory is user-scoped by design with user-scope tests; institution isolation tests added — cross-tenant analytics/audit/duel reads refused; multi-tenant deployments pending) | run 35783063874 |
-| AI-17 | Transparent baseline estimator, default selection policy, difficulty fallback | in-progress (Elo estimator + shrinking K tested; window difficulty-fallback rule and selection mix pending) | run 35280682748 |
+| AI-17 | Transparent baseline estimator, default selection policy, di | tested (GET /v1/me/selection-policy discloses the Elo baseline anchors, shrinking-K rule, counted-evidence definition, and the actual selection rules alongside the learner's real per-chapter state) | run 35790283904 |
 | PLAN-01 | Original / revised / current plan timeline | in-progress (versioned plans + revision list + undo tested; timeline UI pending) | run 35280682748 |
-| PLAN-02 | Capacity changes and feasible replanning | in-progress (revision-on-evidence tested; capacity/deadline replanning pending) | run 35280682748 |
+| PLAN-02 | Capacity changes and feasible replanning | tested (POST /v1/me/plan/replan forks today's plan to a new version fitting the declared budget, defers trimmed tasks with a capacity_change receipt, never touches done work; validation 5-480 minutes) | run 35790283904 |
 | LIB-01 | Versioned articles and references | tested (seed-level: versioned published articles readable; editorial authoring surface pending) | run 35467238410 |
 | NOTE-01 | Source-linked private notes | tested (CRUD + user-scoped isolation + deletion) | run 35467238410 |
 | ADMIN-01 | Real cross-tenant owner dashboard | not-started | — |
@@ -101,12 +102,12 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | AI-03 | Mistake hypotheses, not assumed diagnoses | tested (slice 16: per-chapter miss patterns labelled hypothesis with evidence counts, min-evidence floor) | run 35479440275 |
 | AI-08 | Protected tasks and plan-churn controls | not-started | — |
 | AI-09 | Source-grounded contextual tutoring | tested (slice-11 scope: extractive adapter answers only from reviewed rationale/key-point/exam-tip/source of answered questions; Socratic/contrast modes pending) | run 35466880140 |
-| AI-10 | Socratic, explain-back, contrast modes | not-started | — |
+| AI-10 | Socratic, explain-back, contrast modes | tested (extractive modes on the answer-first gate: socratic guides without the reveal, explain-back mirrors the learner's words against option rationales, contrast compares the defensible choice with the picked distractor) | run 35790283904 |
 | AI-11 | Learner-viewable editable memory | tested (coach memory PUT/GET/DELETE, user-scoped isolation — other learners see empty list) | run 35728441244 |
 | AI-12 | Delayed intervention outcome tracking | tested (intervention create + delayed outcome PATCH with measured_at, user-owned) | run 35728441244 |
 | AI-16 | Qualified model routing and regression suites | in-progress (adapter routing extractive → OpenAI-compatible when key set; grounding regression seam tests live; full §23 eval harness pending) | run 35466880140 |
 | AI-18 | Pre-generated one-tap tutoring, cached and offline | not-started | — |
-| PLAN-03 | Review debt recovery and buffer time | not-started | — |
+| PLAN-03 | Review debt recovery and buffer time | tested (GET /v1/me/review-debt reports due cards, the real last-7-day completion rate, and a backlog projection only when rate history exists — no invented numbers) | run 35790283904 |
 | SR-01 | Deterministic reviewed scheduling engine (FSRS) | tested (product scope: decks, cards, review-events API, review UI — all through the official MIT rs-fsrs implementation behind the shared scheduler crate; native+wasm; browser-E2E tested) | run 35379501317 |
 | SR-02 | New-card and workload limits | tested (product scope: QueueLimits 30/10 enforced through GET /v1/reviews/queue; most-at-risk-first triage with overflow counting) | run 35379501317 |
 | SR-03 | Cloze, image, explanatory cards | in-progress (front/back text cards tested end-to-end; cloze, image-occlusion, audio, and clinical-discrimination card types pending) | run 35379501317 |
@@ -197,7 +198,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | AI-15 | Evaluated multilingual tutoring | not-started | — |
-| PLAN-04 | Exam-switch knowledge-gap report | not-started | — |
+| PLAN-04 | Exam-switch knowledge-gap report | tested (per-chapter independent attempt coverage for the target exam under the 10-attempt evidence rule; chapters reported as covered / low_evidence / no_evidence) | run 35790283904 |
 | SIM-08 | Team-based cases and handover | not-started | — |
 
 ## Phase 7 — Advanced intelligence and continuing education
