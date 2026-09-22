@@ -5487,3 +5487,470 @@ async fn retest_serves_unattempted_family_variant() {
         "{queue}"
     );
 }
+
+#[tokio::test]
+async fn community_groups_duels_and_integrity_gated_prizes() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+
+    // Register with explicit ids: duels and assertions need user references.
+    let register = |app: Router, prefix: String| async move {
+        let email = format!("{prefix}-{}@example.test", Uuid::new_v4());
+        let (status, reg) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{reg}");
+        let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
+        let (status, login) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/login",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{login}");
+        let token = login["token"].as_str().unwrap().to_string();
+        (user_id, token)
+    };
+    let (alice_id, alice) = register(app.clone(), "alice".into()).await;
+    let (bob_id, bob) = register(app.clone(), "bob".into()).await;
+    let (_, carol) = register(app.clone(), "carol".into()).await;
+
+    // COMMUNITY-03: identity is opt-in; handles validated and unique.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&alice),
+            Some(serde_json::json!({"handle": "x"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&alice),
+            Some(serde_json::json!({"handle": "ace-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&bob),
+            Some(serde_json::json!({"handle": "ace-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["code"], "handle_taken", "{body}");
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&bob),
+            Some(serde_json::json!({"handle": "bold-2"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // COMMUNITY-01: groups with moderation; non-members are refused.
+    let (status, group) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/groups",
+            Some(&alice),
+            Some(serde_json::json!({"name": "Anatomy cram"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{group}");
+    let group_id: Uuid = group["group_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/join"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&carol),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, post) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&bob),
+            Some(serde_json::json!({"body": "Chapter 3 is brutal"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{post}");
+    let post_id: Uuid = post["post_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}"),
+            Some(&carol),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}"),
+            Some(&alice),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, posts) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posts}");
+    assert_eq!(posts["posts"][0]["status"], "removed", "{posts}");
+
+    // COMP-03/GROW-01: private duel with a share token.
+    let (status, duel) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/duels",
+            Some(&alice),
+            Some(serde_json::json!({
+                "opponent": format!("{bob_id}"),
+                "exam_id": format!("{}", ids.exam_id),
+                "chapter_id": format!("{}", ids.chapter1),
+                "question_count": 3
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duel}");
+    let duel_id: Uuid = duel["duel_id"].as_str().unwrap().parse().unwrap();
+    let share = duel["share_token"].as_str().unwrap().to_string();
+
+    // The share link resolves (deferred deep-link payload) with opt-in names.
+    let (status, resolved) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/duels/by-token/{share}"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert_eq!(resolved["challenger"], "ace-1", "{resolved}");
+
+    // Third parties can neither resolve the token to nothing new nor watch.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/duels/{duel_id}"),
+            Some(&carol),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Only the challenged opponent accepts.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/duels/{duel_id}/accept"),
+            Some(&carol),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, accepted) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/duels/{duel_id}/accept"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["question_count"], 3, "{accepted}");
+    let bob_session: Uuid = accepted["your_session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    // Alice's side is the other one.
+    let (status, pre) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/duels/{duel_id}"),
+            Some(&alice),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pre}");
+    let sides = pre["sides"].as_array().unwrap();
+    let alice_session: Uuid = sides
+        .iter()
+        .find(|s| s["session_id"] != serde_json::json!(format!("{bob_session}")))
+        .and_then(|s| s["session_id"].as_str())
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let play = |app: Router, token: &str, sid: Uuid, key: String| async move {
+        for i in 0..3 {
+            let (status, _) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/practice/sessions/{sid}/answers"),
+                    Some(token),
+                    Some(serde_json::json!({
+                        "item_index": i, "chosen_index": 0,
+                        "elapsed_ms": 1000,
+                        "idempotency_key": format!("{key}-{i}")
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/submit"),
+                Some(token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    };
+    play(app.clone(), &bob, bob_session, "duel-b".into()).await;
+    play(app.clone(), &alice, alice_session, "duel-a".into()).await;
+    let (status, final_state) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/duels/{duel_id}"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{final_state}");
+    assert_eq!(final_state["status"], "done", "{final_state}");
+    let scored = final_state["sides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["score"].is_number());
+    assert!(scored, "{final_state}");
+
+    // COMP-01/04: entry requires the opt-in handle; prizes need review.
+    let starts = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let ends = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let (status, comp) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&alice),
+            Some(serde_json::json!({
+                "title": "Weekly sprint",
+                "exam_id": format!("{}", ids.exam_id),
+                "question_ids": [
+                    format!("{}", ids.question_versions[0]),
+                    format!("{}", ids.question_versions[1]),
+                    format!("{}", ids.question_versions[2])
+                ],
+                "starts_at": starts,
+                "ends_at": ends,
+                "cadence": "weekly"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{comp}");
+    let comp_id: Uuid = comp["competition_id"].as_str().unwrap().parse().unwrap();
+
+    // Carol never opted in — she cannot invent a handle.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/entry"),
+            Some(&carol),
+            Some(serde_json::json!({
+                "handle": "sneaky", "answers": [], "total_time_ms": 0
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "not_opted_in", "{body}");
+
+    // Bob cannot enter under someone else's handle either.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/entry"),
+            Some(&bob),
+            Some(serde_json::json!({
+                "handle": "ace-1", "answers": [], "total_time_ms": 0
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "handle_mismatch", "{body}");
+
+    let (status, entry) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/entry"),
+            Some(&bob),
+            Some(serde_json::json!({
+                "handle": "bold-2", "answers": [], "total_time_ms": 1000
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{entry}");
+
+    // Claim before close: refused.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/claim"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "competition_open", "{body}");
+
+    // Close the window (surgically): claim now waits for review.
+    sqlx::query("UPDATE competitions SET ends_at = now() - INTERVAL '1 minute'")
+        .execute(&state.pool)
+        .await
+        .expect("close window");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/claim"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "prize_review_pending", "{body}");
+
+    // Review flags bold-2 — prizes only after integrity review (COMP-04).
+    let (status, review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/competitions/{comp_id}/prize-review"),
+            Some(&alice),
+            Some(serde_json::json!({"flag": ["bold-2"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{review}");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{comp_id}/claim"),
+            Some(&bob),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "entry_flagged", "{body}");
+
+    // The leaderboard names handles only and marks the flagged entry.
+    let (status, board) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/competitions/{comp_id}/leaderboard"),
+            Some(&carol),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{board}");
+    assert_eq!(board["prize_reviewed"], true, "{board}");
+    let first = &board["entries"][0];
+    assert_eq!(first["handle"], "bold-2", "{board}");
+    assert_eq!(first["flagged"], true, "{board}");
+    assert_eq!(first["prize_eligible"], false, "{board}");
+}

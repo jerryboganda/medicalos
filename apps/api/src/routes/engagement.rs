@@ -583,6 +583,8 @@ pub struct CreateCompetitionReq {
     pub question_ids: Vec<Uuid>,
     pub starts_at: chrono::DateTime<chrono::Utc>,
     pub ends_at: chrono::DateTime<chrono::Utc>,
+    /// COMP-01: one_off | daily | weekly | monthly | live.
+    pub cadence: Option<String>,
 }
 
 pub async fn create_competition(
@@ -605,17 +607,28 @@ pub async fn create_competition(
             "competition must end after it starts",
         ));
     }
+    let cadence = req.cadence.unwrap_or_else(|| "one_off".into());
+    if !matches!(
+        cadence.as_str(),
+        "one_off" | "daily" | "weekly" | "monthly" | "live"
+    ) {
+        return Err(ApiError::unprocessable(
+            "invalid_cadence",
+            "cadence must be one_off, daily, weekly, monthly, or live",
+        ));
+    }
     let id = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO competitions (id, title, exam_id, question_ids, starts_at, ends_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO competitions (id, title, exam_id, question_ids, starts_at, ends_at, created_by, cadence)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         id,
         req.title.trim(),
         req.exam_id,
         serde_json::to_value(&req.question_ids).map_err(|_| ApiError::internal())?,
         req.starts_at,
         req.ends_at,
-        user.user_id
+        user.user_id,
+        cadence
     )
     .execute(&state.pool)
     .await?;
@@ -690,6 +703,26 @@ pub async fn submit_competition_entry(
         return Err(ApiError::unprocessable(
             "invalid_handle",
             "handle must be 1-40 characters",
+        ));
+    }
+    // COMMUNITY-03: competition presence is part of the community — it
+    // requires the opt-in profile, and the handle must be the learner's own.
+    let profile = sqlx::query!(
+        "SELECT handle FROM community_profiles WHERE user_id = $1",
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(p) = profile else {
+        return Err(ApiError::forbidden(
+            "not_opted_in",
+            "create a community profile to enter competitions",
+        ));
+    };
+    if !p.handle.eq_ignore_ascii_case(handle) {
+        return Err(ApiError::forbidden(
+            "handle_mismatch",
+            "entries must use your own community handle",
         ));
     }
 

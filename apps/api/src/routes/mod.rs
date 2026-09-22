@@ -3,6 +3,7 @@ pub mod actions;
 pub mod admin;
 pub mod auth;
 pub mod coach;
+pub mod community;
 pub mod config;
 pub mod engagement;
 pub mod exams;

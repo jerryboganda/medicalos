@@ -120,6 +120,56 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::exams::start_assessment_session),
         )
         .route(
+            "/v1/community/profile",
+            post(routes::community::create_profile),
+        )
+        .route("/v1/community/me", get(routes::community::my_profile))
+        .route(
+            "/v1/community/groups",
+            post(routes::community::create_group),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/join",
+            post(routes::community::join_group),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/posts",
+            post(routes::community::create_post).get(routes::community::list_posts),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/posts/{post_id}",
+            axum::routing::delete(routes::community::remove_post),
+        )
+        .route("/v1/community/duels", post(routes::community::create_duel))
+        .route(
+            "/v1/community/duels/by-token/{token}",
+            get(routes::community::duel_by_token),
+        )
+        .route(
+            "/v1/community/duels/{duel_id}",
+            get(routes::community::duel_state),
+        )
+        .route(
+            "/v1/community/duels/{duel_id}/accept",
+            post(routes::community::accept_duel),
+        )
+        .route(
+            "/v1/community/duels/{duel_id}/decline",
+            post(routes::community::decline_duel),
+        )
+        .route(
+            "/v1/competitions/{comp_id}/leaderboard",
+            get(routes::community::competition_leaderboard),
+        )
+        .route(
+            "/v1/competitions/{comp_id}/claim",
+            post(routes::community::claim_prize),
+        )
+        .route(
+            "/v1/admin/competitions/{comp_id}/prize-review",
+            post(routes::community::prize_review),
+        )
+        .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
                 .get(routes::settings::get_settings),
@@ -420,6 +470,59 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/assessments/{form_id}/sessions",
             post(routes::exams::start_assessment_session),
+        )
+        .route(
+            "/api/v1/community/profile",
+            post(routes::community::create_profile),
+        )
+        .route("/api/v1/community/me", get(routes::community::my_profile))
+        .route(
+            "/api/v1/community/groups",
+            post(routes::community::create_group),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/join",
+            post(routes::community::join_group),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/posts",
+            post(routes::community::create_post).get(routes::community::list_posts),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/posts/{post_id}",
+            axum::routing::delete(routes::community::remove_post),
+        )
+        .route(
+            "/api/v1/community/duels",
+            post(routes::community::create_duel),
+        )
+        .route(
+            "/api/v1/community/duels/by-token/{token}",
+            get(routes::community::duel_by_token),
+        )
+        .route(
+            "/api/v1/community/duels/{duel_id}",
+            get(routes::community::duel_state),
+        )
+        .route(
+            "/api/v1/community/duels/{duel_id}/accept",
+            post(routes::community::accept_duel),
+        )
+        .route(
+            "/api/v1/community/duels/{duel_id}/decline",
+            post(routes::community::decline_duel),
+        )
+        .route(
+            "/api/v1/competitions/{comp_id}/leaderboard",
+            get(routes::community::competition_leaderboard),
+        )
+        .route(
+            "/api/v1/competitions/{comp_id}/claim",
+            post(routes::community::claim_prize),
+        )
+        .route(
+            "/api/v1/admin/competitions/{comp_id}/prize-review",
+            post(routes::community::prize_review),
         )
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
