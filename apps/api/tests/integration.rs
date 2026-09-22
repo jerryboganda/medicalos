@@ -189,6 +189,19 @@ async fn xp_competitions_coverage_flow() {
     assert_eq!(status, StatusCode::OK, "{comp}");
     let comp_id: Uuid = comp["competition_id"].as_str().unwrap().parse().unwrap();
 
+    // Community presence is opt-in: entries must use the learner's own
+    // registered handle.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&learner),
+            Some(serde_json::json!({"handle": "fixture-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     let (status, entry) = call(
         app.clone(),
         request(
