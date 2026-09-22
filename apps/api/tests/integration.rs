@@ -3686,12 +3686,18 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     )
     .execute(&state.pool)
     .await;
-    assert!(update_frozen.is_err(), "frozen form update must be rejected");
+    assert!(
+        update_frozen.is_err(),
+        "frozen form update must be rejected"
+    );
 
     let delete_frozen = sqlx::query!("DELETE FROM assessment_forms WHERE id = $1", form_id)
         .execute(&state.pool)
         .await;
-    assert!(delete_frozen.is_err(), "frozen form delete must be rejected");
+    assert!(
+        delete_frozen.is_err(),
+        "frozen form delete must be rejected"
+    );
 
     let stored_form = sqlx::query!(
         "SELECT name, reserved, ai_allowed FROM assessment_forms WHERE id = $1",
