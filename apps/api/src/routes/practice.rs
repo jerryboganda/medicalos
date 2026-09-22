@@ -453,7 +453,7 @@ pub async fn answer(
     Path(sid): Path<Uuid>,
     Json(req): Json<AnswerReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    apply_answer(&state, user_id, sid, req).await
+    apply_answer(&state, user.user_id, sid, req).await
 }
 
 /// OFF-02: the entire answer path — open-session check, server deadline,

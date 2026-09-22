@@ -53,13 +53,13 @@ pub async fn sync_events(
     for event in req.events {
         let outcome = match event.kind.as_str() {
             "answer" => {
-                apply::<AnswerPayload>(&state, &user, &event, |state, user, payload| {
+                apply::<AnswerPayload, _, _>(&state, &user, &event, |state, user, payload| {
                     practice::apply_answer(state, user, payload.session_id, payload.rest)
                 })
                 .await
             }
             "review" => {
-                apply::<review::ReviewEventReq>(&state, &user, &event, |state, user, payload| {
+                apply::<review::ReviewEventReq, _, _>(&state, &user, &event, |state, user, payload| {
                     review::apply_review(state, user, payload)
                 })
                 .await

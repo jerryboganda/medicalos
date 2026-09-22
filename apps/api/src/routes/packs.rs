@@ -255,20 +255,16 @@ pub async fn create_lease(
 }
 
 /// GET /v1/me/packs — active leases with freshness disclosure (OFF-04):
-/// content_as_of is the newest published question in the leased chapters,
-/// so the client can say "pack data as of <date>" truthfully.
+/// content_as_of is when the server issued/refreshed this lease. Question
+/// versions do not carry publication timestamps, so claiming a newer content
+/// timestamp would fabricate precision.
 pub async fn list_leases(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query!(
         r#"SELECT pl.id, pl.exam_id, pl.device_id, pl.chapters, pl.expires_at,
-                  (SELECT COALESCE(MAX(qv.created_at), pl.created_at)
-                   FROM question_versions qv
-                   WHERE qv.status = 'published'
-                     AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(pl.chapters) c(x)
-                                 WHERE c.x::uuid = qv.chapter_id))
-                  AS "content_as_of!"
+                  pl.created_at AS "content_as_of!"
            FROM pack_leases pl
            WHERE pl.user_id = $1 AND pl.expires_at > now()
            ORDER BY pl.expires_at"#,

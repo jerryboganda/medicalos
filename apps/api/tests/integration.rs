@@ -3565,15 +3565,10 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     assert_eq!(status, StatusCode::OK, "{device}");
     assert_eq!(device["device_key"], "ci-browser");
 
-    let (status, exams) = call(
-        app.clone(),
-        request("GET", "/v1/exams", Some(&token), None),
-    )
-    .await;
+    let (status, exams) =
+        call(app.clone(), request("GET", "/v1/exams", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{exams}");
-    let exam_id = exams["exams"][0]["exam_id"]
-        .as_str()
-        .expect("seed exam id");
+    let exam_id = exams["exams"][0]["exam_id"].as_str().expect("seed exam id");
 
     let (status, spec) = call(
         app.clone(),

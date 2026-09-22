@@ -206,7 +206,7 @@ pub async fn review_event(
     user: AuthUser,
     Json(req): Json<ReviewEventReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    apply_review(&state, user_id, req).await
+    apply_review(&state, user.user_id, req).await
 }
 
 /// OFF-02: shared with the offline sync endpoint — one review path, no drift.
