@@ -202,7 +202,7 @@ pub struct ImageCaseReq {
     pub modality: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct ImageRef {
     pub url: String,
     pub rights_ref: String,
