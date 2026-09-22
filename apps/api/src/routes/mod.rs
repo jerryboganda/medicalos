@@ -1,5 +1,5 @@
-pub mod actions;
 pub mod accounts;
+pub mod actions;
 pub mod admin;
 pub mod auth;
 pub mod coach;

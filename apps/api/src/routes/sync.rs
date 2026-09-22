@@ -55,13 +55,8 @@ pub async fn sync_events(
             "answer" => match serde_json::from_value::<AnswerPayload>(event.payload.clone()) {
                 Ok(payload) => finish(
                     &event.event_id,
-                    practice::apply_answer(
-                        &state,
-                        user.user_id,
-                        payload.session_id,
-                        payload.rest,
-                    )
-                    .await,
+                    practice::apply_answer(&state, user.user_id, payload.session_id, payload.rest)
+                        .await,
                 ),
                 Err(_) => invalid_payload(&event.event_id),
             },

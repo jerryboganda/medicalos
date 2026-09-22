@@ -31,10 +31,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/me/devices/{device_id}",
             delete(routes::accounts::revoke_device),
         )
-        .route(
-            "/v1/me/account",
-            delete(routes::accounts::delete_account),
-        )
+        .route("/v1/me/account", delete(routes::accounts::delete_account))
         .route("/v1/exams", get(routes::exams::list_exams))
         .route(
             "/v1/admin/exams/{exam_id}/specs",
@@ -377,10 +374,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/admin/audit", get(routes::admin::audit_log))
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
-        .route(
-            "/api/v1/me/coach-memory",
-            get(routes::coach::list_memory),
-        )
+        .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))
         .route(
             "/api/v1/me/coach-memory/{key}",
             axum::routing::put(routes::coach::put_memory).delete(routes::coach::delete_memory),
