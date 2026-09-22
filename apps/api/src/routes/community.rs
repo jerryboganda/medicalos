@@ -498,19 +498,25 @@ pub async fn on_session_submitted(state: &AppState, session_id: Uuid) -> ApiResu
     )
     .execute(&state.pool)
     .await?;
+    // The other side may not have submitted yet — scores are nullable here.
     let sides = sqlx::query!(
-        r#"SELECT user_id, score AS "score!", total_ms AS "ms!" FROM duel_sessions
-           WHERE duel_id = $1"#,
+        "SELECT user_id, score, total_ms FROM duel_sessions WHERE duel_id = $1",
         d.duel_id
     )
     .fetch_all(&state.pool)
     .await?;
-    if sides.len() == 2 {
+    if sides.len() == 2
+        && sides
+            .iter()
+            .all(|s| s.score.is_some() && s.total_ms.is_some())
+    {
         let (a, b) = (&sides[0], &sides[1]);
-        let winner = match a.score.cmp(&b.score) {
+        let (a_score, b_score) = (a.score.unwrap(), b.score.unwrap());
+        let (a_ms, b_ms) = (a.total_ms.unwrap(), b.total_ms.unwrap());
+        let winner = match a_score.cmp(&b_score) {
             std::cmp::Ordering::Greater => Some(a.user_id),
             std::cmp::Ordering::Less => Some(b.user_id),
-            std::cmp::Ordering::Equal => match a.ms.cmp(&b.ms) {
+            std::cmp::Ordering::Equal => match a_ms.cmp(&b_ms) {
                 std::cmp::Ordering::Greater => Some(b.user_id),
                 std::cmp::Ordering::Less => Some(a.user_id),
                 std::cmp::Ordering::Equal => None,
