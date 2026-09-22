@@ -34,6 +34,7 @@ migrations!(
     "0017_offline",
     "0018_completion_kernel",
     "0019_engagement",
+    "0020_assessment_form_immutability",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
