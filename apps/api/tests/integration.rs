@@ -6357,11 +6357,26 @@ async fn library_media_and_image_cases_are_rights_checked() {
     let token = register_and_login(app.clone()).await;
     seed::seed(&state.pool).await.expect("seed");
 
-    let article_id: Uuid = sqlx::query!("SELECT id FROM articles LIMIT 1")
-        .fetch_one(&state.pool)
-        .await
-        .expect("seeded article")
-        .id;
+    // A minimal published article fixture to attach media to.
+    let article_id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO articles (id, slug, title) VALUES ($1, $2, 'Media Fixture')",
+        article_id,
+        "media-fixture"
+    )
+    .execute(&state.pool)
+    .await
+    .expect("article");
+    sqlx::query!(
+        "INSERT INTO article_versions
+           (id, article_id, version, status, body, source_ref)
+         VALUES ($1, $2, 1, 'published', 'Fixture body.', 'Fixture')",
+        Uuid::new_v4(),
+        article_id
+    )
+    .execute(&state.pool)
+    .await
+    .expect("article version");
 
     // LIB-06: media without a rights reference is refused.
     let (status, body) = call(
