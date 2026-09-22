@@ -4086,7 +4086,7 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::OK, "{eng}");
     assert_eq!(eng["qotd"]["answered"], true, "{eng}");
     assert!(
-        eng["qotd"]["community_split"].as_array().unwrap().len() >= 1,
+        !eng["qotd"]["community_split"].as_array().unwrap().is_empty(),
         "{eng}"
     );
     assert!(eng["qotd"].get("correct_index").is_none(), "{eng}");
