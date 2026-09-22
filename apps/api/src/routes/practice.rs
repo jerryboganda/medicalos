@@ -4,6 +4,7 @@
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -14,11 +15,19 @@ use crate::seed::QuestionOption;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+pub struct BlueprintSlice {
+    pub chapter_id: Uuid,
+    pub count: i32,
+}
+
+#[derive(Deserialize)]
 pub struct CreateSessionReq {
     pub preset: String,
     pub chapter_id: Option<Uuid>,
     /// QB-06 targeted pool: several chapters at once (overrides chapter_id).
     pub chapter_ids: Option<Vec<Uuid>>,
+    /// QB-07 blueprint-balanced random pool; counts are exact per chapter.
+    pub blueprint: Option<Vec<BlueprintSlice>>,
     /// QB-06 pool filter: any (default) | unseen | incorrect | marked.
     pub source: Option<String>,
     pub question_count: Option<i32>,
@@ -249,6 +258,118 @@ pub async fn create_session(
                 Some(chapter_id),
                 None,
                 time_limit_seconds,
+                &qs,
+            )
+            .await
+        }
+        "blueprint" => {
+            let slices = req
+                .blueprint
+                .as_ref()
+                .filter(|slices| !slices.is_empty())
+                .ok_or_else(|| {
+                    ApiError::unprocessable(
+                        "blueprint_required",
+                        "blueprint sessions need at least one chapter/count slice",
+                    )
+                })?;
+            if slices.len() > 20
+                || slices.iter().any(|slice| !(1..=50).contains(&slice.count))
+                || slices.iter().map(|slice| slice.count).sum::<i32>() > 50
+            {
+                return Err(ApiError::unprocessable(
+                    "invalid_blueprint",
+                    "blueprint must contain at most 20 chapters, 1-50 questions per chapter, and 50 questions total",
+                ));
+            }
+
+            let mut seen = HashSet::with_capacity(slices.len());
+            if slices.iter().any(|slice| !seen.insert(slice.chapter_id)) {
+                return Err(ApiError::unprocessable(
+                    "invalid_blueprint",
+                    "blueprint chapter_id values must be unique",
+                ));
+            }
+
+            let chapter_ids: Vec<Uuid> = slices.iter().map(|slice| slice.chapter_id).collect();
+            let hierarchy = sqlx::query!(
+                r#"SELECT COUNT(*) AS "chapters!", COUNT(DISTINCT exam_id) AS "exams!"
+                   FROM curriculum_nodes
+                   WHERE id = ANY($1) AND kind = 'chapter'"#,
+                &chapter_ids
+            )
+            .fetch_one(&state.pool)
+            .await?;
+            if hierarchy.chapters != slices.len() as i64 || hierarchy.exams != 1 {
+                return Err(ApiError::unprocessable(
+                    "invalid_blueprint",
+                    "all blueprint chapter_id values must be valid chapters from one exam",
+                ));
+            }
+
+            let source = req.source.as_deref().unwrap_or("any");
+            if !matches!(source, "any" | "unseen" | "incorrect" | "marked") {
+                return Err(ApiError::unprocessable(
+                    "invalid_source",
+                    "source must be any|unseen|incorrect|marked",
+                ));
+            }
+
+            let total = slices.iter().map(|slice| slice.count).sum::<i32>();
+            let mut qs = Vec::with_capacity(total as usize);
+            for slice in slices {
+                let pool_qs = sqlx::query!(
+                    r#"SELECT id, vignette, lead_in, difficulty, options
+                       FROM question_versions qv
+                       WHERE status = 'published' AND chapter_id = $1
+                         AND NOT EXISTS (
+                             SELECT 1 FROM question_reports r
+                             WHERE r.question_version_id = qv.id
+                               AND r.status = 'quarantined'
+                         )
+                         AND (
+                             $3 = 'any'
+                             OR ($3 = 'unseen' AND NOT EXISTS (
+                                 SELECT 1 FROM attempts a
+                                 WHERE a.question_version_id = qv.id AND a.user_id = $2))
+                             OR ($3 = 'incorrect' AND EXISTS (
+                                 SELECT 1 FROM attempts a
+                                 WHERE a.question_version_id = qv.id AND a.user_id = $2
+                                   AND a.correct = FALSE))
+                             OR ($3 = 'marked' AND EXISTS (
+                                 SELECT 1 FROM question_marks m
+                                 WHERE m.question_version_id = qv.id AND m.user_id = $2))
+                         )
+                       ORDER BY random() LIMIT $4"#,
+                    slice.chapter_id,
+                    user.user_id,
+                    source,
+                    i64::from(slice.count)
+                )
+                .fetch_all(&state.pool)
+                .await?;
+                if pool_qs.len() != slice.count as usize {
+                    return Err(ApiError::unprocessable(
+                        "blueprint_pool_shortfall",
+                        "not enough eligible questions to satisfy the requested blueprint",
+                    ));
+                }
+                qs.extend(pool_qs.into_iter().map(|r| PoolQuestion {
+                    id: r.id,
+                    vignette: r.vignette,
+                    lead_in: r.lead_in,
+                    difficulty: r.difficulty,
+                    options: r.options,
+                }));
+            }
+
+            insert_session(
+                &state.pool,
+                user.user_id,
+                "blueprint",
+                None,
+                None,
+                None,
                 &qs,
             )
             .await
