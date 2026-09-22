@@ -357,6 +357,32 @@ pub async fn duel_by_token(
     })))
 }
 
+async fn pick_duel_questions(
+    state: &AppState,
+    duel_id: Uuid,
+    chapter_id: Option<Uuid>,
+    count: i32,
+) -> ApiResult<Vec<Uuid>> {
+    let rows = sqlx::query!(
+        r#"SELECT qv.id FROM question_versions qv
+           JOIN curriculum_nodes c ON c.id = qv.chapter_id
+           WHERE qv.status = 'published'
+             AND c.exam_id = (SELECT exam_id FROM duels WHERE id = $1)
+             AND ($2::uuid IS NULL OR qv.chapter_id = $2)
+             AND NOT EXISTS (SELECT 1 FROM question_reports r
+                             WHERE r.question_version_id = qv.id AND r.status = 'quarantined')
+             AND NOT EXISTS (SELECT 1 FROM reserved_questions rq
+                             WHERE rq.question_version_id = qv.id)
+           ORDER BY random() LIMIT $3"#,
+        duel_id,
+        chapter_id,
+        count as i64
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.id).collect())
+}
+
 pub async fn accept_duel(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -384,28 +410,10 @@ pub async fn accept_duel(
     }
     // Same selection rules for both sides: random published, non-reserved,
     // non-quarantined questions from the chapter (or exam-wide without one).
-    let pick = |count: i32| async move {
-        let rows = sqlx::query!(
-            r#"SELECT qv.id FROM question_versions qv
-               JOIN curriculum_nodes c ON c.id = qv.chapter_id
-               WHERE qv.status = 'published'
-                 AND c.exam_id = (SELECT exam_id FROM duels WHERE id = $1)
-                 AND ($2::uuid IS NULL OR qv.chapter_id = $2)
-                 AND NOT EXISTS (SELECT 1 FROM question_reports r
-                                 WHERE r.question_version_id = qv.id AND r.status = 'quarantined')
-                 AND NOT EXISTS (SELECT 1 FROM reserved_questions rq
-                                 WHERE rq.question_version_id = qv.id)
-               ORDER BY random() LIMIT $3"#,
-            duel.id,
-            duel.chapter_id,
-            count as i64
-        )
-        .fetch_all(&state.pool)
-        .await?;
-        Ok::<Vec<Uuid>, ApiError>(rows.into_iter().map(|r| r.id).collect())
-    };
-    let challenger_qs = pick(duel.question_count).await?;
-    let opponent_qs = pick(duel.question_count).await?;
+    let challenger_qs =
+        pick_duel_questions(&state, duel.id, duel.chapter_id, duel.question_count).await?;
+    let opponent_qs =
+        pick_duel_questions(&state, duel.id, duel.chapter_id, duel.question_count).await?;
     if challenger_qs.is_empty() || opponent_qs.is_empty() {
         return Err(ApiError::unprocessable(
             "empty_pool",
