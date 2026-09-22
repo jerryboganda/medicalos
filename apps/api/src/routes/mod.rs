@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod actions;
 pub mod admin;
+pub mod analytics;
 pub mod auth;
 pub mod coach;
 pub mod community;

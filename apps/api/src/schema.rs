@@ -39,6 +39,7 @@ migrations!(
     "0022_reserved_families",
     "0023_community",
     "0024_library_cards",
+    "0025_ops_admin",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

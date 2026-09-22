@@ -40,3 +40,40 @@ pub async fn config(
         .collect();
     Ok(Json(json!({ "flags": flags })))
 }
+
+// ---- OPS-06: forced / soft update + version compatibility metadata ----------
+
+/// The client asks before it logs in. Backed by the `client_update` feature
+/// flag; absent flag means "no update required" (honest default). Two-version
+/// compatibility: `min_supported_client` names the oldest API contract this
+/// deployment still answers.
+pub async fn client_update(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let row = sqlx::query!("SELECT value FROM feature_flags WHERE key = 'client_update'")
+        .fetch_optional(&state.pool)
+        .await?;
+    let version = env!("CARGO_PKG_VERSION");
+    let mut update = json!({
+        "mode": "none",
+        "api_version": version,
+        "min_supported_client": version,
+        "recommended_version": version,
+    });
+    if let Some(r) = row {
+        let flag = &r.value;
+        let mode = flag.get("mode").and_then(|m| m.as_str()).unwrap_or("none");
+        if !matches!(mode, "none" | "soft" | "forced") {
+            // A misconfigured flag is an operator error, not a client one.
+            return Err(crate::error::ApiError::internal());
+        }
+        update["mode"] = json!(mode);
+        if let Some(min) = flag.get("min_supported_client") {
+            update["min_supported_client"] = min.clone();
+        }
+        if let Some(rec) = flag.get("recommended_version") {
+            update["recommended_version"] = rec.clone();
+        }
+    }
+    Ok(Json(update))
+}

@@ -189,6 +189,25 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/image-cases", get(routes::library::list_image_cases))
         .route(
+            "/v1/analytics/events",
+            post(routes::analytics::receive_events),
+        )
+        .route("/v1/admin/dashboard", get(routes::admin::dashboard))
+        .route(
+            "/v1/admin/content-rights",
+            post(routes::admin::create_content_rights).get(routes::admin::list_content_rights),
+        )
+        .route("/v1/admin/ai-admin", get(routes::admin::ai_admin))
+        .route(
+            "/v1/admin/incidents",
+            post(routes::admin::create_incident).get(routes::admin::list_incidents),
+        )
+        .route(
+            "/v1/admin/incidents/{incident_id}",
+            axum::routing::patch(routes::admin::update_incident),
+        )
+        .route("/v1/client-update", get(routes::config::client_update))
+        .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
                 .get(routes::settings::get_settings),
@@ -565,6 +584,25 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/me/image-cases",
             get(routes::library::list_image_cases),
         )
+        .route(
+            "/api/v1/analytics/events",
+            post(routes::analytics::receive_events),
+        )
+        .route("/api/v1/admin/dashboard", get(routes::admin::dashboard))
+        .route(
+            "/api/v1/admin/content-rights",
+            post(routes::admin::create_content_rights).get(routes::admin::list_content_rights),
+        )
+        .route("/api/v1/admin/ai-admin", get(routes::admin::ai_admin))
+        .route(
+            "/api/v1/admin/incidents",
+            post(routes::admin::create_incident).get(routes::admin::list_incidents),
+        )
+        .route(
+            "/api/v1/admin/incidents/{incident_id}",
+            axum::routing::patch(routes::admin::update_incident),
+        )
+        .route("/api/v1/client-update", get(routes::config::client_update))
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
         .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))

@@ -965,3 +965,288 @@ pub async fn psychometric_queue(
         .collect();
     Ok(Json(json!({ "items": items })))
 }
+
+// ---- ADMIN-01/02/03/04 + OPS-05/06: owner console reads and ledgers ----------
+
+/// ADMIN-01: real cross-tenant aggregates. Counts only — tenant rows stay
+/// behind their own access rules.
+pub async fn dashboard(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let counts = sqlx::query!(
+        r#"SELECT (SELECT COUNT(*) FROM institutions) AS "institutions!",
+               (SELECT COUNT(*) FROM users WHERE deleted_at IS NULL) AS "users!",
+               (SELECT COUNT(*) FROM question_versions WHERE status = 'published') AS "published_questions!",
+               (SELECT COUNT(*) FROM articles) AS "articles!",
+               (SELECT COUNT(*) FROM content_rights) AS "rights_records!",
+               (SELECT COUNT(*) FROM incidents WHERE status <> 'resolved') AS "open_incidents!",
+               (SELECT COUNT(*) FROM coach_turns WHERE created_at >= now() - interval '30 days') AS "coach_turns_30d!""#
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "institutions": counts.institutions,
+        "users": counts.users,
+        "published_questions": counts.published_questions,
+        "articles": counts.articles,
+        "rights_records": counts.rights_records,
+        "open_incidents": counts.open_incidents,
+        "coach_turns_last_30_days": counts.coach_turns_30d,
+    })))
+}
+
+// ---- ADMIN-02/TRUST-07: content rights ledger (§19.2) ------------------------
+
+#[derive(Deserialize)]
+pub struct ContentRightsReq {
+    pub ref_code: String,
+    pub licensor: String,
+    pub territory: Option<String>,
+    /// display | offline | ai | derivatives | translation (Appendix B of §19).
+    pub permitted_uses: Vec<String>,
+    pub valid_from: chrono::NaiveDate,
+    pub valid_to: Option<chrono::NaiveDate>,
+    pub notes: Option<String>,
+}
+
+pub async fn create_content_rights(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<ContentRightsReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let ref_code = req.ref_code.trim().to_uppercase();
+    if ref_code.is_empty() || ref_code.len() > 60 {
+        return Err(ApiError::unprocessable(
+            "invalid_ref_code",
+            "ref_code must be 1-60 characters",
+        ));
+    }
+    let licensor = req.licensor.trim();
+    if licensor.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_licensor",
+            "licensor is required",
+        ));
+    }
+    let known = ["display", "offline", "ai", "derivatives", "translation"];
+    if req.permitted_uses.is_empty()
+        || !req
+            .permitted_uses
+            .iter()
+            .all(|u| known.contains(&u.as_str()))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_permitted_uses",
+            "permitted uses must draw from display, offline, ai, derivatives, translation",
+        ));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO content_rights
+           (id, ref_code, licensor, territory, permitted_uses, valid_from, valid_to, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        id,
+        ref_code,
+        licensor,
+        req.territory.as_deref().unwrap_or("worldwide"),
+        serde_json::to_value(&req.permitted_uses).map_err(|_| ApiError::internal())?,
+        req.valid_from,
+        req.valid_to,
+        req.notes,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    audit(
+        &state.pool,
+        user.user_id,
+        "content_rights_created",
+        "content_rights",
+        id,
+        json!({ "ref_code": ref_code }),
+    )
+    .await?;
+    Ok(Json(json!({ "rights_id": id, "ref_code": ref_code })))
+}
+
+pub async fn list_content_rights(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let rows = sqlx::query!(
+        r#"SELECT id, ref_code, licensor, territory, permitted_uses,
+                  valid_from AS "valid_from?", valid_to AS "valid_to?", notes AS "notes?"
+           FROM content_rights ORDER BY created_at DESC LIMIT 200"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "rights": rows.iter().map(|r| json!({
+        "rights_id": r.id,
+        "ref_code": r.ref_code,
+        "licensor": r.licensor,
+        "territory": r.territory,
+        "permitted_uses": r.permitted_uses,
+        "valid_from": r.valid_from,
+        "valid_to": r.valid_to,
+        "notes": r.notes,
+    })).collect::<Vec<_>>() })))
+}
+
+// ---- ADMIN-03: AI cost/policy read-out ----------------------------------------
+
+/// Real numbers from the coach stream: turns by adapter and prompt type over
+/// 30 days. Policy knobs live in state/config, disclosed, not invented here.
+pub async fn ai_admin(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let by_adapter = sqlx::query!(
+        r#"SELECT adapter AS "adapter!", model AS "model!", COUNT(*) AS "n!"
+           FROM coach_turns WHERE created_at >= now() - interval '30 days'
+           GROUP BY adapter, model ORDER BY n DESC"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let by_prompt = sqlx::query!(
+        r#"SELECT prompt_type AS "prompt_type!", COUNT(*) AS "n!"
+           FROM coach_turns WHERE created_at >= now() - interval '30 days'
+           GROUP BY prompt_type ORDER BY n DESC"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "daily_allowance_per_learner": state.free_daily_coach_turns,
+        "turns_last_30_days": by_adapter.iter().map(|r| json!({
+            "adapter": r.adapter, "model": r.model, "count": r.n
+        })).collect::<Vec<_>>(),
+        "prompt_types_last_30_days": by_prompt.iter().map(|r| json!({
+            "prompt_type": r.prompt_type, "count": r.n
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+// ---- ADMIN-04: incidents -------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct IncidentReq {
+    pub title: String,
+    pub severity: String, // sev1 | sev2 | sev3
+}
+
+pub async fn create_incident(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<IncidentReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let title = req.title.trim();
+    if title.is_empty() || title.len() > 200 {
+        return Err(ApiError::unprocessable(
+            "invalid_title",
+            "title must be 1-200 characters",
+        ));
+    }
+    if !matches!(req.severity.as_str(), "sev1" | "sev2" | "sev3") {
+        return Err(ApiError::unprocessable(
+            "invalid_severity",
+            "severity must be sev1, sev2, or sev3",
+        ));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO incidents (id, title, severity, opened_by) VALUES ($1, $2, $3, $4)",
+        id,
+        title,
+        req.severity,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    audit(
+        &state.pool,
+        user.user_id,
+        "incident_opened",
+        "incident",
+        id,
+        json!({ "severity": req.severity }),
+    )
+    .await?;
+    Ok(Json(json!({ "incident_id": id })))
+}
+
+pub async fn list_incidents(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let rows = sqlx::query!(
+        r#"SELECT id, title, severity, status,
+                  created_at AS "created_at?", resolved_at AS "resolved_at?"
+           FROM incidents ORDER BY created_at DESC LIMIT 100"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "incidents": rows.iter().map(|r| json!({
+        "incident_id": r.id,
+        "title": r.title,
+        "severity": r.severity,
+        "status": r.status,
+        "created_at": r.created_at,
+        "resolved_at": r.resolved_at,
+    })).collect::<Vec<_>>() })))
+}
+
+#[derive(Deserialize)]
+pub struct IncidentUpdateReq {
+    pub status: String, // mitigated | resolved
+}
+
+pub async fn update_incident(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(incident_id): Path<Uuid>,
+    Json(req): Json<IncidentUpdateReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    if !matches!(req.status.as_str(), "mitigated" | "resolved" | "open") {
+        return Err(ApiError::unprocessable(
+            "invalid_status",
+            "status must be open, mitigated, or resolved",
+        ));
+    }
+    let updated = sqlx::query!(
+        "UPDATE incidents
+         SET status = $2,
+             resolved_at = CASE WHEN $2 = 'resolved' THEN now() ELSE resolved_at END
+         WHERE id = $1",
+        incident_id,
+        req.status
+    )
+    .execute(&state.pool)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::not_found("incident_not_found"));
+    }
+    audit(
+        &state.pool,
+        user.user_id,
+        "incident_updated",
+        "incident",
+        incident_id,
+        json!({ "status": req.status }),
+    )
+    .await?;
+    Ok(Json(json!({ "status": req.status })))
+}
