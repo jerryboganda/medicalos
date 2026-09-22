@@ -723,18 +723,10 @@ pub async fn apply_answer(
     // QB-17: clamp client-reported time into a sane range; out-of-range or
     // negative reports are dropped to NULL rather than trusted.
     let elapsed_ms = req.elapsed_ms.filter(|ms| (0..=3_600_000).contains(ms));
-    // QB-04: assistance evidence is what the client declares OR what the
-    // server can prove (a coach turn happened on this question first).
-    let coached = sqlx::query!(
-        r#"SELECT 1 AS "one!" FROM coach_turns
-           WHERE user_id = $1 AND question_version_id = $2"#,
-        user_id,
-        item.id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .is_some();
-    let assisted = req.assisted.unwrap_or(false) || coached;
+    // QB-04: assistance evidence is declared by the session workspace. The
+    // Coach's answer-first gate means a turn can never precede an attempt,
+    // so there is no server-provable pre-answer assistance to record.
+    let assisted = req.assisted.unwrap_or(false);
 
     let inserted = sqlx::query!(
         r#"INSERT INTO attempts

@@ -5238,29 +5238,14 @@ async fn assisted_evidence_never_becomes_community_signal() {
         assert_eq!(status, StatusCode::OK);
     };
 
-    // Learner A asks the Coach first — the server can prove assistance.
-    let (status, coach) = call(
-        app.clone(),
-        request(
-            "POST",
-            "/v1/coach/turns",
-            Some(&coached),
-            Some(serde_json::json!({
-                "question_version_id": format!("{vid}"),
-                "prompt_type": "explain",
-                "message": "Walk me through this one",
-                "idempotency_key": "assist-coach-a"
-            })),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{coach}");
+    // Learner A uses in-session tools and declares assistance.
     answer_in_session(
         app.clone(),
         coached.clone(),
         "assist-ans-a".into(),
         serde_json::json!({
-            "item_index": 0, "chosen_index": 0, "idempotency_key": "assist-ans-a"
+            "item_index": 0, "chosen_index": 0, "assisted": true,
+            "idempotency_key": "assist-ans-a"
         }),
     )
     .await;
