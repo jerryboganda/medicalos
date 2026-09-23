@@ -6947,7 +6947,7 @@ async fn single_active_session_policy_and_device_limit() {
         ),
     )
     .await;
-    assert_eq!(reg["user_id"].as_str().is_some(), true, "{reg}");
+    assert!(reg["user_id"].as_str().is_some(), "{reg}");
     let (_, first_login) = call(
         app.clone(),
         request(
@@ -7143,7 +7143,7 @@ async fn upgrade_triggers_fire_for_full_mock_and_chapter_analytics() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    let ids = seed::seed(&state.pool).await.expect("seed");
+    seed::seed(&state.pool).await.expect("seed");
     let learner = register_and_login(app.clone()).await;
 
     // COM-01 chapter analytics: the free tier gets two drill-downs a day
