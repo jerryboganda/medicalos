@@ -26,6 +26,10 @@
 	let importReport = $state('');
 	let lastBatch = $state('');
 
+	// editorial workflow (INST-05)
+	let workflowIds = $state('');
+	let workflowReport = $state<unknown[]>([]);
+
 	async function unlock() {
 		unlocked = adminToken().length > 0;
 		if (unlocked) await refreshAudit();
@@ -78,6 +82,25 @@
 				err instanceof ApiError
 					? err.message
 					: 'Import failed — is the JSON valid?';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function runWorkflow(action: 'submit' | 'approve' | 'reject' | 'publish') {
+		busy = true;
+		error = '';
+		workflowReport = [];
+		try {
+			const versionIds = workflowIds
+				.split(',')
+				.map((v) => v.trim())
+				.filter(Boolean);
+			const res = await Api.assessmentWorkflow(action, versionIds);
+			workflowReport = res.results;
+			await refreshAudit();
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Workflow call failed.';
 		} finally {
 			busy = false;
 		}
@@ -211,6 +234,78 @@
 			<pre
 				style="white-space:pre-wrap; font-size: var(--text-sm);"
 				data-testid="import-report">{importReport}</pre>
+		{/if}
+	</div>
+
+	<div class="card">
+		<h2>Editorial workflow</h2>
+		<p class="muted" style="font-size: var(--text-sm);">
+			Authored and imported items are born drafts. A draft must be
+			submitted, approved, and published before learners ever see it —
+			and the author of an item cannot be its approver. Paste one or more
+			version IDs (comma-separated).
+		</p>
+		<label class="field" for="workflow-ids">
+			<span>Question version IDs</span>
+			<textarea
+				id="workflow-ids"
+				bind:value={workflowIds}
+				rows="2"
+				data-testid="workflow-ids"
+			></textarea>
+		</label>
+		<div style="display:flex; gap:12px; flex-wrap:wrap;">
+			<button
+				class="btn"
+				type="button"
+				disabled={busy || !workflowIds}
+				data-testid="workflow-submit"
+				onclick={() => runWorkflow('submit')}
+			>
+				Submit for review
+			</button>
+			<button
+				class="btn"
+				type="button"
+				disabled={busy || !workflowIds}
+				data-testid="workflow-approve"
+				onclick={() => runWorkflow('approve')}
+			>
+				Approve
+			</button>
+			<button
+				class="btn"
+				type="button"
+				disabled={busy || !workflowIds}
+				onclick={() => runWorkflow('reject')}
+			>
+				Reject to draft
+			</button>
+			<button
+				class="btn primary"
+				type="button"
+				disabled={busy || !workflowIds}
+				data-testid="workflow-publish"
+				onclick={() => runWorkflow('publish')}
+			>
+				Publish
+			</button>
+		</div>
+		{#if workflowReport.length > 0}
+			<ul style="font-size: var(--text-sm);">
+				{#each workflowReport as r (r.version_id)}
+					<li>
+						{r.version_id}:
+						{#if r.status}
+							<strong>{r.status}</strong>
+						{:else}
+							<span class="danger-text"
+								>{r.error.code} — {r.error.message}</span
+							>
+						{/if}
+					</li>
+				{/each}
+			</ul>
 		{/if}
 	</div>
 

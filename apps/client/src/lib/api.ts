@@ -381,5 +381,30 @@ export const Api = {
 			'POST',
 			'/v1/reviews/events',
 			{ card_id: cardId, rating, idempotency_key: idempotencyKey }
-		)
+		),
+	reviewDebt: () =>
+		call<{
+			due_now: number;
+			completed_last_7_days: number;
+			daily_rate: number | null;
+			projected_backlog_days: number | null;
+			note: string;
+		}>('GET', '/v1/me/review-debt'),
+	selectionPolicy: () =>
+		call<{
+			estimator: {
+				model: string;
+				base: number;
+				difficulty_anchors: Record<string, number>;
+				k_rule: string;
+				counted_evidence: string;
+			};
+			selection_rules: string[];
+			your_chapters: {
+				chapter: string;
+				ability: number | null;
+				current_k: number;
+				evidence_count: number;
+			}[];
+		}>('GET', '/v1/me/selection-policy')
 };
