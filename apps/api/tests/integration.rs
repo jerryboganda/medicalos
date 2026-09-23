@@ -6762,3 +6762,161 @@ async fn prompt_injection_never_steers_the_extractive_coach() {
         "{turn}"
     );
 }
+
+#[tokio::test]
+async fn curriculum_builder_data_heatmap_filters_and_handle_lookup() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // QB-12 data: the learner curriculum lists chapters with published counts.
+    let (status, curriculum) = call(
+        app.clone(),
+        request("GET", "/v1/me/curriculum", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{curriculum}");
+    let chapters = curriculum["chapters"].as_array().unwrap();
+    assert!(!chapters.is_empty(), "{curriculum}");
+    let chapter1_row = chapters
+        .iter()
+        .find(|c| c["chapter_id"] == serde_json::json!(format!("{}", ids.chapter1)))
+        .expect("chapter1 listed");
+    assert!(
+        chapter1_row["published_questions"].as_i64().unwrap() >= 1,
+        "{curriculum}"
+    );
+
+    // Real evidence first, so the trend overlay has something to count.
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "hm-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // PROG-01: unfiltered map first, then a drill-down with difficulty +
+    // trend window, which must return the overlay accuracies.
+    let (status, full) = call(
+        app.clone(),
+        request("GET", "/v1/me/heatmap", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{full}");
+    let systems = full["systems"].as_array().unwrap();
+    assert!(!systems.is_empty(), "{full}");
+    let system_id = systems[0]["system_id"].as_str().unwrap().to_string();
+
+    let (status, filtered) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/heatmap?system_id={system_id}&difficulty=medium&trend_days=30"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{filtered}");
+    let drill_systems = filtered["systems"].as_array().unwrap();
+    assert_eq!(drill_systems.len(), 1, "{filtered}");
+    let all_chapters = drill_systems[0]["chapters"].as_array().unwrap();
+    let with_overlay = all_chapters
+        .iter()
+        .any(|c| c["filtered_accuracy"].is_i64() && c["recent_answered"].is_i64());
+    assert!(with_overlay, "overlay missing: {filtered}");
+
+    // Invalid filter values are refused honestly.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/heatmap?difficulty=impossible",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "invalid_difficulty", "{body}");
+
+    // Community handle lookup resolves opt-in identity only.
+    let other = register_and_login(app.clone()).await;
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&other),
+            Some(serde_json::json!({"handle": "findable-1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, found) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/community/profiles/findable-1",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["handle"], "findable-1", "{found}");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/community/profiles/missing-handle",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // My duels start empty and honestly so.
+    let (status, duels) = call(
+        app.clone(),
+        request("GET", "/v1/me/duels", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duels}");
+    assert_eq!(duels["duels"].as_array().unwrap().len(), 0, "{duels}");
+}

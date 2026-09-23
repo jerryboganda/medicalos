@@ -723,3 +723,72 @@ pub async fn claim_prize(
         "handle": entry.handle,
     })))
 }
+
+/// Resolve a handle to a duel opponent. Opt-in info only: the handle exists
+/// publicly precisely so duelists can find each other; nothing else leaks.
+pub async fn profile_by_handle(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path(handle): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let row = sqlx::query!(
+        "SELECT user_id, handle FROM community_profiles WHERE handle = $1",
+        handle.to_lowercase()
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("profile_not_found"))?;
+    Ok(Json(
+        json!({ "user_id": row.user_id, "handle": row.handle }),
+    ))
+}
+
+/// My duels: challenges I sent or received, newest first. The client renders
+/// accept/decline on pending ones it received and state on the rest.
+pub async fn my_duels(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT d.id, d.status, d.question_count, d.winner AS "winner?",
+                  d.challenger = $1 AS "mine_sent!",
+                  ch.handle AS "challenger_handle?", oh.handle AS "opponent_handle?"
+           FROM duels d
+           LEFT JOIN community_profiles ch ON ch.user_id = d.challenger
+           LEFT JOIN community_profiles oh ON oh.user_id = d.opponent
+           WHERE d.challenger = $1 OR d.opponent = $1
+           ORDER BY d.created_at DESC LIMIT 50"#,
+        user.user_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "duels": rows.iter().map(|r| json!({
+        "duel_id": r.id,
+        "status": r.status,
+        "question_count": r.question_count,
+        "winner": r.winner,
+        "sent_by_me": r.mine_sent,
+        "challenger": r.challenger_handle.unwrap_or_else(|| "member".into()),
+        "opponent": r.opponent_handle.unwrap_or_else(|| "member".into()),
+    })).collect::<Vec<_>>() })))
+}
+
+/// Group discovery: id and name only. Content stays members-only.
+pub async fn list_groups(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT g.id, g.name,
+                  (SELECT COUNT(*) FROM community_group_members m
+                   WHERE m.group_id = g.id) AS "members!"
+           FROM community_groups g ORDER BY g.created_at DESC LIMIT 100"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "groups": rows.iter().map(|r| json!({
+        "group_id": r.id,
+        "name": r.name,
+        "members": r.members,
+    })).collect::<Vec<_>>() })))
+}

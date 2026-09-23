@@ -390,6 +390,133 @@ export const Api = {
 			projected_backlog_days: number | null;
 			note: string;
 		}>('GET', '/v1/me/review-debt'),
+	myCurriculum: () =>
+		call<{
+			chapters: {
+				chapter_id: string;
+				chapter_name: string;
+				system: string;
+				subject: string;
+				exam: string;
+				published_questions: number;
+			}[];
+		}>('GET', '/v1/me/curriculum'),
+	masteryHeatmap: (params?: {
+		system_id?: string;
+		difficulty?: string;
+		trend_days?: number;
+	}) => {
+		const qs = new URLSearchParams();
+		if (params?.system_id) qs.set('system_id', params.system_id);
+		if (params?.difficulty) qs.set('difficulty', params.difficulty);
+		if (params?.trend_days) qs.set('trend_days', String(params.trend_days));
+		const suffix = qs.toString() ? `?${qs.toString()}` : '';
+		return call<{
+			systems: {
+				system_id: string;
+				system_name: string;
+				chapters: {
+					chapter_id: string;
+					chapter_name: string;
+					ability: number | null;
+					evidence_count: number | null;
+					band: string;
+					filtered_accuracy?: number | null;
+					recent_answered?: number;
+					recent_correct?: number;
+				}[];
+			}[];
+			bands: { weak_below: number; strong_at: number };
+		}>('GET', `/v1/me/heatmap${suffix}`);
+	},
+	myInstitutions: () =>
+		call<{
+			memberships: { institution_id: string; name: string; role: string }[];
+		}>('GET', '/v1/me/institutions'),
+	createInstitution: (name: string) =>
+		call<{ institution_id: string }>('POST', '/v1/institutions', { name }),
+	addInstitutionMember: (
+		institutionId: string,
+		userId: string,
+		role: string
+	) =>
+		call<{ member: string; role: string }>(
+			'POST',
+			`/v1/institutions/${institutionId}/members`,
+			{ user_id: userId, role }
+		),
+	createCohort: (institutionId: string, name: string, memberIds: string[]) =>
+		call<{ cohort_id: string }>(
+			'POST',
+			`/v1/institutions/${institutionId}/cohorts`,
+			{ name, member_ids: memberIds }
+		),
+	createAssignment: (cohortId: string, title: string, dueAt?: string) =>
+		call<{ assignment_id: string }>(
+			'POST',
+			`/v1/cohorts/${cohortId}/assignments`,
+			{ title, due_at: dueAt }
+		),
+	communityProfile: () =>
+		call<{ opted_in: boolean; handle?: string }>('GET', '/v1/community/me'),
+	createCommunityProfile: (handle: string) =>
+		call<{ handle: string }>('POST', '/v1/community/profile', { handle }),
+	profileByHandle: (handle: string) =>
+		call<{ user_id: string; handle: string }>(
+			'GET',
+			`/v1/community/profiles/${handle}`
+		),
+	createDuel: (opponent: string, examId: string, questionCount: number, chapterId?: string) =>
+		call<{ duel_id: string; share_token: string }>(
+			'POST',
+			'/v1/community/duels',
+			{
+				opponent,
+				exam_id: examId,
+				question_count: questionCount,
+				...(chapterId ? { chapter_id: chapterId } : {})
+			}
+		),
+	myDuels: () => call<{ duels: unknown[] }>('GET', '/v1/me/duels'),
+	duelState: (duelId: string) =>
+		call<{ status: string; winner: string | null; sides: unknown[] }>(
+			'GET',
+			`/v1/community/duels/${duelId}`
+		),
+	acceptDuel: (duelId: string) =>
+		call<{ accepted: boolean; your_session_id: string; question_count: number }>(
+			'POST',
+			`/v1/community/duels/${duelId}/accept`
+		),
+	declineDuel: (duelId: string) =>
+		call<{ declined: boolean }>(
+			'POST',
+			`/v1/community/duels/${duelId}/decline`
+		),
+	createCommunityGroup: (name: string) =>
+		call<{ group_id: string }>('POST', '/v1/community/groups', { name }),
+	joinGroup: (groupId: string) =>
+		call<{ joined: boolean }>('POST', `/v1/community/groups/${groupId}/join`),
+	listGroupPosts: (groupId: string) =>
+		call<{ posts: unknown[] }>(
+			'GET',
+			`/v1/community/groups/${groupId}/posts`
+		),
+	createGroupPost: (groupId: string, body: string) =>
+		call<{ post_id: string }>(
+			'POST',
+			`/v1/community/groups/${groupId}/posts`,
+			{ body }
+		),
+	removeGroupPost: (groupId: string, postId: string) =>
+		call<{ removed: boolean }>(
+			'DELETE',
+			`/v1/community/groups/${groupId}/posts/${postId}`
+		),
+	listGroups: () =>
+		call<{
+			groups: { group_id: string; name: string; members: number }[];
+		}>('GET', '/v1/community/groups'),
 	selectionPolicy: () =>
 		call<{
 			estimator: {

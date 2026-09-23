@@ -1017,3 +1017,26 @@ pub async fn selection_policy(
         "your_chapters": chapters,
     })))
 }
+
+// ---- INST-02: the learner's own institution memberships ---------------------
+
+/// Memberships for the workspace picker: institution + role, nothing else.
+pub async fn my_institutions(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT i.id, i.name, im.role
+           FROM institution_members im
+           JOIN institutions i ON i.id = im.institution_id
+           WHERE im.user_id = $1 ORDER BY i.name"#,
+        user.user_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "memberships": rows.iter().map(|r| json!({
+        "institution_id": r.id,
+        "name": r.name,
+        "role": r.role,
+    })).collect::<Vec<_>>() })))
+}

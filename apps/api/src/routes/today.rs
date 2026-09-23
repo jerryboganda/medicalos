@@ -212,3 +212,43 @@ pub async fn undo_revision(
         plan_version: new_version,
     }))
 }
+
+// ---- QB-12: learner-facing curriculum for the session builder ---------------
+
+/// Chapters with their system/subject context — the multi-select source for
+/// the practice builder. Read-only, learner-scoped, no admin gate.
+pub async fn my_curriculum(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query!(
+        r#"SELECT ch.id AS chapter_id, ch.name AS chapter_name,
+                  sys.name AS system_name, sub.name AS subject_name,
+                  e.id AS exam_id, e.name AS exam_name,
+                  (SELECT COUNT(*) FROM question_versions qv
+                   WHERE qv.chapter_id = ch.id AND qv.status = 'published') AS "published!"
+           FROM curriculum_nodes ch
+           JOIN curriculum_nodes sys ON sys.id = ch.parent_id
+           JOIN curriculum_nodes sub ON sub.id = sys.parent_id
+           JOIN exams e ON e.id = ch.exam_id
+           WHERE ch.kind = 'chapter'
+           ORDER BY e.name, sub.display_order, sys.display_order, ch.display_order"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let chapters: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "chapter_id": r.chapter_id,
+                "chapter_name": r.chapter_name,
+                "system": r.system_name,
+                "subject": r.subject_name,
+                "exam_id": r.exam_id,
+                "exam": r.exam_name,
+                "published_questions": r.published,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "chapters": chapters })))
+}

@@ -31,6 +31,8 @@
 			</a>
 			<a class="btn" href={`${base}/practice`} data-testid="nav-practice">Practice</a>
 			<a class="btn" href={`${base}/review`} data-testid="nav-review">Review</a>
+			<a class="btn" href={`${base}/community`} data-testid="nav-community">Community</a>
+			<a class="btn" href={`${base}/faculty`} data-testid="nav-faculty">Faculty</a>
 			<a class="btn" href={`${base}/admin`} data-testid="nav-admin">Console</a>
 			<button class="btn" type="button" onclick={signOut}>Sign out</button>
 		</nav>

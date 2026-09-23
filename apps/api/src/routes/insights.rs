@@ -3,14 +3,25 @@
 //! hypotheses (never diagnoses, §8), and every number traces to attempts
 //! or learner_concept_state — nothing is fabricated (§2.3).
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::Json;
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::auth::AuthUser;
 use crate::error::ApiResult;
 use crate::state::AppState;
+
+#[derive(Deserialize)]
+pub struct HeatmapQuery {
+    /// PROG-01 drill-down: only this system's chapters.
+    pub system_id: Option<Uuid>,
+    /// PROG-01 difficulty filter: accuracy computed over this difficulty only.
+    pub difficulty: Option<String>,
+    /// PROG-01 trend: recent-window accuracy (days) alongside the overall one.
+    pub trend_days: Option<i64>,
+}
 
 /// GET /v1/me/mistake-hypotheses — AI-03: chapters where the learner keeps
 /// missing questions, with evidence counts. A hypothesis needs ≥2 misses to
@@ -59,7 +70,24 @@ pub async fn mistake_hypotheses(
 pub async fn mastery_heatmap(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
+    Query(q): Query<HeatmapQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    if let Some(d) = &q.difficulty {
+        if !matches!(d.as_str(), "easy" | "medium" | "hard") {
+            return Err(crate::error::ApiError::unprocessable(
+                "invalid_difficulty",
+                "difficulty must be easy, medium, or hard",
+            ));
+        }
+    }
+    if let Some(days) = q.trend_days {
+        if !(1..=365).contains(&days) {
+            return Err(crate::error::ApiError::unprocessable(
+                "invalid_window",
+                "trend_days must be 1-365",
+            ));
+        }
+    }
     // Mastery bands: config override, else the §24 default quad-points.
     let bands: Vec<i64> = sqlx::query!(
         r#"SELECT value->0 AS "lo!", value->1 AS "hi!" FROM app_settings
@@ -80,11 +108,47 @@ pub async fn mastery_heatmap(
            LEFT JOIN learner_concept_state lcs
              ON lcs.chapter_id = chapter.id AND lcs.user_id = $1
            WHERE system.kind = 'system'
+             AND ($2::uuid IS NULL OR system.id = $2)
            ORDER BY system.display_order, chapter.display_order"#,
-        user.user_id
+        user.user_id,
+        q.system_id
     )
     .fetch_all(&state.pool)
     .await?;
+    // Optional real-evidence overlays: accuracy restricted to one difficulty,
+    // and a recent-window accuracy next to the overall one (trend direction).
+    let overlays: std::collections::HashMap<Uuid, (i64, i64, Option<i64>)> =
+        if q.difficulty.is_some() || q.trend_days.is_some() {
+            let days = q.trend_days.unwrap_or(30).clamp(1, 365);
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
+            let rows = sqlx::query!(
+                r#"SELECT qv.chapter_id,
+                      COUNT(*) FILTER (WHERE a.correct IS NOT NULL) AS "answered!",
+                      COUNT(*) FILTER (WHERE a.correct = TRUE) AS "correct!",
+                      COUNT(*) FILTER (WHERE a.correct = TRUE
+                             AND a.created_at >= $2) AS "recent_correct!"
+               FROM attempts a
+               JOIN question_versions qv ON qv.id = a.question_version_id
+               WHERE a.user_id = $1 AND a.assisted = FALSE
+                 AND ($3::text IS NULL OR qv.difficulty = $3)
+               GROUP BY qv.chapter_id"#,
+                user.user_id,
+                cutoff,
+                q.difficulty
+            )
+            .fetch_all(&state.pool)
+            .await?;
+            rows.into_iter()
+                .map(|r| {
+                    (
+                        r.chapter_id,
+                        (r.answered, r.correct, Some(r.recent_correct)),
+                    )
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
 
     let mut systems: Vec<serde_json::Value> = Vec::new();
     for r in rows {
@@ -100,13 +164,24 @@ pub async fn mastery_heatmap(
             }
             _ => "unassessed",
         };
-        let entry = json!({
+        let mut entry = json!({
             "chapter_id": r.chapter_id,
             "chapter_name": r.chapter_name,
             "ability": r.ability,
             "evidence_count": r.evidence_count,
             "band": band,
         });
+        if let Some((answered, correct, recent_correct)) = overlays.get(&r.chapter_id) {
+            entry["filtered_accuracy"] = if *answered > 0 {
+                json!(Some((*correct * 100 / *answered) as i64))
+            } else {
+                json!(None::<i64>)
+            };
+            if let Some(recent) = recent_correct {
+                entry["recent_answered"] = json!(answered);
+                entry["recent_correct"] = json!(recent);
+            }
+        }
         if let Some(sys) = systems
             .iter_mut()
             .find(|s| s["system_id"] == r.system_id.to_string())

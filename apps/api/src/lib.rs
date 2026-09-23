@@ -126,7 +126,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/community/me", get(routes::community::my_profile))
         .route(
             "/v1/community/groups",
-            post(routes::community::create_group),
+            post(routes::community::create_group).get(routes::community::list_groups),
         )
         .route(
             "/v1/community/groups/{group_id}/join",
@@ -207,6 +207,13 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             axum::routing::patch(routes::admin::update_incident),
         )
         .route("/v1/client-update", get(routes::config::client_update))
+        .route("/v1/me/curriculum", get(routes::today::my_curriculum))
+        .route(
+            "/v1/community/profiles/{handle}",
+            get(routes::community::profile_by_handle),
+        )
+        .route("/v1/me/duels", get(routes::community::my_duels))
+        .route("/v1/me/institutions", get(routes::program::my_institutions))
         .route(
             "/v1/admin/settings",
             axum::routing::patch(routes::settings::update_settings)
@@ -516,7 +523,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/community/me", get(routes::community::my_profile))
         .route(
             "/api/v1/community/groups",
-            post(routes::community::create_group),
+            post(routes::community::create_group).get(routes::community::list_groups),
         )
         .route(
             "/api/v1/community/groups/{group_id}/join",
@@ -603,6 +610,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             axum::routing::patch(routes::admin::update_incident),
         )
         .route("/api/v1/client-update", get(routes::config::client_update))
+        .route("/api/v1/me/curriculum", get(routes::today::my_curriculum))
+        .route(
+            "/api/v1/community/profiles/{handle}",
+            get(routes::community::profile_by_handle),
+        )
+        .route("/api/v1/me/duels", get(routes::community::my_duels))
+        .route(
+            "/api/v1/me/institutions",
+            get(routes::program::my_institutions),
+        )
         .route("/api/v1/coach/turns", post(routes::coach::coach_turn))
         .route("/api/v1/coach/history", get(routes::coach::history))
         .route("/api/v1/me/coach-memory", get(routes::coach::list_memory))

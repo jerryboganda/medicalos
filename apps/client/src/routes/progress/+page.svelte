@@ -37,12 +37,48 @@
 		}[];
 	}
 
+	interface HeatChapter {
+		chapter_id: string;
+		chapter_name: string;
+		ability: number | null;
+		evidence_count: number | null;
+		band: string;
+		filtered_accuracy?: number | null;
+	}
+
+	interface HeatSystem {
+		system_id: string;
+		system_name: string;
+		chapters: HeatChapter[];
+	}
+
 	let learner = $state<LearnerChapter[]>([]);
+	let heatSystems = $state<HeatSystem[]>([]);
+	let drillSystem = $state('');
+	let filterDifficulty = $state('');
+	let trendDays = $state('');
+	let heatLoading = $state(false);
 	let debt = $state<ReviewDebt | null>(null);
 	let debtUnavailable = $state(false);
 	let policy = $state<SelectionPolicy | null>(null);
 	let policyUnavailable = $state(false);
 	let loading = $state(true);
+
+	async function loadHeatmap() {
+		heatLoading = true;
+		try {
+			const res = await Api.masteryHeatmap({
+				system_id: drillSystem || undefined,
+				difficulty: filterDifficulty || undefined,
+				trend_days: trendDays ? Number(trendDays) : undefined
+			});
+			heatSystems = res.systems;
+		} catch {
+			heatSystems = [];
+		} finally {
+			heatLoading = false;
+		}
+	}
 
 	onMount(async () => {
 		loadAuth();
@@ -56,6 +92,7 @@
 		} finally {
 			loading = false;
 		}
+		await loadHeatmap();
 		try {
 			debt = await Api.reviewDebt();
 		} catch {
@@ -96,6 +133,81 @@
 			</div>
 		</div>
 	{/each}
+
+	<div class="card">
+		<h2>Mastery map</h2>
+		<p class="muted" style="font-size: var(--text-sm);">
+			Bands come from your real ability estimates (config thresholds:
+			weak / developing / strong). Drill into one system, restrict to a
+			difficulty, or add a trend window — every number here traces to
+			attempts.
+		</p>
+		<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+			<label class="field" for="heat-system">
+				<span>System</span>
+				<select id="heat-system" bind:value={drillSystem} onchange={loadHeatmap}>
+					<option value="">All systems</option>
+					{#each heatSystems as s (s.system_id)}
+						<option value={s.system_id}>{s.system_name}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="field" for="heat-difficulty">
+				<span>Difficulty</span>
+				<select
+					id="heat-difficulty"
+					bind:value={filterDifficulty}
+					onchange={loadHeatmap}
+				>
+					<option value="">Any</option>
+					<option value="easy">Easy</option>
+					<option value="medium">Medium</option>
+					<option value="hard">Hard</option>
+				</select>
+			</label>
+			<label class="field" for="heat-trend">
+				<span>Trend window (days)</span>
+				<input
+					id="heat-trend"
+					type="number"
+					min="1"
+					max="365"
+					bind:value={trendDays}
+					onchange={loadHeatmap}
+				/>
+			</label>
+			<button
+				class="btn"
+				type="button"
+				disabled={heatLoading}
+				onclick={loadHeatmap}
+			>
+				{heatLoading ? 'Loading…' : 'Apply'}
+			</button>
+		</div>
+		{#if heatSystems.length === 0}
+			<p class="muted">
+				{heatLoading
+					? 'Loading…'
+					: 'No curriculum systems to map yet — they appear with the exam content.'}
+			</p>
+		{:else}
+			{#each heatSystems as sys (sys.system_id)}
+				<h3>{sys.system_name}</h3>
+				<ul style="font-size: var(--text-sm);">
+					{#each sys.chapters as ch (ch.chapter_id)}
+						<li>
+							{ch.chapter_name} — <strong>{ch.band}</strong>
+							{#if ch.evidence_count !== null}, {ch.evidence_count} answer(s){/if}
+							{#if ch.filtered_accuracy !== undefined && ch.filtered_accuracy !== null}
+								· accuracy at this filter: {ch.filtered_accuracy}%
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/each}
+		{/if}
+	</div>
 
 	<div class="card">
 		<h2>Review debt</h2>
