@@ -13,8 +13,9 @@ use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::seed::QuestionOption;
 use crate::state::AppState;
-use domain_contracts::{option_count, QuestionOption};
+use domain_contracts::option_count;
 
 fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers.get("x-admin-token").and_then(|v| v.to_str().ok())
@@ -1258,7 +1259,7 @@ pub struct VariantReq {
     pub difficulty: String,
     pub vignette: String,
     pub lead_in: String,
-    pub options: Vec<domain_contracts::QuestionOption>,
+    pub options: Vec<QuestionOption>,
     pub correct_index: i16,
     pub key_learning_point: String,
     pub exam_tip: Option<String>,
@@ -1448,7 +1449,7 @@ pub async fn run_coach_regression(
                   qv.key_learning_point
            FROM question_versions qv
            WHERE qv.status = 'published'
-           ORDER BY qv.created_at DESC LIMIT $1"#,
+           ORDER BY qv.id LIMIT $1"#,
         max
     )
     .fetch_all(&state.pool)
@@ -1456,7 +1457,7 @@ pub async fn run_coach_regression(
     let mut results: Vec<serde_json::Value> = Vec::new();
     let mut passed = 0i64;
     for r in &rows {
-        let options: Vec<domain_contracts::QuestionOption> =
+        let options: Vec<QuestionOption> =
             serde_json::from_value(r.options.clone()).unwrap_or_default();
         let answer = crate::routes::coach::extractive_grounding(
             "explain",
