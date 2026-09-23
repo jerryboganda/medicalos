@@ -37,6 +37,10 @@ pub async fn deliver(
             "SELECT reports FROM notification_preferences WHERE user_id = $1",
             user_id
         ),
+        "content_update" => sqlx::query_scalar!(
+            "SELECT content_updates FROM notification_preferences WHERE user_id = $1",
+            user_id
+        ),
         _ => sqlx::query_scalar!(
             "SELECT true AS \"ok!\" WHERE NOT EXISTS (
                 SELECT 1 FROM notification_preferences WHERE user_id = $1
@@ -77,6 +81,36 @@ pub async fn inbox(
     )
     .fetch_all(&state.pool)
     .await?;
+    let stored_preferences = sqlx::query!(
+        r#"SELECT plan_reminders, mock_results, reports, content_updates,
+                  quiet_hours_start, quiet_hours_end
+           FROM notification_preferences WHERE user_id = $1"#,
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let preferences = stored_preferences.map_or_else(
+        || {
+            json!({
+                "plan_reminders": true,
+                "mock_results": true,
+                "reports": true,
+                "content_updates": true,
+                "quiet_hours_start": 22,
+                "quiet_hours_end": 7,
+            })
+        },
+        |p| {
+            json!({
+                "plan_reminders": p.plan_reminders,
+                "mock_results": p.mock_results,
+                "reports": p.reports,
+                "content_updates": p.content_updates,
+                "quiet_hours_start": p.quiet_hours_start,
+                "quiet_hours_end": p.quiet_hours_end,
+            })
+        },
+    );
     let items: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|r| {
@@ -91,7 +125,9 @@ pub async fn inbox(
             })
         })
         .collect();
-    Ok(Json(json!({ "notifications": items })))
+    Ok(Json(
+        json!({ "notifications": items, "preferences": preferences }),
+    ))
 }
 
 pub async fn mark_read(
@@ -118,6 +154,7 @@ pub struct PrefReq {
     pub plan_reminders: Option<bool>,
     pub mock_results: Option<bool>,
     pub reports: Option<bool>,
+    pub content_updates: Option<bool>,
     pub quiet_hours_start: Option<i32>,
     pub quiet_hours_end: Option<i32>,
 }
@@ -137,20 +174,23 @@ pub async fn update_preferences(
     }
     sqlx::query!(
         "INSERT INTO notification_preferences
-           (user_id, plan_reminders, mock_results, reports, quiet_hours_start, quiet_hours_end)
+           (user_id, plan_reminders, mock_results, reports, content_updates,
+            quiet_hours_start, quiet_hours_end)
          VALUES ($1,
                  COALESCE($2, true), COALESCE($3, true), COALESCE($4, true),
-                 COALESCE($5, 22), COALESCE($6, 7))
+                 COALESCE($5, true), COALESCE($6, 22), COALESCE($7, 7))
          ON CONFLICT (user_id) DO UPDATE SET
            plan_reminders = COALESCE($2, notification_preferences.plan_reminders),
            mock_results = COALESCE($3, notification_preferences.mock_results),
            reports = COALESCE($4, notification_preferences.reports),
-           quiet_hours_start = COALESCE($5, notification_preferences.quiet_hours_start),
-           quiet_hours_end = COALESCE($6, notification_preferences.quiet_hours_end)",
+           content_updates = COALESCE($5, notification_preferences.content_updates),
+           quiet_hours_start = COALESCE($6, notification_preferences.quiet_hours_start),
+           quiet_hours_end = COALESCE($7, notification_preferences.quiet_hours_end)",
         user.user_id,
         req.plan_reminders,
         req.mock_results,
         req.reports,
+        req.content_updates,
         req.quiet_hours_start,
         req.quiet_hours_end
     )

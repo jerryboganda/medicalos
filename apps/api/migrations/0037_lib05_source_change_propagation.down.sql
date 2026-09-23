@@ -1,0 +1,11 @@
+ALTER TABLE notification_preferences DROP COLUMN IF EXISTS content_updates;
+DROP TABLE IF EXISTS attempt_corrections;
+DROP TABLE IF EXISTS source_change_task_learners;
+DROP TABLE IF EXISTS source_change_tasks;
+DROP TABLE IF EXISTS source_change_events;
+DROP TABLE IF EXISTS source_dependencies;
+DROP TABLE IF EXISTS source_passages;
+DROP TABLE IF EXISTS article_reads;
+DROP INDEX IF EXISTS idx_scenario_runs_version;
+ALTER TABLE scenario_runs DROP COLUMN IF EXISTS scenario_version_id;
+DROP TABLE IF EXISTS scenario_versions;

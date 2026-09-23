@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS scenario_handover_acknowledgements_immutable ON scenario_handover_acknowledgements;
+DROP TRIGGER IF EXISTS scenario_handovers_immutable ON scenario_handovers;
+DROP TRIGGER IF EXISTS scenario_team_members_immutable ON scenario_team_members;
+DROP TRIGGER IF EXISTS scenario_team_invites_accept_once ON scenario_team_invites;
+DROP FUNCTION IF EXISTS reject_scenario_team_record_mutation();
+DROP FUNCTION IF EXISTS guard_scenario_team_invite_update();
+DROP TABLE IF EXISTS scenario_handover_acknowledgements;
+DROP TABLE IF EXISTS scenario_handovers;
+DROP TABLE IF EXISTS scenario_team_invites;
+DROP TABLE IF EXISTS scenario_team_members;

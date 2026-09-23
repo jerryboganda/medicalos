@@ -5,16 +5,125 @@
 use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::{Form, State};
 use axum::http::{header, Request, StatusCode};
+use axum::response::IntoResponse;
 use axum::Router;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
+use std::collections::HashMap;
 use tower::ServiceExt; // oneshot
 use uuid::Uuid;
 
 use api::{router, schema, seed, state::AppState};
 
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct TutoringCardFixture {
+    prompt_type: String,
+    content: String,
+    source_ref: String,
+}
+
+fn test_hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
+    const BLOCK: usize = 64;
+    let mut key = key.to_vec();
+    if key.len() > BLOCK {
+        key = Sha256::digest(&key).to_vec();
+    }
+    key.resize(BLOCK, 0);
+    let mut inner = Sha256::new();
+    for byte in &key {
+        inner.update([*byte ^ 0x36]);
+    }
+    inner.update(message);
+    let inner_hash = inner.finalize();
+    let mut outer = Sha256::new();
+    for byte in &key {
+        outer.update([*byte ^ 0x5c]);
+    }
+    outer.update(inner_hash);
+    outer
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[derive(Clone)]
+struct OidcTestProvider {
+    issuer: String,
+    expected_challenge: Arc<tokio::sync::Mutex<String>>,
+    nonce: Arc<tokio::sync::Mutex<String>>,
+    subject: Arc<tokio::sync::Mutex<String>>,
+}
+
+async fn oidc_test_discovery(State(provider): State<OidcTestProvider>) -> axum::Json<Value> {
+    axum::Json(serde_json::json!({
+        "issuer": provider.issuer,
+        "authorization_endpoint": format!("{}/authorize", provider.issuer),
+        "token_endpoint": format!("{}/token", provider.issuer),
+        "jwks_uri": format!("{}/jwks", provider.issuer),
+        "response_types_supported": ["code"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["HS256"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic"]
+    }))
+}
+
+async fn oidc_test_jwks() -> axum::Json<Value> {
+    axum::Json(serde_json::json!({ "keys": [] }))
+}
+
+async fn oidc_test_token(
+    State(provider): State<OidcTestProvider>,
+    Form(form): Form<HashMap<String, String>>,
+) -> axum::response::Response {
+    let verifier = form
+        .get("code_verifier")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    if form.get("code").map(String::as_str) != Some("approved-code")
+        || challenge != *provider.expected_challenge.lock().await
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": "invalid_grant" })),
+        )
+            .into_response();
+    }
+
+    let now = chrono::Utc::now().timestamp();
+    let claims = serde_json::json!({
+        "iss": provider.issuer,
+        "sub": provider.subject.lock().await.clone(),
+        "aud": "medical-os-test-client",
+        "exp": now + 300,
+        "iat": now,
+        "nonce": provider.nonce.lock().await.clone()
+    });
+    let id_token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(b"test-oidc-client-secret"),
+    )
+    .expect("sign test ID token");
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "access_token": "test-access-token",
+            "token_type": "Bearer",
+            "expires_in": 300,
+            "id_token": id_token
+        })),
+    )
+        .into_response()
+}
 
 async fn setup() -> Arc<AppState> {
     let url = std::env::var("DATABASE_URL")
@@ -48,7 +157,10 @@ async fn setup() -> Arc<AppState> {
         free_daily_coach_turns: 20,
         openai_api_key: None,
         openai_base_url: "https://api.openai.com/v1".into(),
-        pack_signing_key: None,
+        pack_signing_key: Some("0123456789abcdef0123456789abcdef".into()),
+        oidc_credential_key: Some("test-oidc-encryption-key-with-32-plus-chars".into()),
+        public_api_base_url: "http://127.0.0.1:8080/api".into(),
+        public_app_url: "http://127.0.0.1:5173".into(),
     })
 }
 
@@ -505,14 +617,69 @@ async fn account_export_and_signed_pack_manifest() {
     assert!(export["card_reviews"].is_array());
     assert!(export["portfolio"].is_array());
 
-    // OFF-01: manifest for the answered chapter is signed; the signature
-    // verifies against a recomputed HMAC of the canonical listing.
-    let (status, manifest) = call(
+    // The existing v1 route keeps its metadata-only response for installed
+    // clients; tutoring cards require the separately versioned leased API.
+    let (status, legacy_manifest) = call(
         app.clone(),
         request(
             "GET",
             &format!(
                 "/v1/packs/{}/manifest?chapters={}",
+                ids.exam_id, ids.chapter3
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{legacy_manifest}");
+    assert!(legacy_manifest.get("manifest_version").is_none());
+    assert!(legacy_manifest["items"][0].get("tutoring_cards").is_none());
+    assert!(legacy_manifest["signature"].is_string());
+
+    // OFF-01: manifest for the answered chapter is signed; the signature
+    // verifies against a recomputed HMAC of the canonical listing.
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("enable paid pack fixture");
+    let (status, invalid_lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": "device-a",
+                "chapters": [Uuid::new_v4()]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_lease}");
+    let (status, lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": "export-device",
+                "chapters": [ids.chapter3]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lease}");
+
+    let (status, manifest) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={}&device_id=export-device",
                 ids.exam_id, ids.chapter3
             ),
             Some(&token),
@@ -526,45 +693,56 @@ async fn account_export_and_signed_pack_manifest() {
     assert_eq!(sig.len(), 64, "sha256 hmac is 64 hex chars");
     assert_eq!(manifest["items"].as_array().unwrap().len(), 1);
 
-    // Tampering with the canonical bytes changes the signature.
+    let item = &manifest["items"][0];
+    let version_id: Uuid = item["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let question_checksum: String = sqlx::query_scalar(
+        "SELECT encode(sha256((vignette || lead_in)::bytea), 'hex')
+         FROM question_versions WHERE id = $1",
+    )
+    .bind(version_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("question checksum");
+    let cards: Vec<TutoringCardFixture> =
+        serde_json::from_value(item["tutoring_cards"].clone()).expect("tutoring cards");
+    let mut content_hash = Sha256::new();
+    content_hash.update(question_checksum.as_bytes());
+    content_hash.update([0]);
+    content_hash.update(serde_json::to_vec(&cards).expect("serialized cards"));
+    let expected_item_checksum = content_hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(item["checksum"], expected_item_checksum);
+
     let canonical = format!(
-        "{} {}\n",
-        manifest["items"][0]["question_version_id"]
-            .as_str()
-            .unwrap(),
-        "tampered"
+        "medical-os-pack-manifest-v3\nexam {}\ndevice {}\nchapters {}\n{} {}\n",
+        ids.exam_id,
+        serde_json::to_string("export-device").unwrap(),
+        ids.chapter3,
+        version_id,
+        expected_item_checksum
     );
-    let recomputed = {
-        use sha2::{Digest, Sha256};
-        const BLOCK: usize = 64;
-        let key = b"dev-pack-signing-key";
-        let mut k = key.to_vec();
-        k.resize(BLOCK, 0);
-        let mut inner = Sha256::new();
-        for b in k.iter() {
-            inner.update([b ^ 0x36]);
-        }
-        inner.update(canonical.as_bytes());
-        let ih = inner.finalize();
-        let mut outer = Sha256::new();
-        for b in k.iter() {
-            outer.update([b ^ 0x5c]);
-        }
-        outer.update(ih);
-        outer
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    };
-    assert_ne!(sig, recomputed, "tampered content must not verify");
+    let signing_key = b"0123456789abcdef0123456789abcdef";
+    assert_eq!(sig, test_hmac_sha256_hex(signing_key, canonical.as_bytes()));
+
+    let tampered = format!("{canonical}TAMPERED");
+    assert_ne!(sig, test_hmac_sha256_hex(signing_key, tampered.as_bytes()));
 
     // Empty chapter list is refused.
     let (status, _) = call(
         app.clone(),
         request(
             "GET",
-            &format!("/v1/packs/{}/manifest?chapters=", ids.exam_id),
+            &format!(
+                "/v2/packs/{}/manifest?chapters=&device_id=export-device",
+                ids.exam_id
+            ),
             Some(&token),
             None,
         ),
@@ -1242,12 +1420,43 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
         )
     };
 
+    let chapter1 = ids.chapter1.to_string();
+    let (status, pre_quarantine_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter1, "question_count": 10
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pre_quarantine_session}");
+    let pre_quarantine_item = pre_quarantine_session["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["question_version_id"] == qv)
+        .expect("the future quarantined question is in the live session");
+    let pre_quarantine_session_id = pre_quarantine_session["session_id"]
+        .as_str()
+        .expect("session id");
+    let pre_quarantine_item_index = pre_quarantine_item["item_index"]
+        .as_i64()
+        .expect("item index") as i16;
+
     // First report: recorded, not yet quarantined.
     let (status, r1) = call(app.clone(), report(&token, "wrong_answer", "key looks off")).await;
     assert_eq!(status, StatusCode::OK, "{r1}");
     assert_eq!(r1["already_recorded"], false);
     assert_eq!(r1["quarantined"], false);
     assert!(r1["report_id"].as_str().is_some());
+    assert!(r1["acknowledged_at"].as_str().is_some());
+    assert!(r1["acknowledgement_due_at"].as_str().is_some());
+    assert!(r1["resolution_due_at"].as_str().is_some());
+    assert_eq!(r1["status"], "open");
 
     // Same learner reporting again: idempotent, no second record.
     let (status, dup) = call(app.clone(), report(&token, "typo", "second try")).await;
@@ -1274,6 +1483,11 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
     let (status, r3) = call(app.clone(), report(&token3, "outdated", "")).await;
     assert_eq!(status, StatusCode::OK, "{r3}");
     assert_eq!(r3["quarantined"], true);
+    let token4 = register_and_login(app.clone()).await;
+    let (status, r4) = call(app.clone(), report(&token4, "typo", "one more report")).await;
+    assert_eq!(status, StatusCode::OK, "{r4}");
+    assert_eq!(r4["quarantined"], true);
+    assert_eq!(r4["status"], "quarantined");
 
     // Own-reports endpoint: status visible, no other learner disclosed.
     let (status, mine) = call(
@@ -1292,7 +1506,6 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
 
     // Quarantined item leaves new tutor sessions: chapter1 now serves only
     // the one remaining unflagged question.
-    let chapter1 = ids.chapter1.to_string();
     let (status, session) = call(
         app.clone(),
         request(
@@ -1314,37 +1527,205 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
         "the served item is the unflagged one"
     );
 
-    // A live session created BEFORE quarantine keeps its items answerable —
-    // quarantine never yanks items mid-session. (Seed one more session via a
-    // fresh user below the allowance: token3 used no attempts yet.)
-    let (status, detail) = call(
+    // A session created before quarantine keeps the old item answerable.
+    let (status, answered) = call(
         app.clone(),
         request(
             "POST",
-            "/v1/practice/sessions",
+            &format!("/v1/practice/sessions/{pre_quarantine_session_id}/answers"),
             Some(&token),
             Some(serde_json::json!({
-                "preset": "tutor", "chapter_id": chapter1, "question_count": 10
+                "item_index": pre_quarantine_item_index,
+                "chosen_index": 0,
+                "idempotency_key": "quarantined-existing-session"
             })),
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{detail}");
-
-    // Resolve route is honest about the missing console (no fake workflow).
-    let rid = r1["report_id"].as_str().unwrap();
-    let (status, body) = call(
+    assert_eq!(status, StatusCode::OK, "{answered}");
+    let (status, live_detail) = call(
         app.clone(),
         request(
-            "POST",
-            &format!("/v1/reports/{rid}/resolve"),
+            "GET",
+            &format!("/v1/practice/sessions/{pre_quarantine_session_id}"),
             Some(&token),
             None,
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
-    assert_eq!(body["error"]["code"], "editor_console_pending");
+    assert_eq!(status, StatusCode::OK, "{live_detail}");
+    let old_item = live_detail["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["question_version_id"] == qv)
+        .expect("live session retains quarantined item");
+    assert_eq!(old_item["answered"], true);
+    assert_eq!(old_item["report_status"], "quarantined");
+
+    // The editorial queue groups reports without exposing reporter identities.
+    let (status, queue) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/reports", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    assert_eq!(queue["reports"].as_array().unwrap().len(), 1);
+    assert_eq!(queue["reports"][0]["report_count"], 4);
+    assert_eq!(queue["reports"][0]["quarantined"], true);
+    assert!(queue["reports"][0].get("reporter_id").is_none());
+    assert_eq!(
+        queue["reports"][0]["reporter_feedback"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert!(queue["reports"][0]["reporter_feedback"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry.get("reporter_id").is_none()));
+
+    for (body, code) in [
+        (
+            serde_json::json!({
+                "status": "resolved_later",
+                "resolution_note": "Unsupported resolution values are rejected."
+            }),
+            "invalid_resolution_status",
+        ),
+        (
+            serde_json::json!({
+                "status": "resolved_rejected",
+                "resolution_note": "   "
+            }),
+            "invalid_resolution_note",
+        ),
+        (
+            serde_json::json!({
+                "status": "resolved_rejected",
+                "resolution_note": "x".repeat(2001)
+            }),
+            "invalid_resolution_note",
+        ),
+    ] {
+        let (status, invalid) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                &format!("/v1/reports/{}/resolve", r1["report_id"].as_str().unwrap()),
+                Some(&token),
+                Some(body),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+        assert_eq!(invalid["error"]["code"], code);
+    }
+
+    // A reporter may opt out of report notifications; delivery counts reflect it.
+    let opted_out_report_id = Uuid::parse_str(r3["report_id"].as_str().unwrap()).unwrap();
+    sqlx::query(
+        "INSERT INTO notification_preferences (user_id, reports)
+         SELECT reporter_id, false FROM question_reports WHERE id = $1
+         ON CONFLICT (user_id) DO UPDATE SET reports = EXCLUDED.reports",
+    )
+    .bind(opted_out_report_id)
+    .execute(&state.pool)
+    .await
+    .expect("set report notification preference");
+
+    // Rejecting a report group releases the item and notifies opted-in reporters.
+    let rid = r1["report_id"].as_str().unwrap();
+    let (status, resolution) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/reports/{rid}/resolve"),
+            Some(&token),
+            Some(serde_json::json!({
+                "status": "resolved_rejected",
+                "resolution_note": "Editorial review confirmed the published answer."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resolution}");
+    assert_eq!(resolution["resolved_reports"], 4);
+    assert_eq!(resolution["notified_reporters"], 3);
+
+    let (status, resolved) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resolved}");
+    assert_eq!(resolved["reports"][0]["status"], "resolved_rejected");
+    assert_eq!(
+        resolved["reports"][0]["resolution_note"],
+        "Editorial review confirmed the published answer."
+    );
+    assert_eq!(resolved["reports"][0]["resolution_overdue"], false);
+
+    let (status, inbox) = call(
+        app.clone(),
+        request("GET", "/v1/me/notifications", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inbox}");
+    assert!(inbox["notifications"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| {
+            entry["category"] == "report"
+                && entry["body"]
+                    .as_str()
+                    .unwrap()
+                    .contains("reviewed and left unchanged")
+        }));
+
+    let (status, opted_out_inbox) = call(
+        app.clone(),
+        request("GET", "/v1/me/notifications", Some(&token3), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{opted_out_inbox}");
+    assert!(!opted_out_inbox["notifications"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["category"] == "report"));
+
+    let (status, repeated) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/reports/{rid}/resolve"),
+            Some(&token),
+            Some(serde_json::json!({
+                "status": "resolved_rejected",
+                "resolution_note": "Repeated resolution must be rejected."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{repeated}");
+    assert_eq!(repeated["error"]["code"], "report_already_resolved");
+
+    let (status, empty_queue) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/reports", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_queue}");
+    assert_eq!(empty_queue["reports"].as_array().unwrap().len(), 0);
 
     // Validation: bad category and over-long note are rejected.
     let (status, _) = call(app.clone(), report(&token, "bogus", "")).await;
@@ -1352,6 +1733,11 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
     let long = "x".repeat(2001);
     let (status, _) = call(app.clone(), report(&token2, "typo", &long)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let unicode_note = "界".repeat(1500);
+    let token5 = register_and_login(app.clone()).await;
+    let (status, accepted_unicode_note) =
+        call(app.clone(), report(&token5, "typo", &unicode_note)).await;
+    assert_eq!(status, StatusCode::OK, "{accepted_unicode_note}");
 
     // Unknown version is 404, and other learners' queues are unaffected.
     let (status, _) = call(
@@ -1365,6 +1751,323 @@ async fn qb08_reports_quarantine_and_pool_exclusion() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn qb16_fixed_resolution_requires_and_links_a_published_correction() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let qv = ids.question_versions[0];
+
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token),
+            Some(serde_json::json!({"category": "wrong_answer"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let report_id = report["report_id"].as_str().expect("report id");
+
+    let (status, missing_correction_note) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/reports/{report_id}/resolve"),
+            Some(&token),
+            Some(serde_json::json!({
+                "status": "resolved_fixed",
+                "resolution_note": "Private reporter feedback."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{missing_correction_note}"
+    );
+    assert_eq!(
+        missing_correction_note["error"]["code"],
+        "invalid_correction_note"
+    );
+
+    let (status, error) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/reports/{report_id}/resolve"),
+            Some(&token),
+            Some(serde_json::json!({
+                "status": "resolved_fixed",
+                "resolution_note": "Private reporter feedback.",
+                "correction_note": "The answer key was updated from the source."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert_eq!(error["error"]["code"], "correction_version_required");
+
+    let corrected_version_id = Uuid::new_v4();
+    let inserted = sqlx::query(
+        r#"INSERT INTO question_versions (
+               id, question_id, version, status, chapter_id, difficulty,
+               vignette, lead_in, options, correct_index, key_learning_point,
+               exam_tip, high_yield, source_ref
+           )
+           SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
+                  vignette || ' (corrected)', lead_in, options, correct_index,
+                  key_learning_point, exam_tip, high_yield, source_ref
+           FROM question_versions WHERE id = $2"#,
+    )
+    .bind(corrected_version_id)
+    .bind(qv)
+    .execute(&state.pool)
+    .await
+    .expect("publish corrected fixture version");
+    assert_eq!(inserted.rows_affected(), 1);
+
+    let (status, result) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/reports/{report_id}/resolve"),
+            Some(&token),
+            Some(serde_json::json!({
+                "status": "resolved_fixed",
+                "resolution_note": "The reviewer verified the correction against the source.",
+                "correction_note": "The answer key was updated from the source."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["resolved_reports"], 1);
+    assert_eq!(
+        result["corrected_version_id"],
+        corrected_version_id.to_string()
+    );
+
+    let old_status: String =
+        sqlx::query_scalar("SELECT status FROM question_versions WHERE id = $1")
+            .bind(qv)
+            .fetch_one(&state.pool)
+            .await
+            .expect("old version status");
+    assert_eq!(old_status, "archived");
+
+    let (status, own_reports) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own_reports}");
+    assert_eq!(own_reports["reports"][0]["status"], "resolved_fixed");
+    assert_eq!(
+        own_reports["reports"][0]["corrected_version_id"],
+        corrected_version_id.to_string()
+    );
+    assert_eq!(own_reports["reports"][0]["corrected_version_number"], 2);
+    assert_eq!(
+        own_reports["reports"][0]["resolution_note"],
+        "The reviewer verified the correction against the source."
+    );
+    assert_eq!(
+        own_reports["reports"][0]["correction_note"],
+        "The answer key was updated from the source."
+    );
+
+    let (status, retry) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token),
+            Some(serde_json::json!({"category": "wrong_answer"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retry}");
+    assert_eq!(retry["already_recorded"], true);
+    assert_eq!(retry["status"], "resolved_fixed");
+    assert_eq!(
+        retry["resolution_note"],
+        "The reviewer verified the correction against the source."
+    );
+    assert_eq!(
+        retry["corrected_version_id"],
+        corrected_version_id.to_string()
+    );
+    assert_eq!(
+        retry["correction_note"],
+        "The answer key was updated from the source."
+    );
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 10
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert!(session["items"]
+        .as_array()
+        .expect("session items")
+        .iter()
+        .all(|item| item["question_version_id"] != qv.to_string()));
+
+    let session_id = session["session_id"].as_str().expect("session id");
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let corrected = detail["items"]
+        .as_array()
+        .expect("session detail items")
+        .iter()
+        .find(|item| item["question_version_id"] == corrected_version_id.to_string())
+        .expect("new version is available in practice");
+    assert_eq!(corrected["corrected"], true);
+    assert_eq!(
+        corrected["correction_note"],
+        "The answer key was updated from the source."
+    );
+}
+
+#[tokio::test]
+async fn qb16_report_queue_caps_feedback_but_keeps_the_total_count() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    for index in 0..21 {
+        let reporter_id = Uuid::new_v4();
+        let email = format!("report-feedback-{index}-{}@example.test", Uuid::new_v4());
+        sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, 'fixture')")
+            .bind(reporter_id)
+            .bind(email)
+            .execute(&state.pool)
+            .await
+            .expect("create reporter fixture");
+        sqlx::query(
+            "INSERT INTO question_reports (id, question_version_id, reporter_id, category, note)
+             VALUES ($1, $2, $3, 'other', $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(ids.question_versions[0])
+        .bind(reporter_id)
+        .bind(format!("Report detail {index}"))
+        .execute(&state.pool)
+        .await
+        .expect("create report fixture");
+    }
+
+    let (status, queue) = call(
+        app,
+        admin_req("GET", "/v1/admin/reports", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    assert_eq!(queue["reports"][0]["report_count"], 21);
+    assert_eq!(
+        queue["reports"][0]["reporter_feedback"]
+            .as_array()
+            .unwrap()
+            .len(),
+        20
+    );
+    assert_eq!(queue["reports"][0]["feedback_truncated"], true);
+}
+
+#[tokio::test]
+async fn qb16_concurrent_group_resolutions_serialize_to_one_decision() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token1 = register_and_login(app.clone()).await;
+    let token2 = register_and_login(app.clone()).await;
+    let qv = ids.question_versions[0];
+
+    let report = |token: &str| {
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(token),
+            Some(serde_json::json!({"category": "typo"})),
+        )
+    };
+    let (status, first) = call(app.clone(), report(&token1)).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let (status, second) = call(app.clone(), report(&token2)).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let first_id = first["report_id"].as_str().unwrap();
+    let second_id = second["report_id"].as_str().unwrap();
+
+    let resolve = |report_id: &str| {
+        call(
+            app.clone(),
+            admin_req(
+                "POST",
+                &format!("/v1/reports/{report_id}/resolve"),
+                Some(&token1),
+                Some(serde_json::json!({
+                    "status": "resolved_rejected",
+                    "resolution_note": "Concurrent resolutions must serialize."
+                })),
+            ),
+        )
+    };
+    let (left, right) = tokio::join!(resolve(first_id), resolve(second_id));
+    assert!(
+        (left.0 == StatusCode::OK && right.0 == StatusCode::CONFLICT)
+            || (left.0 == StatusCode::CONFLICT && right.0 == StatusCode::OK),
+        "one resolution must succeed and the other must receive a stable conflict: {:?}, {:?}",
+        left,
+        right
+    );
+    let conflict = if left.0 == StatusCode::CONFLICT {
+        &left.1
+    } else {
+        &right.1
+    };
+    assert_eq!(conflict["error"]["code"], "report_already_resolved");
+    let resolved: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM question_reports
+         WHERE question_version_id = $1 AND status = 'resolved_rejected'",
+    )
+    .bind(qv)
+    .fetch_one(&state.pool)
+    .await
+    .expect("resolved report count");
+    assert_eq!(resolved, 2);
 }
 
 #[tokio::test]
@@ -1960,6 +2663,16 @@ async fn editorial_hierarchy_question_and_import_flow() {
             "transition {action} failed: {wf}"
         );
     }
+    for version_id in &vids {
+        let card_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1",
+        )
+        .bind(version_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("published version cards");
+        assert_eq!(card_count, 5, "publishing creates all tutoring cards once");
+    }
 
     // A learner answers the imported question via a tutor session.
     let (status, session) = call(
@@ -2186,6 +2899,9 @@ async fn coach_daily_allowance_enforced() {
         openai_api_key: None,
         openai_base_url: "https://api.openai.com/v1".into(),
         pack_signing_key: None,
+        oidc_credential_key: Some("test-oidc-encryption-key-with-32-plus-chars".into()),
+        public_api_base_url: "http://127.0.0.1:8080/api".into(),
+        public_app_url: "http://127.0.0.1:5173".into(),
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
@@ -2390,6 +3106,971 @@ async fn library_seed_search_article() {
 }
 
 #[tokio::test]
+async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let old_version_id = ids.question_versions[0];
+    let old = sqlx::query(
+        "SELECT question_id, version, chapter_id, options, correct_index
+         FROM question_versions WHERE id = $1",
+    )
+    .bind(old_version_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("question version fixture");
+    let question_id: Uuid = old.try_get("question_id").unwrap();
+    let question_version: i32 = old.try_get("version").unwrap();
+    let chapter_id: Uuid = old.try_get("chapter_id").unwrap();
+    let options: Value = old.try_get("options").unwrap();
+    let old_correct_index: i16 = old.try_get("correct_index").unwrap();
+    let replacement_correct_index =
+        (old_correct_index + 1) % options.as_array().unwrap().len() as i16;
+    let replacement_version_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO question_versions
+             (id, question_id, version, status, chapter_id, difficulty, vignette,
+              lead_in, options, correct_index, key_learning_point, exam_tip,
+              high_yield, source_ref)
+           SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
+                  vignette || ' reviewed', lead_in, options, $3, key_learning_point,
+                  exam_tip, high_yield, source_ref
+           FROM question_versions WHERE id = $2"#,
+    )
+    .bind(replacement_version_id)
+    .bind(old_version_id)
+    .bind(replacement_correct_index)
+    .execute(&state.pool)
+    .await
+    .expect("replacement question version");
+
+    let token_hash = Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("authenticated user fixture");
+    let session_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO practice_sessions
+             (id, user_id, preset, chapter_id, status, submitted_at, result_payload)
+           VALUES ($1, $2, 'tutor', $3, 'submitted', now(),
+                   '{"total":1,"correct":1,"incorrect":0,"skipped":0,"score":100,"mock":null}')"#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("submitted session fixture");
+    sqlx::query(
+        "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+         VALUES ($1, $2, 0, $3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(session_id)
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let attempt_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO attempts
+             (id, session_id, item_index, user_id, question_version_id, chosen_index,
+              correct, confidence, assisted, idempotency_key)
+           VALUES ($1, $2, 0, $3, $4, $5, TRUE, 'sure', FALSE, 'source-change-fixture')"#,
+    )
+    .bind(attempt_id)
+    .bind(session_id)
+    .bind(user_id)
+    .bind(old_version_id)
+    .bind(old_correct_index)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let mock_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO mocks
+           (id, title, exam_id, blueprint, pass_mark_percent, attempts_allowed, created_by)
+         VALUES ($1, 'Legacy source correction fixture', $2, $3, 50, 1, $4)",
+    )
+    .bind(mock_id)
+    .bind(ids.exam_id)
+    .bind(serde_json::json!([]))
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("mock fixture");
+    let legacy_mock_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions
+           (id, user_id, preset, chapter_id, status, submitted_at, mock_id)
+         VALUES ($1, $2, 'mock', $3, 'submitted', now(), $4)",
+    )
+    .bind(legacy_mock_session_id)
+    .bind(user_id)
+    .bind(chapter_id)
+    .bind(mock_id)
+    .execute(&state.pool)
+    .await
+    .expect("legacy mock session without a stored receipt");
+    sqlx::query(
+        "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+         VALUES ($1, $2, 0, $3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(legacy_mock_session_id)
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO attempts
+             (id, session_id, item_index, user_id, question_version_id, chosen_index,
+              correct, confidence, assisted, idempotency_key)
+           VALUES ($1, $2, 0, $3, $4, $5, TRUE, 'sure', FALSE, 'source-change-legacy-mock-fixture')"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(legacy_mock_session_id)
+    .bind(user_id)
+    .bind(old_version_id)
+    .bind(old_correct_index)
+    .execute(&state.pool)
+    .await
+    .expect("legacy mock attempt");
+    sqlx::query(
+        "INSERT INTO mock_attempts (id, mock_id, user_id, session_id, score_percent, passed)
+         VALUES ($1, $2, $3, $4, 100, TRUE)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(mock_id)
+    .bind(user_id)
+    .bind(legacy_mock_session_id)
+    .execute(&state.pool)
+    .await
+    .expect("legacy mock result");
+    let open_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions (id, user_id, preset, chapter_id, status)
+         VALUES ($1, $2, 'tutor', $3, 'open')",
+    )
+    .bind(open_session_id)
+    .bind(user_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("open session fixture");
+    sqlx::query(
+        "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+         VALUES ($1, $2, 0, $3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(open_session_id)
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let open_attempt_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO attempts
+             (id, session_id, item_index, user_id, question_version_id, chosen_index,
+              correct, confidence, assisted, idempotency_key)
+           VALUES ($1, $2, 0, $3, $4, $5, TRUE, 'sure', FALSE, 'source-change-open-fixture')"#,
+    )
+    .bind(open_attempt_id)
+    .bind(open_session_id)
+    .bind(user_id)
+    .bind(old_version_id)
+    .bind(old_correct_index)
+    .execute(&state.pool)
+    .await
+    .expect("open attempt fixture");
+    let quarantined_answer_token = register_and_login(app.clone()).await;
+    let quarantined_token_hash = Sha256::digest(quarantined_answer_token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let quarantined_answer_user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(quarantined_token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("second learner fixture");
+    let quarantined_answer_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions (id, user_id, preset, chapter_id, status)
+         VALUES ($1, $2, 'tutor', $3, 'open')",
+    )
+    .bind(quarantined_answer_session_id)
+    .bind(quarantined_answer_user_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("pre-quarantine session for the second learner");
+    sqlx::query(
+        "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+         VALUES ($1, $2, 0, $3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(quarantined_answer_session_id)
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO learner_concept_state
+           (user_id, chapter_id, ability, evidence_count, independent_count)
+         VALUES ($1, $2, 1510, 1, 1)",
+    )
+    .bind(user_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let deck_id = Uuid::new_v4();
+    let card_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO decks (id, user_id, name) VALUES ($1, $2, 'Source fixture')")
+        .bind(deck_id)
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO cards
+             (id, deck_id, user_id, front, back, state, source_question_version_id)
+           VALUES ($1, $2, $3, 'Fixture front', 'Fixture back', '{}', $4)"#,
+    )
+    .bind(card_id)
+    .bind(deck_id)
+    .bind(user_id)
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pregen_tutoring (id, question_version_id, prompt_type, content)
+         VALUES ($1, $2, 'explain', 'Fixture tutoring')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(old_version_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let article_id = Uuid::new_v4();
+    let article_version_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO articles (id, slug, title) VALUES ($1, 'source-change-fixture', 'Source fixture')")
+        .bind(article_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO article_versions (id, article_id, version, status, body, source_ref)
+         VALUES ($1, $2, 1, 'published', 'Fictional fixture content.', 'Fixture citation')",
+    )
+    .bind(article_version_id)
+    .bind(article_id)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/source-change-fixture",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, scenario) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/scenarios",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "source-change-fixture",
+                "title": "Source fixture",
+                "state_machine": {"initial":"start","transitions":[{"from":"start","on":"finish","to":"done"}]}
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{scenario}");
+    let scenario_version_id: Uuid = scenario["scenario_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, run) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&token),
+            Some(serde_json::json!({"scenario_slug":"source-change-fixture"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{run}");
+    let run_id: Uuid = run["run_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, passage) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/source-passages",
+            Some(&token),
+            Some(serde_json::json!({
+                "source_ref":"Fictional editorial standard",
+                "locator":"section 4.2, paragraph 3"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{passage}");
+    let passage_id = passage["source_passage_id"].as_str().unwrap();
+    for (kind, version_id) in [
+        ("question", old_version_id),
+        ("article", article_version_id),
+        ("scenario", scenario_version_id),
+        ("question", ids.question_versions[1]),
+    ] {
+        let (status, linked) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                &format!("/v1/admin/source-passages/{passage_id}/dependencies"),
+                Some(&token),
+                Some(serde_json::json!({
+                    "resource_kind":kind,
+                    "resource_version_id":version_id
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{linked}");
+    }
+    sqlx::query("UPDATE question_versions SET status = 'archived' WHERE id = $1")
+        .bind(ids.question_versions[1])
+        .execute(&state.pool)
+        .await
+        .expect("archive an obsolete linked version");
+
+    let (status, earlier_material_change) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/source-passages/{passage_id}/changes"),
+            Some(&token),
+            Some(serde_json::json!({
+                "source_revision":"2026-09-fixture-material",
+                "classification":"material_change",
+                "note":"An earlier material change needs editorial review."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{earlier_material_change}");
+    let earlier_question_task = earlier_material_change["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["resource_kind"] == "question")
+        .unwrap()["task_id"]
+        .as_str()
+        .unwrap();
+
+    let (status, change) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/source-passages/{passage_id}/changes"),
+            Some(&token),
+            Some(serde_json::json!({
+                "source_revision":"2026-09-fixture-2",
+                "classification":"invalid_answer_key",
+                "note":"The answer key no longer matches the cited source."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{change}");
+    assert_eq!(change["tasks"].as_array().unwrap().len(), 3);
+    assert_eq!(change["affected_learners"], 1);
+    let question_impact = change["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["resource_kind"] == "question")
+        .unwrap();
+    assert_eq!(
+        question_impact["affected_user_ids"],
+        serde_json::json!([user_id])
+    );
+    assert_eq!(question_impact["affected_cards"], 1);
+
+    let q_status: String = sqlx::query_scalar("SELECT status FROM question_versions WHERE id = $1")
+        .bind(old_version_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(q_status, "quarantined");
+    let (status, earlier_review) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/source-change-tasks/{earlier_question_task}"),
+            Some(&token),
+            Some(serde_json::json!({
+                "resolution":"reviewed_current",
+                "resolution_note":"Reviewed against the earlier change."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{earlier_review}");
+    let still_quarantined: String =
+        sqlx::query_scalar("SELECT status FROM question_versions WHERE id = $1")
+            .bind(old_version_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(still_quarantined, "quarantined");
+    let (status, quarantined_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{quarantined_answer_session_id}/answers"),
+            Some(&quarantined_answer_token),
+            Some(serde_json::json!({
+                "item_index":0,
+                "chosen_index":(old_correct_index + 1) % options.as_array().unwrap().len() as i16,
+                "idempotency_key":"quarantined-content-miss"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quarantined_answer}");
+    let quarantined_card_suspension: bool = sqlx::query_scalar(
+        "SELECT suspended FROM cards
+         WHERE user_id = $1 AND source_question_version_id = $2",
+    )
+    .bind(quarantined_answer_user_id)
+    .bind(old_version_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("a missed quarantined question still produces a retained card");
+    assert!(quarantined_card_suspension);
+    let article_status: String =
+        sqlx::query_scalar("SELECT status FROM article_versions WHERE id = $1")
+            .bind(article_version_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(article_status, "quarantined");
+    let scenario_status: String =
+        sqlx::query_scalar("SELECT status FROM scenario_versions WHERE id = $1")
+            .bind(scenario_version_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(scenario_status, "quarantined");
+    let suspended: bool = sqlx::query_scalar("SELECT suspended FROM cards WHERE id = $1")
+        .bind(card_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert!(suspended);
+    let pregen_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1")
+            .bind(old_version_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(pregen_count, 0);
+    let (status, historical_session) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{historical_session}");
+    assert_eq!(
+        historical_session["items"][0]["correct_index"],
+        old_correct_index
+    );
+    assert_eq!(historical_session["items"][0]["corrected"], false);
+    assert_eq!(
+        historical_session["items"][0]["corrected_version_id"],
+        Value::Null
+    );
+    assert_eq!(
+        historical_session["items"][0]["report_status"],
+        "quarantined"
+    );
+    assert!(historical_session["items"][0]["tutoring_cards"].is_null());
+
+    let (status, open_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{open_session_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_detail}");
+    assert_eq!(open_detail["items"][0]["correct_index"], old_correct_index);
+    assert_eq!(open_detail["items"][0]["corrected"], false);
+    assert_eq!(open_detail["items"][0]["report_status"], "quarantined");
+    assert!(open_detail["items"][0]["tutoring_cards"].is_null());
+    let (status, open_replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{open_session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": old_correct_index,
+                "idempotency_key": "source-change-open-fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_replay}");
+    assert_eq!(open_replay["correct_index"], old_correct_index);
+    assert!(open_replay["tutoring_cards"].is_null());
+    let pregen_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1")
+            .bind(old_version_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        pregen_count, 0,
+        "historical reads do not regenerate quarantined tutoring"
+    );
+    let notifications: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND category = 'content_update'",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(notifications, 1);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/source-change-fixture",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&token),
+            Some(serde_json::json!({"scenario_slug":"source-change-fixture"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&token),
+            Some(serde_json::json!({"event":"finish"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "existing runs retain their version");
+
+    let case_id = change["source_change_id"].as_str().unwrap();
+    let question_task = change["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["resource_kind"] == "question")
+        .unwrap()["task_id"]
+        .as_str()
+        .unwrap();
+    let (status, mismatch) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/source-change-tasks/{question_task}"),
+            Some(&token),
+            Some(serde_json::json!({
+                "resolution":"corrected",
+                "corrected_version_id":ids.question_versions[1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{mismatch}");
+    assert_eq!(mismatch["error"]["code"], "correction_family_mismatch");
+
+    let (status, corrected) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/source-change-tasks/{question_task}"),
+            Some(&token),
+            Some(serde_json::json!({
+                "resolution":"corrected",
+                "corrected_version_id":replacement_version_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{corrected}; source change {case_id}"
+    );
+    let (status, corrected_session) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected_session}");
+    assert_eq!(
+        corrected_session["items"][0]["correct_index"],
+        replacement_correct_index
+    );
+    assert_eq!(corrected_session["items"][0]["corrected"], true);
+    assert_eq!(
+        corrected_session["items"][0]["corrected_version_id"],
+        replacement_version_id.to_string()
+    );
+    assert_eq!(
+        corrected_session["items"][0]["report_status"],
+        "resolved_fixed"
+    );
+
+    let (status, open_after_correction) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{open_session_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_after_correction}");
+    assert_eq!(
+        open_after_correction["items"][0]["correct_index"],
+        old_correct_index
+    );
+    assert_eq!(open_after_correction["items"][0]["corrected"], false);
+
+    let (status, submitted_replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": old_correct_index,
+                "idempotency_key": "source-change-fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submitted_replay}");
+    assert_eq!(submitted_replay["correct_index"], replacement_correct_index);
+    assert_eq!(submitted_replay["correct"], false);
+    assert_eq!(submitted_replay["already_recorded"], true);
+
+    let action_session_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO practice_sessions
+             (id, user_id, preset, chapter_id, status, submitted_at)
+           VALUES ($1, $2, 'tutor', $3, 'submitted', now())"#,
+    )
+    .bind(action_session_id)
+    .bind(user_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("submitted quarantined-item action fixture");
+    for item_index in 0..2_i16 {
+        sqlx::query(
+            "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(action_session_id)
+        .bind(item_index)
+        .bind(old_version_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        r#"INSERT INTO attempts
+             (id, session_id, item_index, user_id, question_version_id, chosen_index,
+              correct, confidence, assisted, idempotency_key)
+           VALUES ($1, $2, 0, $3, $4, $5, FALSE, 'sure', FALSE, 'quarantined-action-fixture')"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(action_session_id)
+    .bind(user_id)
+    .bind(old_version_id)
+    .bind((old_correct_index + 1) % options.as_array().unwrap().len() as i16)
+    .execute(&state.pool)
+    .await
+    .expect("incorrect attempt on a quarantined item");
+    let (status, action) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{action_session_id}/action"),
+            Some(&token),
+            Some(serde_json::json!({"action":"practice_incorrect"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{action}");
+    assert_eq!(action["error"]["code"], "nothing_to_practice");
+
+    let standalone_quarantined_id: Uuid = sqlx::query_scalar(
+        r#"SELECT qv.id FROM question_versions qv
+           JOIN questions q ON q.id = qv.question_id
+           WHERE qv.status = 'published' AND qv.id <> $1 AND qv.id <> $2
+             AND NOT EXISTS (
+                 SELECT 1 FROM question_versions sibling
+                 JOIN questions sibling_question ON sibling_question.id = sibling.question_id
+                 WHERE sibling_question.family_id = q.family_id
+                   AND sibling.id <> qv.id AND sibling.status = 'published'
+             )
+           ORDER BY qv.id LIMIT 1"#,
+    )
+    .bind(old_version_id)
+    .bind(replacement_version_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("a separate published question without another published family version");
+    sqlx::query("UPDATE question_versions SET status = 'quarantined' WHERE id = $1")
+        .bind(standalone_quarantined_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
+           VALUES ($1, $2, 0, now() - interval '1 minute', now()),
+                  ($1, $3, 0, now() - interval '1 minute', now())
+           ON CONFLICT (user_id, question_version_id) DO UPDATE SET due = EXCLUDED.due"#,
+    )
+    .bind(user_id)
+    .bind(old_version_id)
+    .bind(standalone_quarantined_id)
+    .execute(&state.pool)
+    .await
+    .expect("due cards for quarantined original and no-sibling question");
+    let (status, due_retests) = call(
+        app.clone(),
+        request("GET", "/v1/me/retests", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{due_retests}");
+    let retests = due_retests["retests"].as_array().unwrap();
+    assert!(!retests.iter().any(|retest| {
+        retest["card_version_id"] == old_version_id.to_string()
+            || retest["question_version_id"] == old_version_id.to_string()
+            || retest["question_version_id"] == standalone_quarantined_id.to_string()
+    }));
+
+    let effective_correct: Option<bool> =
+        sqlx::query_scalar("SELECT correct FROM attempts WHERE id = $1")
+            .bind(attempt_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(effective_correct, Some(false));
+    let (mock_score, mock_passed): (i32, bool) =
+        sqlx::query_as("SELECT score_percent, passed FROM mock_attempts WHERE session_id = $1")
+            .bind(legacy_mock_session_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("corrected legacy mock score");
+    assert_eq!((mock_score, mock_passed), (0, false));
+    let legacy_receipt: Option<Value> =
+        sqlx::query_scalar("SELECT result_payload FROM practice_sessions WHERE id = $1")
+            .bind(legacy_mock_session_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert!(legacy_receipt.is_none());
+    let open_effective_correct: Option<bool> =
+        sqlx::query_scalar("SELECT correct FROM attempts WHERE id = $1")
+            .bind(open_attempt_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        open_effective_correct,
+        Some(true),
+        "open sessions retain their pinned answer version"
+    );
+    let ledger_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attempt_corrections WHERE task_id = $1 AND attempt_id = $2",
+    )
+    .bind(question_task.parse::<Uuid>().unwrap())
+    .bind(attempt_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(ledger_count, 1);
+    let receipt: Value =
+        sqlx::query_scalar("SELECT result_payload FROM practice_sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(receipt["correct"], 0);
+    assert_eq!(receipt["incorrect"], 1);
+    assert_eq!(receipt["score"], 0);
+    let ability: f32 = sqlx::query_scalar(
+        "SELECT ability FROM learner_concept_state WHERE user_id = $1 AND chapter_id = $2",
+    )
+    .bind(user_id)
+    .bind(chapter_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert!(
+        ability < 1500.0,
+        "corrected evidence must recompute ability: {ability}"
+    );
+    let notifications: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND category = 'content_update'",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(notifications, 2);
+
+    let (status, followup) = call(
+        app,
+        admin_req(
+            "POST",
+            &format!("/v1/admin/source-passages/{passage_id}/changes"),
+            Some(&token),
+            Some(serde_json::json!({
+                "source_revision":"2026-09-fixture-3",
+                "classification":"minor_typo",
+                "note":"The reviewed replacement retains this source dependency."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{followup}");
+    assert_eq!(followup["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(followup["tasks"][0]["resource_kind"], "question");
+    assert_eq!(
+        followup["tasks"][0]["question_version_id"],
+        replacement_version_id.to_string()
+    );
+}
+
+#[tokio::test]
+async fn minor_source_change_creates_review_work_without_quarantine_or_notice() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let (status, passage) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/source-passages",
+            Some(&token),
+            Some(serde_json::json!({"source_ref":"Synthetic source","locator":"section 1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{passage}");
+    let passage_id = passage["source_passage_id"].as_str().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/source-passages/{passage_id}/dependencies"),
+            Some(&token),
+            Some(serde_json::json!({
+                "resource_kind":"question",
+                "resource_version_id":ids.question_versions[0]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, change) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/source-passages/{passage_id}/changes"),
+            Some(&token),
+            Some(serde_json::json!({
+                "source_revision":"typo-fix-2",
+                "classification":"minor_typo",
+                "note":"A spelling correction was published."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{change}");
+    assert_eq!(change["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(change["affected_learners"], 0);
+    let version_status: String =
+        sqlx::query_scalar("SELECT status FROM question_versions WHERE id = $1")
+            .bind(ids.question_versions[0])
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(version_status, "published");
+    let notification_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(notification_count, 0);
+}
+
+#[tokio::test]
 async fn notifications_preferences_roundtrip() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -2403,6 +4084,7 @@ async fn notifications_preferences_roundtrip() {
     .await;
     assert_eq!(status, StatusCode::OK, "{inbox}");
     assert_eq!(inbox["notifications"].as_array().unwrap().len(), 0);
+    assert_eq!(inbox["preferences"]["content_updates"], true);
 
     let (status, _) = call(
         app.clone(),
@@ -2410,11 +4092,35 @@ async fn notifications_preferences_roundtrip() {
             "PATCH",
             "/v1/me/notifications",
             Some(&token),
-            Some(serde_json::json!({"mock_results": false, "quiet_hours_start": 23})),
+            Some(serde_json::json!({
+                "mock_results": false,
+                "content_updates": false,
+                "quiet_hours_start": 23
+            })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    let (status, saved) = call(
+        app.clone(),
+        request("GET", "/v1/me/notifications", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["preferences"]["content_updates"], false);
+    let token_hash = Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let content_updates: bool = sqlx::query_scalar(
+        "SELECT content_updates FROM notification_preferences
+         WHERE user_id = (SELECT user_id FROM auth_sessions WHERE token_hash = $1)",
+    )
+    .bind(token_hash)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert!(!content_updates);
 }
 
 #[tokio::test]
@@ -2559,6 +4265,18 @@ async fn pregen_tutoring_generated_and_cached() {
     let token = register_and_login(app.clone()).await;
     let vid = ids.question_versions[0];
 
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{vid}/pregen-tutoring"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
     // Generate: five one-tap cards from reviewed material (AI-18).
     let (status, gen) = call(
         app.clone(),
@@ -2573,28 +4291,308 @@ async fn pregen_tutoring_generated_and_cached() {
     assert_eq!(status, StatusCode::OK, "{gen}");
     assert_eq!(gen["generated"], 5);
 
-    // Cached read: cards contain reviewed rationale, never invention.
-    let (status, cards) = call(
+    let (status, repeated) = call(
         app.clone(),
-        request(
-            "GET",
+        admin_req(
+            "POST",
             &format!("/v1/questions/versions/{vid}/pregen-tutoring"),
             Some(&token),
             None,
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{cards}");
-    let list = cards["cards"].as_array().unwrap();
-    assert_eq!(list.len(), 5);
-    let explain = list
-        .iter()
-        .find(|c| c["prompt_type"] == "explain")
-        .expect("explain card");
-    assert!(explain["content"]
-        .as_str()
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["generated"], 5);
+    let cached_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1")
+            .bind(vid)
+            .fetch_one(&state.pool)
+            .await
+            .expect("cached cards");
+    assert_eq!(cached_count, 5);
+
+    let manifest_url = format!(
+        "/v2/packs/{}/manifest?chapters={}&device_id=device-a",
+        ids.exam_id, ids.chapter3
+    );
+    let (status, no_lease) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{no_lease}");
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("enable paid pack fixture");
+    let (status, lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": "device-a",
+                "chapters": [ids.chapter3]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lease}");
+    let (status, before_tutor_answer) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{before_tutor_answer}");
+    assert!(before_tutor_answer["items"][0]["tutoring_cards"]
+        .as_array()
         .unwrap()
-        .contains("Simple version"));
+        .is_empty());
+
+    // A tutor answer receives its cards with the immediate feedback; the
+    // session detail also restores them after a reload.
+    let (status, created) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset":"tutor", "chapter_id":ids.chapter3, "question_count":1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let sid = created["session_id"].as_str().unwrap();
+    let (status, unanswered) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unanswered}");
+    assert!(unanswered["items"][0].get("tutoring_cards").is_none());
+    let (status, answered) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index":0, "chosen_index":0, "idempotency_key":"ai18-card-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answered}");
+    assert_eq!(answered["tutoring_cards"].as_array().unwrap().len(), 5);
+
+    let (status, timed) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset":"timed", "chapter_id":ids.chapter1,
+                "question_count":1, "time_limit_seconds":300
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed}");
+    let timed_id = timed["session_id"].as_str().unwrap();
+    let (status, timed_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{timed_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index":0, "chosen_index":0, "idempotency_key":"ai18-timed-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed_answer}");
+    assert!(timed_answer.get("tutoring_cards").is_none());
+
+    let (status, restored) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(
+        restored["items"][0]["tutoring_cards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+
+    let explain: String = sqlx::query_scalar(
+        "SELECT content FROM pregen_tutoring
+         WHERE question_version_id = $1 AND prompt_type = 'explain'",
+    )
+    .bind(ids.question_versions[4])
+    .fetch_one(&state.pool)
+    .await
+    .expect("cached explain card");
+    assert!(explain.contains("Simple version"));
+    let test_me: String = sqlx::query_scalar(
+        "SELECT content FROM pregen_tutoring
+         WHERE question_version_id = $1 AND prompt_type = 'test_me'",
+    )
+    .bind(vid)
+    .fetch_one(&state.pool)
+    .await
+    .expect("cached self-test card");
+    assert!(test_me.contains("Recall:"));
+    assert!(test_me.contains("Answer:"));
+
+    let (status, wrong_device) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={}&device_id=device-b",
+                ids.exam_id, ids.chapter3
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{wrong_device}");
+
+    let (status, invalid_chapter) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={}&device_id=device-a",
+                ids.exam_id,
+                Uuid::new_v4()
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_chapter}"
+    );
+
+    let (status, manifest) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manifest}");
+    assert_eq!(manifest["manifest_version"], 3);
+    assert_eq!(manifest["device_id"], "device-a");
+    let pack_item = &manifest["items"][0];
+    assert_eq!(pack_item["tutoring_cards"].as_array().unwrap().len(), 5);
+    let first_checksum = pack_item["checksum"].as_str().unwrap().to_string();
+    let first_signature = manifest["signature"].as_str().unwrap().to_string();
+
+    let (status, second_lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&token),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": "device-b",
+                "chapters": [ids.chapter1, ids.chapter3]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_lease}");
+    let (status, second_manifest) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={}&device_id=device-b",
+                ids.exam_id, ids.chapter3
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_manifest}");
+    assert_eq!(second_manifest["items"][0]["checksum"], first_checksum);
+    assert_ne!(second_manifest["signature"], first_signature);
+    let (status, timed_chapter_manifest) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={}&device_id=device-b",
+                ids.exam_id, ids.chapter1
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed_chapter_manifest}");
+    assert!(timed_chapter_manifest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["tutoring_cards"].as_array().unwrap().is_empty()));
+
+    sqlx::query(
+        "UPDATE pregen_tutoring SET content = 'changed cache content'
+         WHERE question_version_id = $1 AND prompt_type = 'explain'",
+    )
+    .bind(ids.question_versions[4])
+    .execute(&state.pool)
+    .await
+    .expect("change cached card fixture");
+    let (status, changed_manifest) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed_manifest}");
+    assert_ne!(changed_manifest["items"][0]["checksum"], first_checksum);
+    assert_ne!(changed_manifest["signature"], first_signature);
+
+    let lease_id = lease["lease_id"].as_str().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/packs/lease/{lease_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, revoked) = call(app, request("GET", &manifest_url, Some(&token), None)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{revoked}");
 }
 
 #[tokio::test]
@@ -3958,6 +5956,735 @@ async fn completion_kernel_institution_program_and_interop_are_staff_scoped() {
 }
 
 #[tokio::test]
+async fn institution_program_curriculum_and_coverage_are_tenant_scoped() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let staff = register_and_login(app.clone()).await;
+
+    let (status, inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "Curriculum Institute"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst}");
+    let inst_id: Uuid = inst["institution_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, other_inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "Other Curriculum Institute"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_inst}");
+    let other_inst_id: Uuid = other_inst["institution_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, program) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "MBBS"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{program}");
+    let program_id: Uuid = program["program_id"].as_str().unwrap().parse().unwrap();
+    let (status, listed_programs) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&staff),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed_programs}");
+    let listed_program = listed_programs["programs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|candidate| candidate["program_id"] == program_id.to_string())
+        .expect("new program is listed");
+    assert_eq!(listed_program["chapter_ids"].as_array().unwrap().len(), 0);
+    let suppression_curriculum_path =
+        format!("/v1/institutions/{inst_id}/programs/{program_id}/curriculum");
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &suppression_curriculum_path,
+            Some(&staff),
+            Some(serde_json::json!({"chapter_ids": [ids.chapter1]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let suppression_coverage_path =
+        format!("/v1/institutions/{inst_id}/programs/{program_id}/coverage");
+    let (status, suppressed_report) = call(
+        app.clone(),
+        request("GET", &suppression_coverage_path, Some(&staff), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{suppressed_report}");
+    assert_eq!(suppressed_report["cohort_size"], 0);
+    assert_eq!(suppressed_report["suppressed"], true);
+    assert!(suppressed_report["chapters"][0]["learners_with_evidence"].is_null());
+    assert!(suppressed_report["chapters"][0]["attempts"].is_null());
+    let (status, other_program) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{other_inst_id}/programs"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "Other program"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_program}");
+    let other_program_id: Uuid = other_program["program_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, wrong_program_cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "name": "Cross tenant cohort",
+                "program_id": other_program_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{wrong_program_cohort}");
+
+    let mut learner_ids = Vec::new();
+    let mut first_learner_token = String::new();
+    for index in 0..5 {
+        let email = format!("program-coverage-{index}-{}@example.test", Uuid::new_v4());
+        let (status, registered) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email.clone(), "password": "longenough"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{registered}");
+        let learner_id: Uuid = registered["user_id"].as_str().unwrap().parse().unwrap();
+        let (status, logged_in) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/login",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{logged_in}");
+        if index == 0 {
+            first_learner_token = logged_in["token"].as_str().unwrap().to_owned();
+        }
+        let (status, member) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                &format!("/v1/institutions/{inst_id}/members"),
+                Some(&staff),
+                Some(serde_json::json!({"user_id": learner_id, "role": "learner"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{member}");
+        learner_ids.push(learner_id);
+    }
+
+    let (status, unlinked_member) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "name": "Unlinked learner cohort",
+                "member_ids": [Uuid::new_v4()],
+                "program_id": program_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{unlinked_member}"
+    );
+
+    let unlinked_email = format!("auto-enroll-{}@example.test", Uuid::new_v4());
+    let (status, unlinked_account) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": unlinked_email,
+                "password": "longenough"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unlinked_account}");
+    let unlinked_id: Uuid = unlinked_account["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, auto_enrollment) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "name": "Auto-enrolled learner",
+                "member_ids": [unlinked_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{auto_enrollment}");
+    let auto_enrolled_role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM institution_members WHERE institution_id = $1 AND user_id = $2",
+    )
+    .bind(inst_id)
+    .bind(unlinked_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("automatic institution membership");
+    assert_eq!(auto_enrolled_role, "learner");
+
+    let (status, cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "name": "Program cohort",
+                "member_ids": learner_ids,
+                "program_id": program_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cohort}");
+    let cohort_id: Uuid = cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+    let (status, listed_cohorts) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed_cohorts}");
+    let listed_cohort = listed_cohorts["cohorts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|candidate| candidate["cohort_id"] == cohort_id.to_string())
+        .expect("new cohort is listed");
+    assert_eq!(listed_cohort["program_id"], program_id.to_string());
+    assert_eq!(listed_cohort["members"], 5);
+
+    let instructor_email = format!("program-instructor-{}@example.test", Uuid::new_v4());
+    let (status, instructor_account) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": instructor_email,
+                "password": "longenough"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{instructor_account}");
+    let instructor_id: Uuid = instructor_account["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, instructor_member) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/members"),
+            Some(&staff),
+            Some(serde_json::json!({"user_id": instructor_id, "role": "instructor"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{instructor_member}");
+    let (status, staff_in_cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({
+                "name": "Invalid staff cohort",
+                "member_ids": [instructor_id],
+                "program_id": program_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{staff_in_cohort}"
+    );
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&first_learner_token),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&first_learner_token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "program-coverage-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    let curriculum_path = format!("/v1/institutions/{inst_id}/programs/{program_id}/curriculum");
+    let (status, mapped) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &curriculum_path,
+            Some(&staff),
+            Some(serde_json::json!({
+                "chapter_ids": [ids.chapter1, ids.chapter2, ids.chapter1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapped}");
+    assert_eq!(mapped["chapter_count"], 2);
+    let (status, mapped_programs) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&staff),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapped_programs}");
+    let mapped_program = mapped_programs["programs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|candidate| candidate["program_id"] == program_id.to_string())
+        .expect("mapped program remains listed");
+    assert_eq!(mapped_program["chapter_ids"].as_array().unwrap().len(), 2);
+
+    let (status, invalid_map) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &curriculum_path,
+            Some(&staff),
+            Some(serde_json::json!({"chapter_ids": [ids.exam_id]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_map}");
+
+    let other_program_path =
+        format!("/v1/institutions/{inst_id}/programs/{other_program_id}/curriculum");
+    let (status, cross_tenant) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &other_program_path,
+            Some(&staff),
+            Some(serde_json::json!({"chapter_ids": [ids.chapter1]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{cross_tenant}");
+
+    let coverage_path = format!("/v1/institutions/{inst_id}/programs/{program_id}/coverage");
+    let (status, report) = call(
+        app.clone(),
+        request("GET", &coverage_path, Some(&staff), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["cohort_size"], 5);
+    assert_eq!(report["chapters"].as_array().unwrap().len(), 2);
+    let chapter_one = report["chapters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|chapter| chapter["chapter_id"] == ids.chapter1.to_string())
+        .expect("chapter one report");
+    assert_eq!(chapter_one["learners_with_evidence"], 1);
+    assert_eq!(chapter_one["coverage_percent"], 20.0);
+
+    let (status, denied) = call(
+        app.clone(),
+        request("GET", &coverage_path, Some(&first_learner_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    let (status, denied_programs) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_id}/programs"),
+            Some(&first_learner_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_programs}");
+    let (status, denied_cohorts) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&first_learner_token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_cohorts}");
+}
+
+#[tokio::test]
+async fn institution_external_enrollment_is_staff_scoped_idempotent_and_tenant_safe() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let staff = register_and_login(app.clone()).await;
+    let outsider = register_and_login(app.clone()).await;
+
+    let (status, inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "SSO Institute"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst}");
+    let inst_id: Uuid = inst["institution_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "SSO cohort"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cohort}");
+    let cohort_id: Uuid = cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, other_inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&staff),
+            Some(serde_json::json!({"name": "Other SSO Institute"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_inst}");
+    let other_inst_id: Uuid = other_inst["institution_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, other_cohort) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{other_inst_id}/cohorts"),
+            Some(&staff),
+            Some(serde_json::json!({"name": "Other institution cohort"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_cohort}");
+    let other_cohort_id: Uuid = other_cohort["cohort_id"].as_str().unwrap().parse().unwrap();
+
+    let register_user = |app: Router| async move {
+        let email = format!("sso-{}@example.test", Uuid::new_v4());
+        let (status, body) = call(
+            app,
+            request(
+                "POST",
+                "/v1/auth/register",
+                None,
+                Some(serde_json::json!({"email": email, "password": "longenough"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["user_id"].as_str().unwrap().parse::<Uuid>().unwrap()
+    };
+    let learner_id = register_user(app.clone()).await;
+    let other_id = register_user(app.clone()).await;
+    let endpoint = format!("/v1/institutions/{inst_id}/external-enrollments");
+
+    let (status, invalid_role) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&staff),
+            Some(serde_json::json!({
+                "provider": "oidc:example-university",
+                "subject": "student-42",
+                "user_id": learner_id,
+                "role": "instructor"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_role}");
+
+    let enrollment = serde_json::json!({
+        "provider": "oidc:example-university",
+        "subject": "student-42",
+        "user_id": learner_id,
+        "role": "learner",
+        "cohort_id": cohort_id
+    });
+
+    let (status, enrolled) = call(
+        app.clone(),
+        request("POST", &endpoint, Some(&staff), Some(enrollment.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enrolled}");
+    assert_eq!(enrolled["user_id"], learner_id.to_string());
+    assert_eq!(enrolled["role"], "learner");
+
+    // Replaying the same provider subject is idempotent.
+    let (status, replayed) = call(
+        app.clone(),
+        request("POST", &endpoint, Some(&staff), Some(enrollment.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed["user_id"], learner_id.to_string());
+
+    // OIDC issuer URLs can exceed the former provider-key limit.
+    let long_issuer = format!("https://idp.example.test/{}", "a".repeat(201));
+    let (status, long_issuer_enrollment) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&staff),
+            Some(serde_json::json!({
+                "provider": long_issuer,
+                "subject": "student-long-issuer",
+                "user_id": other_id,
+                "role": "learner"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{long_issuer_enrollment}");
+    assert_eq!(long_issuer_enrollment["provider"], long_issuer);
+
+    // Existing institution roles survive identity linking.
+    let staff_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM institution_members WHERE institution_id = $1 AND role = 'admin'",
+    )
+    .bind(inst_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("institution creator membership");
+    let (status, linked_staff) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&staff),
+            Some(serde_json::json!({
+                "provider": "oidc:example-university",
+                "subject": "staff-1",
+                "user_id": staff_id,
+                "role": "learner"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{linked_staff}");
+    assert_eq!(linked_staff["role"], "admin");
+
+    // The external subject cannot be rebound to another local identity.
+    let (status, conflict) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&staff),
+            Some(serde_json::json!({
+                "provider": "oidc:example-university",
+                "subject": "student-42",
+                "user_id": other_id,
+                "role": "learner"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "external_identity_conflict");
+
+    // Non-staff members cannot provision external identities in this tenant.
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&outsider),
+            Some(serde_json::json!({
+                "provider": "saml:example-university",
+                "subject": "student-99",
+                "user_id": other_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    // A cohort from another institution cannot be attached to this enrollment.
+    let (status, cross_tenant) = call(
+        app.clone(),
+        request(
+            "POST",
+            &endpoint,
+            Some(&staff),
+            Some(serde_json::json!({
+                "provider": "oidc:example-university",
+                "subject": "student-cross-tenant",
+                "user_id": other_id,
+                "cohort_id": other_cohort_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{cross_tenant}");
+
+    // Enrollment creates the tenant membership and the mapping.
+    let member = sqlx::query!(
+        "SELECT role FROM institution_members WHERE institution_id = $1 AND user_id = $2",
+        inst_id,
+        learner_id
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("membership created");
+    assert_eq!(member.role, "learner");
+    let identity = sqlx::query!(
+        "SELECT user_id FROM external_identities WHERE institution_id = $1 AND provider = $2 AND subject = $3",
+        inst_id,
+        "oidc:example-university",
+        "student-42"
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("external identity created");
+    assert_eq!(identity.user_id, learner_id);
+    let cohort_member = sqlx::query!(
+        "SELECT 1 AS one FROM cohort_members WHERE cohort_id = $1 AND user_id = $2",
+        cohort_id,
+        learner_id
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .expect("cohort enrollment lookup");
+    assert!(cohort_member.is_some());
+    let enrollment_events = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM audit_events
+         WHERE institution_id = $1 AND action = 'external_enrollment_bound' AND entity_id = $2",
+    )
+    .bind(inst_id)
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("external enrollment audit count");
+    assert_eq!(
+        enrollment_events, 1,
+        "replay should not duplicate the audit event"
+    );
+}
+
+#[tokio::test]
 async fn blueprint_balanced_session_generation() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -5141,6 +7868,56 @@ async fn reserved_family_form_session_and_ai_gate() {
         "{coach}"
     );
 
+    let (status, pregen) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/questions/versions/{vid}/pregen-tutoring"),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{pregen}");
+    assert_eq!(pregen["error"]["code"], "ai_restricted_for_assessment");
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("enable reserved pack fixture");
+    let (status, lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": "reserved-device",
+                "chapters": [chapter_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lease}");
+    let (status, manifest) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!(
+                "/v2/packs/{}/manifest?chapters={chapter_id}&device_id=reserved-device",
+                ids.exam_id
+            ),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manifest}");
+    assert!(manifest["items"][0]["tutoring_cards"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
     // The standard pipeline handles answers for the form session.
     let (status, _) = call(
         app.clone(),
@@ -6079,13 +8856,16 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     seed::seed(&state.pool).await.expect("seed");
     let learner = register_and_login(app.clone()).await;
 
-    // Cold start: one 10-question practice task (10 committed minutes).
-    let (status, _) = call(
+    // Cold start: one 10-question practice task with an explicit 15-minute estimate.
+    let (status, initial_today) = call(
         app.clone(),
         request("GET", "/v1/me/today", Some(&learner), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial_today["tasks"][0]["question_count"], 10);
+    assert_eq!(initial_today["tasks"][0]["estimated_minutes"], 15);
+    let task_key = initial_today["tasks"][0]["task_key"].clone();
 
     // Replan below capacity is refused as invalid; above it is a no-op.
     let (status, body) = call(
@@ -6094,7 +8874,7 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
             "POST",
             "/v1/me/plan/replan",
             Some(&learner),
-            Some(serde_json::json!({"daily_minutes": 1})),
+            Some(serde_json::json!({"daily_minutes": 1, "expected_version": 1})),
         ),
     )
     .await;
@@ -6105,7 +8885,7 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
             "POST",
             "/v1/me/plan/replan",
             Some(&learner),
-            Some(serde_json::json!({"daily_minutes": 60})),
+            Some(serde_json::json!({"daily_minutes": 60, "expected_version": 1})),
         ),
     )
     .await;
@@ -6113,14 +8893,14 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     assert_eq!(body["replanned"], false, "{body}");
     assert_eq!(body["reason"], "within_capacity", "{body}");
 
-    // Trim to 5 minutes: the 10-minute task is deferred with a receipt.
+    // Trim to 5 minutes: the estimated 15-minute task is deferred with a receipt.
     let (status, replanned) = call(
         app.clone(),
         request(
             "POST",
             "/v1/me/plan/replan",
             Some(&learner),
-            Some(serde_json::json!({"daily_minutes": 5})),
+            Some(serde_json::json!({"daily_minutes": 5, "expected_version": 1})),
         ),
     )
     .await;
@@ -6136,6 +8916,1956 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{today}");
+    assert_eq!(
+        today["revisions"][0]["deferred_tasks"][0],
+        initial_today["tasks"][0]["title"]
+    );
+
+    let current_plan_id = today["plan_id"].as_str().unwrap();
+    let revision_id = today["revisions"][0]["id"].as_str().unwrap();
+    let (status, undone) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/plans/{current_plan_id}/revisions/{revision_id}/undo"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+    assert_eq!(undone["plan_version"], 3);
+
+    let (status, restored) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(restored["tasks"][0]["status"], "pending");
+    assert_eq!(restored["tasks"][0]["question_count"], 10);
+    assert_eq!(restored["tasks"][0]["estimated_minutes"], 15);
+    assert_eq!(restored["tasks"][0]["task_key"], task_key);
+}
+
+#[tokio::test]
+async fn ai08_legacy_capacity_receipt_remains_undoable() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let existing_task_id: Uuid = today["tasks"][0]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE plan_tasks SET estimated_minutes = 6 WHERE id = $1")
+        .bind(existing_task_id)
+        .execute(&state.pool)
+        .await
+        .expect("set the task to fit the budget");
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Legacy optional task', 10, 15)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("add optional task");
+
+    let (status, replanned) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({ "daily_minutes": 10, "expected_version": 1 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replanned}");
+    assert_eq!(replanned["deferred_tasks"], 1, "{replanned}");
+
+    let (status, current) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let plan_id = current["plan_id"].as_str().unwrap();
+    let revision_id: Uuid = current["revisions"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    sqlx::query("UPDATE plan_revisions SET receipt = $2 WHERE id = $1")
+        .bind(revision_id)
+        .bind(serde_json::json!({ "deferred": ["Legacy optional task"] }))
+        .execute(&state.pool)
+        .await
+        .expect("restore legacy receipt shape");
+
+    let (status, undone) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/plans/{plan_id}/revisions/{revision_id}/undo"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+
+    let (status, restored) = call(app, request("GET", "/v1/me/today", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert!(
+        restored["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| { task["title"] == "Legacy optional task" && task["status"] == "pending" }),
+        "{restored}"
+    );
+}
+
+#[tokio::test]
+async fn ai08_repeated_migration_application_preserves_custom_estimates() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, today) = call(app, request("GET", "/v1/me/today", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let task_id: Uuid = today["tasks"][0]["id"].as_str().unwrap().parse().unwrap();
+    let source_plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let copied_plan_id = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO plans (id, user_id, plan_date, version)
+         SELECT $1, user_id, plan_date, version + 1 FROM plans WHERE id = $2",
+    )
+    .bind(copied_plan_id)
+    .bind(source_plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("create historical plan copy");
+    sqlx::query(
+        r#"INSERT INTO plan_tasks
+             (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes,
+              source_session_id, status, added_by_revision, protected, task_key)
+           SELECT gen_random_uuid(), $1, kind, title, chapter_id, question_count,
+                  estimated_minutes, source_session_id, status, added_by_revision,
+                  protected, gen_random_uuid()
+           FROM plan_tasks WHERE plan_id = $2"#,
+    )
+    .bind(copied_plan_id)
+    .bind(source_plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("copy legacy task with a fresh default creation time and identity");
+
+    sqlx::query("UPDATE plan_tasks SET estimated_minutes = 37 WHERE id = $1")
+        .bind(task_id)
+        .execute(&state.pool)
+        .await
+        .expect("set learner estimate");
+    schema::apply_up(&state.pool)
+        .await
+        .expect("replaying registered migrations is safe");
+
+    let estimate: i32 =
+        sqlx::query_scalar("SELECT estimated_minutes FROM plan_tasks WHERE id = $1")
+            .bind(task_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("read learner estimate after migration replay");
+    assert_eq!(estimate, 37);
+    let source_key: Uuid = sqlx::query_scalar("SELECT task_key FROM plan_tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    let copied_key: Uuid = sqlx::query_scalar(
+        "SELECT task_key FROM plan_tasks WHERE plan_id = $1 ORDER BY created_at, id LIMIT 1",
+    )
+    .bind(copied_plan_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        copied_key, source_key,
+        "plan snapshots share stable task identity"
+    );
+}
+
+#[tokio::test]
+async fn ai08_session_completion_marks_only_its_linked_plan_task() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let task = &today["tasks"][0];
+    let chapter_id: Uuid = task["chapter_id"].as_str().unwrap().parse().unwrap();
+    let task_key: Uuid = task["task_key"].as_str().unwrap().parse().unwrap();
+    let task_id: Uuid = task["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE plan_tasks SET question_count = 2 WHERE id = $1")
+        .bind(task_id)
+        .execute(&state.pool)
+        .await
+        .expect("set task count to available fixture questions");
+    let sibling_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Same chapter sibling', $3, 3, 5)",
+    )
+    .bind(sibling_id)
+    .bind(plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add same-chapter sibling");
+    let sibling_key: Uuid = sqlx::query_scalar("SELECT task_key FROM plan_tasks WHERE id = $1")
+        .bind(sibling_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("read sibling key");
+
+    let (status, mismatch) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": chapter_id,
+                "question_count": 1,
+                "plan_task_key": task_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{mismatch}");
+    assert_eq!(mismatch["error"]["code"], "invalid_plan_task");
+
+    let (status, shortfall) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": chapter_id,
+                "question_count": 3,
+                "plan_task_key": sibling_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{shortfall}");
+    assert_eq!(shortfall["error"]["code"], "plan_task_pool_shortfall");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": chapter_id,
+                "question_count": 2,
+                "plan_task_key": task_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id = session["session_id"].as_str().unwrap();
+    let (status, receipt) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+
+    let (status, current) = call(app, request("GET", "/v1/me/today", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let tasks = current["tasks"].as_array().unwrap();
+    assert_eq!(
+        tasks
+            .iter()
+            .find(|item| item["task_key"] == task_key.to_string())
+            .unwrap()["status"],
+        "done"
+    );
+    assert_eq!(
+        tasks
+            .iter()
+            .find(|item| item["task_key"] == sibling_key.to_string())
+            .unwrap()["status"],
+        "pending"
+    );
+}
+
+#[tokio::test]
+async fn ai08_linked_revision_preserves_skips_and_fails_closed_after_quarantine() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let practice_task = &today["tasks"][0];
+    let task_chapter: Uuid = practice_task["chapter_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let task_key = practice_task["task_key"].as_str().unwrap();
+    let other_chapter = if task_chapter == ids.chapter1 {
+        ids.chapter2
+    } else {
+        ids.chapter1
+    };
+    let (status, cross_chapter) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor",
+                "chapter_id":task_chapter,
+                "chapter_ids":[task_chapter,other_chapter],
+                "question_count":1,
+                "plan_task_key":task_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{cross_chapter}");
+    assert_eq!(cross_chapter["error"]["code"], "plan_task_chapter_mismatch");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor","chapter_id":ids.chapter1,"question_count":2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let items = sqlx::query(
+        "SELECT item_index, question_version_id FROM session_items
+         WHERE session_id = $1 ORDER BY item_index",
+    )
+    .bind(session_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(items.len(), 2);
+    for (index, item) in items.iter().enumerate() {
+        let question_version_id: Uuid = item.try_get("question_version_id").unwrap();
+        let item_index: i16 = item.try_get("item_index").unwrap();
+        if index == 0 {
+            let correct_index: i16 =
+                sqlx::query_scalar("SELECT correct_index FROM question_versions WHERE id = $1")
+                    .bind(question_version_id)
+                    .fetch_one(&state.pool)
+                    .await
+                    .unwrap();
+            let wrong_index = if correct_index == 0 { 1 } else { 0 };
+            let (status, answer) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/practice/sessions/{session_id}/answers"),
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "item_index":item_index,
+                        "chosen_index":wrong_index,
+                        "idempotency_key":"ai08-revision-wrong"
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{answer}");
+        } else {
+            let (status, skipped) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/practice/sessions/{session_id}/answers"),
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "item_index":item_index,
+                        "chosen_index":null,
+                        "idempotency_key":"ai08-revision-skip"
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{skipped}");
+        }
+    }
+    let (status, receipt) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+
+    let (status, after_submit) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_submit}");
+    let revision = after_submit["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| {
+            task["kind"] == "revision" && task["source_session_id"] == session_id.to_string()
+        })
+        .expect("automatic task includes the incorrect answer and explicit skip");
+    assert_eq!(revision["question_count"], 2);
+    let revision_key = revision["task_key"].as_str().unwrap();
+    let revision_task_id: Uuid = revision["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE plan_tasks SET question_count = 1 WHERE id = $1")
+        .bind(revision_task_id)
+        .execute(&state.pool)
+        .await
+        .expect("reduce the planned revision size below the eligible pool");
+    let (status, revision_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"revision",
+                "source_session_id":session_id,
+                "plan_task_key":revision_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revision_session}");
+    assert_eq!(revision_session["items"].as_array().unwrap().len(), 1);
+    sqlx::query("UPDATE plan_tasks SET question_count = 2 WHERE id = $1")
+        .bind(revision_task_id)
+        .execute(&state.pool)
+        .await
+        .expect("restore the full planned revision size");
+    let skipped_version: Uuid = items[1].try_get("question_version_id").unwrap();
+    sqlx::query("UPDATE question_versions SET status = 'quarantined' WHERE id = $1")
+        .bind(skipped_version)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let (status, shortfall) = call(
+        app,
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"revision",
+                "source_session_id":session_id,
+                "plan_task_key":revision_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{shortfall}");
+    assert_eq!(shortfall["error"]["code"], "plan_task_pool_shortfall");
+}
+
+#[tokio::test]
+async fn ai08_concurrent_first_today_reads_create_one_plan() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (first, second) = tokio::join!(
+        call(
+            app.clone(),
+            request("GET", "/v1/me/today", Some(&learner), None),
+        ),
+        call(
+            app.clone(),
+            request("GET", "/v1/me/today", Some(&learner), None),
+        ),
+    );
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["plan_id"], second.1["plan_id"]);
+
+    let plan_id: Uuid = first.1["plan_id"].as_str().unwrap().parse().unwrap();
+    let plan_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM plans
+         WHERE user_id = (SELECT user_id FROM plans WHERE id = $1)
+           AND plan_date = CURRENT_DATE",
+    )
+    .bind(plan_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count today's plans");
+    assert_eq!(plan_count, 1);
+}
+
+#[tokio::test]
+async fn ai08_submit_and_replan_race_preserves_completed_task_on_undo() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let chapter_id = today["tasks"][0]["chapter_id"].as_str().unwrap();
+    let task_id: Uuid = today["tasks"][0]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE plan_tasks SET question_count = 2 WHERE id = $1")
+        .bind(task_id)
+        .execute(&state.pool)
+        .await
+        .expect("set task count to available fixture questions");
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"timed",
+                "chapter_id":chapter_id,
+                "question_count":2,
+                "plan_task_key":today["tasks"][0]["task_key"],
+                "time_limit_seconds":30
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id = session["session_id"].as_str().unwrap();
+
+    let (submitted, replanned) = tokio::join!(
+        call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/submit"),
+                Some(&learner),
+                None,
+            ),
+        ),
+        call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/me/plan/replan",
+                Some(&learner),
+                Some(serde_json::json!({"daily_minutes":5,"expected_version":1})),
+            ),
+        ),
+    );
+    assert_eq!(submitted.0, StatusCode::OK, "{}", submitted.1);
+    assert_eq!(replanned.0, StatusCode::OK, "{}", replanned.1);
+
+    let (status, current) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    if current["tasks"].as_array().unwrap().is_empty() {
+        let revision_id = current["revisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|revision| revision["reason_code"] == "capacity_change")
+            .expect("capacity revision")
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("revision id");
+        let current_plan_id = current["plan_id"].as_str().unwrap();
+        let (status, undone) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/plans/{current_plan_id}/revisions/{revision_id}/undo"),
+                Some(&learner),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{undone}");
+
+        let (status, restored) = call(
+            app.clone(),
+            request("GET", "/v1/me/today", Some(&learner), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{restored}");
+        assert!(restored["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| { task["chapter_id"] == chapter_id && task["status"] == "done" }));
+    } else {
+        assert!(current["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| { task["chapter_id"] == chapter_id && task["status"] == "done" }));
+    }
+}
+
+#[tokio::test]
+async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_version() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let done_task_id: Uuid = today["tasks"][0]["id"].as_str().unwrap().parse().unwrap();
+    let chapter_id: Uuid = today["tasks"][0]["chapter_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    sqlx::query("UPDATE plan_tasks SET status = 'done' WHERE id = $1")
+        .bind(done_task_id)
+        .execute(&state.pool)
+        .await
+        .expect("mark completed task");
+    let protected_task_id = Uuid::new_v4();
+    let early_optional_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, created_at)
+         VALUES ($1, $2, 'practice', 'Earlier optional practice', $3, 5, 8, now() - interval '1 second')",
+    )
+    .bind(early_optional_id)
+    .bind(plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add earlier optional task fixture");
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Protected review', $3, 4, 6)",
+    )
+    .bind(protected_task_id)
+    .bind(plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add protected task fixture");
+    let deferred_task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Optional practice', $3, 3, 5)",
+    )
+    .bind(deferred_task_id)
+    .bind(plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add deferrable task fixture");
+
+    let (status, protected) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &format!("/v1/plans/{plan_id}/tasks/{protected_task_id}/protection"),
+            Some(&learner),
+            Some(serde_json::json!({"protected":true})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{protected}");
+
+    let (status, blocked) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes":5,"expected_version":1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{blocked}");
+    assert_eq!(blocked["error"]["code"], "protected_tasks_over_capacity");
+    assert_eq!(blocked["error"]["details"]["protected_minutes"], 6);
+
+    let (status, replanned) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes":10,"expected_version":1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replanned}");
+    assert_eq!(replanned["version"], 2);
+    assert_eq!(replanned["kept_tasks"], 2);
+    assert_eq!(replanned["deferred_tasks"], 2);
+    let deferred_ids = replanned["deferred_task_ids"].as_array().unwrap();
+    assert!(deferred_ids.contains(&serde_json::json!(deferred_task_id)));
+    assert!(deferred_ids.contains(&serde_json::json!(early_optional_id)));
+
+    let (status, current) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["version"], 2);
+    let latest_plan_id: Uuid = current["plan_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(current["tasks"].as_array().unwrap().len(), 2);
+    assert!(current["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| { task["id"] == done_task_id.to_string() && task["status"] == "done" }));
+    assert!(current["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|task| { task["id"] == protected_task_id.to_string() && task["protected"] == true }));
+
+    let (status, stale) = call(
+        app,
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes":6,"expected_version":1})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    assert_eq!(stale["error"]["code"], "stale_plan_version");
+    assert_eq!(stale["error"]["details"]["current_version"], 2);
+
+    let (status, unprotected) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &format!("/v1/plans/{latest_plan_id}/tasks/{protected_task_id}/protection"),
+            Some(&learner),
+            Some(serde_json::json!({"protected":false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unprotected}");
+    let new_pending_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Second optional task', $3, 3, 5)",
+    )
+    .bind(new_pending_id)
+    .bind(latest_plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add concurrent-replan fixture");
+    let replan_uri = "/v1/me/plan/replan";
+    let (first, second) = tokio::join!(
+        call(
+            app.clone(),
+            request(
+                "POST",
+                replan_uri,
+                Some(&learner),
+                Some(serde_json::json!({"daily_minutes":6,"expected_version":2})),
+            ),
+        ),
+        call(
+            app,
+            request(
+                "POST",
+                replan_uri,
+                Some(&learner),
+                Some(serde_json::json!({"daily_minutes":6,"expected_version":2})),
+            ),
+        )
+    );
+    assert_eq!(
+        [first.0, second.0]
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count(),
+        1,
+        "one concurrent request applies the replan"
+    );
+    assert_eq!(
+        [first.0, second.0]
+            .iter()
+            .filter(|status| **status == StatusCode::CONFLICT)
+            .count(),
+        1,
+        "the competing request observes a stale plan version"
+    );
+    let stale_body = if first.0 == StatusCode::CONFLICT {
+        &first.1
+    } else {
+        &second.1
+    };
+    assert_eq!(stale_body["error"]["code"], "stale_plan_version");
+}
+
+#[tokio::test]
+async fn ai04_free_allowance_is_atomic_at_answer_and_fits_full_tasks() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let learner_token_hash = Sha256::digest(learner.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let learner_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(learner_token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("registered learner id");
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let chapter_id: Uuid = today["tasks"][0]["chapter_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let small_task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Two-question practice', $3, 2, 5)",
+    )
+    .bind(small_task_id)
+    .bind(plan_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("add small practice candidate");
+
+    let fixture_question_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM question_versions WHERE status = 'published' ORDER BY id LIMIT 1",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("load a question for the allowance fixture");
+    let source_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions (id, user_id, preset, status, submitted_at)
+         VALUES ($1, $2, 'tutor', 'submitted', now())",
+    )
+    .bind(source_session_id)
+    .bind(learner_id)
+    .execute(&state.pool)
+    .await
+    .expect("create submitted allowance fixture");
+    sqlx::query(
+        "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+         SELECT gen_random_uuid(), $1, item_index::smallint, $2
+         FROM generate_series(0, 8) AS items(item_index)",
+    )
+    .bind(source_session_id)
+    .bind(fixture_question_id)
+    .execute(&state.pool)
+    .await
+    .expect("add nine allowance source items");
+    sqlx::query(
+        "INSERT INTO attempts
+           (id, session_id, item_index, user_id, question_version_id,
+            chosen_index, correct, assisted, idempotency_key)
+         SELECT gen_random_uuid(), $1, item_index::smallint, $2, $3,
+                NULL, NULL, FALSE, gen_random_uuid()::text
+         FROM generate_series(0, 8) AS items(item_index)",
+    )
+    .bind(source_session_id)
+    .bind(learner_id)
+    .bind(fixture_question_id)
+    .execute(&state.pool)
+    .await
+    .expect("record today's nine free attempts");
+
+    let (status, next_action) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=60&activity_preference=practice",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{next_action}");
+    assert_eq!(next_action["reason_code"], "free_allowance_insufficient");
+    assert_eq!(next_action["allowance"]["remaining"], 1);
+    assert_eq!(next_action["allowance"]["required"], 2);
+
+    let task_key: Uuid = sqlx::query_scalar("SELECT task_key FROM plan_tasks WHERE id = $1")
+        .bind(small_task_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("small task identity");
+    let (status, blocked_launch) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor",
+                "chapter_id":chapter_id,
+                "question_count":2,
+                "plan_task_key":task_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{blocked_launch}");
+    assert_eq!(
+        blocked_launch["error"]["code"],
+        "free_allowance_insufficient"
+    );
+    assert_eq!(
+        blocked_launch["error"]["details"]["allowance"]["required"],
+        2
+    );
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor","chapter_id":chapter_id,"question_count":2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let item_indexes: Vec<i16> = sqlx::query_scalar(
+        "SELECT item_index FROM session_items WHERE session_id = $1 ORDER BY item_index",
+    )
+    .bind(session_id)
+    .fetch_all(&state.pool)
+    .await
+    .expect("load new session items");
+    assert_eq!(item_indexes.len(), 2);
+    let first_key = Uuid::new_v4().to_string();
+    let second_key = Uuid::new_v4().to_string();
+    let (first, second) = tokio::join!(
+        call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index":item_indexes[0],
+                    "chosen_index":null,
+                    "idempotency_key":first_key.clone()
+                })),
+            ),
+        ),
+        call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index":item_indexes[1],
+                    "chosen_index":null,
+                    "idempotency_key":second_key.clone()
+                })),
+            ),
+        ),
+    );
+    assert!(
+        (first.0 == StatusCode::OK && second.0 == StatusCode::FORBIDDEN)
+            || (first.0 == StatusCode::FORBIDDEN && second.0 == StatusCode::OK),
+        "exactly one concurrent answer should consume the final question: {first:?}, {second:?}"
+    );
+    let (accepted_index, accepted_key) = if first.0 == StatusCode::OK {
+        (item_indexes[0], first_key)
+    } else {
+        (item_indexes[1], second_key)
+    };
+    let rejected = if first.0 == StatusCode::FORBIDDEN {
+        &first.1
+    } else {
+        &second.1
+    };
+    assert_eq!(rejected["error"]["code"], "free_allowance_reached");
+    let used: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attempts a JOIN practice_sessions s ON s.id = a.session_id
+         WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE AND s.preset <> 'revision'",
+    )
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count capped attempts");
+    assert_eq!(used, 10);
+
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index":accepted_index,
+                "chosen_index":null,
+                "idempotency_key":accepted_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["already_recorded"], true);
+
+    let (status, revision) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"revision","source_session_id":source_session_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revision}");
+    let revision_id = revision["session_id"].as_str().unwrap();
+    let (status, revision_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{revision_id}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index":0,"chosen_index":null,"idempotency_key":"revision-exempt"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revision_answer}");
+    let used_after_revision: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attempts a JOIN practice_sessions s ON s.id = a.session_id
+         WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE AND s.preset <> 'revision'",
+    )
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("revision attempts remain exempt");
+    assert_eq!(used_after_revision, 10);
+}
+
+#[tokio::test]
+async fn ai04_next_action_respects_time_evidence_and_current_plan() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let learner_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("registered learner id");
+
+    let (status, no_plan) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=60",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_plan}");
+    assert_eq!(no_plan["reason_code"], "no_current_plan");
+    assert!(no_plan["recommended_action"].is_null());
+    let plans_after_recommendation: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM plans WHERE user_id = $1 AND plan_date = CURRENT_DATE",
+    )
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count plans after read-only recommendation");
+    assert_eq!(
+        plans_after_recommendation, 0,
+        "recommendation must not create a plan"
+    );
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    let initial_version = today["version"].clone();
+    let initial_task_count = today["tasks"].as_array().unwrap().len();
+
+    let (status, invalid_budget) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=4",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_budget}");
+
+    let weak_version: Uuid = sqlx::query_scalar(
+        "SELECT id FROM question_versions
+         WHERE chapter_id = $1 AND status = 'published' ORDER BY id LIMIT 1",
+    )
+    .bind(ids.chapter1)
+    .fetch_one(&state.pool)
+    .await
+    .expect("weak chapter question version");
+    let strong_version: Uuid = sqlx::query_scalar(
+        "SELECT id FROM question_versions
+         WHERE chapter_id = $1 AND status = 'published' ORDER BY id LIMIT 1",
+    )
+    .bind(ids.chapter3)
+    .fetch_one(&state.pool)
+    .await
+    .expect("strong chapter question version");
+
+    // Put the higher-accuracy practice first so the evidence-based choice must
+    // outrank plan order once both chapters pass the ten-attempt floor.
+    for (chapter_id, question_version_id, correct) in [
+        (ids.chapter3, strong_version, true),
+        (ids.chapter1, weak_version, false),
+    ] {
+        sqlx::query(
+            "INSERT INTO plan_tasks
+               (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+             VALUES ($1, $2, 'practice', $3, $4, $5, $6)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(plan_id)
+        .bind(if correct {
+            "Strong chapter practice"
+        } else {
+            "Weak chapter practice"
+        })
+        .bind(chapter_id)
+        .bind(if correct { 1 } else { 2 })
+        .bind(if correct { 8 } else { 6 })
+        .execute(&state.pool)
+        .await
+        .expect("add recommendation candidate");
+
+        sqlx::query(
+            "WITH session_ids AS (
+                 SELECT gen_random_uuid() AS id FROM generate_series(1, 10)
+             ), inserted AS (
+                 INSERT INTO practice_sessions
+                     (id, user_id, preset, chapter_id, status, submitted_at)
+                 SELECT id, $1, 'tutor', $2, 'submitted', now() FROM session_ids
+                 RETURNING id
+             )
+             INSERT INTO attempts
+                 (id, session_id, item_index, user_id, question_version_id,
+                  chosen_index, correct, assisted, idempotency_key, created_at)
+             SELECT gen_random_uuid(), id, 0, $1, $3, 0, $4, false, id::text,
+                    now() - interval '10 days'
+             FROM inserted",
+        )
+        .bind(learner_id)
+        .bind(chapter_id)
+        .bind(*question_version_id)
+        .bind(correct)
+        .execute(&state.pool)
+        .await
+        .expect("record independent chapter evidence");
+    }
+
+    let revision_source_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions
+           (id, user_id, preset, chapter_id, status, submitted_at)
+         VALUES ($1, $2, 'tutor', $3, 'submitted', now())",
+    )
+    .bind(revision_source_id)
+    .bind(learner_id)
+    .bind(ids.chapter1)
+    .execute(&state.pool)
+    .await
+    .expect("create submitted source for revision task");
+    for (item_index, question_version_id) in ids.question_versions[..2].iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO session_items (id, session_id, item_index, question_version_id)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(revision_source_id)
+        .bind(item_index as i16)
+        .bind(question_version_id)
+        .execute(&state.pool)
+        .await
+        .expect("add unanswered revision source item");
+    }
+
+    let revision_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, source_session_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'revision', 'Missed-question follow-up', $3, 2, 5)",
+    )
+    .bind(revision_id)
+    .bind(plan_id)
+    .bind(revision_source_id)
+    .execute(&state.pool)
+    .await
+    .expect("add revision recommendation candidate");
+
+    let (status, revision_pick) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revision_pick}");
+    assert_eq!(
+        revision_pick["recommended_action"]["task_id"],
+        revision_id.to_string()
+    );
+    assert_eq!(
+        revision_pick["recommended_action"]["reason_code"],
+        "missed_question_revision"
+    );
+    assert_eq!(revision_pick["recommended_action"]["estimated_minutes"], 5);
+
+    sqlx::query("UPDATE plan_tasks SET status = 'done' WHERE id = $1")
+        .bind(revision_id)
+        .execute(&state.pool)
+        .await
+        .expect("close revision candidate");
+    let (status, no_fit) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=5",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_fit}");
+    assert!(no_fit["recommended_action"].is_null(), "{no_fit}");
+    assert_eq!(no_fit["reason_code"], "no_task_fits");
+
+    let (status, weak_chapter_pick) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{weak_chapter_pick}");
+    assert_eq!(
+        weak_chapter_pick["recommended_action"]["title"],
+        "Weak chapter practice"
+    );
+    assert_eq!(
+        weak_chapter_pick["recommended_action"]["reason_code"],
+        "lower_observed_accuracy"
+    );
+    assert_eq!(
+        weak_chapter_pick["recommended_action"]["independent_count"],
+        10
+    );
+
+    sqlx::query(
+        "UPDATE practice_sessions s SET preset = 'revision'
+         FROM attempts a WHERE a.session_id = s.id AND a.user_id = $1",
+    )
+    .bind(learner_id)
+    .execute(&state.pool)
+    .await
+    .expect("mark existing attempt evidence as revision practice");
+    sqlx::query("UPDATE attempts SET created_at = now() WHERE user_id = $1")
+        .bind(learner_id)
+        .execute(&state.pool)
+        .await
+        .expect("record revision practice today");
+    let (status, revision_exempt) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revision_exempt}");
+    assert!(
+        revision_exempt["recommended_action"].is_object(),
+        "{revision_exempt}"
+    );
+    let (status, practice_after_revisions) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{practice_after_revisions}");
+    sqlx::query(
+        "UPDATE practice_sessions s SET preset = 'tutor'
+         FROM attempts a WHERE a.session_id = s.id AND a.user_id = $1",
+    )
+    .bind(learner_id)
+    .execute(&state.pool)
+    .await
+    .expect("restore practice-session fixtures");
+    sqlx::query("UPDATE attempts SET created_at = now() - interval '10 days' WHERE user_id = $1")
+        .bind(learner_id)
+        .execute(&state.pool)
+        .await
+        .expect("restore historical evidence timestamps");
+
+    let protected_task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, protected)
+         VALUES ($1, $2, 'practice', 'Protected practice', $3, 2, 4, TRUE)",
+    )
+    .bind(protected_task_id)
+    .bind(plan_id)
+    .bind(ids.chapter1)
+    .execute(&state.pool)
+    .await
+    .expect("add protected task");
+
+    let (status, protected_pick) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8&activity_preference=revision",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{protected_pick}");
+    assert_eq!(
+        protected_pick["recommended_action"]["task_id"],
+        protected_task_id.to_string()
+    );
+    assert_eq!(
+        protected_pick["recommended_action"]["reason_code"],
+        "protected_task"
+    );
+
+    sqlx::query("UPDATE plan_tasks SET status = 'done' WHERE id = $1")
+        .bind(protected_task_id)
+        .execute(&state.pool)
+        .await
+        .expect("close protected task fixture");
+    let (status, adjusted_pick) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=12&activity_preference=practice&time_multiplier=1.5",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{adjusted_pick}");
+    assert_eq!(
+        adjusted_pick["recommended_action"]["title"],
+        "Weak chapter practice"
+    );
+    assert_eq!(
+        adjusted_pick["recommended_action"]["adjusted_estimated_minutes"],
+        9
+    );
+
+    let (status, no_preferred_activity) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8&activity_preference=revision",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_preferred_activity}");
+    assert_eq!(
+        no_preferred_activity["reason_code"],
+        "activity_preference_unavailable"
+    );
+    assert!(no_preferred_activity["recommended_action"].is_null());
+
+    let (status, invalid_multiplier) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=12&time_multiplier=0.5",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_multiplier}"
+    );
+    let (status, invalid_preference) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=12&activity_preference=timed",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_preference}"
+    );
+
+    sqlx::query("UPDATE attempts SET created_at = now() WHERE user_id = $1")
+        .bind(learner_id)
+        .execute(&state.pool)
+        .await
+        .expect("use today's question allowance");
+    let (status, blocked_by_entitlement) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{blocked_by_entitlement}");
+    assert!(blocked_by_entitlement["recommended_action"].is_null());
+    assert_eq!(
+        blocked_by_entitlement["reason_code"],
+        "free_allowance_reached"
+    );
+    assert_eq!(blocked_by_entitlement["plan_id"], plan_id.to_string());
+    assert_eq!(blocked_by_entitlement["plan_version"], initial_version);
+
+    sqlx::query("UPDATE users SET tier = 'paid' WHERE id = $1")
+        .bind(learner_id)
+        .execute(&state.pool)
+        .await
+        .expect("upgrade entitlement fixture");
+    let (status, paid_pick) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=8",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid_pick}");
+    assert!(paid_pick["recommended_action"].is_object(), "{paid_pick}");
+    let (status, paid_practice) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid_practice}");
+
+    let (status, unchanged) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged["version"], initial_version);
+    assert_eq!(
+        unchanged["tasks"].as_array().unwrap().len(),
+        initial_task_count + 4
+    );
+
+    let past_exam_date: String = sqlx::query_scalar("SELECT (CURRENT_DATE - 1)::text")
+        .fetch_one(&state.pool)
+        .await
+        .expect("past exam date");
+    let (status, goal) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/goals",
+            Some(&learner),
+            Some(serde_json::json!({
+                "target_note": "Prepare for the registered examination",
+                "exam_date": past_exam_date,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goal}");
+    let (status, expired_goal) = call(
+        app,
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=60",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{expired_goal}");
+    assert_eq!(expired_goal["reason_code"], "exam_deadline_passed");
+    assert!(expired_goal["recommended_action"].is_null());
+}
+
+#[tokio::test]
+async fn ai04_does_not_recommend_quarantined_practice_content() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE plan_tasks SET status = 'done' WHERE plan_id = $1")
+        .bind(plan_id)
+        .execute(&state.pool)
+        .await
+        .expect("close cold-start task");
+    sqlx::query(
+        "UPDATE question_versions qv SET status = 'quarantined'
+         WHERE qv.chapter_id = $1 AND qv.status = 'published'
+           AND qv.id <> (
+               SELECT id FROM question_versions
+               WHERE chapter_id = $1 AND status = 'published' ORDER BY id LIMIT 1
+           )",
+    )
+    .bind(ids.chapter1)
+    .execute(&state.pool)
+    .await
+    .expect("quarantine all practice content in the chapter");
+
+    let task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Quarantined chapter practice', $3, 2, 5)",
+    )
+    .bind(task_id)
+    .bind(plan_id)
+    .bind(ids.chapter1)
+    .execute(&state.pool)
+    .await
+    .expect("add task whose content has been quarantined");
+    let task_key: Uuid = sqlx::query_scalar("SELECT task_key FROM plan_tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("task identity");
+
+    let (status, launch) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 2,
+                "plan_task_key": task_key,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{launch}");
+    assert_eq!(launch["error"]["code"], "plan_task_pool_shortfall");
+
+    let (status, recommendation) = call(
+        app,
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=5",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recommendation}");
+    assert_eq!(recommendation["reason_code"], "content_unavailable");
+    assert!(recommendation["recommended_action"].is_null());
+}
+
+#[tokio::test]
+async fn ai08_automatic_revisions_are_idempotent_and_capped() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let mut session_ids = Vec::new();
+
+    for attempt_number in 0..4 {
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&learner),
+                Some(serde_json::json!({
+                    "preset":"tutor", "chapter_id":ids.chapter1, "question_count":1
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        let session_id: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+        let version_id: Uuid = session["items"][0]["question_version_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let correct_index: i16 =
+            sqlx::query_scalar("SELECT correct_index FROM question_versions WHERE id = $1")
+                .bind(version_id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("fixture answer key");
+        let wrong_index = if correct_index == 0 { 1 } else { 0 };
+        let (status, answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index":0,
+                    "chosen_index":wrong_index,
+                    "idempotency_key":format!("ai08-{attempt_number}-wrong")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer["correct"], false);
+
+        if attempt_number == 0 {
+            let submit_uri = format!("/v1/practice/sessions/{session_id}/submit");
+            let (first, second) = tokio::join!(
+                call(
+                    app.clone(),
+                    request("POST", &submit_uri, Some(&learner), None),
+                ),
+                call(
+                    app.clone(),
+                    request("POST", &submit_uri, Some(&learner), None),
+                )
+            );
+            assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+            assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+        } else {
+            let (status, receipt) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/practice/sessions/{session_id}/submit"),
+                    Some(&learner),
+                    None,
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{receipt}");
+        }
+        session_ids.push(session_id);
+    }
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    assert_eq!(today["revision_budget"]["automatic_used"], 3);
+    assert_eq!(today["revision_budget"]["automatic_limit"], 3);
+    assert_eq!(today["revision_budget"]["total_used"], 3);
+    assert_eq!(today["revisions"].as_array().unwrap().len(), 3);
+
+    let first_event_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM plan_revisions WHERE source_event_id = $1")
+            .bind(session_ids[0])
+            .fetch_one(&state.pool)
+            .await
+            .expect("count idempotent automatic revision");
+    assert_eq!(
+        first_event_count, 1,
+        "concurrent submit produces one revision"
+    );
+    let automatic_estimate: i32 = sqlx::query_scalar(
+        "SELECT estimated_minutes FROM plan_tasks
+         WHERE source_session_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(session_ids[0])
+    .fetch_one(&state.pool)
+    .await
+    .expect("automatic revision estimate");
+    assert_eq!(
+        automatic_estimate, 2,
+        "one missed question rounds up to two estimated minutes"
+    );
+    let capped_event_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM plan_revisions WHERE source_event_id = $1")
+            .bind(session_ids[3])
+            .fetch_one(&state.pool)
+            .await
+            .expect("count capped automatic revision");
+    assert_eq!(
+        capped_event_count, 0,
+        "the fourth daily automatic revision is capped"
+    );
+
+    let current_plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO plan_revisions
+           (id, plan_id, from_version, to_version, reason_code, explanation,
+            automatic, receipt)
+         SELECT gen_random_uuid(), $1, n, n + 1, 'fixture', 'revision-cap fixture',
+                false, '{}'::jsonb
+         FROM generate_series(1, 5) AS n",
+    )
+    .bind(current_plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("fill the daily revision budget");
+    sqlx::query("UPDATE plans SET version = 9 WHERE id = $1")
+        .bind(current_plan_id)
+        .execute(&state.pool)
+        .await
+        .expect("prepare daily revision-limit fixture");
+    sqlx::query(
+        "INSERT INTO plan_tasks
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+         VALUES ($1, $2, 'practice', 'Capacity limit fixture', $3, 10, 15)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(current_plan_id)
+    .bind(ids.chapter1)
+    .execute(&state.pool)
+    .await
+    .expect("prepare a task that would otherwise be deferred");
+    let (status, capped) = call(
+        app,
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes":5,"expected_version":9})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{capped}");
+    assert_eq!(capped["error"]["code"], "plan_revision_limit");
+}
+
+#[tokio::test]
+async fn ai08_capacity_revision_at_daily_limit_remains_undoable() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+
+    sqlx::query(
+        "INSERT INTO plan_revisions
+           (id, plan_id, from_version, to_version, reason_code, explanation,
+            automatic, receipt)
+         SELECT gen_random_uuid(), $1, n, n + 1, 'fixture', 'revision-cap fixture',
+                false, '{}'::jsonb
+         FROM generate_series(1, 7) AS n",
+    )
+    .bind(plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("prepare seven existing revisions");
+    sqlx::query("UPDATE plans SET version = 8 WHERE id = $1")
+        .bind(plan_id)
+        .execute(&state.pool)
+        .await
+        .expect("align latest plan version with fixture");
+
+    let (status, replanned) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/plan/replan",
+            Some(&learner),
+            Some(serde_json::json!({"daily_minutes":5,"expected_version":8})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replanned}");
+    assert_eq!(replanned["version"], 9);
+    let current_plan_id = replanned["plan_id"].as_str().unwrap();
+    let (status, current) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let revision_id = current["revisions"].as_array().unwrap().last().unwrap()["id"]
+        .as_str()
+        .unwrap();
+
+    let (status, undone) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/plans/{current_plan_id}/revisions/{revision_id}/undo"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+    assert_eq!(undone["plan_version"], 10);
+
+    let (status, restored) = call(app, request("GET", "/v1/me/today", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["revision_budget"]["total_used"], 8);
+    assert!(restored["tasks"].as_array().unwrap().iter().any(|task| {
+        task["title"] == today["tasks"][0]["title"] && task["status"] == "pending"
+    }));
 }
 
 #[tokio::test]
@@ -7476,4 +12206,2800 @@ async fn variants_trends_drills_regression_and_qti() {
     assert!(qti.contains("imsmanifest"), "{qti}");
     assert!(qti.contains("<qti-assessment-item"), "{qti}");
     assert!(qti.contains("<correctResponse>"), "{qti}");
+}
+
+#[tokio::test]
+async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+
+    let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind OIDC fixture");
+    let issuer = format!("http://{}", provider_listener.local_addr().unwrap());
+    let provider = OidcTestProvider {
+        issuer: issuer.clone(),
+        expected_challenge: Arc::new(tokio::sync::Mutex::new(String::new())),
+        nonce: Arc::new(tokio::sync::Mutex::new(String::new())),
+        subject: Arc::new(tokio::sync::Mutex::new("learner-subject-1".into())),
+    };
+    let provider_app = Router::new()
+        .route(
+            "/.well-known/openid-configuration",
+            axum::routing::get(oidc_test_discovery),
+        )
+        .route("/jwks", axum::routing::get(oidc_test_jwks))
+        .route("/token", axum::routing::post(oidc_test_token))
+        .with_state(provider.clone());
+    let provider_task = tokio::spawn(async move {
+        axum::serve(provider_listener, provider_app)
+            .await
+            .expect("serve OIDC fixture");
+    });
+
+    let email = format!("oidc-{}@example.test", Uuid::new_v4());
+    let (_, registered) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({ "email": email, "password": "longenough" })),
+        ),
+    )
+    .await;
+    let user_id = registered["user_id"].as_str().unwrap();
+    let (_, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({ "email": email, "password": "longenough" })),
+        ),
+    )
+    .await;
+    let password_token = login["token"].as_str().unwrap().to_string();
+
+    let (_, institution) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&password_token),
+            Some(serde_json::json!({ "name": "OIDC Test Institution" })),
+        ),
+    )
+    .await;
+    let institution_id = institution["institution_id"].as_str().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/goals",
+            Some(&password_token),
+            Some(serde_json::json!({ "target_note": "OIDC session identity" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/me/session-policy",
+            Some(&password_token),
+            Some(serde_json::json!({ "single_active_session": true })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let config_uri = format!("/v1/admin/institutions/{institution_id}/sso/oidc");
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "PUT",
+            &config_uri,
+            Some(&password_token),
+            Some(serde_json::json!({
+                "issuer": issuer,
+                "client_id": "medical-os-test-client",
+                "client_secret": "test-oidc-client-secret",
+                "enabled": true
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let (_, configured) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &config_uri,
+            Some(&password_token),
+            Some(serde_json::json!({
+                "issuer": issuer,
+                "client_id": "medical-os-test-client",
+                "client_secret": "test-oidc-client-secret",
+                "enabled": true
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(configured["enabled"], true, "{configured}");
+    assert_eq!(configured["client_secret_configured"], true, "{configured}");
+    assert!(configured.get("client_secret").is_none(), "{configured}");
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/institutions/{institution_id}/external-enrollments"),
+            Some(&password_token),
+            Some(serde_json::json!({
+                "provider": issuer,
+                "subject": "learner-subject-1",
+                "user_id": user_id,
+                "role": "learner"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    async fn start_login(app: &Router, institution_id: &str) -> HashMap<String, String> {
+        let (status, body) = call(
+            app.clone(),
+            request(
+                "GET",
+                &format!("/v1/institutions/{institution_id}/sso/oidc/start"),
+                None,
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let authorization_url = url::Url::parse(body["authorization_url"].as_str().unwrap())
+            .expect("authorization URL");
+        authorization_url.query_pairs().into_owned().collect()
+    }
+
+    async fn callback_location(
+        app: &Router,
+        institution_id: &str,
+        code: &str,
+        state: &str,
+    ) -> String {
+        let response = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("/api/v1/auth/oidc/callback/{institution_id}?code={code}&state={state}"),
+                None,
+                None,
+            ))
+            .await
+            .expect("OIDC callback");
+        assert!(response.status().is_redirection(), "{}", response.status());
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("callback location")
+            .to_owned()
+    }
+
+    let query = start_login(&app, institution_id).await;
+    assert_eq!(query.get("response_type").map(String::as_str), Some("code"));
+    assert_eq!(query.get("scope").map(String::as_str), Some("openid"));
+    assert_eq!(
+        query.get("code_challenge_method").map(String::as_str),
+        Some("S256")
+    );
+    *provider.expected_challenge.lock().await = query.get("code_challenge").unwrap().clone();
+    *provider.nonce.lock().await = query.get("nonce").unwrap().clone();
+    let oidc_state = query.get("state").unwrap().clone();
+
+    let wrong_state_location =
+        callback_location(&app, institution_id, "approved-code", "attacker-state").await;
+    assert_eq!(
+        wrong_state_location,
+        "http://127.0.0.1:5173/login/sso/callback?error=sso_failed"
+    );
+
+    let callback = callback_location(&app, institution_id, "approved-code", &oidc_state).await;
+    assert!(
+        callback.starts_with("http://127.0.0.1:5173/login/sso/callback#ticket="),
+        "{callback}"
+    );
+    let ticket = callback.split_once("#ticket=").unwrap().1;
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/oidc/complete",
+            None,
+            Some(serde_json::json!({ "ticket": ticket })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sso_token = session["token"].as_str().unwrap();
+
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&password_token), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "SSO preserves single-session policy"
+    );
+    let (status, goals) = call(
+        app.clone(),
+        request("GET", "/v1/me/goals", Some(sso_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{goals}");
+    assert_eq!(goals["goals"][0]["target_note"], "OIDC session identity");
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/oidc/complete",
+            None,
+            Some(serde_json::json!({ "ticket": ticket })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "handoff ticket is one-use"
+    );
+
+    let bad_nonce_query = start_login(&app, institution_id).await;
+    let bad_nonce_state = bad_nonce_query.get("state").unwrap();
+    *provider.expected_challenge.lock().await =
+        bad_nonce_query.get("code_challenge").unwrap().clone();
+    *provider.nonce.lock().await = format!("{}-wrong", bad_nonce_query.get("nonce").unwrap());
+    let bad_nonce_location =
+        callback_location(&app, institution_id, "approved-code", bad_nonce_state).await;
+    assert_eq!(
+        bad_nonce_location,
+        "http://127.0.0.1:5173/login/sso/callback?error=sso_failed"
+    );
+
+    let unmapped_query = start_login(&app, institution_id).await;
+    *provider.expected_challenge.lock().await =
+        unmapped_query.get("code_challenge").unwrap().clone();
+    *provider.nonce.lock().await = unmapped_query.get("nonce").unwrap().clone();
+    *provider.subject.lock().await = "not-pre-enrolled".into();
+    let unmapped_location = callback_location(
+        &app,
+        institution_id,
+        "approved-code",
+        unmapped_query.get("state").unwrap(),
+    )
+    .await;
+    assert_eq!(
+        unmapped_location,
+        "http://127.0.0.1:5173/login/sso/callback?error=sso_failed"
+    );
+    provider_task.abort();
+}
+
+#[tokio::test]
+async fn qb13_calculators_conversions_and_assisted_hints() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, bmi) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/calculators/bmi",
+            Some(&learner),
+            Some(serde_json::json!({"weight_kg":70.0,"height_m":1.75})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bmi}");
+    assert!(
+        (bmi["value"].as_f64().unwrap() - 22.86).abs() < 0.01,
+        "{bmi}"
+    );
+    assert!(bmi["disclaimer"]
+        .as_str()
+        .unwrap()
+        .contains("not for clinical use"));
+
+    let (status, invalid) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/calculators/bmi",
+            Some(&learner),
+            Some(serde_json::json!({"weight_kg":70.0,"height_m":0.0})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    assert_eq!(invalid["error"]["code"], "invalid_calculator_input");
+
+    let (status, overflow) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/calculators/bmi",
+            Some(&learner),
+            Some(serde_json::json!({
+                "weight_kg": 1.7976931348623157e308,
+                "height_m": 1e-200
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{overflow}");
+    assert_eq!(overflow["error"]["code"], "invalid_calculator_input");
+
+    let (status, conversion) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/calculators/convert",
+            Some(&learner),
+            Some(serde_json::json!({
+                "value": 100.0, "analyte": "glucose",
+                "from": "mg/dL", "to": "mmol/L"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{conversion}");
+    assert!(
+        (conversion["value"].as_f64().unwrap() - 5.55).abs() < 0.01,
+        "{conversion}"
+    );
+
+    let (status, invalid_conversion) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/calculators/convert",
+            Some(&learner),
+            Some(serde_json::json!({
+                "value": 1.0, "analyte": "sodium",
+                "from": "mmol/L", "to": "mmol/L"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_conversion}"
+    );
+    assert_eq!(invalid_conversion["error"]["code"], "invalid_conversion");
+
+    let mut invalid_hint_request = request(
+        "POST",
+        "/v1/admin/questions",
+        Some(&learner),
+        Some(serde_json::json!({
+            "chapter_id":ids.chapter1,
+            "difficulty":"medium",
+            "vignette":"A synthetic study question.",
+            "lead_in":"Which option is correct?",
+            "options":[{"text":"One","rationale":"Reason one."},{"text":"Two","rationale":"Reason two."}],
+            "correct_index":0,
+            "key_learning_point":"Use the authored reasoning cue.",
+            "hint":"x".repeat(2001),
+            "source_ref":"synthetic-fixture"
+        })),
+    );
+    invalid_hint_request
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, invalid_hint) = call(app.clone(), invalid_hint_request).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_hint}");
+    assert_eq!(invalid_hint["error"]["code"], "hint_too_long");
+
+    let mut author_request = request(
+        "POST",
+        "/v1/admin/questions",
+        Some(&learner),
+        Some(serde_json::json!({
+            "chapter_id":ids.chapter1,
+            "difficulty":"medium",
+            "vignette":"A synthetic study question.",
+            "lead_in":"Which option is correct?",
+            "options":[{"text":"One","rationale":"Reason one."},{"text":"Two","rationale":"Reason two."}],
+            "correct_index":0,
+            "key_learning_point":"Use the authored reasoning cue.",
+            "hint":"Compare the alternatives before choosing.",
+            "source_ref":"synthetic-fixture"
+        })),
+    );
+    author_request
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, authored) = call(app.clone(), author_request).await;
+    assert_eq!(status, StatusCode::OK, "{authored}");
+    let saved_hint: String = sqlx::query_scalar("SELECT hint FROM question_versions WHERE id = $1")
+        .bind(
+            authored["version_id"]
+                .as_str()
+                .unwrap()
+                .parse::<Uuid>()
+                .unwrap(),
+        )
+        .fetch_one(&state.pool)
+        .await
+        .expect("read authored hint");
+    assert_eq!(saved_hint, "Compare the alternatives before choosing.");
+
+    sqlx::query("UPDATE question_versions SET hint = $2 WHERE id = $1")
+        .bind(ids.question_versions[0])
+        .bind("Compare the direction of the two pressure components first.")
+        .execute(&state.pool)
+        .await
+        .expect("set tutor hint fixture");
+    let (status, marked) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/{}/mark", ids.question_versions[0]),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor", "chapter_id":ids.chapter1,
+                "source":"marked", "question_count":1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid = session["session_id"].as_str().unwrap();
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let item = &detail["items"][0];
+    let vid = item["question_version_id"].as_str().unwrap();
+    assert_eq!(item["hint_available"], true, "{session}");
+    assert!(
+        item.get("hint").is_none(),
+        "hint must not be sent before request"
+    );
+
+    let (status, hint) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}/items/0/hint"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hint}");
+    assert_eq!(
+        hint["hint"],
+        "Compare the direction of the two pressure components first."
+    );
+
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index":0, "chosen_index":0,
+                "assisted":false, "idempotency_key":"qb13-hint-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let assisted: bool = sqlx::query_scalar(
+        "SELECT assisted FROM attempts WHERE question_version_id = $1 AND idempotency_key = 'qb13-hint-answer'",
+    )
+    .bind(vid.parse::<Uuid>().unwrap())
+    .fetch_one(&state.pool)
+    .await
+    .expect("read assistance evidence");
+    assert!(
+        assisted,
+        "the server must preserve hint use as assisted evidence"
+    );
+
+    let (status, timed) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"timed", "chapter_id":ids.chapter1,
+                "question_count":1, "time_limit_seconds":30
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed}");
+    let timed_sid = timed["session_id"].as_str().unwrap();
+    let (status, denied) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{timed_sid}/items/0/hint"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let upload_at = chrono::Utc::now() - chrono::Duration::minutes(3);
+    sqlx::query(
+        "UPDATE practice_sessions
+         SET created_at = now() - interval '15 minutes',
+             deadline = now() - interval '2 minutes'
+         WHERE id = $1",
+    )
+    .bind(timed_sid.parse::<Uuid>().unwrap())
+    .execute(&state.pool)
+    .await
+    .expect("expire the practice session for offline replay");
+    let (status, late_answer) = call(
+        app,
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{timed_sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index":0, "chosen_index":0,
+                "idempotency_key":"qb13-late-offline-answer",
+                "client_recorded_at":upload_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{late_answer}");
+    let stored = sqlx::query(
+        "SELECT assisted, offline_recorded_at FROM attempts WHERE idempotency_key = 'qb13-late-offline-answer'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("read late offline attempt");
+    assert!(
+        stored.get::<bool, _>("assisted"),
+        "late offline evidence is never independent"
+    );
+    let offline_recorded_at = stored
+        .get::<Option<chrono::DateTime<chrono::Utc>>, _>("offline_recorded_at")
+        .expect("offline timestamp is recorded");
+    assert!(
+        (offline_recorded_at - upload_at).num_milliseconds().abs() <= 1,
+        "PostgreSQL timestamp precision should preserve the offline time: {offline_recorded_at} vs {upload_at}"
+    );
+}
+
+#[tokio::test]
+async fn off02_concurrent_session_submit_returns_one_persisted_receipt() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let email = format!("off02-{}@example.test", Uuid::new_v4());
+    let (status, registered) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email":email,"password":"correct horse"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{registered}");
+    let learner_id = registered["user_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email":email,"password":"correct horse"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let learner = login["token"].as_str().unwrap().to_string();
+
+    let (status, created) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset":"tutor", "chapter_id":ids.chapter1, "question_count":1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let sid = created["session_id"].as_str().unwrap();
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let version_id = detail["items"][0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    let correct_index: i16 =
+        sqlx::query_scalar("SELECT correct_index FROM question_versions WHERE id = $1")
+            .bind(version_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("question key");
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index":0, "chosen_index":correct_index,
+                "idempotency_key":"off02-submit-replay-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    let submit_uri = format!("/v1/practice/sessions/{sid}/submit");
+    let (first, second) = tokio::join!(
+        call(
+            app.clone(),
+            request("POST", &submit_uri, Some(&learner), None),
+        ),
+        call(
+            app.clone(),
+            request("POST", &submit_uri, Some(&learner), None),
+        )
+    );
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1, second.1, "concurrent submits must share a receipt");
+    let (replay_status, replay) = call(
+        app.clone(),
+        request("POST", &submit_uri, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(
+        replay, first.1,
+        "a lost-response retry reuses the stored receipt"
+    );
+
+    let evidence_count: i64 = sqlx::query_scalar(
+        "SELECT evidence_count FROM learner_concept_state WHERE user_id = $1 AND chapter_id = $2",
+    )
+    .bind(learner_id)
+    .bind(ids.chapter1)
+    .fetch_one(&state.pool)
+    .await
+    .expect("learner evidence");
+    assert_eq!(
+        evidence_count, 1,
+        "completion applies learner evidence once"
+    );
+
+    let stored: String =
+        sqlx::query_scalar("SELECT result_payload::text FROM practice_sessions WHERE id = $1")
+            .bind(sid.parse::<Uuid>().unwrap())
+            .fetch_one(&state.pool)
+            .await
+            .expect("stored result receipt");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stored).unwrap(),
+        first.1
+    );
+}
+
+#[tokio::test]
+async fn core10_concepts_are_versioned_and_curriculum_mappings_are_many_to_many() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let admin = |mut req: Request<Body>| {
+        req.headers_mut()
+            .insert("x-admin-token", "test-admin".parse().unwrap());
+        req
+    };
+
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/admin/concepts", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, first) = call(
+        app.clone(),
+        admin(request(
+            "POST",
+            "/v1/admin/concepts",
+            Some(&learner),
+            Some(serde_json::json!({
+                "canonical_key":"cardiac-output",
+                "display_name":"Cardiac output",
+                "definition":"The volume of blood pumped by the heart per unit time."
+            })),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let concept_id = first["concept_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    assert_eq!(first["current_version"], 1);
+
+    let (status, unauthorized_version) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/admin/concepts/{concept_id}/versions"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "display_name":"Unauthorized change",
+                "definition":"This mutation must be rejected."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{unauthorized_version}");
+
+    let (status, version) = call(
+        app.clone(),
+        admin(request(
+            "POST",
+            &format!("/v1/admin/concepts/{concept_id}/versions"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "display_name":"Cardiac output",
+                "definition":"The volume of blood pumped by each ventricle per unit time."
+            })),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version}");
+    assert_eq!(version["current_version"], 2);
+
+    let (status, listed) = call(
+        app.clone(),
+        admin(request("GET", "/v1/admin/concepts", Some(&learner), None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["concepts"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["concepts"][0]["concept_id"], concept_id.to_string());
+    assert_eq!(listed["concepts"][0]["current_version"], 2);
+    assert_eq!(
+        listed["concepts"][0]["definition"],
+        "The volume of blood pumped by each ventricle per unit time."
+    );
+
+    let (status, second) = call(
+        app.clone(),
+        admin(request(
+            "POST",
+            "/v1/admin/concepts",
+            Some(&learner),
+            Some(serde_json::json!({
+                "canonical_key":"stroke-volume",
+                "display_name":"Stroke volume",
+                "definition":"The volume ejected by a ventricle in one beat."
+            })),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    let second_id = second["concept_id"].as_str().unwrap();
+
+    let (status, mapped) = call(
+        app.clone(),
+        admin(request(
+            "PUT",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            Some(serde_json::json!({"concept_ids":[concept_id,second_id]})),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapped}");
+    let (status, chapter1) = call(
+        app.clone(),
+        admin(request(
+            "GET",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            None,
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{chapter1}");
+    assert_eq!(chapter1["concepts"].as_array().unwrap().len(), 2);
+    assert!(chapter1["concepts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|concept| {
+            concept["concept_id"] == concept_id.to_string() && concept["version"] == 2
+        }));
+
+    let (status, mapped_again) = call(
+        app.clone(),
+        admin(request(
+            "PUT",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter2),
+            Some(&learner),
+            Some(serde_json::json!({"concept_ids":[concept_id]})),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapped_again}");
+    let (status, chapter2) = call(
+        app.clone(),
+        admin(request(
+            "GET",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter2),
+            Some(&learner),
+            None,
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{chapter2}");
+    assert_eq!(chapter2["concepts"].as_array().unwrap().len(), 1);
+
+    let (status, invalid) = call(
+        app.clone(),
+        admin(request(
+            "PUT",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            Some(serde_json::json!({"concept_ids":[Uuid::new_v4()]})),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    let (status, unchanged) = call(
+        app.clone(),
+        admin(request(
+            "GET",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            None,
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged["concepts"].as_array().unwrap().len(), 2);
+
+    let (status, cleared) = call(
+        app.clone(),
+        admin(request(
+            "PUT",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            Some(serde_json::json!({"concept_ids":[]})),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["mapped"], 0);
+    let (status, cleared_node) = call(
+        app.clone(),
+        admin(request(
+            "GET",
+            &format!("/v1/admin/hierarchy/{}/concepts", ids.chapter1),
+            Some(&learner),
+            None,
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared_node}");
+    assert!(cleared_node["concepts"].as_array().unwrap().is_empty());
+
+    let (status, duplicate) = call(
+        app,
+        admin(request(
+            "POST",
+            "/v1/admin/concepts",
+            Some(&learner),
+            Some(serde_json::json!({
+                "canonical_key":"cardiac-output",
+                "display_name":"Duplicate",
+                "definition":"Duplicate keys are refused."
+            })),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+
+    let audited_ids = vec![
+        concept_id,
+        second["concept_id"]
+            .as_str()
+            .unwrap()
+            .parse::<Uuid>()
+            .unwrap(),
+        ids.chapter1,
+        ids.chapter2,
+    ];
+    let audit_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events
+         WHERE entity_id = ANY($1)
+           AND action IN (
+               'concept_identity_created',
+               'concept_version_created',
+               'curriculum_concepts_mapped'
+           )",
+    )
+    .bind(&audited_ids)
+    .fetch_one(&state.pool)
+    .await
+    .expect("concept and mapping audit events");
+    assert_eq!(audit_count, 6, "each successful mutation is audited once");
+}
+
+#[tokio::test]
+async fn ai08_task_launch_and_capacity_replan_are_serialized() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let task = &today["tasks"][0];
+    let task_key = task["task_key"].as_str().unwrap().to_owned();
+    let chapter_id = task["chapter_id"].as_str().unwrap();
+    let question_count = 2_i64;
+    sqlx::query("UPDATE plan_tasks SET question_count = $2 WHERE id = $1")
+        .bind(task["id"].as_str().unwrap().parse::<Uuid>().unwrap())
+        .bind(question_count as i32)
+        .execute(&state.pool)
+        .await
+        .expect("fit the linked task to the available fixture questions");
+
+    let (replanned, launched) = tokio::join!(
+        call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/me/plan/replan",
+                Some(&learner),
+                Some(serde_json::json!({"daily_minutes":5,"expected_version":1})),
+            ),
+        ),
+        call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&learner),
+                Some(serde_json::json!({
+                    "preset":"tutor",
+                    "chapter_id":chapter_id,
+                    "question_count":question_count,
+                    "plan_task_key":task_key
+                })),
+            ),
+        ),
+    );
+    assert_eq!(replanned.0, StatusCode::OK, "{}", replanned.1);
+    assert_eq!(replanned.1["replanned"], true, "{}", replanned.1);
+
+    if launched.0 == StatusCode::OK {
+        let session_id: Uuid = launched.1["session_id"].as_str().unwrap().parse().unwrap();
+        let stored_key: Option<Uuid> =
+            sqlx::query_scalar("SELECT plan_task_key FROM practice_sessions WHERE id = $1")
+                .bind(session_id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("linked session persists its task identity");
+        assert_eq!(stored_key, Some(task_key.parse().unwrap()));
+        assert_eq!(
+            launched.1["items"].as_array().unwrap().len() as i64,
+            question_count
+        );
+    } else {
+        assert_eq!(
+            launched.0,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            launched.1
+        );
+        assert_eq!(launched.1["error"]["code"], "invalid_plan_task");
+        let orphaned: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM practice_sessions WHERE plan_task_key = $1")
+                .bind(task_key.parse::<Uuid>().unwrap())
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(orphaned, 0, "a failed launch leaves no session row");
+    }
+}
+
+#[tokio::test]
+async fn lib06_private_imports_require_active_rights_and_stay_owner_scoped() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let owner = register_and_login(app.clone()).await;
+
+    let (status, permitted_rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&owner),
+            Some(serde_json::json!({
+                "ref_code":"PRIVATE-IMPORT-OK",
+                "licensor":"Fixture rights holder",
+                "territory":"worldwide",
+                "permitted_uses":["display","search","private_import"],
+                "valid_from":"2020-01-01",
+                "valid_to":null,
+                "contract_ref":"library-contract-42",
+                "contract_version":"2026-r1",
+                "asset_refs":["cardiology:chapter-3"],
+                "audiences":["learners"],
+                "seat_limit":250,
+                "offline_terms":"No offline copies.",
+                "quotation_limit_words":300,
+                "ai_terms":"No model processing.",
+                "derivative_terms":"No adaptations.",
+                "attribution":"Credit the original author.",
+                "royalty_terms":"Annual per-seat royalty."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{permitted_rights}");
+    let rights_id = permitted_rights["rights_id"].as_str().unwrap();
+
+    let (status, display_only) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&owner),
+            Some(serde_json::json!({
+                "ref_code":"DISPLAY-ONLY",
+                "licensor":"Fixture rights holder",
+                "permitted_uses":["display"],
+                "valid_from":"2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{display_only}");
+
+    let (status, expired) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&owner),
+            Some(serde_json::json!({
+                "ref_code":"EXPIRED-IMPORT",
+                "licensor":"Fixture rights holder",
+                "permitted_uses":["display","private_import"],
+                "valid_from":"2010-01-01",
+                "valid_to":"2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{expired}");
+
+    let (status, import_only) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&owner),
+            Some(serde_json::json!({
+                "ref_code":"PRIVATE-IMPORT-ONLY",
+                "licensor":"Import-only rights holder",
+                "permitted_uses":["display","private_import"],
+                "valid_from":"2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{import_only}");
+
+    let (status, rights) = call(
+        app.clone(),
+        request("GET", "/v1/me/library/import-rights", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rights}");
+    assert_eq!(rights["rights"].as_array().unwrap().len(), 2, "{rights}");
+    let searchable_right = rights["rights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|right| right["ref_code"] == "PRIVATE-IMPORT-OK")
+        .unwrap();
+    assert_eq!(searchable_right["search_allowed"], true);
+    let import_only_right = rights["rights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|right| right["ref_code"] == "PRIVATE-IMPORT-ONLY")
+        .unwrap();
+    assert_eq!(import_only_right["search_allowed"], false);
+
+    let denied_import = |rights_ref: &str| {
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Private notes",
+                "media_type":"text/markdown",
+                "content":"A short private physiology note.",
+                "rights_ref":rights_ref
+            })),
+        )
+    };
+    for rights_ref in ["DISPLAY-ONLY", "EXPIRED-IMPORT", "UNKNOWN-IMPORT"] {
+        let (status, denied) = call(app.clone(), denied_import(rights_ref)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+        assert_eq!(denied["error"]["code"], "rights_unavailable");
+    }
+    let (status, unsupported) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Unsupported file",
+                "media_type":"application/pdf",
+                "content":"not extracted",
+                "rights_ref":"PRIVATE-IMPORT-OK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{unsupported}");
+    assert_eq!(unsupported["error"]["code"], "unsupported_document_type");
+
+    let oversized_content = "x".repeat(1024 * 1024 + 1);
+    let (status, oversized) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Oversized document",
+                "media_type":"text/plain",
+                "content":oversized_content,
+                "rights_ref":"PRIVATE-IMPORT-OK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{oversized}");
+    assert_eq!(oversized["error"]["code"], "document_too_large");
+
+    let content = "# Private study note\n\nA permitted source excerpt.";
+    let (status, imported) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Study note",
+                "media_type":"text/markdown",
+                "content":content,
+                "rights_ref":"PRIVATE-IMPORT-OK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{imported}");
+    assert_eq!(imported["rights_ref"], "PRIVATE-IMPORT-OK");
+    assert_eq!(imported["available"], true);
+    let document_id = imported["document_id"].as_str().unwrap();
+    let expected_hash = Sha256::digest(content.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(imported["sha256"], expected_hash);
+
+    let (status, unsearchable_import) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Import-only study note",
+                "media_type":"text/plain",
+                "content":"A private study note that must not be searched.",
+                "rights_ref":"PRIVATE-IMPORT-ONLY"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{unsearchable_import}");
+
+    let escaped_content = "\\".repeat(1024 * 1024);
+    let (status, escaped_import) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/library/imports",
+            Some(&owner),
+            Some(serde_json::json!({
+                "title":"Maximum escaped text",
+                "media_type":"text/plain",
+                "content":escaped_content,
+                "rights_ref":"PRIVATE-IMPORT-OK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{escaped_import}");
+    let escaped_document_id = escaped_import["document_id"].as_str().unwrap();
+
+    let (status, document) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/library/imports/{document_id}"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{document}");
+    assert_eq!(document["content"], content);
+    assert_eq!(document["sha256"], expected_hash);
+
+    let (status, private_search) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/search?q=study%20note",
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{private_search}");
+    assert_eq!(
+        private_search["private_documents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        private_search["private_documents"][0]["content_type"],
+        "private_document"
+    );
+    assert_eq!(
+        private_search["private_documents"][0]["sha256"],
+        expected_hash
+    );
+    assert_eq!(
+        private_search["private_documents"][0]["document_id"],
+        document_id
+    );
+
+    let other_learner = register_and_login(app.clone()).await;
+    let (status, hidden) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/library/imports/{document_id}"),
+            Some(&other_learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");
+    let (status, other_search) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/search?q=study%20note",
+            Some(&other_learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other_search}");
+    assert_eq!(
+        other_search["private_documents"].as_array().unwrap().len(),
+        0
+    );
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&owner),
+            Some(serde_json::json!({"reason":"Fixture grant ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert_eq!(revoked["revoked"], true);
+    let (status, repeated_revoke) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&owner),
+            Some(serde_json::json!({"reason":"Repeated request"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repeated_revoke}");
+    assert_eq!(repeated_revoke["already_revoked"], true);
+    let (status, admin_rights) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/content-rights", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{admin_rights}");
+    let revoked_record = admin_rights["rights"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["rights_id"].as_str() == Some(rights_id))
+        .expect("revoked rights record remains auditable");
+    assert!(revoked_record["revoked_at"].as_str().is_some());
+    assert_eq!(revoked_record["revocation_note"], "Fixture grant ended");
+    assert_eq!(revoked_record["contract_ref"], "library-contract-42");
+    assert_eq!(revoked_record["contract_version"], "2026-r1");
+    assert_eq!(
+        revoked_record["asset_refs"],
+        serde_json::json!(["cardiology:chapter-3"])
+    );
+    assert_eq!(revoked_record["audiences"], serde_json::json!(["learners"]));
+    assert_eq!(revoked_record["seat_limit"], 250);
+    assert_eq!(revoked_record["quotation_limit_words"], 300);
+    assert_eq!(revoked_record["status"], "revoked");
+
+    let (status, revoked_read) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/library/imports/{document_id}"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{revoked_read}");
+    assert_eq!(revoked_read["error"]["code"], "rights_unavailable");
+    let (status, revoked_search) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/search?q=study%20note",
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked_search}");
+    assert_eq!(
+        revoked_search["private_documents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let (status, visible_metadata) = call(
+        app.clone(),
+        request("GET", "/v1/me/library/imports", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{visible_metadata}");
+    assert_eq!(visible_metadata["documents"][0]["available"], false);
+
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit.to_string().contains("rights_revoked"));
+    assert!(!audit.to_string().contains(content));
+
+    let (status, deleted) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/me/library/imports/{document_id}"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert_eq!(deleted["deleted"], true);
+    let (status, delete_escaped) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/me/library/imports/{escaped_document_id}"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{delete_escaped}");
+    let (status, missing) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/me/library/imports/{document_id}"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{missing}");
+}
+
+#[tokio::test]
+async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let appeal_reviewer = register_and_login(app.clone()).await;
+    let scenario_body = serde_json::json!({
+        "slug": "sim04-evidence-test",
+        "title": "Evidence test station",
+        "state_machine": {
+            "initial": "start",
+            "terminal_states": ["complete"],
+            "transitions": [
+                {"from": "start", "on": "ask_symptom_onset", "to": "start"},
+                {"from": "start", "on": "finish", "to": "complete"}
+            ]
+        },
+        "rubric": [
+            {"criterion_key": "focused_history", "label": "Takes a focused history", "max_score": 2.0},
+            {"criterion_key": "physical_exam", "label": "Performs a focused examination", "max_score": 1.0}
+        ]
+    });
+    let (status, scenario) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/scenarios",
+            Some(&learner),
+            Some(scenario_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{scenario}");
+    let (status, published) = call(
+        app.clone(),
+        request("GET", "/v1/scenarios", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+    assert!(published["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["slug"] == "sim04-evidence-test" && item["version"] == 1));
+
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&learner),
+            Some(serde_json::json!({"scenario_slug":"sim04-evidence-test"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let run_id = started["run_id"].as_str().unwrap();
+    assert_eq!(started["scenario_version"], 1);
+    assert!(started["available_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "ask_symptom_onset"));
+    let (status, active_run) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{active_run}");
+    assert_eq!(active_run["finished"], false);
+    assert_eq!(active_run["timeline"].as_array().unwrap().len(), 0);
+
+    let version_path = format!(
+        "/v1/admin/scenarios/{}/versions",
+        scenario["scenario_id"].as_str().unwrap()
+    );
+    let (status, version_two) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &version_path,
+            Some(&learner),
+            Some(serde_json::json!({
+                "state_machine": {
+                    "initial":"start",
+                    "terminal_states":["complete"],
+                    "transitions":[
+                        {"from":"start","on":"ask_symptom_onset","to":"start"},
+                        {"from":"start","on":"finish","to":"complete"}
+                    ]
+                },
+                "rubric":[
+                    {"criterion_key":"focused_history","label":"Revised focused history","max_score":3.0},
+                    {"criterion_key":"physical_exam","label":"Performs a focused examination","max_score":1.0}
+                ]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{version_two}");
+    assert_eq!(version_two["version"], 2);
+
+    let (status, latest_run) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&learner),
+            Some(serde_json::json!({"scenario_slug":"sim04-evidence-test"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{latest_run}");
+    let latest_run_id = latest_run["run_id"].as_str().unwrap();
+    let (status, unfinished_appeal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{latest_run_id}/appeals"),
+            Some(&learner),
+            Some(serde_json::json!({"reason":"I would like this unfinished station reviewed."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{unfinished_appeal}");
+    assert_eq!(unfinished_appeal["error"]["code"], "run_not_finished");
+    let (status, latest_debrief) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{latest_run_id}/debrief"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{latest_debrief}");
+    assert_eq!(latest_debrief["scenario_version"], 2);
+    assert!(latest_debrief["rubric"]
+        .to_string()
+        .contains("Revised focused history"));
+
+    let assessment_path = format!("/v1/admin/scenarios/runs/{run_id}/assessment");
+    let (status, unfinished) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&reviewer),
+            Some(serde_json::json!({"criteria": []})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{unfinished}");
+    assert_eq!(unfinished["error"]["code"], "run_not_finished");
+    let (status, action_event) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&learner),
+            Some(serde_json::json!({"event":"ask_symptom_onset"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{action_event}");
+    assert_eq!(action_event["current_state"], "start");
+
+    let (status, finished) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&learner),
+            Some(serde_json::json!({"event":"finish"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{finished}");
+
+    let (status, unassessed_appeal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/appeals"),
+            Some(&learner),
+            Some(serde_json::json!({"reason":"I want an examiner result to be reviewed."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{unassessed_appeal}");
+    assert_eq!(
+        unassessed_appeal["error"]["code"],
+        "assessment_not_recorded"
+    );
+
+    let replay_path = format!("/api/v1/scenarios/runs/{run_id}/counterfactual");
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &replay_path,
+            Some(&learner),
+            Some(serde_json::json!({"events":["finish"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["scenario_version"], 1);
+    assert_eq!(replay["final_state"], "complete");
+    assert_eq!(replay["counterfactual_timeline"][0]["on"], "finish");
+    assert_eq!(replay["counterfactual_timeline"][0]["sequence"], 1);
+    assert_eq!(replay["original_timeline"].as_array().unwrap().len(), 2);
+    let (status, replay_after_terminal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &replay_path,
+            Some(&learner),
+            Some(serde_json::json!({"events":["finish","ask_symptom_onset"]})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{replay_after_terminal}"
+    );
+    let (status, invalid_replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &replay_path,
+            Some(&learner),
+            Some(serde_json::json!({"events":["not-a-station-action"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_replay}");
+
+    let pending_path = "/api/v1/admin/scenarios/runs/pending-assessment";
+    let (status, pending) = call(
+        app.clone(),
+        admin_req("GET", pending_path, Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert!(pending["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|run| run["run_id"] == run_id));
+
+    let (status, self_assessment) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&learner),
+            Some(serde_json::json!({"criteria": []})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{self_assessment}");
+    assert_eq!(
+        self_assessment["error"]["code"],
+        "self_assessment_forbidden"
+    );
+
+    let (status, before) = call(
+        app.clone(),
+        admin_req("GET", &assessment_path, Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    assert_eq!(before["run_id"], run_id);
+    assert!(before.get("learner_id").is_none());
+    assert_eq!(before["rubric"].as_array().unwrap().len(), 2);
+    assert!(before["rubric"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|criterion| criterion["assessment_status"] == "not_assessed"
+            && criterion["score"] == serde_json::Value::Null));
+
+    let assessment = serde_json::json!({
+        "criteria": [
+            {
+                "criterion_key":"focused_history",
+                "assessment_status":"assessed",
+                "score":1.5,
+                "evidence":"Asked when the symptoms began.",
+                "transcript_event_indexes":[3],
+                "transcript_uncertain":false
+            },
+            {
+                "criterion_key":"physical_exam",
+                "assessment_status":"not_assessed",
+                "score":null,
+                "evidence":"No physical examination action was observed.",
+                "transcript_event_indexes":[],
+                "transcript_uncertain":false
+            }
+        ]
+    });
+    let (status, invalid_evidence) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&reviewer),
+            Some(assessment.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_evidence}"
+    );
+    assert_eq!(
+        invalid_evidence["error"]["code"],
+        "invalid_transcript_evidence"
+    );
+
+    let mut assessment = assessment;
+    assessment["criteria"][0]["transcript_event_indexes"] = serde_json::json!([0]);
+    assessment["criteria"][0]["score"] = serde_json::json!(2.5);
+    let (status, invalid_score) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&reviewer),
+            Some(assessment.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_score}");
+    assert_eq!(invalid_score["error"]["code"], "score_out_of_range");
+    assessment["criteria"][0]["score"] = serde_json::json!(1.5);
+    let (status, recorded) = call(
+        app.clone(),
+        admin_req("POST", &assessment_path, Some(&reviewer), Some(assessment)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{recorded}");
+    assert_eq!(recorded["recorded_criteria"], 2);
+    assert_eq!(recorded["not_assessed"], 1);
+    let (status, no_longer_pending) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            "/v1/admin/scenarios/runs/pending-assessment",
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_longer_pending}");
+    assert!(!no_longer_pending["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|run| run["run_id"] == run_id));
+
+    let debrief_path = format!("/v1/scenarios/runs/{run_id}/debrief");
+    let (status, debrief) = call(
+        app.clone(),
+        request("GET", &debrief_path, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{debrief}");
+    assert!(debrief["finished_at"].as_str().is_some());
+    assert_eq!(debrief["scenario_version"], 1);
+    assert_eq!(debrief["timeline"].as_array().unwrap().len(), 2);
+    assert_eq!(debrief["timeline"][0]["index"], 0);
+    assert_eq!(debrief["timeline"][0]["sequence"], 1);
+    assert_eq!(debrief["transcript"][0]["on"], "ask_symptom_onset");
+    let rubric = debrief["rubric"].as_array().unwrap();
+    let history = rubric
+        .iter()
+        .find(|criterion| criterion["criterion_key"] == "focused_history")
+        .unwrap();
+    assert_eq!(history["assessment_status"], "assessed");
+    assert_eq!(history["label"], "Takes a focused history");
+    assert_eq!(history["score"], 1.5);
+    assert_eq!(history["transcript_event_indexes"], serde_json::json!([0]));
+    let physical_exam = rubric
+        .iter()
+        .find(|criterion| criterion["criterion_key"] == "physical_exam")
+        .unwrap();
+    assert_eq!(physical_exam["assessment_status"], "not_assessed");
+    assert_eq!(physical_exam["score"], serde_json::Value::Null);
+    assert_eq!(
+        physical_exam["evidence"],
+        "No physical examination action was observed."
+    );
+
+    let appeal_path = format!("/v1/scenarios/runs/{run_id}/appeals");
+    let appeal_reason = "The history criterion omitted the documented timing question.";
+    let (status, appeal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &appeal_path,
+            Some(&learner),
+            Some(serde_json::json!({"reason":appeal_reason})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{appeal}");
+    assert_eq!(appeal["status"], "open");
+    let appeal_id = appeal["appeal_id"].as_str().unwrap();
+    let (status, duplicate_appeal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &appeal_path,
+            Some(&learner),
+            Some(serde_json::json!({"reason":"I would like a second review of this result."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate_appeal}");
+    let (status, appeal_queue) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            "/v1/admin/scenario-assessment-appeals",
+            Some(&appeal_reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appeal_queue}");
+    assert!(appeal_queue["appeals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["appeal_id"] == appeal_id));
+    let appeal_detail_path = format!("/v1/admin/scenario-assessment-appeals/{appeal_id}");
+    let (status, appeal_detail) = call(
+        app.clone(),
+        admin_req("GET", &appeal_detail_path, Some(&appeal_reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appeal_detail}");
+    assert_eq!(appeal_detail["reason"], appeal_reason);
+    let resolve_appeal_path = format!("/v1/admin/scenario-assessment-appeals/{appeal_id}/review");
+    let review_body = serde_json::json!({
+        "decision":"reassessment_required",
+        "rationale":"The original evidence does not support this criterion decision."
+    });
+    let (status, assessor_review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &resolve_appeal_path,
+            Some(&reviewer),
+            Some(review_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{assessor_review}");
+    assert_eq!(
+        assessor_review["error"]["code"],
+        "appeal_assessor_cannot_review"
+    );
+    let (status, appellant_review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &resolve_appeal_path,
+            Some(&learner),
+            Some(review_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{appellant_review}");
+    assert_eq!(
+        appellant_review["error"]["code"],
+        "appeal_appellant_cannot_review"
+    );
+    let (status, appeal_decision) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &resolve_appeal_path,
+            Some(&appeal_reviewer),
+            Some(review_body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{appeal_decision}");
+    assert_eq!(appeal_decision["decision"], "reassessment_required");
+    let (status, reviewed_debrief) = call(
+        app.clone(),
+        request("GET", &debrief_path, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reviewed_debrief}");
+    assert_eq!(reviewed_debrief["appeal"]["status"], "reviewed");
+    assert_eq!(
+        reviewed_debrief["appeal"]["decision"],
+        "reassessment_required"
+    );
+    assert_eq!(
+        reviewed_debrief["consequential_use_status"],
+        "reassessment_required"
+    );
+    assert_eq!(reviewed_debrief["rubric"][0]["score"], 1.5);
+    let (status, resolved_queue) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            "/v1/admin/scenario-assessment-appeals",
+            Some(&appeal_reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resolved_queue}");
+    assert!(!resolved_queue["appeals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["appeal_id"] == appeal_id));
+
+    let another_learner = register_and_login(app.clone()).await;
+    let (status, private_debrief) = call(
+        app.clone(),
+        request("GET", &debrief_path, Some(&another_learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{private_debrief}");
+    let (status, private_run) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}"),
+            Some(&another_learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{private_run}");
+    let (status, private_appeal) = call(
+        app.clone(),
+        request(
+            "POST",
+            &appeal_path,
+            Some(&another_learner),
+            Some(serde_json::json!({"reason":"I want to review this other learner's assessment."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{private_appeal}");
+
+    let (status, duplicate) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&reviewer),
+            Some(serde_json::json!({"criteria": []})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit.to_string().contains("scenario_assessment_recorded"));
+    assert!(audit
+        .to_string()
+        .contains("scenario_assessment_appeal_reviewed"));
+    assert!(!audit.to_string().contains(appeal_reason));
+    assert!(!audit
+        .to_string()
+        .contains("The original evidence does not support this criterion decision."));
+    assert!(!audit
+        .to_string()
+        .contains("No physical examination action was observed."));
+
+    let run_uuid: Uuid = run_id.parse().unwrap();
+    let mutate_evidence =
+        sqlx::query("UPDATE scenario_rubric_evidence SET evidence = 'changed' WHERE run_id = $1")
+            .bind(run_uuid)
+            .execute(&state.pool)
+            .await;
+    assert!(
+        mutate_evidence.is_err(),
+        "examiner evidence is immutable at the database boundary"
+    );
+    let delete_evidence = sqlx::query("DELETE FROM scenario_rubric_evidence WHERE run_id = $1")
+        .bind(run_uuid)
+        .execute(&state.pool)
+        .await;
+    assert!(
+        delete_evidence.is_err(),
+        "examiner evidence cannot be deleted"
+    );
+    let version_id: Uuid = scenario["scenario_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let mutate_rubric =
+        sqlx::query("UPDATE scenario_rubrics SET label = 'changed' WHERE scenario_version_id = $1")
+            .bind(version_id)
+            .execute(&state.pool)
+            .await;
+    assert!(
+        mutate_rubric.is_err(),
+        "published rubric criteria are immutable"
+    );
+    let mutate_version =
+        sqlx::query("UPDATE scenario_versions SET state_machine = '{}'::jsonb WHERE id = $1")
+            .bind(version_id)
+            .execute(&state.pool)
+            .await;
+    assert!(
+        mutate_version.is_err(),
+        "published scenario version content is immutable"
+    );
+    let delete_version = sqlx::query("DELETE FROM scenario_versions WHERE id = $1")
+        .bind(version_id)
+        .execute(&state.pool)
+        .await;
+    assert!(
+        delete_version.is_err(),
+        "a referenced scenario version cannot be deleted"
+    );
+
+    let appeal_uuid: Uuid = appeal_id.parse().unwrap();
+    let mutate_appeal = sqlx::query(
+        "UPDATE scenario_assessment_appeals SET reason = 'rewritten appeal reason' WHERE id = $1",
+    )
+    .bind(appeal_uuid)
+    .execute(&state.pool)
+    .await;
+    assert!(
+        mutate_appeal.is_err(),
+        "appeal reason is immutable at the database boundary"
+    );
+    let delete_appeal = sqlx::query("DELETE FROM scenario_assessment_appeals WHERE id = $1")
+        .bind(appeal_uuid)
+        .execute(&state.pool)
+        .await;
+    assert!(delete_appeal.is_err(), "appeal rows cannot be deleted");
+    let mutate_decision = sqlx::query(
+        "UPDATE scenario_assessment_appeal_reviews SET rationale = 'rewritten rationale' WHERE appeal_id = $1",
+    )
+    .bind(appeal_uuid)
+    .execute(&state.pool)
+    .await;
+    assert!(
+        mutate_decision.is_err(),
+        "appeal decisions are immutable at the database boundary"
+    );
+    let delete_decision =
+        sqlx::query("DELETE FROM scenario_assessment_appeal_reviews WHERE appeal_id = $1")
+            .bind(appeal_uuid)
+            .execute(&state.pool)
+            .await;
+    assert!(
+        delete_decision.is_err(),
+        "appeal decisions cannot be deleted"
+    );
+
+    let (status, version_three) = call(
+        app,
+        admin_req(
+            "POST",
+            &format!(
+                "/api/v1/admin/scenarios/{}/versions",
+                scenario["scenario_id"].as_str().unwrap()
+            ),
+            Some(&learner),
+            Some(serde_json::json!({
+                "state_machine": {
+                    "initial":"start",
+                    "terminal_states":["complete"],
+                    "transitions":[{"from":"start","on":"finish","to":"complete"}]
+                },
+                "rubric": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{version_three}");
+    assert_eq!(version_three["version"], 3);
+    let version_three_id: Uuid = version_three["scenario_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let delete_unreferenced_version = sqlx::query("DELETE FROM scenario_versions WHERE id = $1")
+        .bind(version_three_id)
+        .execute(&state.pool)
+        .await;
+    assert!(
+        delete_unreferenced_version.is_err(),
+        "scenario versions cannot be deleted even without dependent rows"
+    );
+}
+
+#[tokio::test]
+async fn sim08_team_invites_attribute_actions_and_record_handovers() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let owner = register_and_login(app.clone()).await;
+    let history_taker = register_and_login(app.clone()).await;
+    let observer = register_and_login(app.clone()).await;
+    let outsider = register_and_login(app.clone()).await;
+
+    let (status, scenario) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/scenarios",
+            Some(&owner),
+            Some(serde_json::json!({
+                "slug":"sim08-team-test",
+                "title":"Fictional team case",
+                "state_machine":{
+                    "initial":"start",
+                    "terminal_states":["complete"],
+                    "transitions":[
+                        {"from":"start","on":"take_history","to":"start"},
+                        {"from":"start","on":"finish","to":"complete"}
+                    ]
+                },
+                "rubric":[]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{scenario}");
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&owner),
+            Some(serde_json::json!({"scenario_slug":"sim08-team-test"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let run_id = started["run_id"].as_str().unwrap();
+
+    let (status, initial_team) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}/team"),
+            Some(&owner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{initial_team}");
+    assert_eq!(initial_team["current_role"], "team_lead");
+    assert_eq!(initial_team["members"].as_array().unwrap().len(), 1);
+    assert!(initial_team["members"][0].get("user_id").is_none());
+
+    let (status, owner_invite) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/team/invites"),
+            Some(&owner),
+            Some(serde_json::json!({"role":"history_taker"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{owner_invite}");
+    let invite_code = owner_invite["invite_code"].as_str().unwrap();
+    assert_eq!(invite_code.len(), 32);
+    assert_eq!(owner_invite["role"], "history_taker");
+    let (status, joined) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenario-team-invites/join",
+            Some(&history_taker),
+            Some(serde_json::json!({"invite_code":invite_code})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{joined}");
+    assert_eq!(joined["role"], "history_taker");
+    let (status, invite_reuse) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenario-team-invites/join",
+            Some(&outsider),
+            Some(serde_json::json!({"invite_code":invite_code})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{invite_reuse}");
+
+    let (status, observer_invite) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/team/invites"),
+            Some(&owner),
+            Some(serde_json::json!({"role":"observer"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{observer_invite}");
+    let (status, observer_joined) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenario-team-invites/join",
+            Some(&observer),
+            Some(serde_json::json!({"invite_code":observer_invite["invite_code"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{observer_joined}");
+
+    let (status, outsider_run) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}"),
+            Some(&outsider),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{outsider_run}");
+    let (status, team_view) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}/team"),
+            Some(&history_taker),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{team_view}");
+    assert_eq!(team_view["members"].as_array().unwrap().len(), 3);
+    assert_eq!(team_view["current_role"], "history_taker");
+    assert!(!team_view.to_string().contains("@"));
+
+    let (status, observer_action) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&observer),
+            Some(serde_json::json!({"event":"take_history"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{observer_action}");
+    assert_eq!(observer_action["error"]["code"], "observer_read_only");
+    let (status, action) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&history_taker),
+            Some(serde_json::json!({"event":"take_history"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{action}");
+    assert_eq!(action["timeline"][0]["actor_role"], "history_taker");
+
+    let observer_member_id = team_view["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|member| member["role"] == "observer")
+        .unwrap()["member_id"]
+        .as_str()
+        .unwrap();
+    let handover_reason = "The fictional patient reports a new symptom pattern.";
+    let (status, handover) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/handovers"),
+            Some(&history_taker),
+            Some(serde_json::json!({
+                "recipient_member_id":observer_member_id,
+                "situation":"Fictional patient with a new symptom pattern.",
+                "background":"The role-play history is now complete.",
+                "assessment":"The authored state remains stable.",
+                "recommendation":"Continue with the next authored action."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{handover}");
+    let handover_id = handover["handover_id"].as_str().unwrap();
+    let (status, observer_ack) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/handovers/{handover_id}/ack"),
+            Some(&observer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{observer_ack}");
+    assert_eq!(observer_ack["acknowledged"], true);
+    let (status, duplicate_ack) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/handovers/{handover_id}/ack"),
+            Some(&observer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate_ack}");
+    let (status, wrong_ack) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/handovers/{handover_id}/ack"),
+            Some(&history_taker),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{wrong_ack}");
+
+    let (status, handovers) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}/handovers"),
+            Some(&observer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{handovers}");
+    assert_eq!(
+        handovers["handovers"][0]["situation"],
+        "Fictional patient with a new symptom pattern."
+    );
+    assert_eq!(handovers["handovers"][0]["acknowledged"], true);
+    assert_eq!(handovers["handovers"][0]["to_role"], "observer");
+    assert!(handovers["handovers"][0]
+        .get("recipient_member_id")
+        .is_none());
+
+    let (status, finished) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/events"),
+            Some(&history_taker),
+            Some(serde_json::json!({"event":"finish"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{finished}");
+    let (status, late_invite) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/team/invites"),
+            Some(&owner),
+            Some(serde_json::json!({"role":"scribe"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{late_invite}");
+    let (status, late_handover) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/handovers"),
+            Some(&history_taker),
+            Some(serde_json::json!({
+                "recipient_member_id":observer_member_id,
+                "situation":"The fictional team station has ended.",
+                "background":"The role-play history is complete.",
+                "assessment":"The terminal state was reached.",
+                "recommendation":"Review the debrief."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{late_handover}");
+    assert_eq!(late_handover["error"]["code"], "scenario_run_finished");
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/scenarios/runs/{run_id}/counterfactual"),
+            Some(&observer),
+            Some(serde_json::json!({"events":["finish"]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+
+    let (status, audit) = call(app, admin_req("GET", "/v1/admin/audit", Some(&owner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(!audit.to_string().contains(handover_reason));
+    assert!(!audit.to_string().contains(invite_code));
+}
+
+#[tokio::test]
+async fn lib07_extraction_reports_expose_gaps_and_require_distinct_review() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+
+    let (status, rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&author),
+            Some(serde_json::json!({
+                "ref_code":"LIB07-EXTRACTION-OK",
+                "licensor":"Fixture publisher",
+                "permitted_uses":["document_extraction"],
+                "valid_from":"2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rights}");
+
+    let report = serde_json::json!({
+        "source_label":"electrolyte-guideline.pdf",
+        "source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "media_type":"application/pdf",
+        "parser_version":"layout-parser/1.2.0",
+        "rights_ref":"LIB07-EXTRACTION-OK",
+        "malware_scan_status":"clean",
+        "expected_regions":["page:1","page:2","table:1:electrolytes","page:2:quantity:potassium"],
+        "extracted_regions":["page:1","page:2","page:2:quantity:potassium"],
+        "uncertain_regions":["page:2:quantity:potassium"],
+        "critical_regions":["table:1:electrolytes","page:2:quantity:potassium"]
+    });
+    let mut path_label_report = report.clone();
+    path_label_report["source_label"] = serde_json::json!("../../patient-record.pdf");
+    let (status, path_label) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(path_label_report),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path_label}");
+    assert_eq!(path_label["error"]["code"], "invalid_extraction_source");
+    let (status, incomplete) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(report.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{incomplete}");
+    assert_eq!(incomplete["status"], "incomplete");
+    assert_eq!(
+        incomplete["missing_regions"],
+        serde_json::json!(["table:1:electrolytes"])
+    );
+    assert!(incomplete.get("content").is_none());
+    let incomplete_id = incomplete["report_id"].as_str().unwrap();
+    let (status, cannot_review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/library/extraction-reports/{incomplete_id}/review"),
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "decision":"approved",
+                "verified_regions":["table:1:electrolytes","page:2:quantity:potassium"],
+                "note":"Review attempted before the missing table was extracted."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{cannot_review}");
+    assert_eq!(cannot_review["error"]["code"], "extraction_incomplete");
+
+    let mut complete_report = report;
+    complete_report["source_label"] = serde_json::json!("complete-electrolyte-guideline.pdf");
+    complete_report["source_sha256"] =
+        serde_json::json!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    complete_report["expected_regions"] = serde_json::json!([
+        "page:1",
+        "page:2",
+        "table:1:electrolytes",
+        "page:2:quantity:potassium"
+    ]);
+    complete_report["extracted_regions"] = complete_report["expected_regions"].clone();
+    let (status, review_required) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(complete_report.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{review_required}");
+    assert_eq!(review_required["status"], "review_required");
+    let complete_id = review_required["report_id"].as_str().unwrap();
+
+    let (status, self_review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/library/extraction-reports/{complete_id}/review"),
+            Some(&author),
+            Some(serde_json::json!({
+                "decision":"approved",
+                "verified_regions":["table:1:electrolytes","page:2:quantity:potassium"],
+                "note":"I reviewed the extraction."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{self_review}");
+    assert_eq!(
+        self_review["error"]["code"],
+        "extraction_self_review_forbidden"
+    );
+
+    let review_path = format!("/v1/admin/library/extraction-reports/{complete_id}/review");
+    let review = serde_json::json!({
+        "decision":"approved",
+        "verified_regions":["table:1:electrolytes","page:2:quantity:potassium"],
+        "note":"Verified table values and the potassium quantity against the source."
+    });
+    let (status, approved) = call(
+        app.clone(),
+        admin_req("POST", &review_path, Some(&reviewer), Some(review.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{approved}");
+    assert_eq!(approved["status"], "complete");
+    assert_eq!(approved["verified_regions"].as_array().unwrap().len(), 2);
+    let (status, duplicate_review) = call(
+        app.clone(),
+        admin_req("POST", &review_path, Some(&reviewer), Some(review)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate_review}");
+
+    let (status, blocked) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(serde_json::json!({
+                "source_label":"blocked.pdf",
+                "source_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "media_type":"application/pdf",
+                "parser_version":"layout-parser/1.2.0",
+                "rights_ref":"LIB07-EXTRACTION-OK",
+                "malware_scan_status":"blocked",
+                "expected_regions":["page:1"],
+                "extracted_regions":[],
+                "uncertain_regions":[],
+                "critical_regions":[]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{blocked}");
+    assert_eq!(blocked["status"], "blocked");
+
+    let (status, no_rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(serde_json::json!({
+                "source_label":"unlicensed.pdf",
+                "source_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "media_type":"application/pdf",
+                "parser_version":"layout-parser/1.2.0",
+                "rights_ref":"UNKNOWN-EXTRACTION",
+                "malware_scan_status":"clean",
+                "expected_regions":["page:1"],
+                "extracted_regions":["page:1"],
+                "uncertain_regions":[],
+                "critical_regions":[]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{no_rights}");
+
+    let review_note = "Verified table values and the potassium quantity against the source.";
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit
+        .to_string()
+        .contains("document_extraction_report_reviewed"));
+    assert!(!audit.to_string().contains(review_note));
+
+    let complete_uuid: Uuid = complete_id.parse().unwrap();
+    let mutate_report = sqlx::query(
+        "UPDATE document_extraction_reports SET source_label = 'changed.pdf' WHERE id = $1",
+    )
+    .bind(complete_uuid)
+    .execute(&state.pool)
+    .await;
+    assert!(mutate_report.is_err(), "extraction reports are immutable");
+    let delete_review = sqlx::query("DELETE FROM document_extraction_reviews WHERE report_id = $1")
+        .bind(complete_uuid)
+        .execute(&state.pool)
+        .await;
+    assert!(delete_review.is_err(), "review decisions are immutable");
+
+    let with_source_content = serde_json::json!({
+        "source_label":"secret.pdf",
+        "source_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "media_type":"application/pdf",
+        "parser_version":"layout-parser/1.2.0",
+        "rights_ref":"LIB07-EXTRACTION-OK",
+        "malware_scan_status":"clean",
+        "expected_regions":["page:1"],
+        "extracted_regions":["page:1"],
+        "uncertain_regions":[],
+        "critical_regions":[],
+        "content":"source bytes must not enter this API"
+    });
+    let (status, unexpected_field) = call(
+        app,
+        admin_req(
+            "POST",
+            "/v1/admin/library/extraction-reports",
+            Some(&author),
+            Some(with_source_content),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{unexpected_field}"
+    );
 }

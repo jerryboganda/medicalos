@@ -57,12 +57,15 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export interface TodayTask {
 	id: string;
+	task_key: string;
 	kind: string;
 	title: string;
 	chapter_id: string | null;
 	source_session_id: string | null;
 	question_count: number;
+	estimated_minutes: number;
 	status: string;
+	protected: boolean;
 }
 
 export interface TodayRevision {
@@ -72,6 +75,7 @@ export interface TodayRevision {
 	explanation: string;
 	automatic: boolean;
 	undone: boolean;
+	deferred_tasks: string[];
 }
 
 export interface LearnerChapter {
@@ -88,6 +92,12 @@ export interface Today {
 	tasks: TodayTask[];
 	revisions: TodayRevision[];
 	learner: LearnerChapter[];
+	revision_budget: {
+		automatic_used: number;
+		automatic_limit: number;
+		total_used: number;
+		total_limit: number;
+	};
 }
 
 export interface SessionItem {
@@ -103,8 +113,318 @@ export interface SessionItem {
 	correct_index: number | null;
 	key_learning_point: string | null;
 	exam_tip: string | null;
+	hint_available?: boolean;
 	/** QB-08: honest flag state — null when unflagged. */
-	report_status: 'open' | 'quarantined' | 'resolved_fixed' | null;
+	report_status: 'open' | 'quarantined' | 'resolved_fixed' | 'resolved_rejected' | null;
+	corrected_version_id?: string | null;
+	/** This is a newly published version created to correct an earlier report. */
+	corrected?: boolean;
+	correction_note?: string | null;
+	my_report?: {
+		status: string;
+		resolution_note: string | null;
+		correction_note: string | null;
+		resolved_at: string | null;
+		corrected_version_id: string | null;
+		corrected_version_number: number | null;
+		acknowledged_at: string;
+		acknowledgement_due_at: string;
+		resolution_due_at: string;
+		resolution_overdue: boolean;
+	} | null;
+	tutoring_cards?: TutoringCard[];
+}
+
+export interface RecommendedAction {
+	task_id: string;
+	task_key: string;
+	kind: string;
+	title: string;
+	chapter_id: string | null;
+	source_session_id: string | null;
+	question_count: number;
+	estimated_minutes: number;
+	adjusted_estimated_minutes: number;
+	protected: boolean;
+	reason_code: string;
+	independent_count: number;
+}
+
+export interface NextActionRecommendation {
+	available_minutes: number;
+	activity_preference: 'any' | 'practice' | 'revision';
+	time_multiplier: number;
+	exam_date: string | null;
+	plan_id: string | null;
+	plan_version: number | null;
+	reason_code: string;
+	recommended_action: RecommendedAction | null;
+	allowance?: {
+		limit: number;
+		used: number;
+		remaining: number;
+		required?: number;
+	} | null;
+}
+
+export interface TutoringCard {
+	prompt_type: 'explain' | 'why_wrong' | 'compare' | 'mnemonic' | 'test_me';
+	content: string;
+	source_ref: string;
+}
+
+export interface PrivateImportRight {
+	rights_id: string;
+	ref_code: string;
+	licensor: string;
+	valid_to: string | null;
+	search_allowed: boolean;
+}
+
+export interface PrivateImportSummary {
+	document_id: string;
+	title: string;
+	media_type: 'text/plain' | 'text/markdown';
+	rights_ref: string;
+	sha256: string;
+	created_at: string;
+	available: boolean;
+}
+
+export interface PrivateImport extends PrivateImportSummary {
+	content: string;
+}
+
+export interface PrivateImportSearchResult {
+	document_id: string;
+	content_type: 'private_document';
+	title: string;
+	media_type: PrivateImportSummary['media_type'];
+	rights_ref: string;
+	sha256: string;
+	created_at: string;
+	available: boolean;
+	excerpt: string;
+}
+
+export interface AdminContentRight {
+	rights_id: string;
+	ref_code: string;
+	licensor: string;
+	territory: string;
+	permitted_uses: string[];
+	valid_from: string;
+	valid_to: string | null;
+	notes: string | null;
+	revoked_at: string | null;
+	revoked_by: string | null;
+	revocation_note: string | null;
+	contract_ref: string | null;
+	contract_version: string | null;
+	asset_refs: string[];
+	audiences: string[];
+	seat_limit: number | null;
+	offline_terms: string | null;
+	quotation_limit_words: number | null;
+	ai_terms: string | null;
+	derivative_terms: string | null;
+	attribution: string | null;
+	royalty_terms: string | null;
+	status: 'active' | 'scheduled' | 'expired' | 'revoked';
+}
+
+export interface AdminExtractionReport {
+	report_id: string;
+	source_label: string;
+	source_sha256: string;
+	media_type: string;
+	parser_version: string;
+	rights_ref: string;
+	rights_available: boolean;
+	malware_scan_status: 'clean' | 'blocked' | 'not_scanned';
+	expected_regions: string[];
+	extracted_regions: string[];
+	missing_regions: string[];
+	uncertain_regions: string[];
+	critical_regions: string[];
+	status: 'blocked' | 'incomplete' | 'review_required' | 'rejected' | 'complete' | 'rights_unavailable';
+	created_by: string | null;
+	created_at: string;
+	review: {
+		decision: 'approved' | 'rejected';
+		reviewer_id: string | null;
+		verified_regions: string[] | null;
+		note: string | null;
+		reviewed_at: string | null;
+	} | null;
+}
+
+export interface PendingScenarioAssessment {
+	run_id: string;
+	scenario: string;
+	scenario_version: number;
+	finished_at: string;
+	criterion_count: number;
+}
+
+export interface AdminScenarioAssessment {
+	run_id: string;
+	scenario: string;
+	scenario_version: number;
+	transcript: { from: string; on: string; to: string; actor_role?: ScenarioTeamRole | null }[];
+	started_at: string;
+	finished_at: string;
+	rubric: {
+		criterion_key: string;
+		label: string;
+		max_score: number;
+		assessment_status: 'assessed' | 'not_assessed' | 'legacy_unverified';
+		evidence: string | null;
+		score: number | null;
+		transcript_event_indexes: number[];
+		transcript_uncertain: boolean;
+		reviewed_at: string | null;
+	}[];
+}
+
+export interface ScenarioTimelineEvent {
+	index: number;
+	sequence: number;
+	from: string;
+	on: string;
+	to: string;
+	actor_role?: ScenarioTeamRole | null;
+	terminal?: boolean;
+}
+
+export interface ScenarioSummary {
+	slug: string;
+	title: string;
+	version: number;
+}
+
+export interface ScenarioRun {
+	run_id: string;
+	scenario: string;
+	scenario_slug?: string;
+	scenario_version: number;
+	current_state: string;
+	transcript: ScenarioTimelineEvent[];
+	timeline: ScenarioTimelineEvent[];
+	available_actions: string[];
+	started_at: string;
+	finished_at: string | null;
+	finished: boolean;
+}
+
+export type ScenarioTeamRole = 'team_lead' | 'history_taker' | 'scribe' | 'observer';
+
+export interface ScenarioTeamMember {
+	member_id: string;
+	role: ScenarioTeamRole;
+	joined_at: string;
+}
+
+export interface ScenarioTeam {
+	run_id: string;
+	current_role: ScenarioTeamRole;
+	current_member_id: string;
+	members: ScenarioTeamMember[];
+}
+
+export interface ScenarioHandover {
+	handover_id: string;
+	from_role: ScenarioTeamRole;
+	to_role: ScenarioTeamRole;
+	situation: string;
+	background: string;
+	assessment: string;
+	recommendation: string;
+	created_at: string;
+	acknowledged: boolean;
+	acknowledged_at: string | null;
+	can_ack: boolean;
+}
+
+export interface ScenarioDebrief {
+	scenario: string;
+	scenario_version: number;
+	final_state: string;
+	transcript: ScenarioTimelineEvent[];
+	timeline: ScenarioTimelineEvent[];
+	available_actions: string[];
+	started_at: string;
+	finished_at: string;
+	rubric: AdminScenarioAssessment['rubric'];
+	consequential_use_status: 'reassessment_required' | 'not_authorized_by_assessment';
+	appeal: {
+		appeal_id: string;
+		reason: string;
+		status: 'open' | 'reviewed';
+		decision: 'confirmed' | 'reassessment_required' | null;
+		rationale: string | null;
+		created_at: string;
+		reviewed_at: string | null;
+	} | null;
+}
+
+export interface ScenarioCounterfactualReplay {
+	run_id: string;
+	scenario_version: number;
+	original_timeline: ScenarioTimelineEvent[];
+	counterfactual_timeline: ScenarioTimelineEvent[];
+	final_state: string;
+	terminal: boolean;
+}
+
+export interface ScenarioAssessmentAppealQueueItem {
+	appeal_id: string;
+	run_id: string;
+	scenario: string;
+	scenario_version: number;
+	reason: string;
+	created_at: string;
+}
+
+export interface ScenarioAssessmentAppeal extends ScenarioAssessmentAppealQueueItem {
+	timeline: ScenarioTimelineEvent[];
+	rubric: AdminScenarioAssessment['rubric'];
+}
+
+export interface AdminConcept {
+	concept_id: string;
+	canonical_key: string;
+	current_version: number;
+	display_name: string;
+	definition: string;
+}
+
+export interface AdminCurriculumNode {
+	id: string;
+	kind: string;
+	name: string;
+	parent_id: string | null;
+	display_order: number;
+	status: string;
+}
+
+export interface AdminReport {
+	report_id: string;
+	question_version_id: string;
+	question_id: string;
+	version: number;
+	vignette: string;
+	lead_in: string;
+	category: string;
+	reporter_feedback: { category: string; note: string }[];
+	feedback_truncated: boolean;
+	report_count: number;
+	first_reported_at: string;
+	acknowledgement_due_at: string;
+	resolution_due_at: string;
+	acknowledgements_on_time: boolean;
+	resolution_overdue: boolean;
+	quarantined: boolean;
 }
 
 export interface PracticeSession {
@@ -125,6 +445,7 @@ export interface AnswerResult {
 	options: { text: string; rationale: string }[];
 	key_learning_point: string;
 	exam_tip: string | null;
+	tutoring_cards?: TutoringCard[];
 }
 
 export interface SubmitResult {
@@ -141,6 +462,8 @@ export interface Note {
 	note_id: string;
 	title: string;
 	body: string;
+	source_question_version_id: string | null;
+	updated_at: string;
 	backlinks: { note_id: string; title: string }[];
 }
 
@@ -187,12 +510,74 @@ export interface EngagementSettings {
 	qotd_enabled?: boolean;
 }
 
+export interface OidcProviderView {
+	issuer: string;
+	client_id: string;
+	enabled: boolean;
+	client_secret_configured: boolean;
+}
+
+export interface OidcProviderUpdate {
+	issuer: string;
+	client_id: string;
+	client_secret?: string;
+	clear_client_secret?: boolean;
+	enabled: boolean;
+}
+
 export const Api = {
 	register: (email: string, password: string) =>
 		call<{ user_id: string }>('POST', '/v1/auth/register', { email, password }),
 	login: (email: string, password: string) =>
 		call<{ token: string }>('POST', '/v1/auth/login', { email, password }),
+	getInstitutionOidc: (institutionId: string) =>
+		call<OidcProviderView>(
+			'GET',
+			`/v1/admin/institutions/${encodeURIComponent(institutionId)}/sso/oidc`
+		),
+	configureInstitutionOidc: (institutionId: string, body: OidcProviderUpdate) =>
+		call<OidcProviderView>(
+			'PUT',
+			`/v1/admin/institutions/${encodeURIComponent(institutionId)}/sso/oidc`,
+			body
+		),
+	startInstitutionSso: (institutionId: string) =>
+		call<{ authorization_url: string }>(
+			'GET',
+			`/v1/institutions/${encodeURIComponent(institutionId)}/sso/oidc/start`
+		),
+	completeInstitutionSso: (ticket: string) =>
+		call<{ token: string }>('POST', '/v1/auth/oidc/complete', { ticket }),
 	today: () => call<Today>('GET', '/v1/me/today'),
+	recommendNextAction: (
+		availableMinutes: number,
+		activityPreference: 'any' | 'practice' | 'revision' = 'any',
+		timeMultiplier = 1
+	) => {
+		const query = new URLSearchParams({
+			available_minutes: String(availableMinutes),
+			activity_preference: activityPreference,
+			time_multiplier: String(timeMultiplier)
+		});
+		return call<NextActionRecommendation>('GET', `/v1/me/plan/next-action?${query}`);
+	},
+	protectPlanTask: (planId: string, taskId: string, isProtected: boolean) =>
+		call<{ task_id: string; protected: boolean }>(
+			'PUT',
+			`/v1/plans/${planId}/tasks/${taskId}/protection`,
+			{ protected: isProtected }
+		),
+	replan: (dailyMinutes: number, expectedVersion: number) =>
+		call<{
+			replanned: boolean;
+			version?: number;
+			deferred_tasks?: number;
+			deferred_task_ids?: string[];
+		}>(
+			'POST',
+			'/v1/me/plan/replan',
+			{ daily_minutes: dailyMinutes, expected_version: expectedVersion }
+		),
 	engagement: () => call<Engagement>('GET', '/v1/me/engagement'),
 	updateEngagementSettings: (body: EngagementSettings) =>
 		call<{
@@ -220,12 +605,131 @@ export const Api = {
 		source?: 'any' | 'unseen' | 'incorrect' | 'marked';
 		question_count?: number;
 		source_session_id?: string;
+		plan_task_key?: string;
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
+	listScenarios: () => call<{ scenarios: ScenarioSummary[] }>('GET', '/v1/scenarios'),
+	startScenario: (scenarioSlug: string) =>
+		call<{
+			run_id: string;
+			scenario: string;
+			scenario_slug: string;
+			scenario_version: number;
+			current_state: string;
+			available_actions: string[];
+			finished: false;
+		}>('POST', '/v1/scenarios/runs', { scenario_slug: scenarioSlug }),
+	getScenarioRun: (runId: string) =>
+		call<ScenarioRun>('GET', `/v1/scenarios/runs/${encodeURIComponent(runId)}`),
+	getScenarioTeam: (runId: string) =>
+		call<ScenarioTeam>('GET', `/v1/scenarios/runs/${encodeURIComponent(runId)}/team`),
+	createScenarioTeamInvite: (runId: string, role: Exclude<ScenarioTeamRole, 'team_lead'>) =>
+		call<{ invite_code: string; role: ScenarioTeamRole; expires_at: string }>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/team/invites`,
+			{ role }
+		),
+	joinScenarioTeam: (inviteCode: string) =>
+		call<{ run_id: string; member_id: string; role: ScenarioTeamRole }>(
+			'POST',
+			'/v1/scenario-team-invites/join',
+			{ invite_code: inviteCode }
+		),
+	listScenarioHandovers: (runId: string) =>
+		call<{ handovers: ScenarioHandover[] }>(
+			'GET',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers`
+		),
+	createScenarioHandover: (
+		runId: string,
+		body: Pick<ScenarioHandover, 'situation' | 'background' | 'assessment' | 'recommendation'> & {
+			recipient_member_id: string;
+		}
+	) =>
+		call<{ handover_id: string }>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers`,
+			body
+		),
+	acknowledgeScenarioHandover: (runId: string, handoverId: string) =>
+		call<{ handover_id: string; acknowledged: true }>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers/${encodeURIComponent(handoverId)}/ack`
+		),
+	advanceScenario: (runId: string, event: string) =>
+		call<Pick<ScenarioRun, 'run_id' | 'current_state' | 'finished' | 'available_actions' | 'timeline'>>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/events`,
+			{ event }
+		),
+	getScenarioDebrief: (runId: string) =>
+		call<ScenarioDebrief>(
+			'GET',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/debrief`
+		),
+	appealScenarioAssessment: (runId: string, reason: string) =>
+		call<{ appeal_id: string; status: 'open' }>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/appeals`,
+			{ reason }
+		),
+	replayScenario: (runId: string, events: string[]) =>
+		call<ScenarioCounterfactualReplay>(
+			'POST',
+			`/v1/scenarios/runs/${encodeURIComponent(runId)}/counterfactual`,
+			{ events }
+		),
+	listScenarioAssessmentAppeals: () =>
+		call<{ appeals: ScenarioAssessmentAppealQueueItem[] }>(
+			'GET',
+			'/v1/admin/scenario-assessment-appeals'
+		),
+	getScenarioAssessmentAppeal: (appealId: string) =>
+		call<ScenarioAssessmentAppeal>(
+			'GET',
+			`/v1/admin/scenario-assessment-appeals/${encodeURIComponent(appealId)}`
+		),
+	reviewScenarioAssessmentAppeal: (
+		appealId: string,
+		body: { decision: 'confirmed' | 'reassessment_required'; rationale: string }
+	) =>
+		call<{
+			appeal_id: string;
+			status: 'reviewed';
+			decision: 'confirmed' | 'reassessment_required';
+		}>(
+			'POST',
+			`/v1/admin/scenario-assessment-appeals/${encodeURIComponent(appealId)}/review`,
+			body
+		),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
+	getSessionHint: (sid: string, itemIndex: number) =>
+		call<{ hint: string; assisted: true }>(
+			'GET',
+			`/v1/practice/sessions/${sid}/items/${itemIndex}/hint`
+		),
+	calculate: (kind: string, inputs: Record<string, number | boolean>) =>
+		call<{ calculator: string; value: number; unit: string; disclaimer: string }>(
+			'POST',
+			`/v1/calculators/${encodeURIComponent(kind)}`,
+			inputs
+		),
+	convertUnits: (body: { value: number; analyte?: string; from: string; to: string }) =>
+		call<{ value: number; unit: string; disclaimer: string }>(
+			'POST',
+			'/v1/calculators/convert',
+			body
+		),
 	answer: (
 		sid: string,
-		body: { item_index: number; chosen_index: number | null; idempotency_key: string }
+		body: {
+			item_index: number;
+			chosen_index: number | null;
+			idempotency_key: string;
+			elapsed_ms?: number;
+			assisted?: boolean;
+			client_recorded_at?: string;
+		}
 	) => call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
 	submit: (sid: string) => call<SubmitResult>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
@@ -234,11 +738,127 @@ export const Api = {
 			`/v1/plans/${planId}/revisions/${revisionId}/undo`
 		),
 	reportQuestion: (versionId: string, body: { category: string; note?: string }) =>
-		call<{ report_id: string; already_recorded: boolean; quarantined: boolean }>(
+		call<{
+			report_id: string;
+			already_recorded: boolean;
+			quarantined: boolean;
+			status: 'open' | 'quarantined' | 'resolved_fixed' | 'resolved_rejected';
+			created_at: string;
+			acknowledged_at: string;
+			acknowledgement_due_at: string;
+			resolution_due_at: string;
+			resolution_note: string | null;
+			resolved_at: string | null;
+			corrected_version_id: string | null;
+			corrected_version_number: number | null;
+			correction_note: string | null;
+		}>(
 			'POST',
 			`/v1/questions/versions/${versionId}/reports`,
 			body
 		),
+	adminReports: () =>
+		call<{ reports: AdminReport[] }>('GET', '/v1/admin/reports?limit=100'),
+	listContentRights: () =>
+		call<{ rights: AdminContentRight[] }>('GET', '/v1/admin/content-rights'),
+	listExtractionReports: () =>
+		call<{ reports: AdminExtractionReport[] }>('GET', '/v1/admin/library/extraction-reports'),
+	pendingScenarioAssessments: () =>
+		call<{ runs: PendingScenarioAssessment[] }>(
+			'GET',
+			'/v1/admin/scenarios/runs/pending-assessment'
+		),
+	getScenarioAssessment: (runId: string) =>
+		call<AdminScenarioAssessment>(
+			'GET',
+			`/v1/admin/scenarios/runs/${encodeURIComponent(runId)}/assessment`
+		),
+	recordScenarioAssessment: (
+		runId: string,
+		body: {
+			criteria: {
+				criterion_key: string;
+				assessment_status: 'assessed' | 'not_assessed';
+				score: number | null;
+				evidence: string;
+				transcript_event_indexes: number[];
+				transcript_uncertain: boolean;
+			}[];
+		}
+	) =>
+		call<{ recorded_criteria: number; not_assessed: number }>(
+			'POST',
+			`/v1/admin/scenarios/runs/${encodeURIComponent(runId)}/assessment`,
+			body
+		),
+	createExtractionReport: (body: {
+		source_label: string;
+		source_sha256: string;
+		media_type: string;
+		parser_version: string;
+		rights_ref: string;
+		malware_scan_status: AdminExtractionReport['malware_scan_status'];
+		expected_regions: string[];
+		extracted_regions: string[];
+		uncertain_regions: string[];
+		critical_regions: string[];
+	}) => call<AdminExtractionReport>('POST', '/v1/admin/library/extraction-reports', body),
+	reviewExtractionReport: (
+		reportId: string,
+		body: {
+			decision: 'approved' | 'rejected';
+			verified_regions: string[];
+			note: string;
+		}
+	) =>
+		call<AdminExtractionReport>(
+			'POST',
+			`/v1/admin/library/extraction-reports/${encodeURIComponent(reportId)}/review`,
+			body
+		),
+	createContentRights: (body: {
+		ref_code: string;
+		licensor: string;
+		territory: string;
+		permitted_uses: string[];
+		valid_from: string;
+		valid_to?: string;
+		notes?: string;
+		contract_ref?: string;
+		contract_version?: string;
+		asset_refs?: string[];
+		audiences?: string[];
+		seat_limit?: number;
+		offline_terms?: string;
+		quotation_limit_words?: number;
+		ai_terms?: string;
+		derivative_terms?: string;
+		attribution?: string;
+		royalty_terms?: string;
+	}) => call<{ rights_id: string; ref_code: string }>('POST', '/v1/admin/content-rights', body),
+	revokeContentRights: (rightsId: string, reason: string) =>
+		call<{ revoked: boolean; already_revoked: boolean }>(
+			'PATCH',
+			`/v1/admin/content-rights/${encodeURIComponent(rightsId)}/revoke`,
+			{ reason }
+		),
+	resolveReport: (
+		reportId: string,
+		status: 'resolved_fixed' | 'resolved_rejected',
+		resolutionNote: string,
+		correctionNote?: string
+	) =>
+		call<{
+			status: string;
+			question_version_id: string;
+			corrected_version_id: string | null;
+			resolved_reports: number;
+			notified_reporters: number;
+		}>('POST', `/v1/reports/${encodeURIComponent(reportId)}/resolve`, {
+			status,
+			resolution_note: resolutionNote,
+			...(correctionNote ? { correction_note: correctionNote } : {})
+		}),
 	createDeck: (name: string) =>
 		call<{ deck_id: string }>('POST', '/v1/decks', { name }),
 	addCard: (deckId: string, front: string, back: string) =>
@@ -284,18 +904,55 @@ export const Api = {
 			'GET',
 			`/v1/coach/history?question_version_id=${vid}`
 		),
-	createNote: (title: string, body: string) =>
-		call<{ note_id: string }>('POST', '/v1/notes', { title, body }),
+	createNote: (title: string, body: string, sourceQuestionVersionId?: string) =>
+		call<{ note_id: string; updated_at: string }>('POST', '/v1/notes', {
+			title,
+			body,
+			...(sourceQuestionVersionId
+				? { source_question_version_id: sourceQuestionVersionId }
+				: {})
+		}),
+	updateNote: (noteId: string, body: { title?: string; body?: string; base_updated_at?: string }) =>
+		call<{ updated_at: string }>('PATCH', `/v1/notes/${encodeURIComponent(noteId)}`, body),
 	listNotes: () => call<{ notes: Note[] }>('GET', '/v1/notes'),
+	myMarks: () =>
+		call<{ marks: { question_version_id: string; marked_at: string }[] }>(
+			'GET',
+			'/v1/me/marks'
+		),
+	markQuestion: (versionId: string) =>
+		call<{ marked: boolean }>('POST', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
+	unmarkQuestion: (versionId: string) =>
+		call<{ marked: boolean }>('DELETE', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
 	deleteNote: (noteId: string) =>
 		call<{ deleted: boolean }>('DELETE', `/v1/notes/${noteId}`),
 	librarySearch: (q: string) =>
-		call<{ results: unknown[] }>(
+		call<{ results: unknown[]; private_documents: PrivateImportSearchResult[] }>(
 			'GET',
 			`/v1/library/search?q=${encodeURIComponent(q)}`
 		),
+	privateImportRights: () => call<{ rights: PrivateImportRight[] }>('GET', '/v1/me/library/import-rights'),
+	listPrivateImports: () => call<{ documents: PrivateImportSummary[] }>('GET', '/v1/me/library/imports'),
+	createPrivateImport: (body: {
+		title: string;
+		media_type: PrivateImport['media_type'];
+		content: string;
+		rights_ref: string;
+	}) => call<PrivateImportSummary>('POST', '/v1/me/library/imports', body),
+	getPrivateImport: (documentId: string) =>
+		call<PrivateImport>('GET', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
+	deletePrivateImport: (documentId: string) =>
+		call<{ deleted: boolean }>('DELETE', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
 	inbox: () =>
 		call<{
+			preferences: {
+				plan_reminders: boolean;
+				mock_results: boolean;
+				reports: boolean;
+				content_updates: boolean;
+				quiet_hours_start: number;
+				quiet_hours_end: number;
+			};
 			notifications: {
 				id: string;
 				category: string;
@@ -304,7 +961,14 @@ export const Api = {
 				read: boolean;
 			}[];
 		}>('GET', '/v1/me/notifications'),
-	updateNotificationPrefs: (body: Record<string, unknown>) =>
+	updateNotificationPrefs: (body: Partial<{
+		plan_reminders: boolean;
+		mock_results: boolean;
+		reports: boolean;
+		content_updates: boolean;
+		quiet_hours_start: number;
+		quiet_hours_end: number;
+	}>) =>
 		call<{ updated: boolean }>('PATCH', '/v1/me/notifications', body),
 	addPortfolioEntry: (body: Record<string, unknown>) =>
 		call<{ entry_id: string }>('POST', '/v1/me/portfolio', body),
@@ -322,6 +986,37 @@ export const Api = {
 		name: string;
 		parent_id?: string;
 	}) => call<{ node_id: string }>('POST', '/v1/admin/hierarchy', body),
+	adminHierarchy: (examId: string) =>
+		call<{ nodes: AdminCurriculumNode[] }>(
+			'GET',
+			`/v1/admin/hierarchy?exam_id=${encodeURIComponent(examId)}`
+		),
+	adminConcepts: () => call<{ concepts: AdminConcept[] }>('GET', '/v1/admin/concepts'),
+	createConcept: (body: {
+		canonical_key: string;
+		display_name: string;
+		definition: string;
+	}) => call<{ concept_id: string; current_version: number }>('POST', '/v1/admin/concepts', body),
+	createConceptVersion: (
+		conceptId: string,
+		body: { display_name: string; definition: string }
+	) =>
+		call<{ concept_id: string; current_version: number }>(
+			'POST',
+			`/v1/admin/concepts/${encodeURIComponent(conceptId)}/versions`,
+			body
+		),
+	adminNodeConcepts: (nodeId: string) =>
+		call<{ concepts: (Omit<AdminConcept, 'current_version'> & { version: number })[] }>(
+			'GET',
+			`/v1/admin/hierarchy/${encodeURIComponent(nodeId)}/concepts`
+		),
+	setAdminNodeConcepts: (nodeId: string, conceptIds: string[]) =>
+		call<{ node_id: string; mapped: number }>(
+			'PUT',
+			`/v1/admin/hierarchy/${encodeURIComponent(nodeId)}/concepts`,
+			{ concept_ids: conceptIds }
+		),
 	importQuestions: (body: {
 		exam_id: string;
 		dry_run: boolean;
@@ -445,11 +1140,62 @@ export const Api = {
 			`/v1/institutions/${institutionId}/members`,
 			{ user_id: userId, role }
 		),
-	createCohort: (institutionId: string, name: string, memberIds: string[]) =>
+	institutionCohorts: (institutionId: string) =>
+		call<{
+			cohorts: {
+				cohort_id: string;
+				name: string;
+				program_id: string | null;
+				members: number;
+			}[];
+		}>('GET', `/v1/institutions/${institutionId}/cohorts`),
+	institutionPrograms: (institutionId: string) =>
+		call<{
+			programs: {
+				program_id: string;
+				name: string;
+				chapter_ids: string[];
+			}[];
+		}>('GET', `/v1/institutions/${institutionId}/programs`),
+	createInstitutionProgram: (institutionId: string, name: string) =>
+		call<{ program_id: string }>(
+			'POST',
+			`/v1/institutions/${institutionId}/programs`,
+			{ name }
+		),
+	setProgramCurriculum: (institutionId: string, programId: string, chapterIds: string[]) =>
+		call<{ program_id: string; chapter_ids: string[]; chapter_count: number }>(
+			'PUT',
+			`/v1/institutions/${institutionId}/programs/${programId}/curriculum`,
+			{ chapter_ids: chapterIds }
+		),
+	programCurriculumCoverage: (institutionId: string, programId: string) =>
+		call<{
+			program_id: string;
+			cohort_size: number;
+			minimum_group_size: number;
+			suppressed: boolean;
+			chapters: {
+				chapter_id: string;
+				chapter: string;
+				learners_with_evidence: number | null;
+				attempts: number | null;
+				coverage_percent: number | null;
+			}[];
+		}>(
+			'GET',
+			`/v1/institutions/${institutionId}/programs/${programId}/coverage`
+		),
+	createCohort: (
+		institutionId: string,
+		name: string,
+		memberIds: string[],
+		programId?: string
+	) =>
 		call<{ cohort_id: string }>(
 			'POST',
 			`/v1/institutions/${institutionId}/cohorts`,
-			{ name, member_ids: memberIds }
+			{ name, member_ids: memberIds, ...(programId ? { program_id: programId } : {}) }
 		),
 	createAssignment: (cohortId: string, title: string, dueAt?: string) =>
 		call<{ assignment_id: string }>(

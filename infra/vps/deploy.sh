@@ -11,6 +11,10 @@ set -euo pipefail
 SHA="${1:?usage: deploy.sh <sha>}"
 DATABASE_URL="${DATABASE_URL:-${VPS_DATABASE_URL_AS_ARG:?VPS_DATABASE_URL secret missing}}"
 REGISTRY="${REGISTRY:-ghcr.io/jerryboganda}"
+PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-https://medicalos.polytronx.com/api}"
+PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://medicalos.polytronx.com}"
+OIDC_CREDENTIAL_KEY="${OIDC_CREDENTIAL_KEY:-}"
+PACK_SIGNING_KEY="${PACK_SIGNING_KEY:-}"
 # The GHCR packages for this repo are public: pulls are anonymous, no
 # registry login is wired through CI by design. (A failed `docker login`
 # here once masked a no-op deploy as success — the script must fail loudly
@@ -18,6 +22,10 @@ REGISTRY="${REGISTRY:-ghcr.io/jerryboganda}"
 API_IMAGE="$REGISTRY/medicalos-api:$SHA"
 WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
 : "${DATABASE_URL:?DATABASE_URL must be exported (VPS_DATABASE_URL secret)}"
+if [ "${#PACK_SIGNING_KEY}" -lt 32 ] || [ -z "${PACK_SIGNING_KEY//[[:space:]]/}" ]; then
+  echo "VPS_PACK_SIGNING_KEY must contain at least 32 non-whitespace bytes" >&2
+  exit 1
+fi
 
 echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
 docker pull "$API_IMAGE"
@@ -40,6 +48,10 @@ docker run -d --name medicalos-api --restart unless-stopped \
   --cpus "1.0" --memory "1g" \
   --network platform \
   -e DATABASE_URL="$DATABASE_URL" \
+  -e PUBLIC_API_BASE_URL="$PUBLIC_API_BASE_URL" \
+  -e PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+  -e OIDC_CREDENTIAL_KEY="$OIDC_CREDENTIAL_KEY" \
+  -e PACK_SIGNING_KEY="$PACK_SIGNING_KEY" \
   -e MIN_TIME_LIMIT_SECONDS=30 \
   -e FREE_DAILY_QUESTIONS=10 \
   "$API_IMAGE"

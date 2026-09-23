@@ -32,6 +32,8 @@ pub struct CreateSessionReq {
     pub source: Option<String>,
     pub question_count: Option<i32>,
     pub source_session_id: Option<Uuid>,
+    /// AI-08: stable identity for a task launched from today's plan.
+    pub plan_task_key: Option<Uuid>,
     /// EX-08: required for the timed preset, validated server-side.
     pub time_limit_seconds: Option<i64>,
     /// QB-03: optional per-question budget for untimed sessions (seconds).
@@ -56,7 +58,90 @@ pub(crate) struct PoolQuestion {
     pub options: serde_json::Value,
 }
 
-// 8 args is the session's honest shape; grouping would add a type with one
+fn free_allowance_reached(limit: i64, used: i64) -> ApiError {
+    ApiError::forbidden_with_details(
+        "free_allowance_reached",
+        format!("Daily free allowance of {limit} questions reached — it resets tomorrow."),
+        serde_json::json!({
+            "allowance": {
+                "limit": limit,
+                "used": used,
+                "remaining": limit.saturating_sub(used).max(0),
+            }
+        }),
+    )
+}
+
+fn free_allowance_insufficient(limit: i64, used: i64, required: i64) -> ApiError {
+    ApiError::forbidden_with_details(
+        "free_allowance_insufficient",
+        format!(
+            "Only {} free questions remain today; this planned task needs {required}.",
+            limit.saturating_sub(used).max(0)
+        ),
+        serde_json::json!({
+            "allowance": {
+                "limit": limit,
+                "used": used,
+                "remaining": limit.saturating_sub(used).max(0),
+                "required": required,
+            }
+        }),
+    )
+}
+
+async fn validate_plan_task_key(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    plan_task_key: Option<Uuid>,
+    preset: &str,
+    chapter_id: Option<Uuid>,
+    source_session_id: Option<Uuid>,
+    question_count: Option<i32>,
+) -> ApiResult<Option<i32>> {
+    let Some(plan_task_key) = plan_task_key else {
+        return Ok(None);
+    };
+    let kind = match preset {
+        "tutor" | "timed" => "practice",
+        "revision" => "revision",
+        _ => {
+            return Err(ApiError::unprocessable(
+                "invalid_plan_task",
+                "this session type cannot be linked to a plan task",
+            ))
+        }
+    };
+    let task_question_count = sqlx::query_scalar::<_, i32>(
+        r#"SELECT t.question_count FROM plan_tasks t
+           WHERE t.plan_id = (
+                   SELECT id FROM plans
+                   WHERE user_id = $1 AND plan_date = CURRENT_DATE
+                   ORDER BY version DESC LIMIT 1
+               )
+               AND t.task_key = $2 AND t.kind = $3 AND t.status = 'pending'
+               AND t.chapter_id IS NOT DISTINCT FROM $4
+               AND t.source_session_id IS NOT DISTINCT FROM $5
+               AND ($6::INTEGER IS NULL OR t.question_count = $6)
+           LIMIT 1"#,
+    )
+    .bind(user_id)
+    .bind(plan_task_key)
+    .bind(kind)
+    .bind(chapter_id)
+    .bind(source_session_id)
+    .bind(question_count)
+    .fetch_optional(pool)
+    .await?;
+    task_question_count.map(Some).ok_or_else(|| {
+        ApiError::unprocessable(
+            "invalid_plan_task",
+            "the linked task is not pending in your current plan",
+        )
+    })
+}
+
+// 9 args is the session's honest shape; grouping would add a type with one
 // caller (same precedent as the extractive answer fn in coach.rs).
 #[allow(clippy::too_many_arguments)]
 async fn insert_session(
@@ -67,6 +152,7 @@ async fn insert_session(
     source_session_id: Option<Uuid>,
     time_limit_seconds: Option<i32>,
     per_question_seconds: Option<i32>,
+    plan_task_key: Option<Uuid>,
     pool_questions: &[PoolQuestion],
 ) -> ApiResult<Json<serde_json::Value>> {
     // EX-08: the server issues the deadline — the client never sets it, and
@@ -74,10 +160,12 @@ async fn insert_session(
     let deadline = time_limit_seconds
         .map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit as i64));
     let sid = Uuid::new_v4();
+    let mut tx = pool.begin().await?;
     sqlx::query!(
         "INSERT INTO practice_sessions
-           (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds, deadline, per_question_seconds)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+           (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds,
+            deadline, per_question_seconds, plan_task_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         sid,
         user_id,
         preset,
@@ -85,9 +173,10 @@ async fn insert_session(
         source_session_id,
         time_limit_seconds,
         deadline,
-        per_question_seconds
+        per_question_seconds,
+        plan_task_key
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     let mut items = Vec::with_capacity(pool_questions.len());
     for (i, q) in pool_questions.iter().enumerate() {
@@ -100,7 +189,7 @@ async fn insert_session(
             idx,
             q.id
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         let opts: Vec<QuestionOption> =
             serde_json::from_value(q.options.clone()).map_err(|_| ApiError::internal())?;
@@ -117,6 +206,7 @@ async fn insert_session(
                 .collect(),
         });
     }
+    tx.commit().await?;
     Ok(Json(serde_json::json!({
         "session_id": sid,
         "items": items,
@@ -132,31 +222,42 @@ pub async fn create_session(
     // COM-01: the free-tier daily allowance is an entitlement check (§26.1) —
     // upgrade prompts may originate only from here, never from the Coach.
     // # ponytail: revision sessions are exempt (they re-practice already-
-    // served items); per-tier entitlement service lands with billing.
+    // served items); resource-specific rights still depend on billing links.
     if req.preset.as_str() != "revision" {
-        let used = sqlx::query!(
-            r#"SELECT COALESCE(COUNT(*), 0) AS "n!"
-               FROM attempts
-               WHERE user_id = $1 AND created_at::date = CURRENT_DATE"#,
-            user.user_id
-        )
-        .fetch_one(&state.pool)
-        .await?
-        .n;
-        if used >= state.free_daily_questions {
-            return Err(ApiError::forbidden_with_details(
-                "free_allowance_reached",
-                format!(
-                    "Daily free allowance of {} questions reached — it resets tomorrow.",
-                    state.free_daily_questions
-                ),
-                serde_json::json!({
-                    "allowance": { "limit": state.free_daily_questions, "used": used }
-                }),
-            ));
+        let tier = sqlx::query_scalar!("SELECT tier FROM users WHERE id = $1", user.user_id)
+            .fetch_one(&state.pool)
+            .await?;
+        if tier == "free" {
+            let used = sqlx::query!(
+                r#"SELECT COALESCE(COUNT(*), 0) AS "n!"
+                   FROM attempts a
+                   JOIN practice_sessions s ON s.id = a.session_id
+                   WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE
+                     AND s.preset <> 'revision'"#,
+                user.user_id
+            )
+            .fetch_one(&state.pool)
+            .await?
+            .n;
+            if used >= state.free_daily_questions {
+                return Err(free_allowance_reached(state.free_daily_questions, used));
+            }
         }
     }
-    match req.preset.as_str() {
+    // Replanning and linked task launch serialize on the learner row. Keep
+    // this lock until the task identity is validated and the session/items
+    // are inserted, so a replan cannot remove a task between those steps.
+    let plan_task_lock = if req.plan_task_key.is_some() {
+        let mut tx = state.pool.begin().await?;
+        let _: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(user.user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        Some(tx)
+    } else {
+        None
+    };
+    let result = match req.preset.as_str() {
         "tutor" | "timed" => {
             // QB-06 targeted pool: chapter_ids wins over a single chapter_id.
             let chapter_id = match (&req.chapter_ids, req.chapter_id) {
@@ -179,10 +280,57 @@ pub async fn create_session(
                     ))
                 }
             };
+            // Preserve the planned workload: a linked session cannot claim a
+            // task complete after serving a different requested question count.
+            let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
             let chapters: Vec<Uuid> = match &req.chapter_ids {
                 Some(ids) if !ids.is_empty() => ids.clone(),
                 _ => vec![chapter_id],
             };
+            if req.plan_task_key.is_some() && (chapters.len() != 1 || chapters[0] != chapter_id) {
+                return Err(ApiError::unprocessable(
+                    "plan_task_chapter_mismatch",
+                    "a linked plan task must serve only its planned chapter",
+                ));
+            }
+            let planned_count = validate_plan_task_key(
+                &state.pool,
+                user.user_id,
+                req.plan_task_key,
+                &req.preset,
+                Some(chapter_id),
+                None,
+                Some(count as i32),
+            )
+            .await?;
+            if plan_task_lock.is_some() {
+                if let Some(required) = planned_count {
+                    let tier =
+                        sqlx::query_scalar!("SELECT tier FROM users WHERE id = $1", user.user_id)
+                            .fetch_one(&state.pool)
+                            .await?;
+                    if tier == "free" {
+                        let used = sqlx::query!(
+                            r#"SELECT COUNT(*) AS "n!"
+                               FROM attempts a
+                               JOIN practice_sessions s ON s.id = a.session_id
+                               WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE
+                                 AND s.preset <> 'revision'"#,
+                            user.user_id
+                        )
+                        .fetch_one(&state.pool)
+                        .await?
+                        .n;
+                        if used.saturating_add(i64::from(required)) > state.free_daily_questions {
+                            return Err(free_allowance_insufficient(
+                                state.free_daily_questions,
+                                used,
+                                i64::from(required),
+                            ));
+                        }
+                    }
+                }
+            }
             let source = req.source.as_deref().unwrap_or("any");
             if !matches!(source, "any" | "unseen" | "incorrect" | "marked") {
                 return Err(ApiError::unprocessable(
@@ -191,7 +339,6 @@ pub async fn create_session(
                 ));
             }
             // LIMIT binds as i64 in sqlx.
-            let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
             // EX-08: timed sessions carry a server-issued deadline. The floor
             // is configurable so CI/E2E can run short timed sessions.
             // QB-03: the per-question budget is an untimed-session option.
@@ -275,6 +422,12 @@ pub async fn create_session(
                     "No questions are available for this selection.",
                 ));
             }
+            if req.plan_task_key.is_some() && pool_qs.len() < count as usize {
+                return Err(ApiError::unprocessable(
+                    "plan_task_pool_shortfall",
+                    "There are not enough eligible questions to complete this planned task.",
+                ));
+            }
             let qs: Vec<PoolQuestion> = pool_qs
                 .into_iter()
                 .map(|r| PoolQuestion {
@@ -293,11 +446,22 @@ pub async fn create_session(
                 None,
                 time_limit_seconds,
                 per_question_seconds,
+                req.plan_task_key,
                 &qs,
             )
             .await
         }
         "blueprint" => {
+            let _planned_count = validate_plan_task_key(
+                &state.pool,
+                user.user_id,
+                req.plan_task_key,
+                "blueprint",
+                None,
+                None,
+                None,
+            )
+            .await?;
             let slices = req
                 .blueprint
                 .as_ref()
@@ -406,6 +570,7 @@ pub async fn create_session(
                 None,
                 None,
                 None,
+                None,
                 &qs,
             )
             .await
@@ -417,6 +582,16 @@ pub async fn create_session(
                     "revision sessions need a source_session_id",
                 )
             })?;
+            let linked_question_count = validate_plan_task_key(
+                &state.pool,
+                user.user_id,
+                req.plan_task_key,
+                "revision",
+                None,
+                Some(src),
+                req.question_count,
+            )
+            .await?;
             sqlx::query!(
                 "SELECT 1 AS one FROM practice_sessions
                  WHERE id = $1 AND user_id = $2 AND status = 'submitted'",
@@ -435,9 +610,10 @@ pub async fn create_session(
                 r#"SELECT id, vignette, lead_in, difficulty, options FROM (
                        SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                        FROM question_versions qv
-                       WHERE (qv.id IN (
+                       WHERE qv.status = 'published' AND (qv.id IN (
                            SELECT question_version_id FROM attempts
-                           WHERE session_id = $1 AND correct = FALSE
+                           WHERE session_id = $1
+                             AND (correct = FALSE OR chosen_index IS NULL)
                        )
                        OR qv.id IN (
                            SELECT si.question_version_id FROM session_items si
@@ -458,6 +634,15 @@ pub async fn create_session(
             )
             .fetch_all(&state.pool)
             .await?;
+            if let Some(expected_count) = linked_question_count {
+                if pool_qs.len() < expected_count as usize {
+                    return Err(ApiError::unprocessable(
+                        "plan_task_pool_shortfall",
+                        "There are not enough eligible missed questions to complete this planned revision task.",
+                    ));
+                }
+                pool_qs.truncate(expected_count as usize);
+            }
             if pool_qs.is_empty() {
                 return Err(ApiError::unprocessable(
                     "nothing_to_revise",
@@ -482,6 +667,7 @@ pub async fn create_session(
                 Some(src),
                 None,
                 None,
+                req.plan_task_key,
                 &qs,
             )
             .await
@@ -490,7 +676,13 @@ pub async fn create_session(
             "unknown_preset",
             format!("unknown preset {other}"),
         )),
+    };
+    if let Some(tx) = plan_task_lock {
+        if result.is_ok() {
+            tx.commit().await?;
+        }
     }
+    result
 }
 
 /// Session detail for the client: full item list for the navigator, with
@@ -513,9 +705,15 @@ pub async fn get_session(
     .ok_or_else(|| ApiError::not_found("session_not_found"))?;
 
     let items = sqlx::query!(
-        r#"SELECT si.item_index, qv.id AS question_version_id, qv.vignette, qv.lead_in,
-                  qv.difficulty, qv.options, qv.correct_index, qv.key_learning_point,
-                  qv.exam_tip, a.id AS "attempt_id?", a.chosen_index, a.correct,
+        r#"SELECT si.item_index, qv.id AS question_version_id, qv.status AS question_status,
+                  qv.vignette, qv.lead_in, qv.difficulty,
+                  COALESCE(source_corrected.options, qv.options) AS options,
+                  COALESCE(source_corrected.correct_index, qv.correct_index) AS correct_index,
+                  COALESCE(source_corrected.key_learning_point, qv.key_learning_point) AS key_learning_point,
+                  (qv.hint IS NOT NULL AND btrim(qv.hint) <> '') AS "hint_available!",
+                  si.hint_used,
+                  COALESCE(source_corrected.exam_tip, qv.exam_tip) AS "exam_tip?",
+                  a.id AS "attempt_id?", a.chosen_index, a.correct,
                   EXISTS (
                       SELECT 1 FROM question_reports r
                       WHERE r.question_version_id = qv.id
@@ -525,14 +723,65 @@ pub async fn get_session(
                       SELECT 1 FROM question_reports r
                       WHERE r.question_version_id = qv.id
                         AND r.status = 'quarantined'
-                  ) AS "quarantined!"
+                  ) AS "quarantined!",
+                  ($3 = 'submitted' AND EXISTS (
+                      SELECT 1 FROM question_reports r
+                      WHERE r.question_version_id = qv.id
+                        AND r.status = 'resolved_fixed'
+                  )) OR latest_correction.corrected_version_id IS NOT NULL AS "corrected!",
+                  EXISTS (
+                      SELECT 1 FROM question_reports r
+                      WHERE r.corrected_version_id = qv.id
+                        AND r.status = 'resolved_fixed'
+                  ) AS "current_corrected!",
+                  (SELECT r.correction_note FROM question_reports r
+                   WHERE r.corrected_version_id = qv.id AND r.status = 'resolved_fixed'
+                   ORDER BY r.resolved_at DESC LIMIT 1) AS "correction_note?",
+                  EXISTS (
+                      SELECT 1 FROM question_reports r
+                      WHERE r.question_version_id = qv.id
+                        AND r.status = 'resolved_rejected'
+                  ) AS "reviewed_rejected!",
+                  latest_correction.corrected_version_id AS "corrected_version_id?",
+                  own_report.status AS "my_report_status?",
+                  own_report.resolution_note AS "my_resolution_note?",
+                  own_report.correction_note AS "my_correction_note?",
+                  own_report.resolved_at AS "my_report_resolved_at?",
+                  own_report.corrected_version_id AS "my_corrected_version_id?",
+                  (SELECT corrected.version FROM question_versions corrected
+                   WHERE corrected.id = own_report.corrected_version_id)
+                      AS "my_corrected_version_number?",
+                  own_report.created_at AS "my_report_created_at?",
+                  own_report.acknowledged_at AS "my_acknowledged_at?"
            FROM session_items si
            JOIN question_versions qv ON qv.id = si.question_version_id
+           LEFT JOIN LATERAL (
+               SELECT correction.corrected_version_id
+               FROM (
+                   SELECT t.corrected_question_version_id AS corrected_version_id,
+                          t.resolved_at, t.id
+                   FROM source_change_tasks t
+                   WHERE t.question_version_id = qv.id
+                     AND t.status = 'resolved' AND t.resolution = 'corrected'
+                   UNION ALL
+                   SELECT r.corrected_version_id, r.resolved_at, r.id
+                   FROM question_reports r
+                   WHERE r.question_version_id = qv.id
+                     AND r.status = 'resolved_fixed' AND r.corrected_version_id IS NOT NULL
+               ) correction
+               ORDER BY correction.resolved_at DESC NULLS LAST, correction.id DESC LIMIT 1
+           ) latest_correction ON $3 = 'submitted'
+           LEFT JOIN question_versions source_corrected
+             ON source_corrected.id = latest_correction.corrected_version_id
            LEFT JOIN attempts a
              ON a.session_id = si.session_id AND a.item_index = si.item_index
+           LEFT JOIN question_reports own_report
+             ON own_report.question_version_id = qv.id AND own_report.reporter_id = $2
            WHERE si.session_id = $1
            ORDER BY si.item_index"#,
-        sid
+        sid,
+        user.user_id,
+        session.status
     )
     .fetch_all(&state.pool)
     .await?;
@@ -547,12 +796,39 @@ pub async fn get_session(
             .map(|o| serde_json::json!({"text": o.text}))
             .collect();
         // QB-08: honest flag state so the UI can label affected items.
-        let report_status = if it.quarantined {
+        let report_status = if it.corrected {
+            serde_json::Value::String("resolved_fixed".into())
+        } else if it.quarantined || it.question_status == "quarantined" {
             serde_json::Value::String("quarantined".into())
         } else if it.flagged {
             serde_json::Value::String("open".into())
+        } else if it.reviewed_rejected {
+            serde_json::Value::String("resolved_rejected".into())
         } else {
             serde_json::Value::Null
+        };
+        let my_report = match (
+            it.my_report_status,
+            it.my_report_created_at,
+            it.my_acknowledged_at,
+        ) {
+            (Some(status), Some(created_at), Some(acknowledged_at)) => {
+                let resolution_due_at = created_at + chrono::Duration::hours(72);
+                Some(serde_json::json!({
+                    "status": status,
+                    "resolution_note": it.my_resolution_note,
+                    "correction_note": it.my_correction_note,
+                    "resolved_at": it.my_report_resolved_at,
+                    "corrected_version_id": it.my_corrected_version_id,
+                    "corrected_version_number": it.my_corrected_version_number,
+                    "acknowledged_at": acknowledged_at,
+                    "acknowledgement_due_at": created_at + chrono::Duration::hours(24),
+                    "resolution_due_at": resolution_due_at,
+                    "resolution_overdue": it.my_report_resolved_at.is_none()
+                        && chrono::Utc::now() > resolution_due_at,
+                }))
+            }
+            _ => None,
         };
         let mut item = serde_json::json!({
             "item_index": it.item_index,
@@ -560,6 +836,8 @@ pub async fn get_session(
             "vignette": it.vignette,
             "lead_in": it.lead_in,
             "difficulty": it.difficulty,
+            "hint_available": session.preset == "tutor" && it.hint_available,
+            "hint_used": it.hint_used,
             "options": public_opts,
             "answered": answered,
             "chosen_index": it.chosen_index,
@@ -568,12 +846,22 @@ pub async fn get_session(
             "key_learning_point": null,
             "exam_tip": null,
             "report_status": report_status,
+            "corrected_version_id": it.corrected_version_id,
+            "corrected": it.current_corrected,
+            "correction_note": it.correction_note,
+            "my_report": my_report,
         });
         if answered {
             item["correct_index"] = serde_json::json!(it.correct_index);
             item["options"] = serde_json::json!(opts);
             item["key_learning_point"] = serde_json::json!(it.key_learning_point);
             item["exam_tip"] = serde_json::json!(it.exam_tip);
+            if session.preset == "tutor" && it.question_status == "published" {
+                item["tutoring_cards"] = serde_json::json!(
+                    crate::routes::program::ensure_pregen(&state.pool, it.question_version_id)
+                        .await?
+                );
+            }
         }
         out.push(item);
     }
@@ -595,6 +883,85 @@ pub async fn get_session(
     })))
 }
 
+/// Return an authored hint only after explicit learner action in a tutor run.
+/// Viewing it is persisted on the session item before the answer can be saved.
+pub async fn hint(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((sid, item_index)): Path<(Uuid, i16)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    let session = sqlx::query!(
+        "SELECT preset, status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2 FOR UPDATE",
+        sid,
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("session_not_found"))?;
+    if session.preset != "tutor" {
+        return Err(ApiError::forbidden(
+            "hint_unavailable",
+            "hints are available in tutor sessions only",
+        ));
+    }
+    if session.status != "open" {
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session is already closed",
+        ));
+    }
+    if session
+        .deadline
+        .is_some_and(|deadline| chrono::Utc::now() > deadline)
+    {
+        return Err(ApiError::conflict(
+            "session_expired",
+            "the session deadline has passed",
+        ));
+    }
+    let item = sqlx::query!(
+        "SELECT question_version_id FROM session_items
+         WHERE session_id = $1 AND item_index = $2 FOR UPDATE",
+        sid,
+        item_index
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("unknown_item"))?;
+    let answered = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM attempts WHERE session_id = $1 AND item_index = $2)",
+    )
+    .bind(sid)
+    .bind(item_index)
+    .fetch_one(&mut *tx)
+    .await?;
+    if answered {
+        return Err(ApiError::conflict(
+            "already_answered",
+            "hints can only be opened before answering",
+        ));
+    }
+    let hint: Option<String> =
+        sqlx::query_scalar("SELECT hint FROM question_versions WHERE id = $1")
+            .bind(item.question_version_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let hint = hint
+        .filter(|hint| !hint.trim().is_empty())
+        .ok_or_else(|| ApiError::not_found("hint_unavailable"))?;
+    sqlx::query!(
+        "UPDATE session_items SET hint_used = TRUE
+         WHERE session_id = $1 AND item_index = $2",
+        sid,
+        item_index
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({ "hint": hint, "assisted": true })))
+}
+
 #[derive(Deserialize)]
 pub struct AnswerReq {
     pub item_index: i16,
@@ -607,6 +974,47 @@ pub struct AnswerReq {
     /// QB-17: client-measured time on item. Server clamps; absent stays
     /// null (never synthesized).
     pub elapsed_ms: Option<i64>,
+    /// Local timestamp for a queued practice answer. A late upload is accepted
+    /// only within the practice grace window and is always assisted evidence.
+    pub client_recorded_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn replay_answer(
+    state: &AppState,
+    sid: Uuid,
+    preset: &str,
+    status: &str,
+    idempotency_key: &str,
+) -> ApiResult<Option<Json<serde_json::Value>>> {
+    let replay = sqlx::query!(
+        r#"SELECT a.question_version_id, a.chosen_index, a.correct, qv.correct_index, qv.options,
+                  qv.key_learning_point, qv.exam_tip, qv.status AS question_status
+           FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
+           WHERE a.session_id = $1 AND a.idempotency_key = $2"#,
+        sid,
+        idempotency_key
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    match replay {
+        Some(r) => Ok(Some(
+            response_for_question(
+                state,
+                preset,
+                status,
+                r.question_version_id,
+                &r.question_status,
+                true,
+                r.correct,
+                r.correct_index,
+                &r.options,
+                r.key_learning_point,
+                r.exam_tip,
+            )
+            .await?,
+        )),
+        None => Ok(None),
+    }
 }
 
 pub async fn answer(
@@ -629,55 +1037,59 @@ pub async fn apply_answer(
     req: AnswerReq,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT status, deadline, preset, per_question_seconds AS \"per_question_seconds?\" FROM practice_sessions WHERE id = $1 AND user_id = $2",
+        "SELECT status, deadline, preset, created_at, per_question_seconds AS \"per_question_seconds?\" FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
         user_id
     )
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("session_not_found"))?;
+    // Idempotent replay: same key, same stored answer, no duplicate attempt.
+    if let Some(replay) = replay_answer(
+        state,
+        sid,
+        &session.preset,
+        &session.status,
+        &req.idempotency_key,
+    )
+    .await?
+    {
+        return Ok(replay);
+    }
+
     if session.status != "open" {
         return Err(ApiError::conflict(
             "session_closed",
             "session already submitted",
         ));
     }
-    // EX-08: the server-side deadline is the single source of truth — once it
-    // passes, no new answers are recorded and the client auto-submits.
-    if let Some(deadline) = session.deadline {
+    // Late practice sync is accepted only for a locally recorded event inside
+    // the session window and ten-minute grace period. It never counts as
+    // independent evidence; assessment mocks have no offline grace.
+    let late_offline_sync = if let Some(deadline) = session.deadline {
         if chrono::Utc::now() > deadline {
-            return Err(ApiError::conflict(
-                "session_expired",
-                "Time is up. The session submits with what you answered.",
-            ));
+            let now = chrono::Utc::now();
+            let recorded_at = req.client_recorded_at.as_ref();
+            let accepted = matches!(session.preset.as_str(), "tutor" | "timed")
+                && now <= deadline.clone() + chrono::Duration::minutes(10)
+                && recorded_at.is_some_and(|at| at >= &session.created_at && at <= &deadline);
+            if !accepted {
+                return Err(ApiError::conflict(
+                    "session_expired",
+                    "Time is up. The session submits with what you answered.",
+                ));
+            }
+            true
+        } else {
+            false
         }
-    }
-
-    // Idempotent replay: same key, same stored answer, no duplicate attempt.
-    let replay = sqlx::query!(
-        r#"SELECT a.chosen_index, a.correct, qv.correct_index, qv.options,
-                  qv.key_learning_point, qv.exam_tip
-           FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
-           WHERE a.session_id = $1 AND a.idempotency_key = $2"#,
-        sid,
-        req.idempotency_key
-    )
-    .fetch_optional(&state.pool)
-    .await?;
-    if let Some(r) = replay {
-        return Ok(Json(response_for_preset(
-            &session.preset,
-            true,
-            r.correct,
-            r.correct_index,
-            &r.options,
-            r.key_learning_point,
-            r.exam_tip,
-        )?));
-    }
+    } else {
+        false
+    };
 
     let item = sqlx::query!(
-        r#"SELECT qv.id, qv.correct_index, qv.options, qv.key_learning_point, qv.exam_tip
+        r#"SELECT qv.id, qv.status AS question_status, qv.correct_index, qv.options, qv.key_learning_point,
+                  qv.exam_tip, si.hint_used
            FROM session_items si JOIN question_versions qv ON qv.id = si.question_version_id
            WHERE si.session_id = $1 AND si.item_index = $2"#,
         sid,
@@ -767,37 +1179,99 @@ pub async fn apply_answer(
             ));
         }
     }
-    // QB-04: assistance evidence is declared by the session workspace. The
-    // Coach's answer-first gate means a turn can never precede an attempt,
-    // so there is no server-provable pre-answer assistance to record.
-    let assisted = req.assisted.unwrap_or(false);
+    // QB-13: a viewed tutor hint is server-recorded on the session item, so a
+    // client cannot omit that assistance when it records the answer.
+    let assisted = req.assisted.unwrap_or(false) || item.hint_used || late_offline_sync;
+    let offline_recorded_at = if late_offline_sync {
+        req.client_recorded_at.clone()
+    } else {
+        None
+    };
 
-    let inserted = sqlx::query!(
+    let insert = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO attempts
              (id, session_id, item_index, user_id, question_version_id,
-              chosen_index, correct, confidence, assisted, idempotency_key, elapsed_ms)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              chosen_index, correct, confidence, assisted, idempotency_key, elapsed_ms,
+              offline_recorded_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT DO NOTHING
            RETURNING id"#,
-        Uuid::new_v4(),
-        sid,
-        req.item_index,
-        user_id,
-        item.id,
-        req.chosen_index,
-        correct,
-        req.confidence,
-        assisted,
-        req.idempotency_key,
-        elapsed_ms
     )
-    .fetch_optional(&state.pool)
-    .await?;
+    .bind(Uuid::new_v4())
+    .bind(sid)
+    .bind(req.item_index)
+    .bind(user_id)
+    .bind(item.id)
+    .bind(req.chosen_index)
+    .bind(correct)
+    .bind(&req.confidence)
+    .bind(assisted)
+    .bind(&req.idempotency_key)
+    .bind(elapsed_ms)
+    .bind(offline_recorded_at);
+    let free_tier = if session.preset == "revision" {
+        false
+    } else {
+        sqlx::query_scalar::<_, String>("SELECT tier FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&state.pool)
+            .await?
+            == "free"
+    };
+    let inserted = if free_tier {
+        let mut tx = state.pool.begin().await?;
+        let tier = sqlx::query_scalar::<_, String>(
+            "SELECT tier FROM users WHERE id = $1 FOR NO KEY UPDATE",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if tier == "free" {
+            let replay_exists = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (
+                     SELECT 1 FROM attempts WHERE session_id = $1 AND idempotency_key = $2
+                 )",
+            )
+            .bind(sid)
+            .bind(&req.idempotency_key)
+            .fetch_one(&mut *tx)
+            .await?;
+            if replay_exists {
+                tx.commit().await?;
+                return replay_answer(
+                    state,
+                    sid,
+                    &session.preset,
+                    &session.status,
+                    &req.idempotency_key,
+                )
+                .await?
+                .ok_or_else(ApiError::internal);
+            }
+            let used = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM attempts a
+                 JOIN practice_sessions s ON s.id = a.session_id
+                 WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE
+                   AND s.preset <> 'revision'",
+            )
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if used >= state.free_daily_questions {
+                return Err(free_allowance_reached(state.free_daily_questions, used));
+            }
+        }
+        let inserted = insert.fetch_optional(&mut *tx).await?;
+        tx.commit().await?;
+        inserted
+    } else {
+        insert.fetch_optional(&state.pool).await?
+    };
     if inserted.is_none() {
         // Lost a race with the same key: serve the stored answer.
         let r = sqlx::query!(
-            r#"SELECT a.chosen_index, a.correct, qv.correct_index, qv.options,
-                      qv.key_learning_point, qv.exam_tip
+            r#"SELECT a.question_version_id, a.chosen_index, a.correct, qv.correct_index, qv.options,
+                      qv.key_learning_point, qv.exam_tip, qv.status AS question_status
                FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id
                WHERE a.session_id = $1 AND a.idempotency_key = $2"#,
             sid,
@@ -806,15 +1280,20 @@ pub async fn apply_answer(
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| ApiError::conflict("already_answered", "item already answered"))?;
-        return Ok(Json(response_for_preset(
+        return response_for_question(
+            state,
             &session.preset,
+            &session.status,
+            r.question_version_id,
+            &r.question_status,
             true,
             r.correct,
             r.correct_index,
             &r.options,
             r.key_learning_point,
             r.exam_tip,
-        )?));
+        )
+        .await;
     }
 
     // SR-09: a miss files the key learning point as a review card so the
@@ -831,15 +1310,20 @@ pub async fn apply_answer(
         .await?;
     }
 
-    Ok(Json(response_for_preset(
+    response_for_question(
+        state,
         &session.preset,
+        &session.status,
+        item.id,
+        &item.question_status,
         false,
         correct,
         item.correct_index,
         &item.options,
         item.key_learning_point.clone(),
         item.exam_tip.clone(),
-    )?))
+    )
+    .await
 }
 
 /// SR-09: idempotently file the question's key learning point as a review
@@ -852,34 +1336,43 @@ async fn ensure_key_point_card(
     key_learning_point: &str,
     exam_tip: Option<&str>,
 ) -> ApiResult<()> {
-    let exists = sqlx::query!(
-        "SELECT 1 AS one FROM cards
-         WHERE user_id = $1 AND source_question_version_id = $2",
-        user_id,
-        question_version_id
+    let mut tx = state.pool.begin().await?;
+    let question_status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM question_versions WHERE id = $1 FOR SHARE",
     )
-    .fetch_optional(&state.pool)
+    .bind(question_version_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+             SELECT 1 FROM cards
+             WHERE user_id = $1 AND source_question_version_id = $2
+         )",
+    )
+    .bind(user_id)
+    .bind(question_version_id)
+    .fetch_one(&mut *tx)
     .await?;
-    if exists.is_some() {
+    if exists {
+        tx.commit().await?;
         return Ok(());
     }
-    let deck = sqlx::query!(
+    let deck_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM decks WHERE user_id = $1 AND name = 'Key points'",
-        user_id
     )
-    .fetch_optional(&state.pool)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
     .await?;
-    let deck_id = match deck {
-        Some(d) => d.id,
+    let deck_id = match deck_id {
+        Some(id) => id,
         None => {
             let id = Uuid::new_v4();
-            sqlx::query!(
-                "INSERT INTO decks (id, user_id, name) VALUES ($1, $2, 'Key points')",
-                id,
-                user_id
-            )
-            .execute(&state.pool)
-            .await?;
+            sqlx::query("INSERT INTO decks (id, user_id, name) VALUES ($1, $2, 'Key points')")
+                .bind(id)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
             id
         }
     };
@@ -889,25 +1382,29 @@ async fn ensure_key_point_card(
     let back = exam_tip
         .map(str::to_string)
         .unwrap_or_else(|| key_learning_point.to_string());
-    sqlx::query!(
-        r#"INSERT INTO cards (id, deck_id, user_id, front, back, state, source_question_version_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
-        Uuid::new_v4(),
-        deck_id,
-        user_id,
-        key_learning_point,
-        back,
-        card_state,
-        question_version_id
+    sqlx::query(
+        r#"INSERT INTO cards
+             (id, deck_id, user_id, front, back, state, suspended,
+              source_question_version_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
     )
-    .execute(&state.pool)
+    .bind(Uuid::new_v4())
+    .bind(deck_id)
+    .bind(user_id)
+    .bind(key_learning_point)
+    .bind(back)
+    .bind(card_state)
+    .bind(question_status != "published")
+    .bind(question_version_id)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(())
 }
 
 /// §11.2 one-session vocabulary: tutor reveals immediately; exam-style
-/// presets (mock) defer everything until submission — not even the key is
-/// released early.
+/// presets (mock and timed) defer everything until submission — not even the
+/// key is released early.
 fn response_for_preset(
     preset: &str,
     already: bool,
@@ -917,7 +1414,7 @@ fn response_for_preset(
     key_learning_point: String,
     exam_tip: Option<String>,
 ) -> ApiResult<serde_json::Value> {
-    if preset == "mock" {
+    if matches!(preset, "mock" | "timed") {
         return Ok(serde_json::json!({
             "already_recorded": already,
             "recorded": true,
@@ -940,20 +1437,66 @@ pub async fn submit(
     user: AuthUser,
     Path(sid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let session = sqlx::query!(
-        "SELECT chapter_id, source_session_id, status, preset, mock_id FROM practice_sessions
-         WHERE id = $1 AND user_id = $2",
+    let initial = sqlx::query!(
+        r#"SELECT chapter_id, source_session_id, status, preset, mock_id,
+                  result_payload::text AS "result_payload?"
+           FROM practice_sessions
+          WHERE id = $1 AND user_id = $2"#,
         sid,
         user.user_id
     )
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("session_not_found"))?;
-    if session.status != "open" {
+    if initial.status != "open" && initial.status != "submitted" {
         return Err(ApiError::conflict(
             "session_closed",
             "session already submitted",
         ));
+    }
+    if let Some(stored) = initial.result_payload.as_deref() {
+        let receipt = serde_json::from_str(stored).map_err(|_| ApiError::internal())?;
+        return Ok(Json(receipt));
+    }
+
+    agent::get_or_create_today(&state.pool, user.user_id).await?;
+    let mut tx = state.pool.begin().await?;
+    // Keep the session lock compatible with the fork's FK key-share check;
+    // a stronger lock can deadlock with a submit retry waiting on the user row.
+    let session = sqlx::query!(
+        r#"SELECT chapter_id, source_session_id, status, preset, mock_id,
+                  result_payload::text AS "result_payload?"
+           FROM practice_sessions
+          WHERE id = $1 AND user_id = $2
+          FOR NO KEY UPDATE"#,
+        sid,
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("session_not_found"))?;
+    let plan_task_key = sqlx::query_scalar!(
+        "SELECT plan_task_key FROM practice_sessions WHERE id = $1",
+        sid
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if session.status != "open" && session.status != "submitted" {
+        return Err(ApiError::conflict(
+            "session_closed",
+            "session already submitted",
+        ));
+    }
+    if let Some(stored) = session.result_payload.as_deref() {
+        tx.commit().await?;
+        let receipt = serde_json::from_str(stored).map_err(|_| ApiError::internal())?;
+        return Ok(Json(receipt));
     }
 
     let totals = sqlx::query!(
@@ -968,45 +1511,43 @@ pub async fn submit(
            WHERE si.session_id = $1"#,
         sid
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
 
-    let updated = sqlx::query!(
-        "UPDATE practice_sessions SET status = 'submitted', submitted_at = now()
-         WHERE id = $1 AND status = 'open'",
-        sid
-    )
-    .execute(&state.pool)
-    .await?;
-    if updated.rows_affected() == 0 {
-        return Err(ApiError::conflict(
-            "session_closed",
-            "session already submitted",
-        ));
-    }
-
-    crate::routes::engagement::award_session_xp(&state, user.user_id, totals.correct).await?;
-    crate::routes::engagement::record_daily_progress(&state, user.user_id).await?;
-    crate::routes::community::on_session_submitted(&state, sid).await?;
-    agent::mark_matching_task_done(
-        &state.pool,
-        user.user_id,
-        session.chapter_id,
-        session.source_session_id,
-    )
-    .await?;
-    agent::update_learner_state(&state.pool, user.user_id, sid).await?;
-    // Revision plans come only from self-directed practice; mocks and
-    // revision sessions never spawn them (anti-loop, §8.6).
-    if session.preset == "tutor" {
-        agent::maybe_create_revision(
-            &state.pool,
-            user.user_id,
+    let mut applied_completion = false;
+    if session.status == "open" {
+        let updated = sqlx::query!(
+            "UPDATE practice_sessions SET status = 'submitted', submitted_at = now()
+             WHERE id = $1 AND user_id = $2 AND status = 'open'",
             sid,
-            totals.incorrect,
-            totals.skipped,
+            user.user_id
         )
+        .execute(&mut *tx)
         .await?;
+        applied_completion = updated.rows_affected() > 0;
+    }
+    if applied_completion {
+        agent::mark_linked_task_done_on(&mut *tx, user.user_id, plan_task_key).await?;
+    }
+    tx.commit().await?;
+
+    if applied_completion {
+        crate::routes::engagement::award_session_xp(&state, user.user_id, totals.correct).await?;
+        crate::routes::engagement::record_daily_progress(&state, user.user_id).await?;
+        crate::routes::community::on_session_submitted(&state, sid).await?;
+        agent::update_learner_state(&state.pool, user.user_id, sid).await?;
+        // Revision plans come only from self-directed practice; mocks and
+        // revision sessions never spawn them (anti-loop, §8.6).
+        if session.preset == "tutor" {
+            agent::maybe_create_revision(
+                &state.pool,
+                user.user_id,
+                sid,
+                totals.incorrect,
+                totals.skipped,
+            )
+            .await?;
+        }
     }
 
     let score = if totals.total == 0 {
@@ -1141,7 +1682,96 @@ pub async fn submit(
         });
     }
 
-    Ok(Json(body))
+    let stored = sqlx::query_scalar::<_, String>(
+        "UPDATE practice_sessions
+         SET result_payload = COALESCE(result_payload, $2)
+         WHERE id = $1 AND user_id = $3 AND status = 'submitted'
+         RETURNING result_payload::text",
+    )
+    .bind(sid)
+    .bind(body)
+    .bind(user.user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::conflict("session_closed", "session result is unavailable"))?;
+    let receipt = serde_json::from_str(&stored).map_err(|_| ApiError::internal())?;
+    Ok(Json(receipt))
+}
+
+async fn response_for_question(
+    state: &AppState,
+    preset: &str,
+    session_status: &str,
+    question_version_id: Uuid,
+    question_status: &str,
+    already: bool,
+    correct: Option<bool>,
+    correct_index: i16,
+    options: &serde_json::Value,
+    key_learning_point: String,
+    exam_tip: Option<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut effective_question_version_id = question_version_id;
+    let mut effective_question_status = question_status.to_owned();
+    let mut effective_correct_index = correct_index;
+    let mut effective_options = options.clone();
+    let mut effective_key_learning_point = key_learning_point;
+    let mut effective_exam_tip = exam_tip;
+
+    // Submitted results follow the reviewed correction. Open sessions remain
+    // pinned to the version and answer key they started with.
+    if session_status == "submitted" {
+        if let Some((version_id, status, corrected_index, corrected_options, key_point, tip)) =
+            sqlx::query_as::<_, (Uuid, String, i16, serde_json::Value, String, Option<String>)>(
+                r#"SELECT corrected.id, corrected.status, corrected.correct_index,
+                          corrected.options, corrected.key_learning_point, corrected.exam_tip
+                   FROM (
+                       SELECT t.corrected_question_version_id AS corrected_version_id,
+                              t.resolved_at, t.id
+                       FROM source_change_tasks t
+                       WHERE t.question_version_id = $1
+                         AND t.status = 'resolved' AND t.resolution = 'corrected'
+                       UNION ALL
+                       SELECT r.corrected_version_id, r.resolved_at, r.id
+                       FROM question_reports r
+                       WHERE r.question_version_id = $1
+                         AND r.status = 'resolved_fixed'
+                         AND r.corrected_version_id IS NOT NULL
+                   ) correction
+                   JOIN question_versions corrected
+                     ON corrected.id = correction.corrected_version_id
+                   ORDER BY correction.resolved_at DESC NULLS LAST, correction.id DESC
+                   LIMIT 1"#,
+            )
+            .bind(question_version_id)
+            .fetch_optional(&state.pool)
+            .await?
+        {
+            effective_question_version_id = version_id;
+            effective_question_status = status;
+            effective_correct_index = corrected_index;
+            effective_options = corrected_options;
+            effective_key_learning_point = key_point;
+            effective_exam_tip = tip;
+        }
+    }
+
+    let mut response = response_for_preset(
+        preset,
+        already,
+        correct,
+        effective_correct_index,
+        &effective_options,
+        effective_key_learning_point,
+        effective_exam_tip,
+    )?;
+    if preset == "tutor" && effective_question_status == "published" {
+        response["tutoring_cards"] = serde_json::json!(
+            crate::routes::program::ensure_pregen(&state.pool, effective_question_version_id,)
+                .await?
+        );
+    }
+    Ok(Json(response))
 }
 
 /// Mean community correct-rate over the session's questions that already have

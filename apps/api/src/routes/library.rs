@@ -5,6 +5,7 @@
 //! Phase 2 library slice — this is the versioned + text-searched base.
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
@@ -15,9 +16,13 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
+const PRIVATE_IMPORT_MAX_BYTES: usize = 1024 * 1024;
+const PRIVATE_IMPORT_MAX_DOCUMENTS: i64 = 25;
+const PRIVATE_IMPORT_MAX_TOTAL_BYTES: i64 = 10 * 1024 * 1024;
+
 pub async fn search(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // LIB-02 hybrid ranking: the whole-phrase match anchors the query, then
@@ -28,7 +33,7 @@ pub async fn search(
         .map(|s| s.trim().to_lowercase())
         .unwrap_or_default();
     if query.is_empty() {
-        return Ok(Json(json!({ "results": [] })));
+        return Ok(Json(json!({ "results": [], "private_documents": [] })));
     }
     let tokens: Vec<String> = query
         .split_whitespace()
@@ -72,6 +77,7 @@ pub async fn search(
                 }
             }
             let article = json!({
+                "content_type": "editorial_article",
                 "article_id": r.id,
                 "slug": r.slug,
                 "title": r.title,
@@ -97,7 +103,54 @@ pub async fn search(
         .take(25)
         .map(|(_, article)| article)
         .collect();
-    Ok(Json(json!({ "results": results })))
+    #[derive(sqlx::FromRow)]
+    struct PrivateDocumentSearchHit {
+        document_id: Uuid,
+        title: String,
+        media_type: String,
+        rights_ref: String,
+        sha256: String,
+        created_at: chrono::DateTime<chrono::Utc>,
+        content: String,
+    }
+    let private_documents = sqlx::query_as::<_, PrivateDocumentSearchHit>(
+        r#"SELECT d.id AS document_id, d.title, d.media_type, r.ref_code AS rights_ref,
+                  d.sha256, d.created_at, d.content
+           FROM private_documents d
+           JOIN content_rights r ON r.id = d.rights_id
+           WHERE d.user_id = $1
+             AND r.revoked_at IS NULL
+             AND r.valid_from <= CURRENT_DATE
+             AND (r.valid_to IS NULL OR r.valid_to >= CURRENT_DATE)
+             AND r.permitted_uses @> '["private_import", "display", "search"]'::jsonb
+             AND (d.title ILIKE ANY($2) OR d.content ILIKE ANY($2))
+           ORDER BY d.created_at DESC
+           LIMIT 25
+           FOR SHARE OF r"#,
+    )
+    .bind(user.user_id)
+    .bind(&patterns)
+    .fetch_all(&state.pool)
+    .await?;
+    let private_documents: Vec<serde_json::Value> = private_documents
+        .into_iter()
+        .map(|document| {
+            json!({
+                "document_id": document.document_id,
+                "content_type": "private_document",
+                "title": document.title,
+                "media_type": document.media_type,
+                "rights_ref": document.rights_ref,
+                "sha256": document.sha256,
+                "created_at": document.created_at,
+                "available": true,
+                "excerpt": document.content.chars().take(200).collect::<String>(),
+            })
+        })
+        .collect();
+    Ok(Json(
+        json!({ "results": results, "private_documents": private_documents }),
+    ))
 }
 
 pub async fn get_article(
@@ -120,6 +173,14 @@ pub async fn get_article(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("article_not_found"))?;
+    sqlx::query!(
+        "INSERT INTO article_reads (user_id, article_version_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        _user.user_id,
+        article.id
+    )
+    .execute(&state.pool)
+    .await?;
     let citations = sqlx::query!(
         "SELECT anchor, target, kind FROM article_citations WHERE version_id = $1",
         article.id
@@ -140,6 +201,282 @@ pub async fn get_article(
         })).collect::<Vec<_>>(),
         "media": media_list(&state, article.id).await?,
     })))
+}
+
+#[derive(sqlx::FromRow)]
+struct PrivateImportRight {
+    rights_id: Uuid,
+    ref_code: String,
+    licensor: String,
+    valid_to: Option<chrono::NaiveDate>,
+    search_allowed: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct PrivateDocumentSummary {
+    document_id: Uuid,
+    title: String,
+    media_type: String,
+    rights_ref: String,
+    sha256: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    available: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct PrivateImportQuota {
+    document_count: i64,
+    total_bytes: i64,
+}
+
+#[derive(Deserialize)]
+pub struct CreatePrivateImportReq {
+    pub title: String,
+    pub media_type: String,
+    pub content: String,
+    pub rights_ref: String,
+}
+
+pub async fn private_import_rights(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rights = sqlx::query_as::<_, PrivateImportRight>(
+        r#"SELECT id AS rights_id, ref_code, licensor, valid_to,
+                  permitted_uses @> '["search"]'::jsonb AS search_allowed
+           FROM content_rights
+           WHERE revoked_at IS NULL
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             AND permitted_uses @> '["private_import", "display"]'::jsonb
+           ORDER BY ref_code"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "rights": rights.iter().map(|right| json!({
+        "rights_id": right.rights_id,
+        "ref_code": right.ref_code,
+        "licensor": right.licensor,
+        "valid_to": right.valid_to,
+        "search_allowed": right.search_allowed,
+    })).collect::<Vec<_>>() })))
+}
+
+pub async fn list_private_imports(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let documents = sqlx::query_as::<_, PrivateDocumentSummary>(
+        r#"SELECT d.id AS document_id, d.title, d.media_type, r.ref_code AS rights_ref,
+                  d.sha256, d.created_at,
+                  (r.revoked_at IS NULL
+                   AND r.valid_from <= CURRENT_DATE
+                   AND (r.valid_to IS NULL OR r.valid_to >= CURRENT_DATE)
+                   AND r.permitted_uses @> '["private_import", "display"]'::jsonb) AS available
+           FROM private_documents d
+           JOIN content_rights r ON r.id = d.rights_id
+           WHERE d.user_id = $1
+           ORDER BY d.created_at DESC"#,
+    )
+    .bind(user.user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(
+        json!({ "documents": documents.iter().map(|document| json!({
+        "document_id": document.document_id,
+        "title": document.title,
+        "media_type": document.media_type,
+        "rights_ref": document.rights_ref,
+        "sha256": document.sha256,
+        "created_at": document.created_at,
+        "available": document.available,
+    })).collect::<Vec<_>>() }),
+    ))
+}
+
+pub async fn create_private_import(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<CreatePrivateImportReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let title = req.title.trim();
+    if title.is_empty() || title.chars().count() > 200 {
+        return Err(ApiError::unprocessable(
+            "invalid_document_title",
+            "title must be 1-200 characters",
+        ));
+    }
+    let media_type = req.media_type.trim().to_ascii_lowercase();
+    if !matches!(media_type.as_str(), "text/plain" | "text/markdown") {
+        return Err(ApiError::unprocessable(
+            "unsupported_document_type",
+            "only text/plain and text/markdown imports are supported",
+        ));
+    }
+    if req.content.trim().is_empty()
+        || req
+            .content
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_document_content",
+            "document text must be non-empty and contain no unsupported control characters",
+        ));
+    }
+    if req.content.len() > PRIVATE_IMPORT_MAX_BYTES {
+        return Err(ApiError::unprocessable(
+            "document_too_large",
+            "document text must be at most 1 MiB",
+        ));
+    }
+    let rights_ref = req.rights_ref.trim().to_ascii_uppercase();
+    if rights_ref.is_empty() || rights_ref.len() > 60 {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_ref",
+            "rights_ref must be 1-60 characters",
+        ));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let rights_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM content_rights
+           WHERE ref_code = $1 AND revoked_at IS NULL
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             AND permitted_uses @> '["private_import", "display"]'::jsonb
+           FOR SHARE"#,
+    )
+    .bind(&rights_ref)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::forbidden("rights_unavailable"))?;
+
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user.user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ApiError::not_found("user_not_found"))?;
+    let quota = sqlx::query_as::<_, PrivateImportQuota>(
+        r#"SELECT COUNT(*) AS document_count,
+                  COALESCE(SUM(octet_length(content)), 0)::BIGINT AS total_bytes
+           FROM private_documents WHERE user_id = $1"#,
+    )
+    .bind(user.user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let incoming_bytes = i64::try_from(req.content.len()).map_err(|_| ApiError::internal())?;
+    if quota.document_count >= PRIVATE_IMPORT_MAX_DOCUMENTS
+        || quota.total_bytes.saturating_add(incoming_bytes) > PRIVATE_IMPORT_MAX_TOTAL_BYTES
+    {
+        return Err(ApiError::conflict(
+            "private_import_quota_reached",
+            "private imports are limited to 25 documents and 10 MiB per account",
+        ));
+    }
+
+    let document_id = Uuid::new_v4();
+    let sha256 = crate::auth::sha256_hex(&req.content);
+    let created_at = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+        "INSERT INTO private_documents
+           (id, user_id, rights_id, title, media_type, content, sha256)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING created_at",
+    )
+    .bind(document_id)
+    .bind(user.user_id)
+    .bind(rights_id)
+    .bind(title)
+    .bind(&media_type)
+    .bind(&req.content)
+    .bind(&sha256)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "document_id": document_id,
+            "title": title,
+            "media_type": media_type,
+            "rights_ref": rights_ref,
+            "sha256": sha256,
+            "created_at": created_at,
+            "available": true,
+        })),
+    ))
+}
+
+pub async fn get_private_import(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(document_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    let metadata = sqlx::query_as::<_, PrivateDocumentSummary>(
+        r#"SELECT d.id AS document_id, d.title, d.media_type, r.ref_code AS rights_ref,
+                  d.sha256, d.created_at,
+                  (r.revoked_at IS NULL
+                   AND r.valid_from <= CURRENT_DATE
+                   AND (r.valid_to IS NULL OR r.valid_to >= CURRENT_DATE)
+                   AND r.permitted_uses @> '["private_import", "display"]'::jsonb) AS available
+           FROM private_documents d
+           JOIN content_rights r ON r.id = d.rights_id
+           WHERE d.id = $1 AND d.user_id = $2"#,
+    )
+    .bind(document_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("private_import_not_found"))?;
+    if !metadata.available {
+        return Err(ApiError::forbidden("rights_unavailable"));
+    }
+    let content = sqlx::query_scalar::<_, String>(
+        r#"SELECT d.content FROM private_documents d
+           JOIN content_rights r ON r.id = d.rights_id
+           WHERE d.id = $1 AND d.user_id = $2
+             AND r.revoked_at IS NULL
+             AND r.valid_from <= CURRENT_DATE
+             AND (r.valid_to IS NULL OR r.valid_to >= CURRENT_DATE)
+             AND r.permitted_uses @> '["private_import", "display"]'::jsonb
+           FOR SHARE OF r"#,
+    )
+    .bind(document_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::forbidden("rights_unavailable"))?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "document_id": metadata.document_id,
+        "title": metadata.title,
+        "media_type": metadata.media_type,
+        "rights_ref": metadata.rights_ref,
+        "sha256": metadata.sha256,
+        "created_at": metadata.created_at,
+        "available": metadata.available,
+        "content": content,
+    })))
+}
+
+pub async fn delete_private_import(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(document_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let deleted = sqlx::query_scalar::<_, Uuid>(
+        "DELETE FROM private_documents WHERE id = $1 AND user_id = $2 RETURNING id",
+    )
+    .bind(document_id)
+    .bind(user.user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .is_some();
+    if !deleted {
+        return Err(ApiError::not_found("private_import_not_found"));
+    }
+    Ok(Json(json!({ "deleted": true })))
 }
 
 // ---- LIB-08: media with captions and chapters (rights reference required) ----

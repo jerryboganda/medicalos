@@ -124,6 +124,58 @@ pub fn corrected_calcium(calcium_mg_dl: f64, albumin_g_dl: f64) -> Result<f64, I
     Ok(ca + 0.8 * (4.0 - alb))
 }
 
+/// Convert common study units without treating unlike laboratory analytes as
+/// interchangeable. The glucose factor follows NIDDK's published SI table;
+/// the pound definition uses the exact NIST relationship.
+pub fn convert_unit(value: f64, analyte: &str, from: &str, to: &str) -> Result<f64, InvalidInput> {
+    if !value.is_finite() {
+        return Err(InvalidInput("value must be finite"));
+    }
+    if analyte == "glucose" {
+        let converted = match (from, to) {
+            ("mg/dL", "mg/dL") | ("mmol/L", "mmol/L") => value,
+            ("mg/dL", "mmol/L") => value * 0.0555,
+            ("mmol/L", "mg/dL") => value / 0.0555,
+            _ => return Err(InvalidInput("unsupported glucose unit conversion")),
+        };
+        return finite_conversion(converted);
+    }
+    if !analyte.is_empty() {
+        return Err(InvalidInput("unsupported analyte conversion"));
+    }
+    let converted = match (from, to) {
+        ("kg", "kg")
+        | ("lb", "lb")
+        | ("m", "m")
+        | ("cm", "cm")
+        | ("in", "in")
+        | ("L", "L")
+        | ("mL", "mL")
+        | ("°C", "°C")
+        | ("°F", "°F") => value,
+        ("kg", "lb") => value / 0.453_592_37,
+        ("lb", "kg") => value * 0.453_592_37,
+        ("m", "cm") => value * 100.0,
+        ("cm", "m") => value / 100.0,
+        ("cm", "in") => value / 2.54,
+        ("in", "cm") => value * 2.54,
+        ("L", "mL") => value * 1000.0,
+        ("mL", "L") => value / 1000.0,
+        ("°C", "°F") => value * 9.0 / 5.0 + 32.0,
+        ("°F", "°C") => (value - 32.0) * 5.0 / 9.0,
+        _ => return Err(InvalidInput("unsupported unit conversion")),
+    };
+    finite_conversion(converted)
+}
+
+fn finite_conversion(value: f64) -> Result<f64, InvalidInput> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(InvalidInput("converted value must be finite"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +227,19 @@ mod tests {
         );
         assert!(cockcroft_gault_crcl(40.0, 70.0, 0.0, false).is_err());
         assert!(corrected_calcium(8.5, -1.0).is_err());
+    }
+
+    #[test]
+    fn converts_general_and_analyte_specific_units() {
+        assert!((convert_unit(100.0, "glucose", "mg/dL", "mmol/L").unwrap() - 5.55).abs() < 1e-9);
+        assert!((convert_unit(5.55, "glucose", "mmol/L", "mg/dL").unwrap() - 100.0).abs() < 1e-9);
+        assert!((convert_unit(10.0, "", "lb", "kg").unwrap() - 4.5359237).abs() < 1e-9);
+        assert_eq!(convert_unit(0.0, "", "°C", "°F").unwrap(), 32.0);
+        assert!(convert_unit(1.0, "", "mg/dL", "mmol/L").is_err());
+        assert!(convert_unit(1.0, "sodium", "mg/dL", "mmol/L").is_err());
+        assert!(convert_unit(1.0, "sodium", "mmol/L", "mmol/L").is_err());
+        assert!(convert_unit(1.0, "", "unknown", "unknown").is_err());
+        assert!(convert_unit(f64::INFINITY, "", "kg", "lb").is_err());
+        assert!(convert_unit(f64::MAX, "", "L", "mL").is_err());
     }
 }

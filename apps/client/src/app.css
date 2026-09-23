@@ -56,11 +56,55 @@ h1 {
 
 .top {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
 	gap: var(--space-md);
 	padding: var(--space-md) var(--space-lg);
 	border-bottom: 1px solid var(--color-surface-elevated);
+}
+
+.menu-toggle {
+	margin-left: auto;
+}
+
+.top-nav {
+	display: none;
+	flex: 1 0 100%;
+	flex-direction: column;
+	align-items: stretch;
+	gap: var(--space-sm);
+}
+
+.top-nav.open {
+	display: flex;
+}
+
+.top-nav .btn {
+	justify-content: flex-start;
+}
+
+@media (min-width: 80rem) {
+	.top {
+		flex-wrap: nowrap;
+	}
+
+	.top-nav {
+		display: flex;
+		flex: 0 1 auto;
+		flex-direction: row;
+		align-items: center;
+		gap: var(--space-xs);
+	}
+
+	.top-nav .btn {
+		padding-inline: var(--space-md);
+		font-size: var(--text-sm);
+	}
+
+	.menu-toggle {
+		display: none;
+	}
 }
 
 .brand {
@@ -203,7 +247,8 @@ main {
 	font-size: var(--text-sm);
 }
 
-input {
+input,
+.field select {
 	width: 100%;
 	box-sizing: border-box;
 	min-height: 44px;
@@ -215,7 +260,8 @@ input {
 	font: var(--text-body) var(--font-body);
 }
 
-input:focus-visible {
+input:focus-visible,
+.field select:focus-visible {
 	outline: 2px solid var(--color-focus);
 	outline-offset: 0;
 	border-color: var(--color-focus);

@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::{hash_password, new_session_token, sha256_hex, verify_password};
+use crate::auth::{hash_password, issue_session, verify_password};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -68,7 +68,8 @@ pub async fn login(
 ) -> ApiResult<Json<serde_json::Value>> {
     let email = req.email.trim().to_lowercase();
     let user = sqlx::query!(
-        "SELECT id, password_hash, single_active_session FROM users WHERE email = $1",
+        "SELECT id, password_hash FROM users
+         WHERE email = $1 AND deleted_at IS NULL",
         email
     )
     .fetch_optional(&state.pool)
@@ -77,26 +78,6 @@ pub async fn login(
     if !verify_password(&req.password, &user.password_hash) {
         return Err(ApiError::unauthorized());
     }
-    // CORE-07: the single-active-session policy retires every prior session
-    // the moment a new one is minted.
-    if user.single_active_session {
-        sqlx::query!(
-            "UPDATE auth_sessions SET revoked_at = now()
-             WHERE user_id = $1 AND revoked_at IS NULL",
-            user.id
-        )
-        .execute(&state.pool)
-        .await?;
-    }
-    let session = new_session_token();
-    sqlx::query!(
-        "INSERT INTO auth_sessions (token_hash, user_id, expires_at)
-         VALUES ($1, $2, $3)",
-        sha256_hex(&session.token),
-        user.id,
-        session.expires_at
-    )
-    .execute(&state.pool)
-    .await?;
-    Ok(Json(serde_json::json!({"token": session.token})))
+    let token = issue_session(&state.pool, user.id).await?;
+    Ok(Json(serde_json::json!({"token": token})))
 }

@@ -31,18 +31,20 @@ pub async fn create_note(
     Json(req): Json<NoteReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let id = Uuid::new_v4();
-    sqlx::query!(
+    let created = sqlx::query!(
         "INSERT INTO notes (id, user_id, title, body, source_question_version_id)
-         VALUES ($1, $2, $3, $4, $5)",
+         VALUES ($1, $2, $3, $4, $5) RETURNING updated_at",
         id,
         user.user_id,
         req.title.unwrap_or_default(),
         req.body.unwrap_or_default(),
         req.source_question_version_id
     )
-    .execute(&state.pool)
+    .fetch_one(&state.pool)
     .await?;
-    Ok(Json(json!({ "note_id": id })))
+    Ok(Json(
+        json!({ "note_id": id, "updated_at": created.updated_at }),
+    ))
 }
 
 pub async fn update_note(

@@ -22,6 +22,41 @@
 	let reportBusy = $state(false);
 	let reportDone = $state('');
 	let reportError = $state('');
+	let toolsOpen = $state(false);
+	let textSize = $state(0);
+	let selectedCalculator = $state('bmi');
+	let calculatorInputs = $state({});
+	let calculatorResult = $state('');
+	let calculatorError = $state('');
+	let calculating = $state(false);
+	let converterAnalyte = $state('general');
+	let converterPair = $state('kg|lb');
+	let converterValue = $state('');
+	let converterResult = $state('');
+	let converterError = $state('');
+	let noteByVersion = $state({});
+	let noteRecords = $state({});
+	let noteSaveState = $state({});
+	let markState = $state({});
+	let pendingAnswers = $state({});
+	let unacceptedAnswers = $state({});
+	let pendingMarks = $state({});
+	let pendingNotes = $state({});
+	let highlights = $state({});
+	let eliminated = $state({});
+	let hintText = $state('');
+	let hintByVersion = $state({});
+	let hintBusy = $state(false);
+	let activeTutoringType = $state('');
+	let testAnswerRevealed = $state(false);
+	let offlineMessage = $state('');
+	let timerWarning = $state('');
+	let pendingSubmission = $state(false);
+	let syncingDraft = false;
+	let draftReady = false;
+	let eliminating = $state(false);
+	let noteTimers = new Map();
+	let noteInFlight = new Set();
 
 	// UX-01: Focus Mode dims the surrounding chrome to the current item;
 	// horizontal swipe gestures move between answered items on touch.
@@ -57,9 +92,9 @@
 		touchStartX = null;
 		if (Math.abs(dx) < 60 || !session || !item) return;
 		if (dx < 0 && current < session.items.length - 1 && item.answered) {
-			current += 1;
+			navigateTo(current + 1);
 		} else if (dx > 0 && current > 0) {
-			current -= 1;
+			navigateTo(current - 1);
 		}
 	}
 
@@ -73,23 +108,105 @@
 		['other', 'Other']
 	];
 
+	const CALCULATORS = {
+		bmi: { label: 'BMI', fields: [['weight_kg', 'Weight (kg)'], ['height_m', 'Height (m)']] },
+		bsa: { label: 'Body surface area', fields: [['weight_kg', 'Weight (kg)'], ['height_cm', 'Height (cm)']] },
+		map: { label: 'Mean arterial pressure', fields: [['systolic', 'Systolic (mmHg)'], ['diastolic', 'Diastolic (mmHg)']] },
+		gcs: { label: 'Glasgow Coma Scale', fields: [['eye', 'Eye (1–4)'], ['verbal', 'Verbal (1–5)'], ['motor', 'Motor (1–6)']] },
+		'creatinine-clearance': { label: 'Creatinine clearance', fields: [['age_years', 'Age (years)'], ['weight_kg', 'Weight (kg)'], ['serum_creatinine_mg_dl', 'Creatinine (mg/dL)']], sex: true },
+		egfr: { label: 'eGFR (CKD-EPI 2021)', fields: [['serum_creatinine_mg_dl', 'Creatinine (mg/dL)'], ['age_years', 'Age (years)']], sex: true },
+		'anion-gap': { label: 'Anion gap', fields: [['sodium_mmol_l', 'Sodium (mmol/L)'], ['chloride_mmol_l', 'Chloride (mmol/L)'], ['bicarbonate_mmol_l', 'Bicarbonate (mmol/L)']] },
+		'corrected-calcium': { label: 'Corrected calcium', fields: [['calcium_mg_dl', 'Calcium (mg/dL)'], ['albumin_g_dl', 'Albumin (g/dL)']] }
+	};
+	const UNIT_PAIRS = {
+		general: [
+			['kg|lb', 'kg → lb'], ['lb|kg', 'lb → kg'], ['m|cm', 'm → cm'],
+			['cm|m', 'cm → m'], ['cm|in', 'cm → in'], ['in|cm', 'in → cm'],
+			['L|mL', 'L → mL'], ['mL|L', 'mL → L'], ['°C|°F', '°C → °F'], ['°F|°C', '°F → °C']
+		],
+		glucose: [['mg/dL|mmol/L', 'mg/dL → mmol/L'], ['mmol/L|mg/dL', 'mmol/L → mg/dL']]
+	};
+	const TUTORING_PROMPTS = [
+		['explain', 'Explain simply'],
+		['why_wrong', 'Explain the tempting alternative'],
+		['compare', 'Compare'],
+		['mnemonic', 'Mnemonic'],
+		['test_me', 'Test me']
+	];
 	const item = $derived(session?.items?.[current] ?? null);
-	const allAnswered = $derived(
-		session?.items ? session.items.every((i) => i.answered) : false
+	const activeTutoringCard = $derived(
+		item?.tutoring_cards?.find((card) => card.prompt_type === activeTutoringType) ?? null
 	);
+	const activeTest = $derived(
+		activeTutoringCard?.prompt_type === 'test_me'
+			? splitTestCard(activeTutoringCard.content, item?.key_learning_point ?? '')
+			: null
+	);
+	const allAnswered = $derived(
+		session?.items ? session.items.every((i, index) => i.answered || pendingAnswers[index]) : false
+	);
+	const marked = $derived(item ? Boolean(markState[item.question_version_id]) : false);
+	const questionNote = $derived(item ? (noteByVersion[item.question_version_id] ?? '') : '');
+	const questionHighlights = $derived(item ? (highlights[item.question_version_id] ?? []) : []);
+	const itemEliminated = $derived(item ? (eliminated[item.question_version_id] ?? {}) : {});
+	const calculatorDefinition = $derived(CALCULATORS[selectedCalculator]);
+	const deferredFeedback = $derived(session?.preset === 'mock' || session?.preset === 'timed');
 
-	// EX-08: countdown derives from the server-issued deadline and server_now,
-	// so changing the device clock never extends the timer.
-	let clockSkewMs = $state(0);
+	// EX-08: a monotonic browser clock counts down from the server-issued
+	// deadline; changing the wall clock while a session is open has no effect.
 	let remainingMs = $state(null);
 	let autoSubmitted = $state(false);
+	let timerBaseRemainingMs = null;
+	let timerStartedAt = null;
+	let currentItemStartedAt = null;
+	let elapsedByItem = $state({});
+	let lastPersistedSecond = null;
+
+	function warnIfThresholdCrossed(previous, next) {
+		const thresholds = [[600_000, '10 minutes'], [300_000, '5 minutes'], [60_000, '1 minute']];
+		if (next <= 0) {
+			timerWarning = 'Time expired. This session is submitting now.';
+			return;
+		}
+		let warning = '';
+		if (previous === null && next <= 600_000) {
+			warning = [...thresholds].reverse().find(([threshold]) => next <= threshold)?.[1] ?? '';
+		} else {
+			for (const [threshold, label] of thresholds) {
+				if (previous > threshold && next <= threshold) warning = label;
+			}
+		}
+		if (warning) {
+			timerWarning = `${warning} remaining. This session submits automatically when time expires.`;
+			if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(45);
+		}
+	}
+
+	function anchorTimer(remote) {
+		if (!remote?.deadline || !remote?.server_now) return;
+		const previous = remainingMs;
+		timerBaseRemainingMs = new Date(remote.deadline).getTime() - new Date(remote.server_now).getTime();
+		timerStartedAt = performance.now();
+		remainingMs = Math.max(0, timerBaseRemainingMs);
+		lastPersistedSecond = Math.ceil(remainingMs / 1000);
+		warnIfThresholdCrossed(previous, remainingMs);
+	}
 
 	function tick() {
 		if (!session?.deadline) return;
-		remainingMs = new Date(session.deadline).getTime() - (Date.now() + clockSkewMs);
+		if (timerStartedAt === null) anchorTimer(session);
+		if (timerStartedAt === null) return;
+		const previous = remainingMs;
+		remainingMs = timerBaseRemainingMs - (performance.now() - timerStartedAt);
+		warnIfThresholdCrossed(previous, remainingMs);
+		const second = Math.ceil(Math.max(0, remainingMs) / 1000);
+		if (second !== lastPersistedSecond) {
+			lastPersistedSecond = second;
+			if (draftReady) persistDraft();
+		}
 		if (remainingMs <= 0 && !autoSubmitted && !result && session.status === 'open') {
 			autoSubmitted = true;
-			submitSession();
+			void submitSession();
 		}
 	}
 
@@ -104,6 +221,50 @@
 		return `mlos_key_${sid}_${index}`;
 	}
 
+	function draftKey() {
+		return `mlos_session_${sid}`;
+	}
+
+	function readDraft() {
+		try {
+			return JSON.parse(localStorage.getItem(draftKey()) ?? 'null');
+		} catch {
+			return null;
+		}
+	}
+
+	function persistDraft() {
+		if (!session) return;
+		try {
+			localStorage.setItem(
+				draftKey(),
+				JSON.stringify({
+					session,
+					current,
+					selected,
+					textSize,
+					markState,
+					noteByVersion,
+					noteRecords,
+					pendingAnswers,
+					unacceptedAnswers,
+					pendingMarks,
+					pendingNotes,
+					result,
+					highlights,
+					eliminated,
+					hintByVersion,
+					elapsedByItem,
+					pendingSubmission,
+					remainingMs
+				})
+			);
+			localStorage.setItem('mlos_session_text_size', String(textSize));
+		} catch {
+			offlineMessage = 'This browser could not save the session draft on this device.';
+		}
+	}
+
 	function idempotencyKey(index) {
 		let v = localStorage.getItem(storageKey(index));
 		if (!v) {
@@ -114,74 +275,473 @@
 	}
 
 	async function load() {
+		const cached = readDraft();
+		if (cached) {
+			current = Number.isInteger(cached.current) ? cached.current : 0;
+			selected = cached.selected ?? null;
+			textSize = Number.isInteger(cached.textSize) ? Math.min(3, Math.max(0, cached.textSize)) : 0;
+			markState = cached.markState ?? {};
+			noteByVersion = cached.noteByVersion ?? {};
+			noteRecords = cached.noteRecords ?? {};
+			pendingAnswers = cached.pendingAnswers ?? {};
+			unacceptedAnswers = cached.unacceptedAnswers ?? {};
+			pendingMarks = cached.pendingMarks ?? {};
+			pendingNotes = cached.pendingNotes ?? {};
+			highlights = cached.highlights ?? {};
+			eliminated = cached.eliminated ?? {};
+			hintByVersion = cached.hintByVersion ?? {};
+			elapsedByItem = cached.elapsedByItem ?? {};
+			pendingSubmission = cached.pendingSubmission ?? false;
+			result = cached.result ?? null;
+			if (typeof cached.remainingMs === 'number') remainingMs = cached.remainingMs;
+		}
 		try {
 			session = await Api.getSession(sid);
-			const firstUnanswered = session.items.findIndex((i) => !i.answered);
-			current = firstUnanswered === -1 ? session.items.length - 1 : firstUnanswered;
-			if (session.deadline && session.server_now) {
-				clockSkewMs = new Date(session.server_now).getTime() - Date.now();
-				tick();
-			}
 		} catch (err) {
-			loadFailed =
-				err instanceof ApiError ? err.message : 'Could not load the session.';
+			if (!navigator.onLine && cached?.session) {
+				session = cached.session;
+				offlineMessage = 'Working from the saved session on this device. Changes will sync when you reconnect.';
+			} else {
+				loadFailed = err instanceof ApiError ? err.message : 'Could not load the session.';
+				return;
+			}
 		}
+		for (const [index, queued] of Object.entries(pendingAnswers)) {
+			const itemIndex = Number(index);
+			if (session.items[itemIndex] && !session.items[itemIndex].answered) {
+				session.items[itemIndex] = {
+					...session.items[itemIndex],
+					answered: true,
+					chosen_index: queued.chosen_index
+				};
+			}
+		}
+		if (!cached || !Number.isInteger(cached.current)) {
+			const firstUnanswered = session.items.findIndex((i) => !i.answered);
+			current = firstUnanswered === -1 ? Math.max(0, session.items.length - 1) : firstUnanswered;
+		}
+		current = Math.min(Math.max(0, current), Math.max(0, session.items.length - 1));
+		if (session.deadline && session.server_now) anchorTimer(session);
+		else if (session.deadline && remainingMs !== null) {
+			timerBaseRemainingMs = remainingMs;
+			timerStartedAt = performance.now();
+			lastPersistedSecond = Math.ceil(remainingMs / 1000);
+			warnIfThresholdCrossed(null, remainingMs);
+		}
+		currentItemStartedAt = performance.now();
+		draftReady = true;
+		try {
+			const [marksResult, notesResult] = await Promise.allSettled([Api.myMarks(), Api.listNotes()]);
+			if (marksResult.status === 'fulfilled') {
+				const fromServer = Object.fromEntries(
+					marksResult.value.marks.map((mark) => [mark.question_version_id, true])
+				);
+				for (const versionId of Object.keys(pendingMarks)) {
+					fromServer[versionId] = markState[versionId];
+				}
+				markState = fromServer;
+			}
+			if (notesResult.status === 'fulfilled') {
+				const fromServer = {};
+				const records = {};
+				for (const note of notesResult.value.notes) {
+					if (!note.source_question_version_id) continue;
+					fromServer[note.source_question_version_id] = note.body;
+					records[note.source_question_version_id] = {
+						note_id: note.note_id,
+						updated_at: note.updated_at
+					};
+				}
+				for (const versionId of Object.keys(pendingNotes)) {
+					fromServer[versionId] = noteByVersion[versionId];
+					if (noteRecords[versionId]) records[versionId] = noteRecords[versionId];
+				}
+				noteByVersion = fromServer;
+				noteRecords = records;
+			}
+			persistDraft();
+		} catch {
+			// Session progress remains usable when note or mark refresh is unavailable.
+		}
+		if (session.deadline) tick();
+		if (!result && session.status === 'submitted' && navigator.onLine) {
+			try {
+				result = await Api.submit(sid);
+				persistDraft();
+			} catch (err) {
+				loadFailed = err instanceof ApiError ? err.message : 'Could not recover the submitted result.';
+				return;
+			}
+		}
+		if (navigator.onLine) void syncPending();
+	}
+
+	function setAnswerResult(index, chosen, response) {
+		if (deferredFeedback) {
+			session.items[index] = { ...session.items[index], answered: true, chosen_index: chosen };
+		} else {
+			session.items[index] = {
+				...session.items[index],
+				answered: true,
+				chosen_index: chosen,
+				correct: response.correct,
+				correct_index: response.correct_index,
+				options: response.options,
+				key_learning_point: response.key_learning_point,
+				exam_tip: response.exam_tip,
+				tutoring_cards: response.tutoring_cards ?? []
+			};
+		}
+		const next = { ...pendingAnswers };
+		delete next[index];
+		pendingAnswers = next;
+		selected = null;
+		persistDraft();
+	}
+
+	function elapsedFor(index) {
+		const active = index === current && currentItemStartedAt !== null
+			? Math.max(0, performance.now() - currentItemStartedAt)
+			: 0;
+		return Math.min(3_600_000, Math.round((elapsedByItem[index] ?? 0) + active));
+	}
+
+	function navigateTo(index) {
+		if (!session || index < 0 || index >= session.items.length) return;
+		if (currentItemStartedAt !== null) {
+			elapsedByItem = {
+				...elapsedByItem,
+				[current]: Math.min(3_600_000, (elapsedByItem[current] ?? 0) + performance.now() - currentItemStartedAt)
+			};
+		}
+		current = index;
+		selected = null;
+		activeTutoringType = '';
+		testAnswerRevealed = false;
+		eliminating = false;
+		currentItemStartedAt = performance.now();
+		persistDraft();
+	}
+
+	function splitTestCard(content, fallbackAnswer) {
+		const marker = '\nAnswer: ';
+		const answerStart = content.indexOf(marker);
+		if (answerStart < 0) {
+			return {
+				prompt: 'Recall: State the key learning point for this question.',
+				answer: fallbackAnswer
+			};
+		}
+		return {
+			prompt: content.slice(0, answerStart),
+			answer: content.slice(answerStart + marker.length)
+		};
+	}
+
+	function selectOption(index) {
+		if (item?.answered || busy || pendingAnswers[current]) return;
+		if (eliminating) {
+			toggleEliminated(index);
+			return;
+		}
+		selected = selected === index ? null : index;
+		persistDraft();
+	}
+
+	function toggleEliminated(index) {
+		if (!item) return;
+		const versionId = item.question_version_id;
+		const choices = { ...(eliminated[versionId] ?? {}) };
+		choices[index] = !choices[index];
+		eliminated = { ...eliminated, [versionId]: choices };
+		persistDraft();
 	}
 
 	async function answer(chosen) {
-		if (!item || item.answered || busy) return;
-		busy = true;
+		if (!item || item.answered || busy || pendingAnswers[current]) return;
+		const index = current;
+		const pending = {
+			item_index: index,
+			chosen_index: chosen,
+			idempotency_key: idempotencyKey(index),
+			elapsed_ms: elapsedFor(index),
+			assisted: Boolean(item.hint_used),
+			client_recorded_at: new Date().toISOString()
+		};
+		pendingAnswers = { ...pendingAnswers, [index]: pending };
+		session.items[index] = { ...session.items[index], answered: true, chosen_index: chosen };
+		selected = null;
 		error = '';
+		persistDraft();
+		if (!navigator.onLine) {
+			offlineMessage = 'Answer saved on this device. It will sync when you reconnect.';
+			return;
+		}
+		await syncPending();
+	}
+
+	async function syncPending() {
+		if (syncingDraft || !session || !navigator.onLine) return;
+		syncingDraft = true;
 		try {
-			const res = await Api.answer(sid, {
-				item_index: current,
-				chosen_index: chosen,
-				idempotency_key: idempotencyKey(current)
-			});
-			if (session.preset === 'mock') {
-				// Exam-style: deferred feedback — nothing is revealed (§11.2).
-				session.items[current] = {
-					...session.items[current],
-					answered: true,
-					chosen_index: chosen
-				};
-			} else {
-			session.items[current] = {
-				...session.items[current],
-				answered: true,
-				chosen_index: chosen,
-				correct: res.correct,
-				correct_index: res.correct_index,
-				options: res.options,
-				key_learning_point: res.key_learning_point,
-				exam_tip: res.exam_tip
-			};
+			for (const index of Object.keys(pendingAnswers)) {
+				const queued = pendingAnswers[index];
+				busy = true;
+				try {
+					const response = await Api.answer(sid, queued);
+					setAnswerResult(Number(index), queued.chosen_index, response);
+					offlineMessage = '';
+				} catch (err) {
+					if (err instanceof ApiError && err.code === 'session_expired') {
+						const rejected = { ...unacceptedAnswers, [index]: queued };
+						unacceptedAnswers = rejected;
+						const next = { ...pendingAnswers };
+						delete next[index];
+						pendingAnswers = next;
+						session.items[Number(index)] = {
+							...session.items[Number(index)],
+							answered: false,
+							chosen_index: null
+						};
+						offlineMessage = 'A saved answer arrived after the 10-minute practice sync window. It stays on this device and counts as unanswered.';
+						persistDraft();
+						continue;
+					}
+					error = err instanceof ApiError ? err.message : 'Answer is saved on this device and will sync when the connection returns.';
+					offlineMessage = err instanceof ApiError ? '' : 'Answer saved on this device. It will sync when you reconnect.';
+					break;
+				} finally {
+					busy = false;
+				}
 			}
-			selected = null;
-		} catch (err) {
-			if (err instanceof ApiError && err.code === 'session_expired') {
-				// Server deadline passed: submit what exists (auto-submit, §11.6).
-				autoSubmitted = true;
-				await submitSession();
-				return;
+			for (const versionId of Object.keys(pendingMarks)) {
+				try {
+					if (pendingMarks[versionId]) await Api.markQuestion(versionId);
+					else await Api.unmarkQuestion(versionId);
+					const next = { ...pendingMarks };
+					delete next[versionId];
+					pendingMarks = next;
+				} catch {
+					break;
+				}
 			}
-			error = err instanceof ApiError ? err.message : 'Could not record the answer.';
+			for (const versionId of Object.keys(pendingNotes)) {
+				await saveQuestionNote(versionId);
+				if (pendingNotes[versionId]) break;
+			}
+			if (pendingSubmission && Object.keys(pendingAnswers).length === 0) {
+				pendingSubmission = false;
+				persistDraft();
+				await sendSubmission();
+			}
 		} finally {
-			busy = false;
+			syncingDraft = false;
 		}
 	}
 
 	async function submitSession() {
-		if (submitting) return;
+		if (submitting || result) return;
+		pendingSubmission = true;
+		persistDraft();
+		if (!navigator.onLine) {
+			offlineMessage = 'Session closed on this device. Submission and scoring will sync when you reconnect.';
+			return;
+		}
+		await syncPending();
+	}
+
+	async function sendSubmission() {
+		if (submitting || !navigator.onLine) return;
 		submitting = true;
 		error = '';
 		try {
 			result = await Api.submit(sid);
+			offlineMessage = '';
+			pendingSubmission = false;
+			persistDraft();
 		} catch (err) {
-			error = err instanceof ApiError ? err.message : 'Could not submit the session.';
+			if (err instanceof ApiError) {
+				error = err.message;
+				pendingSubmission = false;
+			} else {
+				offlineMessage = 'Session closed on this device. Submission and scoring will sync when you reconnect.';
+			}
 		} finally {
 			submitting = false;
+			persistDraft();
 		}
+	}
+
+	function editQuestionNote(value) {
+		if (!item) return;
+		const versionId = item.question_version_id;
+		noteByVersion = { ...noteByVersion, [versionId]: value };
+		pendingNotes = { ...pendingNotes, [versionId]: true };
+		noteSaveState = { ...noteSaveState, [versionId]: 'Saved on this device' };
+		persistDraft();
+		scheduleNoteSave(versionId);
+	}
+
+	function scheduleNoteSave(versionId, delay = 450) {
+		if (noteTimers.has(versionId)) clearTimeout(noteTimers.get(versionId));
+		noteTimers.set(versionId, setTimeout(() => {
+			noteTimers.delete(versionId);
+			void saveQuestionNote(versionId);
+		}, delay));
+	}
+
+	async function saveQuestionNote(versionId) {
+		if (noteInFlight.has(versionId)) return;
+		const body = noteByVersion[versionId] ?? '';
+		const existing = noteRecords[versionId];
+		if (!body.trim() && !existing) {
+			const next = { ...pendingNotes };
+			delete next[versionId];
+			pendingNotes = next;
+			noteSaveState = { ...noteSaveState, [versionId]: 'Saved' };
+			persistDraft();
+			return;
+		}
+		if (!navigator.onLine) {
+			pendingNotes = { ...pendingNotes, [versionId]: true };
+			noteSaveState = { ...noteSaveState, [versionId]: 'Saved on this device — waiting to sync' };
+			persistDraft();
+			return;
+		}
+		noteInFlight.add(versionId);
+		try {
+			let record;
+			if (existing) {
+				const updated = await Api.updateNote(existing.note_id, {
+					body,
+					base_updated_at: existing.updated_at
+				});
+				record = { ...existing, updated_at: updated.updated_at };
+			} else {
+				const created = await Api.createNote('', body, versionId);
+				record = { note_id: created.note_id, updated_at: created.updated_at };
+			}
+			noteRecords = { ...noteRecords, [versionId]: record };
+			if (noteByVersion[versionId] === body) {
+				const next = { ...pendingNotes };
+				delete next[versionId];
+				pendingNotes = next;
+				noteSaveState = { ...noteSaveState, [versionId]: 'Saved' };
+			} else {
+				pendingNotes = { ...pendingNotes, [versionId]: true };
+				noteSaveState = { ...noteSaveState, [versionId]: 'Saving…' };
+				scheduleNoteSave(versionId, 0);
+			}
+			persistDraft();
+		} catch (err) {
+			if (err instanceof ApiError && err.code === 'note_conflict') {
+				const next = { ...pendingNotes };
+				delete next[versionId];
+				pendingNotes = next;
+				noteSaveState = { ...noteSaveState, [versionId]: 'Conflict — review this note in your notebook' };
+			} else {
+				pendingNotes = { ...pendingNotes, [versionId]: true };
+				noteSaveState = { ...noteSaveState, [versionId]: 'Saved on this device — waiting to sync' };
+			}
+			persistDraft();
+		} finally {
+			noteInFlight.delete(versionId);
+		}
+	}
+
+	async function toggleMark() {
+		if (!item) return;
+		const versionId = item.question_version_id;
+		const nextMarked = !Boolean(markState[versionId]);
+		markState = { ...markState, [versionId]: nextMarked };
+		pendingMarks = { ...pendingMarks, [versionId]: nextMarked };
+		persistDraft();
+		if (!navigator.onLine) {
+			offlineMessage = 'Mark saved on this device. It will sync when you reconnect.';
+			return;
+		}
+		await syncPending();
+	}
+
+	function chooseCalculator(kind) {
+		selectedCalculator = kind;
+		calculatorInputs = {};
+		calculatorResult = '';
+		calculatorError = '';
+	}
+
+	async function runCalculator() {
+		calculatorError = '';
+		calculatorResult = '';
+		calculating = true;
+		const inputs = Object.fromEntries(
+			calculatorDefinition.fields.map(([key]) => [key, Number(calculatorInputs[key])])
+		);
+		if (calculatorDefinition.sex) inputs.female = Boolean(calculatorInputs.female);
+		try {
+			const response = await Api.calculate(selectedCalculator, inputs);
+			const value = Number.isInteger(response.value) ? String(response.value) : response.value.toFixed(2);
+			calculatorResult = `${value} ${response.unit}`;
+		} catch (err) {
+			calculatorError = err instanceof ApiError ? err.message : 'Calculator unavailable. Reconnect and try again.';
+		} finally {
+			calculating = false;
+		}
+	}
+
+	async function runConversion() {
+		converterError = '';
+		converterResult = '';
+		const [from, to] = converterPair.split('|');
+		try {
+			const response = await Api.convertUnits({
+				value: Number(converterValue),
+				analyte: converterAnalyte === 'general' ? '' : converterAnalyte,
+				from,
+				to
+			});
+			const value = Number.isInteger(response.value) ? String(response.value) : response.value.toFixed(3);
+			converterResult = `${value} ${response.unit}`;
+		} catch (err) {
+			converterError = err instanceof ApiError ? err.message : 'Converter unavailable. Reconnect and try again.';
+		}
+	}
+
+	async function requestHint() {
+		if (!item?.hint_available || session.preset !== 'tutor' || hintBusy) return;
+		const requestedItem = item;
+		const requestedIndex = current;
+		hintBusy = true;
+		error = '';
+		try {
+			const response = await Api.getSessionHint(sid, requestedIndex);
+			hintByVersion = { ...hintByVersion, [requestedItem.question_version_id]: response.hint };
+			session.items[requestedIndex] = { ...session.items[requestedIndex], hint_used: true };
+			if (current === requestedIndex) hintText = response.hint;
+			persistDraft();
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Hint unavailable while offline.';
+		} finally {
+			hintBusy = false;
+		}
+	}
+
+	function addHighlight() {
+		if (!item) return;
+		const text = window.getSelection()?.toString().trim();
+		if (!text) return;
+		const versionId = item.question_version_id;
+		highlights = {
+			...highlights,
+			[versionId]: [...(highlights[versionId] ?? []), text].slice(0, 30)
+		};
+		window.getSelection()?.removeAllRanges();
+		persistDraft();
+	}
+
+	function onNetworkOnline() {
+		offlineMessage = '';
+		void syncPending();
 	}
 
 	async function submitReport() {
@@ -193,13 +753,26 @@
 				category: reportCategory,
 				note: reportNote.trim() ? reportNote.trim() : undefined
 			});
+			const acknowledgedAt = new Date(res.acknowledged_at).toLocaleString();
+			const acknowledgementDueAt = new Date(res.acknowledgement_due_at).toLocaleString();
+			const resolutionDueAt = new Date(res.resolution_due_at).toLocaleString();
 			session.items[current] = {
 				...session.items[current],
-				report_status: res.quarantined ? 'quarantined' : 'open'
+				report_status: res.status,
+				my_report: {
+					status: res.status,
+					resolution_note: res.resolution_note,
+					correction_note: res.correction_note,
+					resolved_at: res.resolved_at,
+					corrected_version_id: res.corrected_version_id,
+					corrected_version_number: res.corrected_version_number,
+					acknowledged_at: res.acknowledged_at,
+					acknowledgement_due_at: res.acknowledgement_due_at,
+					resolution_due_at: res.resolution_due_at,
+					resolution_overdue: false
+				}
 			};
-			reportDone = res.quarantined
-				? 'Thanks — enough learners flagged this, so it is out of rotation pending review.'
-				: 'Thanks — your report is recorded for editorial review.';
+			reportDone = `${res.already_recorded ? 'Your report is already on file.' : 'Thanks — report received and acknowledged'} ${acknowledgedAt}. Acknowledgement target: ${acknowledgementDueAt}. Resolution target: ${resolutionDueAt}.`;
 			reportOpen = false;
 			reportNote = '';
 		} catch (err) {
@@ -217,20 +790,43 @@
 		reportDone = '';
 		reportError = '';
 		reportNote = '';
+		hintText = item ? (hintByVersion[item.question_version_id] ?? '') : '';
 	});
 
 	function onKeydown(event) {
 		if (result || !session || !item) return;
+		if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+		const key = event.key.toLowerCase();
+		if (key === 'e' && !item.answered) {
+			eliminating = !eliminating;
+			return;
+		}
+		if (key === 'h' && session.preset === 'tutor' && item.hint_available && !item.answered) {
+			void requestHint();
+			return;
+		}
+		if (key === 'f') {
+			void toggleMark();
+			return;
+		}
+		if (key === 'p' && current > 0) {
+			navigateTo(current - 1);
+			return;
+		}
 		const letter = 'abcdefghij'.indexOf(event.key.toLowerCase());
 		if (letter >= 0 && !item.answered && letter < item.options.length) {
-			selected = letter;
+			if (eliminating) toggleEliminated(letter);
+			else {
+				selected = letter;
+				persistDraft();
+			}
 		} else if (event.key === 'Enter' || event.key === 'n' || event.key === 'N') {
 			if (!item.answered && selected !== null) {
-				answer(selected);
+				void answer(selected);
 			} else if (item.answered && current < session.items.length - 1) {
-				current += 1;
+				navigateTo(current + 1);
 			} else if (item.answered && allAnswered) {
-				submitSession();
+				void submitSession();
 			}
 		}
 	}
@@ -245,7 +841,26 @@
 		return String.fromCharCode(65 + index);
 	}
 
-	onMount(load);
+	onMount(() => {
+		void load();
+		window.addEventListener('online', onNetworkOnline);
+		const refreshTimer = async () => {
+			if (document.visibilityState !== 'visible' || !session?.deadline || !navigator.onLine) return;
+			try {
+				const remote = await Api.getSession(sid);
+				anchorTimer(remote);
+				tick();
+			} catch {
+				// The monotonic local timer continues through a temporary outage.
+			}
+		};
+		document.addEventListener('visibilitychange', refreshTimer);
+		return () => {
+			window.removeEventListener('online', onNetworkOnline);
+			document.removeEventListener('visibilitychange', refreshTimer);
+			for (const timer of noteTimers.values()) clearTimeout(timer);
+		};
+	});
 </script>
 
 <svelte:window onkeydown={onKeydown} ontouchstart={touchStart} ontouchend={touchEnd} />
@@ -261,6 +876,7 @@
 	{/if}
 </svelte:head>
 
+<div class="session-workspace" data-testid="session-workspace" style={`--session-font-scale: ${[1, 1.125, 1.25, 1.5][textSize]};`}>
 {#if !loadFailed && !result && session}
 	<div class="card" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
 		<button
@@ -276,10 +892,150 @@
 				? 'Exit fullscreen'
 				: 'Fullscreen'}
 		</button>
+		<button class="btn" type="button" data-testid="tools-toggle" aria-expanded={toolsOpen} onclick={() => (toolsOpen = !toolsOpen)}>
+			{toolsOpen ? 'Hide tools' : 'Tools'}
+		</button>
+		<div class="text-size-control" role="group" aria-label="Text size">
+			<span class="muted">Text size</span>
+			{#each ['Default', 'Large', 'Larger', 'Largest'] as label, index}
+				<button
+					class="btn {textSize === index ? 'primary' : ''}"
+					type="button"
+					aria-pressed={textSize === index}
+					data-testid={`text-size-${index}`}
+					onclick={() => {
+						textSize = index;
+						persistDraft();
+					}}
+				>
+					{label}
+				</button>
+			{/each}
+		</div>
 		<span class="muted" style="font-size: var(--text-sm);">
 			In focus mode, swipe left or right to move between answered items.
 		</span>
 	</div>
+{/if}
+
+{#if timerWarning && !result}
+	<p class="feedback timer-warning" role="alert" data-testid="timer-warning">{timerWarning}</p>
+{/if}
+{#if offlineMessage && !result}
+	<p class="feedback" role="status" data-testid="offline-status">{offlineMessage}</p>
+{/if}
+
+{#if session && item && toolsOpen && !result}
+	<section class="card session-tools" aria-label="Session tools" data-testid="tool-tray">
+		<h2>Session tools</h2>
+		<div class="tool-grid">
+			<section class="tool-panel" aria-label="Medical calculator">
+				<label class="field">
+					<span>Medical calculator</span>
+					<select value={selectedCalculator} onchange={(event) => chooseCalculator(event.currentTarget.value)}>
+						{#each Object.entries(CALCULATORS) as [key, calculator]}
+							<option value={key}>{calculator.label}</option>
+						{/each}
+					</select>
+				</label>
+				{#each calculatorDefinition.fields as [key, label]}
+					<label class="field">
+						<span>{label}</span>
+						<input
+							type="number"
+							step="any"
+							value={calculatorInputs[key] ?? ''}
+							data-testid={`calc-input-${key}`}
+							oninput={(event) => {
+								calculatorInputs = { ...calculatorInputs, [key]: event.currentTarget.value };
+							}}
+						/>
+					</label>
+				{/each}
+				{#if calculatorDefinition.sex}
+					<label class="check-field">
+						<input
+							type="checkbox"
+							checked={Boolean(calculatorInputs.female)}
+							onchange={(event) => {
+								calculatorInputs = { ...calculatorInputs, female: event.currentTarget.checked };
+							}}
+						/>
+						Use the formula's female factor
+					</label>
+				{/if}
+				<button class="btn primary" type="button" disabled={calculating} data-testid="calculate" onclick={runCalculator}>
+					{calculating ? 'Calculating…' : 'Calculate'}
+				</button>
+				{#if calculatorResult}<p class="feedback" data-testid="calculator-result">{calculatorResult}</p>{/if}
+				{#if calculatorError}<p class="error-text" role="alert">{calculatorError}</p>{/if}
+				<p class="muted" data-testid="calculator-disclaimer">For exam practice only; not for clinical use.</p>
+			</section>
+
+			<section class="tool-panel" aria-label="Unit converter">
+				<h3>Unit converter</h3>
+				<label class="field">
+					<span>Conversion type</span>
+					<select
+						value={converterAnalyte}
+						onchange={(event) => {
+							converterAnalyte = event.currentTarget.value;
+							converterPair = UNIT_PAIRS[converterAnalyte][0][0];
+							converterResult = '';
+						}}
+					>
+						<option value="general">General units</option>
+						<option value="glucose">Glucose lab units</option>
+					</select>
+				</label>
+				<label class="field">
+					<span>Units</span>
+					<select bind:value={converterPair}>
+						{#each UNIT_PAIRS[converterAnalyte] as [value, label]}
+							<option {value}>{label}</option>
+						{/each}
+					</select>
+				</label>
+				<label class="field">
+					<span>Value</span>
+					<input type="number" step="any" bind:value={converterValue} data-testid="conversion-value" />
+				</label>
+				<button class="btn" type="button" data-testid="convert" onclick={runConversion}>Convert</button>
+				{#if converterResult}<p class="feedback" data-testid="conversion-result">{converterResult}</p>{/if}
+				{#if converterError}<p class="error-text" role="alert">{converterError}</p>{/if}
+			</section>
+
+			<section class="tool-panel" aria-label="Question workspace">
+				<h3>Question workspace</h3>
+				<button class="btn" type="button" data-testid="question-mark" aria-pressed={marked} onclick={toggleMark}>
+					{marked ? 'Remove mark' : 'Mark question'}
+				</button>
+				{#if pendingMarks[item.question_version_id]}
+					<p class="muted">Mark saved on this device; waiting to sync.</p>
+				{/if}
+				<label class="field">
+					<span>Private note for this question</span>
+					<textarea
+						rows="4"
+						value={questionNote}
+						data-testid="question-note"
+						oninput={(event) => editQuestionNote(event.currentTarget.value)}
+					></textarea>
+				</label>
+				<p class="muted" role="status" data-testid="note-save-state">{noteSaveState[item.question_version_id] ?? 'Saved'}</p>
+				<button class="btn" type="button" data-testid="highlight-selection" onclick={addHighlight}>Save selected text</button>
+				{#each questionHighlights as highlight, index}
+					<p class="highlight-note" data-testid="saved-highlight-{index}">“{highlight}”</p>
+				{/each}
+				{#if session.preset === 'tutor' && item.hint_available && !item.answered}
+					<button class="btn" type="button" disabled={hintBusy} data-testid="show-hint" onclick={requestHint}>
+						{hintBusy ? 'Opening hint…' : 'Show reasoning hint'}
+					</button>
+				{/if}
+				{#if hintText}<p class="feedback" data-testid="tutor-hint">{hintText}</p>{/if}
+			</section>
+		</div>
+	</section>
 {/if}
 
 {#if loadFailed}
@@ -332,26 +1088,50 @@
 	</p>
 
 	{#if item}
-		<div class="card">
-			<p>{item.vignette}</p>
+		<div class="card question-card">
+			<p data-testid="question-text">{item.vignette}</p>
 			<p><strong>{item.lead_in}</strong></p>
+			{#if item.corrected}
+				<p style="margin:0 0 var(--space-sm);">
+					<span class="chip" data-testid="corrected-badge">Corrected</span>
+					{#if item.correction_note}
+						<span class="muted" data-testid="correction-changelog">Update: {item.correction_note}</span>
+					{/if}
+				</p>
+			{/if}
 
+			{#if eliminating}
+				<p class="muted" role="status">Elimination mode is on. Select options to strike out; press E again to exit.</p>
+			{/if}
 			<div class="options">
 				{#each item.options as option, i (i)}
-					<button
-						type="button"
-						class="option {item.answered && i === item.correct_index ? 'correct' : ''}
-							{item.answered && item.chosen_index === i && item.correct === false ? 'incorrect' : ''}"
-						aria-pressed={!item.answered && selected === i}
-						disabled={item.answered || busy}
-						data-testid={`option-${i}`}
-						onclick={() => {
-							if (!item.answered) selected = selected === i ? null : i;
-						}}
-					>
-						<span class="key">{letterLabel(i)}</span>
-						<span>{option.text}</span>
-					</button>
+					<div class="option-row">
+						<button
+							type="button"
+							class="option {item.answered && i === item.correct_index ? 'correct' : ''}
+								{item.answered && item.chosen_index === i && item.correct === false ? 'incorrect' : ''}
+								{itemEliminated[i] ? 'eliminated' : ''}"
+							aria-pressed={!item.answered && selected === i}
+							disabled={item.answered || busy || Boolean(pendingAnswers[current])}
+							data-testid={`option-${i}`}
+							onclick={() => selectOption(i)}
+						>
+							<span class="key">{letterLabel(i)}</span>
+							<span>{option.text}</span>
+						</button>
+						{#if !item.answered && session.preset !== 'mock'}
+							<button
+								class="linklike eliminate-option"
+								type="button"
+								aria-pressed={Boolean(itemEliminated[i])}
+								data-testid={`eliminate-${i}`}
+								disabled={Boolean(pendingAnswers[current])}
+								onclick={() => toggleEliminated(i)}
+							>
+								{itemEliminated[i] ? 'Restore' : 'Eliminate'}
+							</button>
+						{/if}
+					</div>
 				{/each}
 			</div>
 
@@ -359,9 +1139,9 @@
 				<p class="error-text" role="alert">{error}</p>
 			{/if}
 
-			{#if !item.answered && session.preset !== 'mock'}
+			{#if !item.answered && deferredFeedback}
 				<p class="muted" style="margin: 0 0 var(--space-sm);">
-					Answers and explanations are revealed after you submit this mock.
+					Answers and explanations are revealed after you submit this assessment.
 				</p>
 			{/if}
 
@@ -369,12 +1149,12 @@
 				<button
 					class="btn primary"
 					type="button"
-					disabled={selected === null || busy || (remainingMs !== null && remainingMs <= 0)}
+					disabled={selected === null || busy || Boolean(pendingAnswers[current]) || (remainingMs !== null && remainingMs <= 0)}
 					data-loading={busy}
 					data-testid="answer"
-					onclick={() => answer(selected)}
+					onclick={() => void answer(selected)}
 				>
-					{busy ? 'Recording…' : session.preset === 'mock' ? 'Record answer' : 'Answer'}
+					{busy ? 'Recording…' : deferredFeedback ? 'Record answer' : 'Answer'}
 				</button>
 				{#if session.preset !== 'mock'}
 				<button
@@ -382,22 +1162,42 @@
 					type="button"
 					disabled={busy || (remainingMs !== null && remainingMs <= 0)}
 					data-testid="skip"
-					onclick={() => answer(null)}
+					onclick={() => void answer(null)}
 				>
 					Skip — I don't want to guess
 				</button>
 				{/if}
-			{:else if session.preset === 'mock'}
-				<p class="muted" data-testid="mock-recorded">
-					{item.chosen_index === null ? 'Recorded as skipped.' : 'Answer recorded.'}
-					Nothing is revealed until submission.
+			{:else if pendingAnswers[current]}
+				<p class="muted" role="status" data-testid="offline-answer">
+					Answer saved on this device. Feedback will appear after the server confirms the sync.
 				</p>
+				{#if current < session.items.length - 1}
+					<button class="btn primary" type="button" data-testid="next" onclick={() => navigateTo(current + 1)}>
+						Next
+					</button>
+				{:else}
+					<button
+						class="btn primary"
+						type="button"
+						disabled={submitting}
+						data-loading={submitting}
+						data-testid="submit-session"
+						onclick={submitSession}
+					>
+						{submitting ? 'Submitting…' : 'Submit session'}
+					</button>
+				{/if}
+			{:else if deferredFeedback}
+				<p class="muted" data-testid="assessment-recorded">
+						{item.chosen_index === null ? 'Recorded as skipped.' : 'Answer recorded.'}
+						Nothing is revealed until submission.
+					</p>
 				{#if current < session.items.length - 1}
 					<button
 						class="btn primary"
 						type="button"
 						data-testid="next"
-						onclick={() => (current += 1)}
+						onclick={() => navigateTo(current + 1)}
 					>
 						Next
 					</button>
@@ -410,7 +1210,7 @@
 						data-testid="submit-session"
 						onclick={submitSession}
 					>
-						{submitting ? 'Submitting…' : 'Submit mock'}
+						{submitting ? 'Submitting…' : session.preset === 'mock' ? 'Submit mock' : 'Submit timed session'}
 					</button>
 				{/if}
 			{:else if session.preset !== 'mock'}
@@ -434,6 +1234,65 @@
 					{#if item.exam_tip}
 						<p class="muted" style="margin: 4px 0 0;">Exam tip: {item.exam_tip}</p>
 					{/if}
+					{#if session.preset === 'tutor' && item.tutoring_cards?.length}
+						<div role="group" aria-label="One-tap tutoring cards" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:var(--space-md);">
+							{#each TUTORING_PROMPTS as [promptType, label] (promptType)}
+								{#if promptType !== 'why_wrong' || item.correct === false}
+									<button
+									class="btn"
+									type="button"
+									aria-pressed={activeTutoringType === promptType}
+									data-testid={`pregen-card-${promptType}`}
+									onclick={() => {
+										activeTutoringType = promptType;
+										testAnswerRevealed = false;
+										persistDraft();
+									}}
+									>
+										{label}
+									</button>
+								{/if}
+							{/each}
+						</div>
+						{#if activeTutoringCard}
+							<div class="feedback">
+								<div
+									data-testid="tutor-card-content"
+									role="status"
+									aria-live="polite"
+									aria-atomic="true"
+								>
+									{#if activeTutoringCard.prompt_type === 'why_wrong'}
+										<p>Compare your selected answer with the keyed answer.</p>
+										{#each item.options as option, i (i)}
+											{#if i === item.chosen_index || i === item.correct_index}
+												<p style="margin:4px 0;">
+													<strong>{i === item.chosen_index ? 'Your answer' : 'Keyed answer'}: {option.text}</strong>
+													{#if option.rationale} — {option.rationale}{/if}
+												</p>
+											{/if}
+										{/each}
+									{:else if activeTest}
+										<p>{activeTest.prompt}</p>
+										{#if testAnswerRevealed}
+											<p><strong>Answer:</strong> {activeTest.answer}</p>
+										{/if}
+									{:else}
+										<p>{activeTutoringCard.content}</p>
+									{/if}
+								</div>
+								{#if activeTest && !testAnswerRevealed}
+									<button
+										class="btn"
+										type="button"
+										data-testid="reveal-tutor-answer"
+										onclick={() => (testAnswerRevealed = true)}
+									>Reveal answer</button>
+								{/if}
+								<p class="muted" style="margin:0;">Source: {activeTutoringCard.source_ref}</p>
+							</div>
+						{/if}
+					{/if}
 					{#if item.report_status === 'quarantined'}
 						<p class="muted" style="margin: 4px 0 0;">
 							Flagged by learners — out of rotation pending editorial review.
@@ -442,11 +1301,43 @@
 						<p class="muted" style="margin: 4px 0 0;">
 							Flagged by a learner — under review.
 						</p>
+					{:else if item.report_status === 'resolved_fixed'}
+						<p class="muted" style="margin: 4px 0 0;">
+							This version was corrected. A newer reviewed version is in use.
+						</p>
+					{:else if item.report_status === 'resolved_rejected'}
+						<p class="muted" style="margin: 4px 0 0;">
+							A report was reviewed; this version remains in use.
+						</p>
 					{/if}
 				</div>
 
-				{#if reportDone}
-					<p class="muted" data-testid="report-done">{reportDone}</p>
+				{#if item.my_report}
+					<div class="feedback" data-testid="my-report-status">
+						<p class="verdict">Your report: {item.my_report.status.replaceAll('_', ' ')}</p>
+						{#if item.my_report.resolution_note}
+							<p style="margin:4px 0;">Review note: {item.my_report.resolution_note}</p>
+						{/if}
+						{#if item.my_report.correction_note}
+							<p style="margin:4px 0;">Public correction: {item.my_report.correction_note}</p>
+						{/if}
+						{#if item.my_report.corrected_version_number}
+							<p style="margin:4px 0;">Corrected version v{item.my_report.corrected_version_number} was published.</p>
+						{/if}
+						{#if item.my_report.status === 'open' || item.my_report.status === 'quarantined'}
+							<p class="muted" style="margin:4px 0;">
+								Acknowledged {new Date(item.my_report.acknowledged_at).toLocaleString()} ·
+								resolution due {new Date(item.my_report.resolution_due_at).toLocaleString()}
+								{#if item.my_report.resolution_overdue}<strong class="danger-text">Overdue</strong>{/if}
+							</p>
+						{/if}
+					</div>
+				{/if}
+
+				{#if item.my_report}
+					<p class="muted" data-testid="report-done">
+						{reportDone || 'Your report is already on file. See its current status above.'}
+					</p>
 				{:else if !reportOpen}
 					<button
 						class="linklike"
@@ -525,7 +1416,7 @@
 						class="btn primary"
 						type="button"
 						data-testid="next"
-						onclick={() => (current += 1)}
+						onclick={() => navigateTo(current + 1)}
 					>
 						Next
 					</button>
@@ -557,3 +1448,103 @@
 {:else}
 	<p class="muted">Loading the session…</p>
 {/if}
+</div>
+
+<style>
+	.session-workspace {
+		font-size: calc(1rem * var(--session-font-scale, 1));
+	}
+
+	.session-workspace :is(input, select, textarea) {
+		box-sizing: border-box;
+		width: 100%;
+		min-height: 44px;
+		padding: var(--space-sm) var(--space-md);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+		background: var(--color-canvas);
+		color: var(--color-text-primary);
+		font: inherit;
+	}
+
+	.session-workspace textarea {
+		resize: vertical;
+	}
+
+	.tool-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+		gap: var(--space-lg);
+	}
+
+	.tool-panel {
+		min-width: 0;
+		padding: var(--space-md);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+	}
+
+	.tool-panel h3 {
+		margin-top: 0;
+	}
+
+	.text-size-control {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-xs);
+	}
+
+	.text-size-control .btn {
+		padding-inline: var(--space-md);
+	}
+
+	.check-field {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		margin-bottom: var(--space-md);
+	}
+
+	.check-field input {
+		width: 20px;
+		min-height: 20px;
+	}
+
+	.option-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: var(--space-sm);
+	}
+
+	.option.eliminated {
+		text-decoration: line-through;
+		opacity: 0.62;
+	}
+
+	.eliminate-option {
+		padding-inline: var(--space-xs);
+		font-size: var(--text-sm);
+	}
+
+	.highlight-note {
+		padding: var(--space-sm) var(--space-md);
+		border-left: 3px solid var(--color-accent);
+		background: var(--color-surface-elevated);
+	}
+
+	.timer-warning {
+		border: 1px solid var(--color-warning);
+	}
+
+	@media (max-width: 640px) {
+		.session-workspace > .card {
+			padding: var(--space-md);
+		}
+
+		.text-size-control {
+			width: 100%;
+		}
+	}
+</style>

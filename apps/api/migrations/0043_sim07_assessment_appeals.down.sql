@@ -1,0 +1,6 @@
+DROP TRIGGER IF EXISTS scenario_assessment_appeal_reviews_immutable ON scenario_assessment_appeal_reviews;
+DROP TRIGGER IF EXISTS scenario_assessment_appeals_immutable ON scenario_assessment_appeals;
+DROP FUNCTION IF EXISTS reject_scenario_assessment_appeal_mutation();
+DROP TABLE IF EXISTS scenario_assessment_appeal_reviews;
+DROP TABLE IF EXISTS scenario_assessment_appeals;
+DROP INDEX IF EXISTS idx_scenario_assessment_appeals_created;

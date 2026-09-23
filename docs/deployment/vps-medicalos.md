@@ -21,7 +21,9 @@ Live surfaces (2026-09-19, owner-directed):
   - `medicalos-api` — `ghcr.io/jerryboganda/medicalos-api:<sha>`
     (built by GitHub Actions, never on the VPS), env `DATABASE_URL`
     from the provisioned `PLATFORM_PG_URL`, `MIN_TIME_LIMIT_SECONDS=30`,
-    `FREE_DAILY_QUESTIONS=10`. Schema applies at startup; optional
+    `FREE_DAILY_QUESTIONS=10`, and the private `PACK_SIGNING_KEY` passed from
+    GitHub secret `VPS_PACK_SIGNING_KEY` (minimum 32 non-whitespace bytes).
+    Schema applies at startup; optional
     `docker exec medicalos-api api --seed` once for demo content.
   - `medicalos-web` — `${REGISTRY:-ghcr.io/jerryboganda/}medicalos-web:<sha>`
     (built by GitHub Actions from `apps/client/Dockerfile`), nginx serves
@@ -62,3 +64,4 @@ Live surfaces (2026-09-19, owner-directed):
 | `VPS_USER` | `root` |
 | `VPS_SSH_KEY` | Private key matching the VPS `authorized_keys` |
 | `VPS_DATABASE_URL` | `PLATFORM_PG_URL` value from the provisioned env file |
+| `VPS_PACK_SIGNING_KEY` | Private random key used to sign offline-pack manifests (minimum 32 non-whitespace bytes) |

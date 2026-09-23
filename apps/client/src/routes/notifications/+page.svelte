@@ -15,12 +15,24 @@
 	}
 
 	let items = $state<InboxItem[] | null>(null);
-	let prefs = $state({ plan_reminders: true, mock_results: true, reports: true });
+	let prefs = $state({
+		plan_reminders: true,
+		mock_results: true,
+		reports: true,
+		content_updates: true
+	});
 	let showPrefs = $state(false);
 	let busy = $state(false);
 
 	async function load() {
-		items = (await Api.inbox()).notifications;
+		const inbox = await Api.inbox();
+		items = inbox.notifications;
+		prefs = {
+			plan_reminders: inbox.preferences.plan_reminders,
+			mock_results: inbox.preferences.mock_results,
+			reports: inbox.preferences.reports,
+			content_updates: inbox.preferences.content_updates
+		};
 	}
 
 	async function savePrefs(e: Event) {
@@ -48,7 +60,7 @@
 
 <div class="card">
 	{#if items === null || items.length === 0}
-		<p class="muted">No notifications. When the plan changes or a report resolves, it shows here.</p>
+		<p class="muted">No notifications. Plan, report, and source updates appear here.</p>
 	{:else}
 		{#each items as n (n.id)}
 			<div class="card" style="margin-bottom: var(--space-md);">
@@ -68,7 +80,8 @@
 		<form onsubmit={savePrefs}>
 			<label><input type="checkbox" bind:checked={prefs.plan_reminders} /> Plan reminders</label><br />
 			<label><input type="checkbox" bind:checked={prefs.mock_results} /> Mock results</label><br />
-			<label><input type="checkbox" bind:checked={prefs.reports} /> Report updates</label><br /><br />
+			<label><input type="checkbox" bind:checked={prefs.reports} /> Report updates</label><br />
+			<label><input type="checkbox" bind:checked={prefs.content_updates} /> Source and content corrections</label><br /><br />
 			<button class="btn primary" type="submit" disabled={busy}>Save preferences</button>
 		</form>
 	{:else}

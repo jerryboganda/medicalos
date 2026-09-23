@@ -55,10 +55,11 @@ test('timed session shows the server countdown and auto-submits', async ({
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 	await expect(page.getByTestId('timer')).toContainText(/left/);
 
-	// Answer the first item so the auto-submit has real content.
+	// Timed exam-style sessions defer answer feedback until submission.
 	await page.getByTestId('option-0').click();
 	await page.getByTestId('answer').click();
-	await expect(page.getByTestId('feedback')).toBeVisible();
+	await expect(page.getByTestId('assessment-recorded')).toBeVisible();
+	await expect(page.getByTestId('feedback')).toHaveCount(0);
 
 	// Auto-submit fires when the countdown reaches zero.
 	await expect(page.getByTestId('results')).toBeVisible({ timeout: 20_000 });

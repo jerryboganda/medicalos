@@ -18,6 +18,10 @@ async fn main() {
         tracing::info!("seeded fixture content");
         return;
     }
+    let pack_signing_key = std::env::var("PACK_SIGNING_KEY")
+        .ok()
+        .filter(|key| key.trim().len() >= 32)
+        .expect("PACK_SIGNING_KEY must be set to at least 32 non-whitespace bytes");
     let min_time_limit: i64 = std::env::var("MIN_TIME_LIMIT_SECONDS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -52,7 +56,14 @@ async fn main() {
             .filter(|t| !t.is_empty()),
         openai_base_url: std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
-        pack_signing_key: std::env::var("PACK_SIGNING_KEY").ok(),
+        pack_signing_key: Some(pack_signing_key),
+        oidc_credential_key: std::env::var("OIDC_CREDENTIAL_KEY")
+            .ok()
+            .filter(|key| !key.is_empty()),
+        public_api_base_url: std::env::var("PUBLIC_API_BASE_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8080/api".into()),
+        public_app_url: std::env::var("PUBLIC_APP_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await

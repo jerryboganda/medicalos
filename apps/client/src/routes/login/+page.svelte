@@ -1,4 +1,5 @@
 <script>
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
@@ -7,8 +8,13 @@
 	let mode = $state('signin');
 	let email = $state('');
 	let password = $state('');
+	let institutionId = $state('');
 	let busy = $state(false);
 	let error = $state('');
+
+	onMount(() => {
+		institutionId = new URLSearchParams(window.location.search).get('institution') ?? '';
+	});
 
 	async function submit(event) {
 		event.preventDefault();
@@ -28,6 +34,27 @@
 					? err.message
 					: 'Something went wrong. Check your connection and try again.';
 		} finally {
+			busy = false;
+		}
+	}
+
+	async function beginInstitutionSignIn() {
+		if (busy) return;
+		const id = institutionId.trim();
+		if (!id) {
+			error = 'Enter your institution ID to continue.';
+			return;
+		}
+		busy = true;
+		error = '';
+		try {
+			const { authorization_url } = await Api.startInstitutionSso(id);
+			window.location.assign(authorization_url);
+		} catch (err) {
+			error =
+				err instanceof ApiError
+					? err.message
+					: 'Institution sign-in is unavailable. Check the ID and try again.';
 			busy = false;
 		}
 	}
@@ -75,6 +102,31 @@
 			{busy ? 'Working…' : mode === 'signin' ? 'Sign in' : 'Create account'}
 		</button>
 	</form>
+
+	{#if mode === 'signin'}
+		<section aria-label="Institution sign-in">
+			<p class="muted">Signing in through your institution?</p>
+			<label class="field" for="sso-institution-id">
+				<span>Institution ID</span>
+				<input
+					id="sso-institution-id"
+					bind:value={institutionId}
+					autocomplete="off"
+					data-testid="sso-institution-id"
+				/>
+			</label>
+			<button
+				class="btn"
+				type="button"
+				disabled={busy || !institutionId.trim()}
+				data-loading={busy}
+				data-testid="sso-submit"
+				onclick={beginInstitutionSignIn}
+			>
+				{busy ? 'Connecting…' : 'Institution sign-in'}
+			</button>
+		</section>
+	{/if}
 
 	<button
 		class="linklike"

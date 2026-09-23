@@ -8,6 +8,7 @@ use chrono::{Duration, Utc};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -50,6 +51,42 @@ pub fn new_session_token() -> NewSession {
         expires_at: Utc::now() + Duration::days(30),
         token,
     }
+}
+
+/// Create the shared application session for password and OIDC logins.
+/// Locking the user row makes single-active-session revocation atomic.
+pub async fn issue_session(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResult<String> {
+    let mut tx = pool.begin().await?;
+    let user = sqlx::query(
+        "SELECT single_active_session FROM users
+         WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    let single_active: bool = user.try_get("single_active_session")?;
+    if single_active {
+        sqlx::query(
+            "UPDATE auth_sessions SET revoked_at = now()
+             WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let session = new_session_token();
+    sqlx::query(
+        "INSERT INTO auth_sessions (token_hash, user_id, expires_at)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(sha256_hex(&session.token))
+    .bind(user_id)
+    .bind(session.expires_at)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(session.token)
 }
 
 pub fn sha256_hex(input: &str) -> String {

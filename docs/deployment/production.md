@@ -26,9 +26,15 @@ Built by GitHub Actions only (AGENTS.md compute policy — the VPS never builds)
 | `DATABASE_URL` | — (required) | Shared platform Postgres (`PLATFORM_PG_URL`) |
 | `MIN_TIME_LIMIT_SECONDS` | 30 | Floor for timed sessions |
 | `FREE_DAILY_QUESTIONS` | 10 | Free-tier daily allowance |
+| `PUBLIC_API_BASE_URL` | `https://medicalos.polytronx.com/api` in production | Public API prefix used to derive OIDC callback URLs |
+| `PUBLIC_APP_URL` | `https://medicalos.polytronx.com` in production | Browser origin used for OIDC handoff |
+| `OIDC_CREDENTIAL_KEY` | unset | Optional encryption key for institution OIDC client secrets; provision as GitHub secret `VPS_OIDC_CREDENTIAL_KEY` |
+| `PACK_SIGNING_KEY` | — (required) | Private HMAC key for offline-pack manifests; provision as GitHub secret `VPS_PACK_SIGNING_KEY` with at least 32 non-whitespace bytes |
 
 GitHub repo-level secrets: `VPS_HOST`, `VPS_USER`,
-`VPS_SSH_KEY`, `VPS_DATABASE_URL`.
+`VPS_SSH_KEY`, `VPS_DATABASE_URL`, and `VPS_PACK_SIGNING_KEY`.
+
+Institution OIDC setup and callback registration: `docs/deployment/institution-oidc.md`.
 
 ## Verification after any deploy
 

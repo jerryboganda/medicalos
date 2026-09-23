@@ -38,4 +38,160 @@ test('question report flow records a report from the session UI', async ({
 	const resp = await reportPost;
 	expect(resp.status(), 'report POST status').toBe(200);
 	await expect(page.getByTestId('report-done')).toContainText('Thanks');
+	await expect(page.getByTestId('report-done')).toContainText('Acknowledgement target:');
+	await expect(page.getByTestId('report-done')).toContainText('Resolution target:');
+});
+
+test('admin resolves a grouped report with private feedback and a public correction note', async ({ page }) => {
+	await page.setViewportSize({ width: 375, height: 812 });
+	await page.addInitScript(() => {
+		localStorage.setItem('mlos_token', 'e2e-user-token');
+		localStorage.setItem('mlos_admin', 'e2e-admin-token');
+	});
+	await page.route('**/v1/admin/audit', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ events: [] })
+		})
+	);
+
+	let releaseFirstQueue!: () => void;
+	const firstQueueGate = new Promise<void>((resolve) => (releaseFirstQueue = resolve));
+	let queueCalls = 0;
+	const reportId = '11111111-1111-4111-8111-111111111111';
+	let resolution: Record<string, unknown> | undefined;
+	await page.route('**/v1/admin/reports*', async (route) => {
+		queueCalls += 1;
+		if (queueCalls === 1) await firstQueueGate;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				reports:
+					queueCalls === 1
+						? [
+								{
+									report_id: reportId,
+									question_version_id: '22222222-2222-4222-8222-222222222222',
+									question_id: '33333333-3333-4333-8333-333333333333',
+									version: 1,
+									vignette: 'A learner case with an unclear key.',
+									lead_in: 'Which answer is best?',
+									category: 'wrong_answer',
+									reporter_feedback: [
+										{
+											category: 'wrong_answer',
+											note: 'The supplied key conflicts with the rationale.'
+										},
+										{
+											category: 'bad_explanation',
+											note: 'The explanation cites the wrong option.'
+										}
+									],
+									feedback_truncated: false,
+									report_count: 2,
+									first_reported_at: '2026-09-23T08:00:00Z',
+									acknowledgement_due_at: '2026-09-24T08:00:00Z',
+									resolution_due_at: '2026-09-26T08:00:00Z',
+									acknowledgements_on_time: true,
+									resolution_overdue: false,
+									quarantined: false
+								}
+							]
+						: []
+			})
+		});
+	});
+	await page.route('**/v1/reports/*/resolve', async (route) => {
+		resolution = route.request().postDataJSON();
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				status: 'resolved_fixed',
+				question_version_id: '22222222-2222-4222-8222-222222222222',
+				corrected_version_id: '44444444-4444-4444-8444-444444444444',
+				resolved_reports: 2,
+				notified_reporters: 2
+			})
+		});
+	});
+
+	await page.route('**/v1/admin/scenarios/runs/pending-assessment', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ runs: [] }) })
+	);
+	await page.route('**/v1/admin/scenario-assessment-appeals', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ appeals: [] }) })
+	);
+	await page.goto('/admin');
+	await expect(page.getByTestId('report-queue-refresh')).toContainText('Refreshing…');
+	releaseFirstQueue();
+	await expect(page.getByTestId('report-item')).toContainText('2 reports');
+	await expect(page.getByTestId('report-item')).toContainText('Version 1');
+	await expect(page.getByTestId('report-item')).toContainText(
+		'The explanation cites the wrong option.'
+	);
+	const noMobileOverflow = await page.evaluate(
+		() => document.documentElement.scrollWidth <= window.innerWidth
+	);
+	expect(noMobileOverflow, 'report cards fit a 375px viewport').toBe(true);
+
+	await page.getByTestId('report-resolution-note').fill('Reviewed: the explanation has been corrected.');
+	await expect(page.getByTestId('report-resolve-fixed')).toBeDisabled();
+	await page
+		.getByTestId('report-correction-note')
+		.fill('The explanation now follows the cited source.');
+	await page.getByTestId('report-resolve-fixed').click();
+	await expect(page.getByTestId('report-queue-success')).toContainText('2 reports resolved');
+	expect(resolution).toEqual({
+		status: 'resolved_fixed',
+		resolution_note: 'Reviewed: the explanation has been corrected.',
+		correction_note: 'The explanation now follows the cited source.'
+	});
+	await expect(page.getByTestId('report-queue-empty')).toBeVisible();
+});
+
+test('admin report queue recovers from an API error and shows its empty state', async ({ page }) => {
+	await page.addInitScript(() => {
+		localStorage.setItem('mlos_token', 'e2e-user-token');
+		localStorage.setItem('mlos_admin', 'e2e-admin-token');
+	});
+	await page.route('**/v1/admin/audit', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ events: [] })
+		})
+	);
+	let calls = 0;
+	await page.route('**/v1/admin/reports*', (route) => {
+		calls += 1;
+		return calls === 1
+			? route.fulfill({
+						status: 503,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							error: { code: 'reports_unavailable', message: 'Report service is temporarily unavailable.' }
+						})
+					})
+			: route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ reports: [] })
+					});
+	});
+
+	await page.route('**/v1/admin/scenarios/runs/pending-assessment', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ runs: [] }) })
+	);
+	await page.route('**/v1/admin/scenario-assessment-appeals', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ appeals: [] }) })
+	);
+	await page.goto('/admin');
+	await expect(page.getByTestId('report-queue-error')).toContainText(
+		'Report service is temporarily unavailable.'
+	);
+	await page.getByTestId('report-queue-refresh').click();
+	await expect(page.getByTestId('report-queue-empty')).toBeVisible();
 });

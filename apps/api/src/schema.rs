@@ -42,6 +42,23 @@ migrations!(
     "0025_ops_admin",
     "0026_session_tails",
     "0027_recovery_qa",
+    "0028_inst04_program_curriculum",
+    "0029_inst03_oidc_sso",
+    "0030_qb16_report_sla",
+    "0031_qb16_public_correction_note",
+    "0032_qb13_session_tools",
+    "0033_off02_submit_receipt",
+    "0034_core10_concepts",
+    "0035_ai08_plan_protection",
+    "0036_ai08_task_identity",
+    "0037_lib05_source_change_propagation",
+    "0038_ai08_shared_task_identity",
+    "0039_lib06_private_imports",
+    "0040_sim04_criterion_evidence",
+    "0041_admin02_rights_scope_terms",
+    "0042_lib07_extraction_reports",
+    "0043_sim07_assessment_appeals",
+    "0044_sim08_team_handover",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

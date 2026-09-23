@@ -1,0 +1,1 @@
+-- Task-key normalization is data-only; 0036 removes the column on full rollback.

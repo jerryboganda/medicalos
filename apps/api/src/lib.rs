@@ -10,7 +10,8 @@ pub mod seed;
 pub mod state;
 use std::sync::Arc;
 
-use axum::routing::{delete, get, post};
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tower_http::cors::CorsLayer;
 
@@ -23,6 +24,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
+        .route(
+            "/v1/auth/oidc/callback/{institution_id}",
+            get(routes::oidc::callback),
+        )
+        .route("/v1/auth/oidc/complete", post(routes::oidc::complete))
         .route(
             "/v1/me/devices",
             post(routes::accounts::register_device).get(routes::accounts::list_devices),
@@ -47,7 +53,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/outcomes", post(routes::exams::add_outcome))
         .route("/v1/me/readiness", get(routes::exams::readiness))
+        .route(
+            "/v1/calculators/{kind}",
+            post(routes::calculators::calculate),
+        )
+        .route(
+            "/v1/calculators/convert",
+            post(routes::calculators::convert),
+        )
         .route("/v1/me/today", get(routes::today::today))
+        .route("/v1/me/plan/next-action", get(routes::today::next_action))
         .route(
             "/v1/me/engagement",
             get(routes::engagement::engagement_status),
@@ -72,12 +87,20 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::practice::answer),
         )
         .route(
+            "/v1/practice/sessions/{sid}/items/{item_index}/hint",
+            get(routes::practice::hint),
+        )
+        .route(
             "/v1/practice/sessions/{sid}/submit",
             post(routes::practice::submit),
         )
         .route(
             "/v1/plans/{pid}/revisions/{rid}/undo",
             post(routes::today::undo_revision),
+        )
+        .route(
+            "/v1/plans/{pid}/tasks/{task_id}/protection",
+            put(routes::today::set_task_protection),
         )
         .route(
             "/v1/questions/versions/{vid}/reports",
@@ -102,6 +125,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             axum::routing::patch(routes::admin::update_node),
         )
         .route(
+            "/v1/admin/concepts",
+            get(routes::concepts::list).post(routes::concepts::create),
+        )
+        .route(
+            "/v1/admin/concepts/{concept_id}/versions",
+            post(routes::concepts::create_version),
+        )
+        .route(
+            "/v1/admin/hierarchy/{node_id}/concepts",
+            get(routes::concepts::node_mappings).put(routes::concepts::set_node_mappings),
+        )
+        .route(
             "/v1/admin/questions",
             post(routes::admin::create_question).get(routes::admin::search_questions),
         )
@@ -111,6 +146,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/v1/admin/audit", get(routes::admin::audit_log))
+        .route("/v1/admin/reports", get(routes::reports::review_queue))
         .route(
             "/v1/admin/assessment-workflow",
             post(routes::admin::assessment_workflow),
@@ -201,6 +237,24 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/admin/content-rights",
             post(routes::admin::create_content_rights).get(routes::admin::list_content_rights),
         )
+        .route(
+            "/v1/admin/content-rights/{rights_id}/revoke",
+            axum::routing::patch(routes::admin::revoke_content_rights),
+        )
+        .route(
+            "/v1/admin/library/extraction-reports",
+            get(routes::admin::list_extraction_reports)
+                .post(routes::admin::create_extraction_report)
+                .layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
+            "/v1/admin/library/extraction-reports/{report_id}",
+            get(routes::admin::get_extraction_report),
+        )
+        .route(
+            "/v1/admin/library/extraction-reports/{report_id}/review",
+            post(routes::admin::review_extraction_report),
+        )
         .route("/v1/admin/ai-admin", get(routes::admin::ai_admin))
         .route(
             "/v1/admin/incidents",
@@ -287,6 +341,40 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::library::get_article),
         )
         .route(
+            "/v1/me/library/import-rights",
+            get(routes::library::private_import_rights),
+        )
+        .route(
+            "/v1/me/library/imports",
+            get(routes::library::list_private_imports)
+                .post(routes::library::create_private_import)
+                .layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
+            "/v1/me/library/imports/{document_id}",
+            get(routes::library::get_private_import).delete(routes::library::delete_private_import),
+        )
+        .route(
+            "/v1/admin/source-passages",
+            post(routes::source_changes::register_passage),
+        )
+        .route(
+            "/v1/admin/source-passages/{passage_id}/dependencies",
+            post(routes::source_changes::link_dependency),
+        )
+        .route(
+            "/v1/admin/source-passages/{passage_id}/changes",
+            post(routes::source_changes::record_change),
+        )
+        .route(
+            "/v1/admin/source-changes/{event_id}",
+            get(routes::source_changes::get_change),
+        )
+        .route(
+            "/v1/admin/source-change-tasks/{task_id}",
+            axum::routing::put(routes::source_changes::resolve_task),
+        )
+        .route(
             "/v1/me/notifications",
             get(routes::inbox::inbox).patch(routes::inbox::update_preferences),
         )
@@ -310,7 +398,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route(
             "/v1/questions/versions/{vid}/pregen-tutoring",
-            get(routes::program::pregen_for_question).post(routes::program::generate_pregen),
+            post(routes::program::generate_pregen),
         )
         .route("/v1/config/flags", get(routes::program::list_flags))
         .route("/v1/admin/flags", post(routes::program::set_flag))
@@ -323,12 +411,32 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::program::add_member),
         )
         .route(
+            "/v1/institutions/{institution_id}/external-enrollments",
+            post(routes::program::bind_external_enrollment),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/sso/oidc/start",
+            get(routes::oidc::start_login),
+        )
+        .route(
+            "/v1/admin/institutions/{institution_id}/sso/oidc",
+            get(routes::oidc::get_provider).put(routes::oidc::configure_provider),
+        )
+        .route(
             "/v1/institutions/{institution_id}/cohorts",
-            post(routes::program::create_cohort),
+            get(routes::program::list_cohorts).post(routes::program::create_cohort),
         )
         .route(
             "/v1/institutions/{institution_id}/programs",
-            post(routes::program::create_program),
+            get(routes::program::list_programs).post(routes::program::create_program),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/programs/{program_id}/curriculum",
+            put(routes::program::set_program_curriculum),
+        )
+        .route(
+            "/v1/institutions/{institution_id}/programs/{program_id}/coverage",
+            get(routes::program::program_curriculum_coverage),
         )
         .route(
             "/v1/institutions/{institution_id}/interop",
@@ -354,11 +462,70 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/me/ce-activities",
             post(routes::program::add_ce_activity),
         )
-        .route("/v1/scenarios", post(routes::program::create_scenario))
+        .route(
+            "/v1/scenarios",
+            get(routes::program::list_scenarios).post(routes::program::create_scenario),
+        )
+        .route(
+            "/v1/admin/scenarios/{scenario_id}/versions",
+            post(routes::program::create_scenario_version),
+        )
         .route("/v1/scenarios/runs", post(routes::program::start_scenario))
+        .route(
+            "/v1/scenarios/runs/{run_id}",
+            get(routes::program::get_scenario_run),
+        )
         .route(
             "/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/team",
+            get(routes::scenario_team::list_team),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/team/invites",
+            post(routes::scenario_team::create_invite),
+        )
+        .route(
+            "/v1/scenario-team-invites/join",
+            post(routes::scenario_team::join_invite),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/handovers",
+            get(routes::scenario_team::list_handovers).post(routes::scenario_team::create_handover),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/handovers/{handover_id}/ack",
+            post(routes::scenario_team::acknowledge_handover),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/counterfactual",
+            post(routes::sim::counterfactual_replay),
+        )
+        .route(
+            "/v1/scenarios/runs/{run_id}/appeals",
+            post(routes::sim::appeal_scenario_assessment),
+        )
+        .route(
+            "/v1/admin/scenarios/runs/{run_id}/assessment",
+            get(routes::sim::admin_assessment).post(routes::sim::record_assessment),
+        )
+        .route(
+            "/v1/admin/scenarios/runs/pending-assessment",
+            get(routes::sim::pending_assessments),
+        )
+        .route(
+            "/v1/admin/scenario-assessment-appeals",
+            get(routes::sim::list_scenario_assessment_appeals),
+        )
+        .route(
+            "/v1/admin/scenario-assessment-appeals/{appeal_id}",
+            get(routes::sim::get_scenario_assessment_appeal),
+        )
+        .route(
+            "/v1/admin/scenario-assessment-appeals/{appeal_id}/review",
+            post(routes::sim::review_scenario_assessment_appeal),
         )
         .route(
             "/v1/note-collections",
@@ -379,6 +546,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/export", get(routes::packs::export_account))
         .route(
             "/v1/packs/{exam_id}/manifest",
+            get(routes::packs::legacy_pack_manifest),
+        )
+        .route(
+            "/v2/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
         .route("/v1/packs/lease", post(routes::packs::create_lease))
@@ -441,6 +612,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/auth/register", post(routes::auth::register))
         .route("/api/v1/auth/login", post(routes::auth::login))
         .route(
+            "/api/v1/auth/oidc/callback/{institution_id}",
+            get(routes::oidc::callback),
+        )
+        .route("/api/v1/auth/oidc/complete", post(routes::oidc::complete))
+        .route(
             "/api/v1/me/devices",
             post(routes::accounts::register_device).get(routes::accounts::list_devices),
         )
@@ -467,7 +643,19 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/api/v1/me/outcomes", post(routes::exams::add_outcome))
         .route("/api/v1/me/readiness", get(routes::exams::readiness))
+        .route(
+            "/api/v1/calculators/{kind}",
+            post(routes::calculators::calculate),
+        )
+        .route(
+            "/api/v1/calculators/convert",
+            post(routes::calculators::convert),
+        )
         .route("/api/v1/me/today", get(routes::today::today))
+        .route(
+            "/api/v1/me/plan/next-action",
+            get(routes::today::next_action),
+        )
         .route(
             "/api/v1/me/engagement",
             get(routes::engagement::engagement_status),
@@ -495,12 +683,20 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::practice::answer),
         )
         .route(
+            "/api/v1/practice/sessions/{sid}/items/{item_index}/hint",
+            get(routes::practice::hint),
+        )
+        .route(
             "/api/v1/practice/sessions/{sid}/submit",
             post(routes::practice::submit),
         )
         .route(
             "/api/v1/plans/{pid}/revisions/{rid}/undo",
             post(routes::today::undo_revision),
+        )
+        .route(
+            "/api/v1/plans/{pid}/tasks/{task_id}/protection",
+            put(routes::today::set_task_protection),
         )
         .route(
             "/api/v1/questions/versions/{vid}/reports",
@@ -528,6 +724,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             axum::routing::patch(routes::admin::update_node),
         )
         .route(
+            "/api/v1/admin/concepts",
+            get(routes::concepts::list).post(routes::concepts::create),
+        )
+        .route(
+            "/api/v1/admin/concepts/{concept_id}/versions",
+            post(routes::concepts::create_version),
+        )
+        .route(
+            "/api/v1/admin/hierarchy/{node_id}/concepts",
+            get(routes::concepts::node_mappings).put(routes::concepts::set_node_mappings),
+        )
+        .route(
             "/api/v1/admin/questions",
             post(routes::admin::create_question).get(routes::admin::search_questions),
         )
@@ -537,6 +745,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::rollback_import),
         )
         .route("/api/v1/admin/audit", get(routes::admin::audit_log))
+        .route("/api/v1/admin/reports", get(routes::reports::review_queue))
         .route(
             "/api/v1/admin/assessment-workflow",
             post(routes::admin::assessment_workflow),
@@ -633,6 +842,24 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/admin/content-rights",
             post(routes::admin::create_content_rights).get(routes::admin::list_content_rights),
         )
+        .route(
+            "/api/v1/admin/content-rights/{rights_id}/revoke",
+            axum::routing::patch(routes::admin::revoke_content_rights),
+        )
+        .route(
+            "/api/v1/admin/library/extraction-reports",
+            get(routes::admin::list_extraction_reports)
+                .post(routes::admin::create_extraction_report)
+                .layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v1/admin/library/extraction-reports/{report_id}",
+            get(routes::admin::get_extraction_report),
+        )
+        .route(
+            "/api/v1/admin/library/extraction-reports/{report_id}/review",
+            post(routes::admin::review_extraction_report),
+        )
         .route("/api/v1/admin/ai-admin", get(routes::admin::ai_admin))
         .route(
             "/api/v1/admin/incidents",
@@ -713,6 +940,40 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::library::get_article),
         )
         .route(
+            "/api/v1/me/library/import-rights",
+            get(routes::library::private_import_rights),
+        )
+        .route(
+            "/api/v1/me/library/imports",
+            get(routes::library::list_private_imports)
+                .post(routes::library::create_private_import)
+                .layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
+            "/api/v1/me/library/imports/{document_id}",
+            get(routes::library::get_private_import).delete(routes::library::delete_private_import),
+        )
+        .route(
+            "/api/v1/admin/source-passages",
+            post(routes::source_changes::register_passage),
+        )
+        .route(
+            "/api/v1/admin/source-passages/{passage_id}/dependencies",
+            post(routes::source_changes::link_dependency),
+        )
+        .route(
+            "/api/v1/admin/source-passages/{passage_id}/changes",
+            post(routes::source_changes::record_change),
+        )
+        .route(
+            "/api/v1/admin/source-changes/{event_id}",
+            get(routes::source_changes::get_change),
+        )
+        .route(
+            "/api/v1/admin/source-change-tasks/{task_id}",
+            axum::routing::put(routes::source_changes::resolve_task),
+        )
+        .route(
             "/api/v1/me/notifications",
             get(routes::inbox::inbox).patch(routes::inbox::update_preferences),
         )
@@ -738,7 +999,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route(
             "/api/v1/questions/versions/{vid}/pregen-tutoring",
-            get(routes::program::pregen_for_question).post(routes::program::generate_pregen),
+            post(routes::program::generate_pregen),
         )
         .route("/api/v1/config/flags", get(routes::program::list_flags))
         .route("/api/v1/admin/flags", post(routes::program::set_flag))
@@ -751,12 +1012,32 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::program::add_member),
         )
         .route(
+            "/api/v1/institutions/{institution_id}/external-enrollments",
+            post(routes::program::bind_external_enrollment),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/sso/oidc/start",
+            get(routes::oidc::start_login),
+        )
+        .route(
+            "/api/v1/admin/institutions/{institution_id}/sso/oidc",
+            get(routes::oidc::get_provider).put(routes::oidc::configure_provider),
+        )
+        .route(
             "/api/v1/institutions/{institution_id}/cohorts",
-            post(routes::program::create_cohort),
+            get(routes::program::list_cohorts).post(routes::program::create_cohort),
         )
         .route(
             "/api/v1/institutions/{institution_id}/programs",
-            post(routes::program::create_program),
+            get(routes::program::list_programs).post(routes::program::create_program),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/programs/{program_id}/curriculum",
+            put(routes::program::set_program_curriculum),
+        )
+        .route(
+            "/api/v1/institutions/{institution_id}/programs/{program_id}/coverage",
+            get(routes::program::program_curriculum_coverage),
         )
         .route(
             "/api/v1/institutions/{institution_id}/interop",
@@ -782,14 +1063,73 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/me/ce-activities",
             post(routes::program::add_ce_activity),
         )
-        .route("/api/v1/scenarios", post(routes::program::create_scenario))
+        .route(
+            "/api/v1/scenarios",
+            get(routes::program::list_scenarios).post(routes::program::create_scenario),
+        )
+        .route(
+            "/api/v1/admin/scenarios/{scenario_id}/versions",
+            post(routes::program::create_scenario_version),
+        )
         .route(
             "/api/v1/scenarios/runs",
             post(routes::program::start_scenario),
         )
         .route(
+            "/api/v1/scenarios/runs/{run_id}",
+            get(routes::program::get_scenario_run),
+        )
+        .route(
             "/api/v1/scenarios/runs/{run_id}/events",
             post(routes::program::scenario_event),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/team",
+            get(routes::scenario_team::list_team),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/team/invites",
+            post(routes::scenario_team::create_invite),
+        )
+        .route(
+            "/api/v1/scenario-team-invites/join",
+            post(routes::scenario_team::join_invite),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/handovers",
+            get(routes::scenario_team::list_handovers).post(routes::scenario_team::create_handover),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/handovers/{handover_id}/ack",
+            post(routes::scenario_team::acknowledge_handover),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/counterfactual",
+            post(routes::sim::counterfactual_replay),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/appeals",
+            post(routes::sim::appeal_scenario_assessment),
+        )
+        .route(
+            "/api/v1/admin/scenarios/runs/{run_id}/assessment",
+            get(routes::sim::admin_assessment).post(routes::sim::record_assessment),
+        )
+        .route(
+            "/api/v1/admin/scenarios/runs/pending-assessment",
+            get(routes::sim::pending_assessments),
+        )
+        .route(
+            "/api/v1/admin/scenario-assessment-appeals",
+            get(routes::sim::list_scenario_assessment_appeals),
+        )
+        .route(
+            "/api/v1/admin/scenario-assessment-appeals/{appeal_id}",
+            get(routes::sim::get_scenario_assessment_appeal),
+        )
+        .route(
+            "/api/v1/admin/scenario-assessment-appeals/{appeal_id}/review",
+            post(routes::sim::review_scenario_assessment_appeal),
         )
         .route(
             "/api/v1/note-collections",
@@ -810,6 +1150,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/me/export", get(routes::packs::export_account))
         .route(
             "/api/v1/packs/{exam_id}/manifest",
+            get(routes::packs::legacy_pack_manifest),
+        )
+        .route(
+            "/api/v2/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
         .route("/api/v1/packs/lease", post(routes::packs::create_lease))

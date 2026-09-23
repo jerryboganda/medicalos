@@ -263,16 +263,15 @@ pub async fn due_retests(
         r#"SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due
            FROM retest_cards rc
            JOIN question_versions qv ON qv.id = rc.question_version_id
-           WHERE rc.user_id = $1 AND rc.due <= $2
+           WHERE rc.user_id = $1 AND rc.due <= $2 AND qv.status = 'published'
            ORDER BY rc.due"#,
         user.user_id,
         now
     )
     .fetch_all(&state.pool)
     .await?;
-    // QB-02/SR-08 (§13): prefer an unattempted published sibling variant of
-    // the same family at serving time; the original card stays the fallback
-    // and the result is still recorded against the card's version.
+    // QB-02/SR-08 (§13): prefer an unattempted published sibling variant.
+    // The base query only returns published cards, so the fallback is safe.
     let mut items: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
     for r in rows {
         let variant = sqlx::query!(

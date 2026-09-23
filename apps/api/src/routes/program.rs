@@ -4,10 +4,13 @@
 //! scaffold. API-first; surfaces attach in the next client iterations.
 
 use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::{PgConnection, PgPool};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -23,81 +26,140 @@ fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
 
 // ---- AI-18: pre-generated tutoring ------------------------------------------
 
-/// Generate the five one-tap tutoring cards for a published question from
-/// its own reviewed material (extractive — §9.5, no model, no hallucination
-/// surface). Cached by (version, prompt type); a new version regenerates.
-pub async fn generate_pregen(
-    State(state): State<Arc<AppState>>,
-    _user: AuthUser,
-    Path(vid): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+#[derive(Clone, Debug, Serialize)]
+pub struct TutoringCard {
+    pub prompt_type: String,
+    pub content: String,
+    pub source_ref: String,
+}
+
+/// Ensure the five deterministic, source-linked cards exist for one published
+/// question version. A separate version gets a separate cache by its ID.
+pub(crate) async fn ensure_pregen_on(
+    connection: &mut PgConnection,
+    vid: Uuid,
+) -> ApiResult<Vec<TutoringCard>> {
     let qv = sqlx::query!(
-        r#"SELECT correct_index, key_learning_point, exam_tip, options, source_ref
+        r#"SELECT correct_index, key_learning_point, options, source_ref
            FROM question_versions WHERE id = $1 AND status = 'published'"#,
         vid
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *connection)
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    let restricted: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM reserved_questions rq
+               JOIN assessment_forms f ON f.id = rq.form_id
+               WHERE rq.question_version_id = $1 AND f.ai_allowed = FALSE
+           )"#,
+    )
+    .bind(vid)
+    .fetch_one(&mut *connection)
+    .await?;
+    if restricted {
+        return Ok(Vec::new());
+    }
+
     let options: Vec<QuestionOption> =
         serde_json::from_value(qv.options).map_err(|_| ApiError::internal())?;
     let key = qv.correct_index as usize;
-    let key_option = options.get(key).ok_or_else(ApiError::internal)?;
-    let distractor = options
-        .get((key + 1) % options.len())
-        .ok_or_else(ApiError::internal)?;
-
-    let cards = json!({
-        "explain": format!("Simple version: {} — because {}.", key_option.text, key_option.rationale),
-        "why_wrong": format!(
-            "The tempting wrong answer is \"{}\": {}. The reviewed position is \"{}\": {}.",
-            distractor.text, distractor.rationale, key_option.text, key_option.rationale
+    if options.len() < 2 || key >= options.len() {
+        return Err(ApiError::internal());
+    }
+    let key_option = &options[key];
+    let distractor = &options[(key + 1) % options.len()];
+    let cards = [
+        (
+            "explain",
+            format!(
+                "Simple version: {} — because {}.",
+                key_option.text, key_option.rationale
+            ),
         ),
-        "compare": format!(
-            "\"{}\" vs \"{}\": the difference that matters is {} vs {}.",
-            key_option.text, distractor.text, key_option.rationale, distractor.rationale
+        (
+            "why_wrong",
+            "Compare your selected option with the keyed answer using the feedback rationales."
+                .to_string(),
         ),
-        "mnemonic": format!("Mnemonic cue: {} (from the reviewed key point).", qv.key_learning_point),
-        "test_me": "A fresh unseen variant will be scheduled by the re-test queue (SR-08).".to_string(),
-    });
-
-    for (ptype, content) in cards.as_object().unwrap() {
+        (
+            "compare",
+            format!(
+                "\"{}\" vs \"{}\": the difference that matters is {} vs {}.",
+                key_option.text, distractor.text, key_option.rationale, distractor.rationale
+            ),
+        ),
+        (
+            "mnemonic",
+            format!(
+                "Mnemonic cue: {} (from the reviewed key point).",
+                qv.key_learning_point
+            ),
+        ),
+        (
+            "test_me",
+            format!(
+                "Recall: State the key learning point for this question.\nAnswer: {}",
+                qv.key_learning_point
+            ),
+        ),
+    ];
+    for (prompt_type, content) in cards {
         sqlx::query!(
             "INSERT INTO pregen_tutoring (id, question_version_id, prompt_type, content)
              VALUES ($1, $2, $3, $4)
              ON CONFLICT (question_version_id, prompt_type)
-             DO UPDATE SET content = $4, generated_by = 'extractive', created_at = now()",
+             DO UPDATE SET content = EXCLUDED.content
+             WHERE pregen_tutoring.prompt_type IN ('why_wrong', 'test_me')",
             Uuid::new_v4(),
             vid,
-            ptype,
-            content.as_str().unwrap_or_default()
+            prompt_type,
+            content
         )
-        .execute(&state.pool)
+        .execute(&mut *connection)
         .await?;
     }
-    Ok(Json(
-        json!({ "generated": cards.as_object().unwrap().len() }),
-    ))
-}
-
-/// Cached one-tap cards for a question. Offline-includable in packs (§9.5).
-pub async fn pregen_for_question(
-    State(state): State<Arc<AppState>>,
-    _user: AuthUser,
-    Path(vid): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query!(
         "SELECT prompt_type, content FROM pregen_tutoring
          WHERE question_version_id = $1 ORDER BY prompt_type",
         vid
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *connection)
     .await?;
-    let cards: serde_json::Value = rows
-        .iter()
-        .map(|r| json!({"prompt_type": r.prompt_type, "content": r.content}))
-        .collect();
-    Ok(Json(json!({ "cards": cards })))
+    Ok(rows
+        .into_iter()
+        .map(|row| TutoringCard {
+            prompt_type: row.prompt_type,
+            content: row.content,
+            source_ref: qv.source_ref.clone(),
+        })
+        .collect())
+}
+
+pub(crate) async fn ensure_pregen(pool: &PgPool, vid: Uuid) -> ApiResult<Vec<TutoringCard>> {
+    let mut tx = pool.begin().await?;
+    let cards = ensure_pregen_on(&mut *tx, vid).await?;
+    tx.commit().await?;
+    Ok(cards)
+}
+
+/// Populate the cache from reviewed material. This is an editorial operation;
+/// learners may read cards only after an eligible tutor answer.
+pub async fn generate_pregen(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: HeaderMap,
+    Path(vid): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(headers.get("x-admin-token").and_then(|v| v.to_str().ok()))?;
+    let cards = ensure_pregen(&state.pool, vid).await?;
+    if cards.is_empty() {
+        return Err(ApiError::forbidden(
+            "ai_restricted_for_assessment",
+            "AI assistance is not allowed for this reserved assessment",
+        ));
+    }
+    Ok(Json(json!({ "generated": cards.len() })))
 }
 
 // ---- OPS-06: feature flags / remote config ----------------------------------
@@ -243,9 +305,216 @@ pub async fn add_member(
 }
 
 #[derive(Deserialize)]
+pub struct ExternalEnrollmentReq {
+    pub provider: String,
+    pub subject: String,
+    pub user_id: Uuid,
+    pub role: Option<String>,
+    pub cohort_id: Option<Uuid>,
+}
+
+/// Provision an institution-scoped external identity for a learner.
+/// This endpoint records a mapping for a provider integration; it does not
+/// accept or verify provider authentication assertions.
+pub async fn bind_external_enrollment(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+    Json(req): Json<ExternalEnrollmentReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let provider = req.provider.trim();
+    if provider.is_empty()
+        || provider.len() > 2048
+        || provider.chars().any(char::is_control)
+        || req.subject.trim().is_empty()
+        || req.subject.len() > 500
+        || req.subject.chars().any(char::is_control)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_external_identity",
+            "provider must be 1-2048 characters and subject 1-500 characters without control characters",
+        ));
+    }
+    if req.role.as_deref().is_some_and(|role| role != "learner") {
+        return Err(ApiError::unprocessable(
+            "invalid_enrollment_role",
+            "external enrollment can provision learners only",
+        ));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let staff = sqlx::query!(
+        "SELECT 1 AS one FROM institution_members
+         WHERE institution_id = $1 AND user_id = $2
+           AND role IN ('admin', 'instructor')
+         FOR UPDATE",
+        institution_id,
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if staff.is_none() {
+        return Err(ApiError::forbidden(
+            "instructor_required",
+            "institution staff access required",
+        ));
+    }
+
+    let active_user = sqlx::query!(
+        "SELECT 1 AS one FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        req.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if active_user.is_none() {
+        return Err(ApiError::not_found("user_not_found"));
+    }
+    if let Some(cohort_id) = req.cohort_id {
+        let cohort = sqlx::query!(
+            "SELECT 1 AS one FROM cohorts WHERE id = $1 AND institution_id = $2",
+            cohort_id,
+            institution_id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if cohort.is_none() {
+            return Err(ApiError::not_found("cohort_not_found"));
+        }
+    }
+
+    let identity_created = sqlx::query!(
+        "INSERT INTO external_identities (institution_id, provider, subject, user_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (institution_id, provider, subject) DO NOTHING",
+        institution_id,
+        provider,
+        req.subject,
+        req.user_id
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+
+    if !identity_created {
+        let existing = sqlx::query!(
+            "SELECT user_id FROM external_identities
+             WHERE institution_id = $1 AND provider = $2 AND subject = $3",
+            institution_id,
+            provider,
+            req.subject
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if existing.user_id != req.user_id {
+            return Err(ApiError::conflict(
+                "external_identity_conflict",
+                "this provider identity is already bound to another user",
+            ));
+        }
+    }
+
+    let membership_created = sqlx::query!(
+        "INSERT INTO institution_members (institution_id, user_id, role)
+         VALUES ($1, $2, 'learner')
+         ON CONFLICT (institution_id, user_id) DO NOTHING",
+        institution_id,
+        req.user_id
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+
+    let cohort_membership_created = if let Some(cohort_id) = req.cohort_id {
+        sqlx::query!(
+            "INSERT INTO cohort_members (cohort_id, user_id) VALUES ($1, $2)
+             ON CONFLICT (cohort_id, user_id) DO NOTHING",
+            cohort_id,
+            req.user_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0
+    } else {
+        false
+    };
+
+    if identity_created || membership_created || cohort_membership_created {
+        crate::routes::admin::audit_scoped(
+            &mut *tx,
+            user.user_id,
+            institution_id,
+            "external_enrollment_bound",
+            "external_identity",
+            req.user_id,
+            json!({
+                "provider": provider,
+                "role": "learner",
+                "cohort_id": req.cohort_id
+            }),
+        )
+        .await?;
+    }
+
+    let membership = sqlx::query!(
+        "SELECT role FROM institution_members WHERE institution_id = $1 AND user_id = $2",
+        institution_id,
+        req.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "user_id": req.user_id,
+        "provider": provider,
+        "subject": req.subject,
+        "role": membership.role,
+        "cohort_id": req.cohort_id,
+        "identity_created": identity_created
+    })))
+}
+
+#[derive(Deserialize)]
 pub struct CreateCohortReq {
     pub name: String,
     pub member_ids: Option<Vec<Uuid>>,
+    pub program_id: Option<Uuid>,
+}
+
+pub async fn list_cohorts(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let rows = sqlx::query!(
+        r#"SELECT c.id AS cohort_id, c.name, c.program_id AS "program_id?",
+                  COUNT(u.id)::BIGINT AS "members!"
+           FROM cohorts c
+           LEFT JOIN cohort_members cm ON cm.cohort_id = c.id
+           LEFT JOIN users u ON u.id = cm.user_id AND u.deleted_at IS NULL
+           WHERE c.institution_id = $1
+           GROUP BY c.id
+           ORDER BY c.name, c.id"#,
+        institution_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let cohorts: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "cohort_id": row.cohort_id,
+                "name": row.name,
+                "program_id": row.program_id,
+                "members": row.members
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "cohorts": cohorts })))
 }
 
 pub async fn create_cohort(
@@ -261,13 +530,15 @@ pub async fn create_cohort(
             "cohort name must be 1-200 characters",
         ));
     }
+    let mut tx = state.pool.begin().await?;
     let admin_member = sqlx::query!(
         "SELECT 1 AS one FROM institution_members
-         WHERE institution_id = $1 AND user_id = $2 AND role IN ('admin','instructor')",
+         WHERE institution_id = $1 AND user_id = $2 AND role IN ('admin','instructor')
+         FOR UPDATE",
         institution_id,
         user.user_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| {
         ApiError::forbidden(
@@ -277,35 +548,99 @@ pub async fn create_cohort(
     })?;
     let _ = admin_member;
 
+    let mut member_ids = req.member_ids.unwrap_or_default();
+    if member_ids.len() > 500 {
+        return Err(ApiError::unprocessable(
+            "too_many_members",
+            "a cohort can enroll at most 500 learners at a time",
+        ));
+    }
+    member_ids.sort_unstable();
+    member_ids.dedup();
+    let active_ids = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM users WHERE id = ANY($1) AND deleted_at IS NULL FOR SHARE",
+    )
+    .bind(&member_ids)
+    .fetch_all(&mut *tx)
+    .await?;
+    if active_ids.len() != member_ids.len() {
+        return Err(ApiError::unprocessable(
+            "invalid_members",
+            "every cohort learner must be an active account",
+        ));
+    }
+    let non_learner_members = sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM institution_members
+         WHERE institution_id = $1 AND user_id = ANY($2) AND role <> 'learner'
+         FOR UPDATE",
+    )
+    .bind(institution_id)
+    .bind(&member_ids)
+    .fetch_all(&mut *tx)
+    .await?;
+    if !non_learner_members.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_cohort_role",
+            "cohorts can contain learner members only",
+        ));
+    }
+
+    if let Some(program_id) = req.program_id {
+        let program = sqlx::query!(
+            "SELECT 1 AS one FROM institution_programs
+             WHERE id = $1 AND institution_id = $2",
+            program_id,
+            institution_id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if program.is_none() {
+            return Err(ApiError::not_found("program_not_found"));
+        }
+    }
+
     let cohort_id = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO cohorts (id, institution_id, name) VALUES ($1, $2, $3)",
+        "INSERT INTO cohorts (id, institution_id, name, program_id)
+         VALUES ($1, $2, $3, $4)",
         cohort_id,
         institution_id,
-        name
+        name,
+        req.program_id
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-    for member in req.member_ids.unwrap_or_default() {
+    for member_id in &member_ids {
+        let member = *member_id;
+        sqlx::query!(
+            "INSERT INTO institution_members (institution_id, user_id, role)
+             VALUES ($1, $2, 'learner')
+             ON CONFLICT (institution_id, user_id) DO NOTHING",
+            institution_id,
+            member
+        )
+        .execute(&mut *tx)
+        .await?;
         sqlx::query!(
             "INSERT INTO cohort_members (cohort_id, user_id) VALUES ($1, $2)
              ON CONFLICT DO NOTHING",
             cohort_id,
             member
         )
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
     }
     crate::routes::admin::audit_scoped(
-        &state.pool,
+        &mut *tx,
         user.user_id,
         institution_id,
         "cohort_created",
         "cohort",
         cohort_id,
-        json!({ "name": name }),
+        json!({ "name": name, "program_id": req.program_id, "member_ids": member_ids }),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "cohort_id": cohort_id })))
 }
 
@@ -402,15 +737,258 @@ pub async fn create_program(
         ));
     }
     let id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await?;
     sqlx::query!(
         "INSERT INTO institution_programs (id, institution_id, name) VALUES ($1, $2, $3)",
         id,
         institution_id,
         name
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    crate::routes::admin::audit_scoped(
+        &mut *tx,
+        user.user_id,
+        institution_id,
+        "program_created",
+        "institution_program",
+        id,
+        json!({ "name": name }),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "program_id": id })))
+}
+
+pub async fn list_programs(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(institution_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let rows = sqlx::query!(
+        r#"SELECT p.id AS program_id, p.name,
+                  COALESCE(
+                      array_agg(m.chapter_id ORDER BY m.chapter_id)
+                          FILTER (WHERE m.chapter_id IS NOT NULL),
+                      ARRAY[]::UUID[]
+                  ) AS "chapter_ids!"
+           FROM institution_programs p
+           LEFT JOIN institution_program_curriculum m ON m.program_id = p.id
+           WHERE p.institution_id = $1
+           GROUP BY p.id
+           ORDER BY p.name, p.id"#,
+        institution_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let programs: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "program_id": row.program_id,
+                "name": row.name,
+                "chapter_ids": row.chapter_ids
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "programs": programs })))
+}
+
+#[derive(Deserialize)]
+pub struct SetProgramCurriculumReq {
+    pub chapter_ids: Vec<Uuid>,
+}
+
+pub async fn set_program_curriculum(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((institution_id, program_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<SetProgramCurriculumReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    let staff = sqlx::query!(
+        "SELECT 1 AS one FROM institution_members
+         WHERE institution_id = $1 AND user_id = $2
+           AND role IN ('admin', 'instructor')
+         FOR UPDATE",
+        institution_id,
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if staff.is_none() {
+        return Err(ApiError::forbidden(
+            "instructor_required",
+            "institution staff access required",
+        ));
+    }
+    let program = sqlx::query!(
+        "SELECT 1 AS one FROM institution_programs
+         WHERE id = $1 AND institution_id = $2
+         FOR UPDATE",
+        program_id,
+        institution_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if program.is_none() {
+        return Err(ApiError::not_found("program_not_found"));
+    }
+    if req.chapter_ids.len() > 500 {
+        return Err(ApiError::unprocessable(
+            "too_many_chapters",
+            "a program can map at most 500 chapters at a time",
+        ));
+    }
+
+    let mut chapter_ids = req.chapter_ids;
+    chapter_ids.sort_unstable();
+    chapter_ids.dedup();
+    let valid_chapters = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)::BIGINT FROM curriculum_nodes
+         WHERE id = ANY($1) AND kind = 'chapter'",
+    )
+    .bind(&chapter_ids)
+    .fetch_one(&mut *tx)
+    .await?;
+    if valid_chapters != chapter_ids.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_chapters",
+            "every curriculum mapping must reference an existing chapter",
+        ));
+    }
+
+    sqlx::query!(
+        "DELETE FROM institution_program_curriculum WHERE program_id = $1",
+        program_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    for chapter_id in &chapter_ids {
+        sqlx::query!(
+            "INSERT INTO institution_program_curriculum
+             (program_id, chapter_id, created_by) VALUES ($1, $2, $3)",
+            program_id,
+            chapter_id,
+            user.user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    crate::routes::admin::audit_scoped(
+        &mut *tx,
+        user.user_id,
+        institution_id,
+        "program_curriculum_replaced",
+        "institution_program",
+        program_id,
+        json!({ "chapter_ids": chapter_ids }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "program_id": program_id,
+        "chapter_ids": chapter_ids,
+        "chapter_count": chapter_ids.len()
+    })))
+}
+
+pub async fn program_curriculum_coverage(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((institution_id, program_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_institution_staff(&state, institution_id, user.user_id).await?;
+    let program = sqlx::query!(
+        "SELECT 1 AS one FROM institution_programs
+         WHERE id = $1 AND institution_id = $2",
+        program_id,
+        institution_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if program.is_none() {
+        return Err(ApiError::not_found("program_not_found"));
+    }
+
+    let cohort_size = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(DISTINCT cm.user_id)::BIGINT
+         FROM cohorts c
+         JOIN cohort_members cm ON cm.cohort_id = c.id
+         JOIN users u ON u.id = cm.user_id AND u.deleted_at IS NULL
+         WHERE c.institution_id = $1 AND c.program_id = $2",
+    )
+    .bind(institution_id)
+    .bind(program_id)
+    .fetch_one(&state.pool)
+    .await?;
+    let rows = sqlx::query!(
+        r#"WITH program_learners AS (
+               SELECT DISTINCT cm.user_id
+               FROM cohorts c
+               JOIN cohort_members cm ON cm.cohort_id = c.id
+               JOIN users u ON u.id = cm.user_id AND u.deleted_at IS NULL
+               WHERE c.institution_id = $1 AND c.program_id = $2
+           ), chapter_evidence AS (
+               SELECT qv.chapter_id,
+                      COUNT(DISTINCT a.user_id)::BIGINT AS learners_with_evidence,
+                      COUNT(*)::BIGINT AS attempts
+               FROM program_learners l
+               JOIN attempts a ON a.user_id = l.user_id AND a.chosen_index IS NOT NULL
+               JOIN question_versions qv ON qv.id = a.question_version_id
+               GROUP BY qv.chapter_id
+           )
+           SELECT n.id AS chapter_id, n.name AS chapter_name,
+                  COALESCE(e.learners_with_evidence, 0)::BIGINT AS "learners_with_evidence!",
+                  COALESCE(e.attempts, 0)::BIGINT AS "attempts!"
+           FROM institution_program_curriculum m
+           JOIN curriculum_nodes n ON n.id = m.chapter_id
+           LEFT JOIN chapter_evidence e ON e.chapter_id = n.id
+           WHERE m.program_id = $2
+           ORDER BY n.display_order, n.name"#,
+        institution_id,
+        program_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let suppressed = cohort_size < 5;
+    let chapters: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            let learners_with_evidence = if suppressed {
+                serde_json::Value::Null
+            } else {
+                json!(row.learners_with_evidence)
+            };
+            let attempts = if suppressed {
+                serde_json::Value::Null
+            } else {
+                json!(row.attempts)
+            };
+            let coverage_percent = if suppressed || cohort_size == 0 {
+                serde_json::Value::Null
+            } else {
+                json!(row.learners_with_evidence as f64 / cohort_size as f64 * 100.0)
+            };
+            json!({
+                "chapter_id": row.chapter_id,
+                "chapter": row.chapter_name,
+                "learners_with_evidence": learners_with_evidence,
+                "attempts": attempts,
+                "coverage_percent": coverage_percent
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "program_id": program_id,
+        "cohort_size": cohort_size,
+        "minimum_group_size": 5,
+        "suppressed": suppressed,
+        "chapters": chapters
+    })))
 }
 
 #[derive(Deserialize)]
@@ -564,6 +1142,93 @@ pub struct CreateScenarioReq {
     pub slug: String,
     pub title: String,
     pub state_machine: serde_json::Value,
+    #[serde(default)]
+    pub rubric: Vec<ScenarioRubricCriterionReq>,
+}
+
+#[derive(Deserialize)]
+pub struct ScenarioRubricCriterionReq {
+    pub criterion_key: String,
+    pub label: String,
+    pub max_score: f32,
+}
+
+#[derive(Deserialize)]
+pub struct CreateScenarioVersionReq {
+    pub state_machine: serde_json::Value,
+    #[serde(default)]
+    pub rubric: Vec<ScenarioRubricCriterionReq>,
+}
+
+fn validate_scenario_rubric(
+    rubric: &[ScenarioRubricCriterionReq],
+    state_machine: &serde_json::Value,
+) -> ApiResult<()> {
+    if rubric.len() > 50 {
+        return Err(ApiError::unprocessable(
+            "invalid_rubric",
+            "a station may define at most 50 rubric criteria",
+        ));
+    }
+    let mut keys = HashSet::new();
+    for criterion in rubric {
+        let key = criterion.criterion_key.trim();
+        let label = criterion.label.trim();
+        if key.is_empty()
+            || key.len() > 80
+            || !key.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+            })
+            || label.is_empty()
+            || label.chars().count() > 200
+            || !criterion.max_score.is_finite()
+            || criterion.max_score <= 0.0
+            || criterion.max_score > 100.0
+        {
+            return Err(ApiError::unprocessable(
+                "invalid_rubric_criterion",
+                "criteria need a key, a 1-200 character label, and a maximum score in (0, 100]",
+            ));
+        }
+        if !keys.insert(key.to_string()) {
+            return Err(ApiError::unprocessable(
+                "duplicate_rubric_criterion",
+                "criterion keys must be unique within a scenario version",
+            ));
+        }
+    }
+
+    let terminal_states = state_machine
+        .get("terminal_states")
+        .and_then(serde_json::Value::as_array);
+    if !rubric.is_empty() && terminal_states.is_none_or(Vec::is_empty) {
+        return Err(ApiError::unprocessable(
+            "terminal_states_required",
+            "a scenario with a rubric must declare at least one terminal state",
+        ));
+    }
+    if let Some(terminal_states) = terminal_states {
+        let destinations: HashSet<&str> = state_machine
+            .get("transitions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|transition| transition.get("to").and_then(serde_json::Value::as_str))
+            .collect();
+        if terminal_states.is_empty()
+            || terminal_states.iter().any(|state| {
+                state
+                    .as_str()
+                    .is_none_or(|value| value.trim().is_empty() || !destinations.contains(value))
+            })
+        {
+            return Err(ApiError::unprocessable(
+                "invalid_terminal_states",
+                "terminal states must be non-empty destinations of scenario transitions",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub async fn create_scenario(
@@ -580,23 +1245,137 @@ pub async fn create_scenario(
             "slug must be alphanumeric/dashes",
         ));
     }
+    validate_scenario_rubric(&req.rubric, &req.state_machine)?;
     let id = Uuid::new_v4();
+    let version_id = Uuid::new_v4();
+    let state_machine = req.state_machine;
+    let rubric = req.rubric;
+    let mut tx = state.pool.begin().await?;
     sqlx::query!(
-        "INSERT INTO scenarios (id, slug, title, state_machine) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO scenarios (id, slug, title, version, status, state_machine)
+         VALUES ($1, $2, $3, 1, 'published', $4)",
         id,
         slug,
         req.title.trim(),
-        req.state_machine
+        state_machine.clone()
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(Json(json!({ "scenario_id": id })))
+    sqlx::query!(
+        "INSERT INTO scenario_versions (id, scenario_id, version, status, state_machine)
+         VALUES ($1, $2, 1, 'published', $3)",
+        version_id,
+        id,
+        state_machine
+    )
+    .execute(&mut *tx)
+    .await?;
+    for criterion in rubric {
+        sqlx::query(
+            "INSERT INTO scenario_rubrics (id, scenario_id, scenario_version_id, criterion_key, label, max_score)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(id)
+        .bind(version_id)
+        .bind(criterion.criterion_key.trim())
+        .bind(criterion.label.trim())
+        .bind(criterion.max_score)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(Json(
+        json!({ "scenario_id": id, "scenario_version_id": version_id, "version": 1 }),
+    ))
+}
+
+pub async fn create_scenario_version(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Path(scenario_id): Path<Uuid>,
+    Json(req): Json<CreateScenarioVersionReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    admin(&state, &headers)?;
+    validate_scenario_rubric(&req.rubric, &req.state_machine)?;
+
+    let mut tx = state.pool.begin().await?;
+    let current = sqlx::query_as::<_, (i32, String)>(
+        "SELECT version, status FROM scenarios WHERE id = $1 FOR UPDATE",
+    )
+    .bind(scenario_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("scenario_not_found"))?;
+    if current.1 != "published" {
+        return Err(ApiError::conflict(
+            "scenario_not_published",
+            "only a published scenario can receive a new version",
+        ));
+    }
+    let version = current.0.checked_add(1).ok_or_else(ApiError::internal)?;
+    let version_id = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO scenario_versions (id, scenario_id, version, status, state_machine)
+         VALUES ($1, $2, $3, 'published', $4)",
+    )
+    .bind(version_id)
+    .bind(scenario_id)
+    .bind(version)
+    .bind(&req.state_machine)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE scenarios SET version = $2, state_machine = $3 WHERE id = $1")
+        .bind(scenario_id)
+        .bind(version)
+        .bind(&req.state_machine)
+        .execute(&mut *tx)
+        .await?;
+    for criterion in &req.rubric {
+        sqlx::query(
+            "INSERT INTO scenario_rubrics (id, scenario_id, scenario_version_id, criterion_key, label, max_score)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(scenario_id)
+        .bind(version_id)
+        .bind(criterion.criterion_key.trim())
+        .bind(criterion.label.trim())
+        .bind(criterion.max_score)
+        .execute(&mut *tx)
+        .await?;
+    }
+    crate::routes::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "scenario_version_created",
+        "scenario_version",
+        version_id,
+        json!({"scenario_id": scenario_id, "version": version, "criterion_count": req.rubric.len()}),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "scenario_id": scenario_id,
+            "scenario_version_id": version_id,
+            "version": version
+        })),
+    ))
 }
 
 /// Resolve one transition deterministically from the authored machine. The
 /// machine shape is {initial, transitions: [{from, on, to}]}; anything not
 /// covered is honestly refused instead of improvised (§14.3).
-fn next_state(machine: &serde_json::Value, current: &str, event: &str) -> Option<String> {
+pub(crate) fn next_state(
+    machine: &serde_json::Value,
+    current: &str,
+    event: &str,
+) -> Option<String> {
     let transitions = machine.get("transitions")?.as_array()?;
     for t in transitions {
         if t.get("from")?.as_str()? == current && t.get("on")?.as_str()? == event {
@@ -606,9 +1385,86 @@ fn next_state(machine: &serde_json::Value, current: &str, event: &str) -> Option
     None
 }
 
+pub(crate) fn scenario_events(machine: &serde_json::Value, state: Option<&str>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    machine
+        .get("transitions")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|transition| {
+            state.is_none_or(|state| {
+                transition.get("from").and_then(serde_json::Value::as_str) == Some(state)
+            })
+        })
+        .filter_map(|transition| transition.get("on").and_then(serde_json::Value::as_str))
+        .filter(|event| seen.insert((*event).to_string()))
+        .map(str::to_string)
+        .collect()
+}
+
+pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<serde_json::Value> {
+    transcript
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, event)| {
+            json!({
+                "index": index,
+                "sequence": index + 1,
+                "from": event.get("from").and_then(serde_json::Value::as_str),
+                "on": event.get("on").and_then(serde_json::Value::as_str),
+                "to": event.get("to").and_then(serde_json::Value::as_str),
+                "actor_role": event.get("actor_role").and_then(serde_json::Value::as_str),
+            })
+        })
+        .collect()
+}
+
+#[derive(sqlx::FromRow)]
+struct PublishedScenario {
+    slug: String,
+    title: String,
+    version: i32,
+}
+
+pub async fn list_scenarios(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let scenarios = sqlx::query_as::<_, PublishedScenario>(
+        r#"SELECT DISTINCT ON (scenario.id) scenario.slug, scenario.title, version.version
+		   FROM scenarios scenario
+		   JOIN scenario_versions version ON version.scenario_id = scenario.id
+		   WHERE scenario.status = 'published' AND version.status = 'published'
+		   ORDER BY scenario.id, version.version DESC
+		   LIMIT 100"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "scenarios": scenarios.into_iter().map(|scenario| json!({
+            "slug": scenario.slug,
+            "title": scenario.title,
+            "version": scenario.version,
+        })).collect::<Vec<_>>()
+    })))
+}
+
 #[derive(Deserialize)]
 pub struct StartScenarioReq {
     pub scenario_slug: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ScenarioStartRow {
+    id: Uuid,
+    slug: String,
+    title: String,
+    scenario_version_id: Uuid,
+    version: i32,
+    state_machine: serde_json::Value,
 }
 
 pub async fn start_scenario(
@@ -616,11 +1472,14 @@ pub async fn start_scenario(
     user: AuthUser,
     Json(req): Json<StartScenarioReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let scenario = sqlx::query!(
-        "SELECT id, state_machine FROM scenarios
-         WHERE slug = $1 AND status = 'published'",
-        req.scenario_slug
+    let scenario = sqlx::query_as::<_, ScenarioStartRow>(
+        r#"SELECT s.id, s.slug, s.title, sv.id AS scenario_version_id,
+                  sv.version, sv.state_machine
+         FROM scenarios s JOIN scenario_versions sv ON sv.scenario_id = s.id
+         WHERE s.slug = $1 AND s.status = 'published' AND sv.status = 'published'
+         ORDER BY sv.version DESC LIMIT 1"#,
     )
+    .bind(req.scenario_slug.trim())
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("scenario_not_found"))?;
@@ -631,17 +1490,87 @@ pub async fn start_scenario(
         .ok_or_else(ApiError::internal)?
         .to_string();
     let run_id = Uuid::new_v4();
-    sqlx::query!(
-        "INSERT INTO scenario_runs (id, scenario_id, user_id, current_state)
-         VALUES ($1, $2, $3, $4)",
-        run_id,
-        scenario.id,
-        user.user_id,
-        initial
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO scenario_runs (id, scenario_id, scenario_version_id, user_id, current_state)
+		 VALUES ($1, $2, $3, $4, $5)",
     )
-    .execute(&state.pool)
+    .bind(run_id)
+    .bind(scenario.id)
+    .bind(scenario.scenario_version_id)
+    .bind(user.user_id)
+    .bind(&initial)
+    .execute(&mut *tx)
     .await?;
-    Ok(Json(json!({ "run_id": run_id, "current_state": initial })))
+    sqlx::query(
+        "INSERT INTO scenario_team_members (id, run_id, user_id, role, invited_by)
+		 VALUES ($1, $2, $3, 'team_lead', $3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(run_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "run_id": run_id,
+        "scenario_slug": scenario.slug,
+        "scenario": scenario.title,
+        "scenario_version": scenario.version,
+        "current_state": initial,
+        "available_actions": scenario_events(&scenario.state_machine, Some(&initial)),
+        "finished": false
+    })))
+}
+
+#[derive(sqlx::FromRow)]
+struct ScenarioRunView {
+    title: String,
+    current_state: String,
+    transcript: serde_json::Value,
+    started_at: chrono::DateTime<chrono::Utc>,
+    finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    version: i32,
+    state_machine: serde_json::Value,
+}
+
+pub async fn get_scenario_run(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(run_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let run = sqlx::query_as::<_, ScenarioRunView>(
+        r#"SELECT scenario.title, run.current_state, run.transcript, run.started_at,
+		          run.finished_at, version.version, version.state_machine
+		   FROM scenario_runs run
+		   JOIN scenarios scenario ON scenario.id = run.scenario_id
+		   JOIN scenario_versions version ON version.id = run.scenario_version_id
+		   WHERE run.id = $1
+		     AND (run.user_id = $2 OR EXISTS (
+		       SELECT 1 FROM scenario_team_members member
+		       WHERE member.run_id = run.id AND member.user_id = $2
+		     ))"#,
+    )
+    .bind(run_id)
+    .bind(user.user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("run_not_found"))?;
+    let finished = run.finished_at.is_some();
+    Ok(Json(json!({
+        "run_id": run_id,
+        "scenario": run.title,
+        "scenario_version": run.version,
+        "current_state": run.current_state,
+        "transcript": run.transcript,
+        "timeline": transcript_timeline(&run.transcript),
+        "available_actions": if finished { Vec::<String>::new() } else {
+            scenario_events(&run.state_machine, Some(&run.current_state))
+        },
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "finished": finished,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -655,17 +1584,43 @@ pub async fn scenario_event(
     Path(run_id): Path<Uuid>,
     Json(req): Json<ScenarioEventReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let run = sqlx::query!(
-        "SELECT r.current_state, r.transcript, s.state_machine
-           FROM scenario_runs r JOIN scenarios s ON s.id = r.scenario_id
-         WHERE r.id = $1 AND r.user_id = $2 AND r.finished_at IS NULL",
-        run_id,
-        user.user_id
+    #[derive(sqlx::FromRow)]
+    struct ScenarioEventState {
+        current_state: String,
+        transcript: serde_json::Value,
+        state_machine: serde_json::Value,
+        actor_role: String,
+    }
+    let mut tx = state.pool.begin().await?;
+    let run = sqlx::query_as::<_, ScenarioEventState>(
+        "SELECT r.current_state, r.transcript, sv.state_machine,
+                COALESCE(member.role, CASE WHEN r.user_id = $2 THEN 'team_lead' END) AS actor_role
+           FROM scenario_runs r JOIN scenario_versions sv ON sv.id = r.scenario_version_id
+         LEFT JOIN scenario_team_members member
+           ON member.run_id = r.id AND member.user_id = $2
+         WHERE r.id = $1 AND r.finished_at IS NULL
+           AND (r.user_id = $2 OR member.id IS NOT NULL)
+         FOR UPDATE OF r",
     )
-    .fetch_optional(&state.pool)
+    .bind(run_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("run_not_found"))?;
-    let next = next_state(&run.state_machine, &run.current_state, &req.event).ok_or_else(|| {
+    if run.actor_role == "observer" {
+        return Err(ApiError::forbidden(
+            "observer_read_only",
+            "observers can view but cannot advance the station",
+        ));
+    }
+    let event = req.event.trim();
+    if event.is_empty() || event.chars().count() > 120 || event.chars().any(char::is_control) {
+        return Err(ApiError::unprocessable(
+            "invalid_scenario_event",
+            "event name must be 1-120 printable characters",
+        ));
+    }
+    let next = next_state(&run.state_machine, &run.current_state, event).ok_or_else(|| {
         ApiError::unprocessable(
             "no_transition",
             format!(
@@ -675,18 +1630,40 @@ pub async fn scenario_event(
         )
     })?;
     let mut transcript = run.transcript.clone();
-    if let Some(a) = transcript.as_array_mut() {
-        a.push(json!({"from": run.current_state, "on": req.event, "to": next}));
-    }
-    sqlx::query!(
-        "UPDATE scenario_runs SET current_state = $2, transcript = $3 WHERE id = $1",
-        run_id,
-        next,
-        transcript
+    let events = transcript.as_array_mut().ok_or_else(ApiError::internal)?;
+    events.push(json!({
+        "from": run.current_state.clone(),
+        "on": event,
+        "to": next.clone(),
+        "actor_role": run.actor_role,
+    }));
+    let finished = run
+        .state_machine
+        .get("terminal_states")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|states| states.iter().any(|state| state.as_str() == Some(&next)));
+    sqlx::query(
+        "UPDATE scenario_runs
+         SET current_state = $2, transcript = $3,
+             finished_at = CASE WHEN $4 THEN now() ELSE finished_at END
+         WHERE id = $1",
     )
-    .execute(&state.pool)
+    .bind(run_id)
+    .bind(&next)
+    .bind(transcript)
+    .bind(finished)
+    .execute(&mut *tx)
     .await?;
-    Ok(Json(json!({ "run_id": run_id, "current_state": next })))
+    tx.commit().await?;
+    Ok(Json(json!({
+        "run_id": run_id,
+        "current_state": next,
+        "finished": finished,
+        "available_actions": if finished { Vec::<String>::new() } else {
+            scenario_events(&run.state_machine, Some(&next))
+        },
+        "timeline": transcript_timeline(&transcript)
+    })))
 }
 
 // ---- CORE-04: institution-scoped audit export (§18.3) -----------------------
@@ -818,12 +1795,13 @@ pub struct AnalyticsQuery {
 pub struct ReplanReq {
     /// The learner's real daily budget in minutes (5-480).
     pub daily_minutes: i32,
+    /// The version shown to the learner when they requested the replan.
+    pub expected_version: i32,
 }
 
-/// The learner (or a capacity change) sets a new daily budget; today's plan
-/// is forked into a new version whose pending tasks fit the budget. Each
-/// task costs question_count minutes (disclosed, deterministic). Done work
-/// is never touched; trimmed tasks are reported, never hidden.
+/// The learner sets a new daily budget; today's plan is forked only if the
+/// version they reviewed is still current. Protected and completed tasks stay
+/// in the plan; only unprotected pending work may be deferred.
 pub async fn replan_plan(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -835,56 +1813,111 @@ pub async fn replan_plan(
             "daily_minutes must be 5-480",
         ));
     }
-    let (old_plan_id, from_version) =
-        crate::agent::get_or_create_today(&state.pool, user.user_id).await?;
-    let tasks = sqlx::query!(
-        "SELECT id, title, question_count, status FROM plan_tasks
-         WHERE plan_id = $1 ORDER BY created_at",
-        old_plan_id
+    crate::agent::get_or_create_today(&state.pool, user.user_id).await?;
+    let mut tx = state.pool.begin().await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        user.user_id
     )
-    .fetch_all(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
-    let committed: i32 = tasks.iter().map(|t| t.question_count).sum();
+    let current = sqlx::query!(
+        "SELECT id, version FROM plans
+         WHERE user_id = $1 AND plan_date = CURRENT_DATE
+         ORDER BY version DESC LIMIT 1 FOR UPDATE",
+        user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if current.version != req.expected_version {
+        return Err(ApiError::conflict_with_details(
+            "stale_plan_version",
+            "Your plan changed. Refresh it before replanning.",
+            json!({ "current_version": current.version }),
+        ));
+    }
+    let tasks = sqlx::query!(
+        "SELECT id, title, estimated_minutes, status, protected FROM plan_tasks
+         WHERE plan_id = $1 ORDER BY created_at, id",
+        current.id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let committed: i64 = tasks
+        .iter()
+        .filter(|task| task.status == "pending")
+        .map(|task| i64::from(task.estimated_minutes))
+        .sum();
     if committed <= req.daily_minutes {
+        tx.commit().await?;
         return Ok(Json(json!({
             "replanned": false,
             "reason": "within_capacity",
             "committed_minutes": committed,
             "daily_minutes": req.daily_minutes,
+            "plan_id": current.id,
+            "version": current.version,
         })));
     }
+    if crate::agent::count_today_revisions_on(&mut *tx, user.user_id).await?
+        >= i64::from(crate::agent::MAX_PLAN_REVISIONS_PER_DAY)
+    {
+        return Err(ApiError::conflict_with_details(
+            "plan_revision_limit",
+            "Today's plan has reached its revision limit.",
+            json!({ "revision_limit": crate::agent::MAX_PLAN_REVISIONS_PER_DAY }),
+        ));
+    }
+    let protected_minutes: i64 = tasks
+        .iter()
+        .filter(|task| task.status == "pending" && task.protected)
+        .map(|task| i64::from(task.estimated_minutes))
+        .sum();
+    if protected_minutes > i64::from(req.daily_minutes) {
+        return Err(ApiError::conflict_with_details(
+            "protected_tasks_over_capacity",
+            "Protected tasks need more time than this daily budget. Increase the budget or unprotect a task.",
+            json!({ "protected_minutes": protected_minutes, "daily_minutes": req.daily_minutes }),
+        ));
+    }
+
     let (new_plan_id, to_version) =
-        crate::agent::fork_plan(&state.pool, old_plan_id, from_version).await?;
+        crate::agent::fork_plan_on(&mut *tx, current.id, current.version).await?;
+    let mut kept_ids: Vec<Uuid> = Vec::new();
+    let mut deferred_ids: Vec<Uuid> = Vec::new();
     let mut kept: Vec<String> = Vec::new();
     let mut deferred: Vec<String> = Vec::new();
-    let mut budget = req.daily_minutes;
+    // Reserve protected minutes before considering optional tasks, so plan
+    // order cannot cause the result to exceed the requested capacity.
+    let mut budget = i64::from(req.daily_minutes) - protected_minutes;
     for t in &tasks {
-        if t.status == "done" || t.question_count <= budget {
-            budget -= t.question_count;
+        if t.status == "done" || t.protected {
+            kept_ids.push(t.id);
             kept.push(t.title.clone());
-        } else {
+        } else if t.status == "pending" && i64::from(t.estimated_minutes) <= budget {
+            budget -= i64::from(t.estimated_minutes);
+            kept_ids.push(t.id);
+            kept.push(t.title.clone());
+        } else if t.status == "pending" {
+            deferred_ids.push(t.id);
             deferred.push(t.title.clone());
         }
     }
-    // Drop the deferred tasks from the new version (the old version rows
-    // keep them for the audit trail).
-    for t in &tasks {
-        if deferred.contains(&t.title) {
-            sqlx::query!(
-                "DELETE FROM plan_tasks WHERE plan_id = $1 AND id = $2",
-                new_plan_id,
-                t.id
-            )
-            .execute(&state.pool)
-            .await?;
-        }
-    }
+    sqlx::query!(
+        "DELETE FROM plan_tasks WHERE plan_id = $1 AND id = ANY($2)",
+        new_plan_id,
+        &deferred_ids
+    )
+    .execute(&mut *tx)
+    .await?;
     let revision_id = Uuid::new_v4();
     let receipt = json!({
         "daily_minutes": req.daily_minutes,
         "committed_minutes_before": committed,
         "kept": kept,
         "deferred": deferred,
+        "kept_task_ids": kept_ids,
+        "deferred_task_ids": deferred_ids,
     });
     let explanation = format!(
         "Plan trimmed to your {}-minute budget: {} task(s) deferred.",
@@ -898,13 +1931,14 @@ pub async fn replan_plan(
          VALUES ($1, $2, $3, $4, 'capacity_change', $5, false, $6)",
         revision_id,
         new_plan_id,
-        from_version,
+        current.version,
         to_version,
         explanation,
         receipt
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({
         "replanned": true,
         "plan_id": new_plan_id,
@@ -912,6 +1946,7 @@ pub async fn replan_plan(
         "kept_tasks": kept.len(),
         "deferred_tasks": deferred.len(),
         "deferred": deferred,
+        "deferred_task_ids": deferred_ids,
     })))
 }
 

@@ -82,15 +82,14 @@ pub async fn export_account(
 
 // ---- OFF-01: signed pack manifests -------------------------------------------
 
-pub(crate) fn signing_key(state: &AppState) -> Vec<u8> {
-    // # ponytail: HMAC key from env with a dev fallback; a KMS-held key is
-    // the Phase 3 hardening step when packs carry licensed media.
-    state
-        .pack_signing_key
-        .as_deref()
-        .unwrap_or("dev-pack-signing-key")
-        .as_bytes()
-        .to_vec()
+pub(crate) fn signing_key(state: &AppState) -> ApiResult<&[u8]> {
+    configured_signing_key(state.pack_signing_key.as_deref())
+}
+
+fn configured_signing_key(key: Option<&str>) -> ApiResult<&[u8]> {
+    key.filter(|value| value.trim().len() >= 32)
+        .map(str::as_bytes)
+        .ok_or_else(ApiError::internal)
 }
 
 pub(crate) fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
@@ -120,23 +119,23 @@ pub(crate) fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
 }
 
 #[derive(Deserialize)]
-pub struct ManifestQuery {
+pub struct LegacyManifestQuery {
     pub chapters: String,
 }
 
-/// OFF-01: signed manifest for an offline pack — the published question
-/// versions with SHA-256 checksums of their content, plus an HMAC signature
-/// the client verifies before trusting the pack (§22).
-pub async fn pack_manifest(
+/// Preserve the v1 metadata-only contract for installed clients. It does not
+/// return question content or tutoring cards; lease-scoped v3 manifests live
+/// on the versioned v2 route.
+pub async fn legacy_pack_manifest(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    _user: AuthUser,
     Path(exam_id): Path<Uuid>,
-    Query(q): Query<ManifestQuery>,
+    Query(q): Query<LegacyManifestQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let chapter_ids: Vec<Uuid> = q
         .chapters
         .split(',')
-        .filter_map(|c| Uuid::parse_str(c.trim()).ok())
+        .filter_map(|chapter| Uuid::parse_str(chapter.trim()).ok())
         .collect();
     if chapter_ids.is_empty() {
         return Err(ApiError::unprocessable(
@@ -144,9 +143,8 @@ pub async fn pack_manifest(
             "pass ?chapters=<uuid,uuid,...>",
         ));
     }
-    let _ = user;
 
-    let mut items: Vec<serde_json::Value> = Vec::new();
+    let mut items = Vec::new();
     let mut canonical = String::new();
     for chapter_id in &chapter_ids {
         let rows = sqlx::query!(
@@ -158,19 +156,202 @@ pub async fn pack_manifest(
         )
         .fetch_all(&state.pool)
         .await?;
-        for r in rows {
-            canonical.push_str(&format!("{} {}\n", r.id, r.checksum));
+        for row in rows {
+            canonical.push_str(&format!("{} {}\n", row.id, row.checksum));
             items.push(json!({
-                "question_version_id": r.id,
-                "checksum": r.checksum,
+                "question_version_id": row.id,
+                "checksum": row.checksum,
             }));
         }
     }
-    let signature = hmac_sha256_hex(&signing_key(&state), canonical.as_bytes());
+    let signature = hmac_sha256_hex(signing_key(&state)?, canonical.as_bytes());
     Ok(Json(json!({
         "exam_id": exam_id,
         "chapters": chapter_ids,
         "items": items,
+        "signature": signature,
+        "algorithm": "hmac-sha256",
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ManifestQuery {
+    pub chapters: String,
+    pub device_id: String,
+}
+
+fn parse_chapter_ids(raw: &str) -> ApiResult<Vec<Uuid>> {
+    let parts: Vec<_> = raw.split(',').map(str::trim).collect();
+    if parts.is_empty() || parts.len() > 50 || parts.iter().any(|part| part.is_empty()) {
+        return Err(ApiError::unprocessable(
+            "invalid_chapters",
+            "pass 1-50 unique chapter UUIDs as ?chapters=<uuid,uuid,...>",
+        ));
+    }
+    let mut seen = std::collections::HashSet::with_capacity(parts.len());
+    let mut chapters = Vec::with_capacity(parts.len());
+    for part in parts {
+        let chapter = Uuid::parse_str(part).map_err(|_| {
+            ApiError::unprocessable("invalid_chapters", "chapter IDs must be valid UUIDs")
+        })?;
+        if !seen.insert(chapter) {
+            return Err(ApiError::unprocessable(
+                "invalid_chapters",
+                "chapter IDs must be unique",
+            ));
+        }
+        chapters.push(chapter);
+    }
+    Ok(chapters)
+}
+
+fn validate_device_id(device_id: &str) -> ApiResult<()> {
+    if device_id.is_empty() || device_id.len() > 128 {
+        return Err(ApiError::unprocessable(
+            "invalid_device",
+            "device_id must be 1-128 characters",
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_chapters(pool: &PgPool, exam_id: Uuid, chapters: &[Uuid]) -> ApiResult<()> {
+    let valid_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM curriculum_nodes
+         WHERE exam_id = $1 AND id = ANY($2) AND kind = 'chapter'",
+    )
+    .bind(exam_id)
+    .bind(chapters.to_vec())
+    .fetch_one(pool)
+    .await?;
+    if valid_count != chapters.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_chapters",
+            "every chapter must belong to the requested exam",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn item_checksum(
+    question_checksum: &str,
+    tutoring_cards: &[crate::routes::program::TutoringCard],
+) -> ApiResult<String> {
+    let tutoring_bytes = serde_json::to_vec(tutoring_cards).map_err(|_| ApiError::internal())?;
+    let mut content_hash = Sha256::new();
+    content_hash.update(question_checksum.as_bytes());
+    content_hash.update([0]);
+    content_hash.update(tutoring_bytes);
+    Ok(content_hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+pub(crate) fn manifest_canonical(
+    exam_id: Uuid,
+    device_id: &str,
+    chapters: &[Uuid],
+    items: &[(Uuid, String)],
+) -> ApiResult<String> {
+    let device_id = serde_json::to_string(device_id).map_err(|_| ApiError::internal())?;
+    let chapters = chapters
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut canonical = format!(
+        "medical-os-pack-manifest-v3\nexam {exam_id}\ndevice {device_id}\nchapters {chapters}\n"
+    );
+    for (id, checksum) in items {
+        canonical.push_str(&format!("{id} {checksum}\n"));
+    }
+    Ok(canonical)
+}
+
+/// OFF-01: signed manifest v3 binds exam, device and chapter scope as well as
+/// the question and tutoring-card contents (§22).
+pub async fn pack_manifest(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(exam_id): Path<Uuid>,
+    Query(q): Query<ManifestQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    validate_device_id(&q.device_id)?;
+    let chapter_ids = parse_chapter_ids(&q.chapters)?;
+    validate_chapters(&state.pool, exam_id, &chapter_ids).await?;
+    let chapter_json = serde_json::to_value(&chapter_ids).map_err(|_| ApiError::internal())?;
+    let has_lease: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+             SELECT 1 FROM pack_leases
+             WHERE user_id = $1 AND exam_id = $2 AND device_id = $3
+               AND expires_at > now() AND chapters @> $4
+         )",
+    )
+    .bind(user.user_id)
+    .bind(exam_id)
+    .bind(&q.device_id)
+    .bind(chapter_json)
+    .fetch_one(&state.pool)
+    .await?;
+    if !has_lease {
+        return Err(ApiError::forbidden(
+            "pack_lease_required",
+            "an active device lease covering every requested chapter is required",
+        ));
+    }
+
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    let mut canonical_items = Vec::new();
+    for chapter_id in &chapter_ids {
+        let rows = sqlx::query!(
+            r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
+               FROM question_versions
+               WHERE chapter_id = $1 AND status = 'published'
+               ORDER BY id"#,
+            chapter_id
+        )
+        .fetch_all(&state.pool)
+        .await?;
+        for r in rows {
+            let answered_in_tutor: bool = sqlx::query_scalar(
+                r#"SELECT EXISTS(
+                       SELECT 1 FROM attempts a
+                       JOIN practice_sessions s ON s.id = a.session_id
+                       WHERE a.user_id = $1 AND a.question_version_id = $2
+                         AND s.user_id = $1
+                         AND s.preset = 'tutor'
+                   )"#,
+            )
+            .bind(user.user_id)
+            .bind(r.id)
+            .fetch_one(&state.pool)
+            .await?;
+            let tutoring_cards = if answered_in_tutor {
+                crate::routes::program::ensure_pregen(&state.pool, r.id).await?
+            } else {
+                Vec::new()
+            };
+            let checksum = item_checksum(&r.checksum, &tutoring_cards)?;
+            canonical_items.push((r.id, checksum.clone()));
+            items.push(json!({
+                "question_version_id": r.id,
+                "checksum": checksum,
+                "tutoring_cards": tutoring_cards,
+            }));
+        }
+    }
+    let canonical = manifest_canonical(exam_id, &q.device_id, &chapter_ids, &canonical_items)?;
+    let signature = hmac_sha256_hex(signing_key(&state)?, canonical.as_bytes());
+    Ok(Json(json!({
+        "exam_id": exam_id,
+        "device_id": q.device_id,
+        "chapters": chapter_ids,
+        "items": items,
+        "manifest_version": 3,
+        "canonical_format": "medical-os-pack-manifest-v3",
+        "item_checksum_algorithm": "sha256(question_checksum || 0x00 || serde_json(tutoring_cards))",
         "signature": signature,
         "algorithm": "hmac-sha256",
     })))
@@ -196,12 +377,7 @@ pub async fn create_lease(
     user: AuthUser,
     Json(req): Json<LeaseReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    if req.device_id.is_empty() || req.device_id.len() > 128 {
-        return Err(ApiError::unprocessable(
-            "invalid_device",
-            "device_id must be 1-128 characters",
-        ));
-    }
+    validate_device_id(&req.device_id)?;
     let tier = sqlx::query!("SELECT tier FROM users WHERE id = $1", user.user_id)
         .fetch_one(&state.pool)
         .await?
@@ -221,6 +397,14 @@ pub async fn create_lease(
             "1-50 chapters per pack lease",
         ));
     }
+    let mut seen = std::collections::HashSet::with_capacity(req.chapters.len());
+    if req.chapters.iter().any(|chapter| !seen.insert(*chapter)) {
+        return Err(ApiError::unprocessable(
+            "invalid_chapters",
+            "chapter IDs must be unique",
+        ));
+    }
+    validate_chapters(&state.pool, req.exam_id, &req.chapters).await?;
 
     // Per-device pack key: random 32 bytes, rotated on renewal.
     use rand::RngCore;
@@ -306,4 +490,23 @@ pub async fn revoke_lease(
         return Err(ApiError::not_found("lease_not_found"));
     }
     Ok(Json(json!({ "revoked": true })))
+}
+
+#[cfg(test)]
+mod signing_key_tests {
+    use super::configured_signing_key;
+
+    #[test]
+    fn signing_key_fails_closed_when_missing_or_weak() {
+        assert!(configured_signing_key(None).is_err());
+        assert!(configured_signing_key(Some("")).is_err());
+        assert!(configured_signing_key(Some("short")).is_err());
+        assert!(configured_signing_key(Some("                                ")).is_err());
+    }
+
+    #[test]
+    fn signing_key_accepts_at_least_32_non_whitespace_bytes() {
+        let key = "0123456789abcdef0123456789abcdef";
+        assert_eq!(configured_signing_key(Some(key)).unwrap(), key.as_bytes());
+    }
 }

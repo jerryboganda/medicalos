@@ -94,7 +94,7 @@ pub async fn session_action(
             let src = sid;
             let pool_qs = sqlx::query!(
                 r#"SELECT DISTINCT qv.id FROM question_versions qv
-                   WHERE qv.id IN (
+                   WHERE qv.status = 'published' AND (qv.id IN (
                        SELECT question_version_id FROM attempts
                        WHERE session_id = $1 AND correct = FALSE
                    )
@@ -104,7 +104,7 @@ pub async fn session_action(
                            SELECT 1 FROM attempts a
                            WHERE a.session_id = si.session_id AND a.item_index = si.item_index
                        )
-                   )"#,
+                   ))"#,
                 src
             )
             .fetch_all(&state.pool)

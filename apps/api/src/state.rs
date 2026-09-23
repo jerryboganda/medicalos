@@ -21,6 +21,12 @@ pub struct AppState {
     pub openai_base_url: String,
     /// OFF-01: HMAC key signing offline pack manifests.
     pub pack_signing_key: Option<String>,
+    /// Encryption key for per-institution OIDC client secrets. Omit to allow public clients only.
+    pub oidc_credential_key: Option<String>,
+    /// Public API prefix registered with OIDC providers, e.g. https://host/api.
+    pub public_api_base_url: String,
+    /// Browser origin where the SPA's OIDC handoff page is served.
+    pub public_app_url: String,
 }
 
 impl AppState {

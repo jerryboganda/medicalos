@@ -5,9 +5,11 @@
 /// the next console iteration — the validation and rollback pipeline below
 /// is the part that must be right first.
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -21,7 +23,7 @@ fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers.get("x-admin-token").and_then(|v| v.to_str().ok())
 }
 
-async fn audit(
+pub(crate) async fn audit(
     pool: impl sqlx::PgExecutor<'_>,
     actor: Uuid,
     action: &str,
@@ -214,6 +216,16 @@ pub async fn list_nodes(
 
 // ---- question CRUD (§19.5) --------------------------------------------------
 
+fn validate_hint_length(hint: Option<&str>) -> ApiResult<()> {
+    if hint.is_some_and(|hint| hint.chars().count() > 2000) {
+        return Err(ApiError::unprocessable(
+            "hint_too_long",
+            "hint must be at most 2000 characters",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct CreateQuestionReq {
     pub chapter_id: Uuid,
@@ -224,6 +236,7 @@ pub struct CreateQuestionReq {
     pub correct_index: i16,
     pub key_learning_point: String,
     pub exam_tip: Option<String>,
+    pub hint: Option<String>,
     pub high_yield: Option<bool>,
     pub source_ref: String,
 }
@@ -236,6 +249,7 @@ fn validate_question(req: &CreateQuestionReq) -> ApiResult<()> {
             "key learning point must be 40 words or fewer (§11.1)",
         ));
     }
+    validate_hint_length(req.hint.as_deref())?;
     if req.vignette.trim().is_empty() || req.lead_in.trim().is_empty() {
         return Err(ApiError::unprocessable(
             "invalid_content",
@@ -286,9 +300,9 @@ async fn insert_question_version(
         r#"INSERT INTO question_versions
            (id, question_id, version, status, chapter_id, difficulty, vignette,
             lead_in, options, correct_index, key_learning_point, exam_tip,
-            high_yield, source_ref, created_by)
+            hint, high_yield, source_ref, created_by)
            VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10,
-                   $11, $12, $13, $14)"#,
+                   $11, $12, $13, $14, $15)"#,
         vid,
         qid,
         status,
@@ -300,6 +314,7 @@ async fn insert_question_version(
         req.correct_index,
         req.key_learning_point,
         req.exam_tip,
+        req.hint,
         req.high_yield.unwrap_or(false),
         req.source_ref,
         created_by,
@@ -464,15 +479,23 @@ async fn transition_version(
                     "the author of an item cannot publish it (§19.3)",
                 ));
             }
-            sqlx::query!(
-                "UPDATE question_versions SET status = 'published', published_by = $2 WHERE id = $1",
+            let mut tx = state.pool.begin().await?;
+            let updated = sqlx::query!(
+                "UPDATE question_versions SET status = 'published', published_by = $2 WHERE id = $1 AND status = 'approved'",
                 vid,
                 actor
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
+            if updated.rows_affected() != 1 {
+                return Err(ApiError::conflict(
+                    "invalid_transition",
+                    "only approved versions can be published",
+                ));
+            }
+            crate::routes::program::ensure_pregen_on(&mut *tx, vid).await?;
             audit(
-                &state.pool,
+                &mut *tx,
                 actor,
                 "assessment_published",
                 "question_version",
@@ -480,6 +503,7 @@ async fn transition_version(
                 json!({}),
             )
             .await?;
+            tx.commit().await?;
             Ok(json!({ "version_id": vid, "status": "published" }))
         }
         _ => Err(ApiError::unprocessable(
@@ -1006,11 +1030,24 @@ pub struct ContentRightsReq {
     pub ref_code: String,
     pub licensor: String,
     pub territory: Option<String>,
-    /// display | offline | ai | derivatives | translation (Appendix B of §19).
+    /// Content use flags, including private_import and document_extraction.
     pub permitted_uses: Vec<String>,
     pub valid_from: chrono::NaiveDate,
     pub valid_to: Option<chrono::NaiveDate>,
     pub notes: Option<String>,
+    pub contract_ref: Option<String>,
+    pub contract_version: Option<String>,
+    #[serde(default)]
+    pub asset_refs: Vec<String>,
+    #[serde(default)]
+    pub audiences: Vec<String>,
+    pub seat_limit: Option<i32>,
+    pub offline_terms: Option<String>,
+    pub quotation_limit_words: Option<i32>,
+    pub ai_terms: Option<String>,
+    pub derivative_terms: Option<String>,
+    pub attribution: Option<String>,
+    pub royalty_terms: Option<String>,
 }
 
 pub async fn create_content_rights(
@@ -1034,7 +1071,17 @@ pub async fn create_content_rights(
             "licensor is required",
         ));
     }
-    let known = ["display", "offline", "ai", "derivatives", "translation"];
+    let known = [
+        "display",
+        "search",
+        "offline",
+        "embeddings",
+        "ai",
+        "derivatives",
+        "translation",
+        "private_import",
+        "document_extraction",
+    ];
     if req.permitted_uses.is_empty()
         || !req
             .permitted_uses
@@ -1043,14 +1090,80 @@ pub async fn create_content_rights(
     {
         return Err(ApiError::unprocessable(
             "invalid_permitted_uses",
-            "permitted uses must draw from display, offline, ai, derivatives, translation",
+            "permitted uses must draw from display, search, offline, embeddings, ai, derivatives, translation, private_import, document_extraction",
         ));
     }
+    let mut uses = std::collections::HashSet::new();
+    if req.permitted_uses.iter().any(|use_| !uses.insert(use_)) {
+        return Err(ApiError::unprocessable(
+            "duplicate_permitted_use",
+            "each permitted use may appear only once",
+        ));
+    }
+    let valid_list = |values: &[String]| {
+        values.len() <= 100
+            && values.iter().all(|value| {
+                !value.trim().is_empty()
+                    && value.chars().count() <= 200
+                    && !value.chars().any(char::is_control)
+            })
+    };
+    if !valid_list(&req.asset_refs) || !valid_list(&req.audiences) {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_scope",
+            "assets and audiences must each contain at most 100 non-empty values of at most 200 characters",
+        ));
+    }
+    if req.seat_limit.is_some_and(|limit| limit <= 0)
+        || req
+            .quotation_limit_words
+            .is_some_and(|limit| !(0..=1_000_000).contains(&limit))
+        || [
+            req.contract_ref.as_deref(),
+            req.contract_version.as_deref(),
+            req.offline_terms.as_deref(),
+            req.ai_terms.as_deref(),
+            req.derivative_terms.as_deref(),
+            req.attribution.as_deref(),
+            req.royalty_terms.as_deref(),
+            req.notes.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.chars().count() > 2000)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_scope",
+            "seat limits must be positive, quotation limits 0-1000000 words, and scope terms at most 2000 characters",
+        ));
+    }
+    if req
+        .valid_to
+        .is_some_and(|valid_to| valid_to < req.valid_from)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_window",
+            "valid_to must be on or after valid_from",
+        ));
+    }
+    let asset_refs: Vec<String> = req
+        .asset_refs
+        .iter()
+        .map(|value| value.trim().to_string())
+        .collect();
+    let audiences: Vec<String> = req
+        .audiences
+        .iter()
+        .map(|value| value.trim().to_string())
+        .collect();
     let id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await?;
     sqlx::query!(
         "INSERT INTO content_rights
-           (id, ref_code, licensor, territory, permitted_uses, valid_from, valid_to, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+           (id, ref_code, licensor, territory, permitted_uses, valid_from, valid_to, notes, created_by,
+            contract_ref, contract_version, asset_refs, audiences, seat_limit, offline_terms,
+            quotation_limit_words, ai_terms, derivative_terms, attribution, royalty_terms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)",
         id,
         ref_code,
         licensor,
@@ -1058,13 +1171,24 @@ pub async fn create_content_rights(
         serde_json::to_value(&req.permitted_uses).map_err(|_| ApiError::internal())?,
         req.valid_from,
         req.valid_to,
-        req.notes,
-        user.user_id
+        req.notes.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        user.user_id,
+        req.contract_ref.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        req.contract_version.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        serde_json::to_value(&asset_refs).map_err(|_| ApiError::internal())?,
+        serde_json::to_value(&audiences).map_err(|_| ApiError::internal())?,
+        req.seat_limit,
+        req.offline_terms.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        req.quotation_limit_words,
+        req.ai_terms.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        req.derivative_terms.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        req.attribution.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        req.royalty_terms.as_deref().map(str::trim).filter(|value| !value.is_empty())
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
     audit(
-        &state.pool,
+        &mut *tx,
         user.user_id,
         "content_rights_created",
         "content_rights",
@@ -1072,7 +1196,35 @@ pub async fn create_content_rights(
         json!({ "ref_code": ref_code }),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "rights_id": id, "ref_code": ref_code })))
+}
+
+#[derive(sqlx::FromRow)]
+struct ContentRightsRow {
+    id: Uuid,
+    ref_code: String,
+    licensor: String,
+    territory: String,
+    permitted_uses: serde_json::Value,
+    valid_from: chrono::NaiveDate,
+    valid_to: Option<chrono::NaiveDate>,
+    notes: Option<String>,
+    revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    revoked_by: Option<Uuid>,
+    revocation_note: Option<String>,
+    contract_ref: Option<String>,
+    contract_version: Option<String>,
+    asset_refs: serde_json::Value,
+    audiences: serde_json::Value,
+    seat_limit: Option<i32>,
+    offline_terms: Option<String>,
+    quotation_limit_words: Option<i32>,
+    ai_terms: Option<String>,
+    derivative_terms: Option<String>,
+    attribution: Option<String>,
+    royalty_terms: Option<String>,
+    status: String,
 }
 
 pub async fn list_content_rights(
@@ -1081,10 +1233,19 @@ pub async fn list_content_rights(
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as::<_, ContentRightsRow>(
         r#"SELECT id, ref_code, licensor, territory, permitted_uses,
-                  valid_from AS "valid_from?", valid_to AS "valid_to?", notes AS "notes?"
-           FROM content_rights ORDER BY created_at DESC LIMIT 200"#
+                  valid_from, valid_to, notes, revoked_at, revoked_by, revocation_note,
+                  contract_ref, contract_version, asset_refs, audiences, seat_limit,
+                  offline_terms, quotation_limit_words, ai_terms, derivative_terms,
+                  attribution, royalty_terms,
+                  CASE
+                    WHEN revoked_at IS NOT NULL THEN 'revoked'
+                    WHEN valid_from > CURRENT_DATE THEN 'scheduled'
+                    WHEN valid_to IS NOT NULL AND valid_to < CURRENT_DATE THEN 'expired'
+                    ELSE 'active'
+                  END AS status
+           FROM content_rights ORDER BY created_at DESC LIMIT 200"#,
     )
     .fetch_all(&state.pool)
     .await?;
@@ -1097,7 +1258,514 @@ pub async fn list_content_rights(
         "valid_from": r.valid_from,
         "valid_to": r.valid_to,
         "notes": r.notes,
+        "revoked_at": r.revoked_at,
+        "revoked_by": r.revoked_by,
+        "revocation_note": r.revocation_note,
+        "contract_ref": r.contract_ref,
+        "contract_version": r.contract_version,
+        "asset_refs": r.asset_refs,
+        "audiences": r.audiences,
+        "seat_limit": r.seat_limit,
+        "offline_terms": r.offline_terms,
+        "quotation_limit_words": r.quotation_limit_words,
+        "ai_terms": r.ai_terms,
+        "derivative_terms": r.derivative_terms,
+        "attribution": r.attribution,
+        "royalty_terms": r.royalty_terms,
+        "status": r.status,
     })).collect::<Vec<_>>() })))
+}
+
+#[derive(Deserialize)]
+pub struct RevokeContentRightsReq {
+    pub reason: String,
+}
+
+pub async fn revoke_content_rights(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(rights_id): Path<Uuid>,
+    Json(req): Json<RevokeContentRightsReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let reason = req.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 500 {
+        return Err(ApiError::unprocessable(
+            "invalid_revocation_reason",
+            "reason must be 1-500 characters",
+        ));
+    }
+    let mut tx = state.pool.begin().await?;
+    let revoked_id = sqlx::query_scalar::<_, Uuid>(
+        "UPDATE content_rights
+         SET revoked_at = now(), revoked_by = $2, revocation_note = $3
+         WHERE id = $1 AND revoked_at IS NULL
+         RETURNING id",
+    )
+    .bind(rights_id)
+    .bind(user.user_id)
+    .bind(reason)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(_) = revoked_id else {
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM content_rights WHERE id = $1)",
+        )
+        .bind(rights_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(ApiError::not_found("content_rights_not_found"));
+        }
+        tx.commit().await?;
+        return Ok(Json(json!({ "revoked": false, "already_revoked": true })));
+    };
+    audit(
+        &mut *tx,
+        user.user_id,
+        "rights_revoked",
+        "content_rights",
+        rights_id,
+        json!({ "reason": reason }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "revoked": true, "already_revoked": false })))
+}
+
+// ---- LIB-07: extraction coverage evidence ----------------------------------
+
+const EXTRACTION_MEDIA_TYPES: &[&str] = &[
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/epub+zip",
+    "text/html",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+    "image/webp",
+    "text/plain",
+];
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateExtractionReportReq {
+    pub source_label: String,
+    pub source_sha256: String,
+    pub media_type: String,
+    pub parser_version: String,
+    pub rights_ref: String,
+    pub malware_scan_status: String,
+    pub expected_regions: Vec<String>,
+    pub extracted_regions: Vec<String>,
+    pub uncertain_regions: Vec<String>,
+    pub critical_regions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewExtractionReportReq {
+    pub decision: String,
+    pub verified_regions: Vec<String>,
+    pub note: String,
+}
+
+fn valid_region_refs(values: &[String]) -> bool {
+    let mut seen = HashSet::new();
+    values.len() <= 5000
+        && values.iter().all(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.bytes().all(|character| {
+                    character.is_ascii_alphanumeric()
+                        || matches!(character, b'_' | b'-' | '.' | ':' | '/')
+                })
+                && seen.insert(value.as_str())
+        })
+}
+
+fn region_set(values: &[String]) -> BTreeSet<String> {
+    values.iter().cloned().collect()
+}
+
+fn string_set(value: &serde_json::Value) -> BTreeSet<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+#[derive(sqlx::FromRow)]
+struct ExtractionReportRow {
+    id: Uuid,
+    source_label: String,
+    source_sha256: String,
+    media_type: String,
+    parser_version: String,
+    rights_ref: String,
+    rights_available: bool,
+    malware_scan_status: String,
+    expected_regions: serde_json::Value,
+    extracted_regions: serde_json::Value,
+    uncertain_regions: serde_json::Value,
+    critical_regions: serde_json::Value,
+    created_by: Option<Uuid>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    review_decision: Option<String>,
+    reviewer_id: Option<Uuid>,
+    verified_regions: Option<serde_json::Value>,
+    review_note: Option<String>,
+    reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+const EXTRACTION_REPORT_SELECT: &str = r#"
+    SELECT report.id, report.source_label, report.source_sha256, report.media_type,
+           report.parser_version, rights.ref_code AS rights_ref,
+           (rights.revoked_at IS NULL
+            AND rights.valid_from <= CURRENT_DATE
+            AND (rights.valid_to IS NULL OR rights.valid_to >= CURRENT_DATE)
+            AND rights.permitted_uses @> '["document_extraction"]'::jsonb) AS rights_available,
+           report.malware_scan_status, report.expected_regions, report.extracted_regions,
+           report.uncertain_regions, report.critical_regions, report.created_by, report.created_at,
+           review.decision AS review_decision, review.reviewer_id,
+           review.verified_regions, review.note AS review_note, review.created_at AS reviewed_at
+    FROM document_extraction_reports report
+    JOIN content_rights rights ON rights.id = report.rights_id
+    LEFT JOIN document_extraction_reviews review ON review.report_id = report.id
+"#;
+
+fn extraction_report_json(row: ExtractionReportRow) -> serde_json::Value {
+    let expected = string_set(&row.expected_regions);
+    let extracted = string_set(&row.extracted_regions);
+    let missing: Vec<String> = expected.difference(&extracted).cloned().collect();
+    let mut needs_review = string_set(&row.uncertain_regions);
+    needs_review.extend(string_set(&row.critical_regions));
+    let status = if !row.rights_available {
+        "rights_unavailable"
+    } else if row.malware_scan_status == "blocked" {
+        "blocked"
+    } else if row.review_decision.as_deref() == Some("rejected") {
+        "rejected"
+    } else if !missing.is_empty() {
+        "incomplete"
+    } else if row.malware_scan_status != "clean" {
+        "review_required"
+    } else if row.review_decision.as_deref() == Some("approved")
+        || (needs_review.is_empty() && row.review_decision.is_none())
+    {
+        "complete"
+    } else {
+        "review_required"
+    };
+    json!({
+        "report_id": row.id,
+        "source_label": row.source_label,
+        "source_sha256": row.source_sha256,
+        "media_type": row.media_type,
+        "parser_version": row.parser_version,
+        "rights_ref": row.rights_ref,
+        "rights_available": row.rights_available,
+        "malware_scan_status": row.malware_scan_status,
+        "expected_regions": expected,
+        "extracted_regions": extracted,
+        "missing_regions": missing,
+        "uncertain_regions": string_set(&row.uncertain_regions),
+        "critical_regions": string_set(&row.critical_regions),
+        "status": status,
+        "created_by": row.created_by,
+        "created_at": row.created_at,
+        "review": row.review_decision.map(|decision| json!({
+            "decision": decision,
+            "reviewer_id": row.reviewer_id,
+            "verified_regions": row.verified_regions.map(|regions| string_set(&regions)),
+            "note": row.review_note,
+            "reviewed_at": row.reviewed_at,
+        })),
+    })
+}
+
+async fn extraction_report(state: &AppState, report_id: Uuid) -> ApiResult<ExtractionReportRow> {
+    let query = format!("{EXTRACTION_REPORT_SELECT} WHERE report.id = $1");
+    sqlx::query_as::<_, ExtractionReportRow>(&query)
+        .bind(report_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("extraction_report_not_found"))
+}
+
+pub async fn list_extraction_reports(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let query = format!("{EXTRACTION_REPORT_SELECT} ORDER BY report.created_at DESC LIMIT 100");
+    let rows = sqlx::query_as::<_, ExtractionReportRow>(&query)
+        .fetch_all(&state.pool)
+        .await?;
+    Ok(Json(
+        json!({ "reports": rows.into_iter().map(extraction_report_json).collect::<Vec<_>>() }),
+    ))
+}
+
+pub async fn get_extraction_report(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(report_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    Ok(Json(extraction_report_json(
+        extraction_report(&state, report_id).await?,
+    )))
+}
+
+pub async fn create_extraction_report(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<CreateExtractionReportReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    state.require_admin(admin_headers(&headers))?;
+    let source_label = req.source_label.trim();
+    let parser_version = req.parser_version.trim();
+    let rights_ref = req.rights_ref.trim().to_ascii_uppercase();
+    if source_label.is_empty()
+        || source_label.chars().count() > 240
+        || source_label
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+        || parser_version.is_empty()
+        || parser_version.chars().count() > 100
+        || parser_version.chars().any(char::is_control)
+        || req.source_sha256.len() != 64
+        || !req
+            .source_sha256
+            .bytes()
+            .all(|character| character.is_ascii_hexdigit())
+        || req
+            .source_sha256
+            .bytes()
+            .any(|character| character.is_ascii_uppercase())
+        || rights_ref.is_empty()
+        || rights_ref.len() > 60
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_extraction_source",
+            "use a non-path source label with a lowercase SHA-256, parser version, and rights reference",
+        ));
+    }
+    if !EXTRACTION_MEDIA_TYPES.contains(&req.media_type.as_str()) {
+        return Err(ApiError::unprocessable(
+            "unsupported_document_type",
+            "unsupported extraction report format",
+        ));
+    }
+    if !matches!(
+        req.malware_scan_status.as_str(),
+        "clean" | "blocked" | "not_scanned"
+    ) {
+        return Err(ApiError::unprocessable(
+            "invalid_scan_status",
+            "scan status must be clean, blocked, or not_scanned",
+        ));
+    }
+    let reference_count = req.expected_regions.len()
+        + req.extracted_regions.len()
+        + req.uncertain_regions.len()
+        + req.critical_regions.len();
+    if reference_count > 5000
+        || !valid_region_refs(&req.expected_regions)
+        || !valid_region_refs(&req.extracted_regions)
+        || !valid_region_refs(&req.uncertain_regions)
+        || !valid_region_refs(&req.critical_regions)
+        || req.expected_regions.is_empty()
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_extraction_regions",
+            "region lists require unique stable references and a combined maximum of 5000",
+        ));
+    }
+    let expected = region_set(&req.expected_regions);
+    let extracted = region_set(&req.extracted_regions);
+    let uncertain = region_set(&req.uncertain_regions);
+    let critical = region_set(&req.critical_regions);
+    if !extracted.is_subset(&expected)
+        || !uncertain.is_subset(&extracted)
+        || !critical.is_subset(&expected)
+    {
+        return Err(ApiError::unprocessable("invalid_extraction_regions", "extracted, uncertain, and critical references must be grounded in the expected regions"));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let rights_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM content_rights
+           WHERE ref_code = $1 AND revoked_at IS NULL
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             AND permitted_uses @> '["document_extraction"]'::jsonb
+           FOR SHARE"#,
+    )
+    .bind(&rights_ref)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::forbidden("extraction_rights_unavailable"))?;
+    let report_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO document_extraction_reports
+               (id, source_label, source_sha256, media_type, parser_version, rights_id,
+                malware_scan_status, expected_regions, extracted_regions, uncertain_regions,
+                critical_regions, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
+    )
+    .bind(report_id)
+    .bind(source_label)
+    .bind(&req.source_sha256)
+    .bind(&req.media_type)
+    .bind(parser_version)
+    .bind(rights_id)
+    .bind(&req.malware_scan_status)
+    .bind(json!(req.expected_regions))
+    .bind(json!(req.extracted_regions))
+    .bind(json!(req.uncertain_regions))
+    .bind(json!(req.critical_regions))
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await?;
+    audit(
+        &mut *tx,
+        user.user_id,
+        "document_extraction_report_created",
+        "document_extraction_report",
+        report_id,
+        json!({
+            "source_sha256": req.source_sha256,
+            "parser_version": parser_version,
+            "expected_regions": expected.len(),
+            "missing_regions": expected.difference(&extracted).count(),
+            "malware_scan_status": req.malware_scan_status,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    let report = extraction_report(&state, report_id).await?;
+    Ok((StatusCode::CREATED, Json(extraction_report_json(report))))
+}
+
+pub async fn review_extraction_report(
+    State(state): State<Arc<AppState>>,
+    reviewer: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(report_id): Path<Uuid>,
+    Json(req): Json<ReviewExtractionReportReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    state.require_admin(admin_headers(&headers))?;
+    if !matches!(req.decision.as_str(), "approved" | "rejected") {
+        return Err(ApiError::unprocessable(
+            "invalid_review_decision",
+            "decision must be approved or rejected",
+        ));
+    }
+    let note = req.note.trim();
+    if note.chars().count() < 10
+        || note.chars().count() > 2000
+        || note.chars().any(char::is_control)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_review_note",
+            "review note must be 10-2000 characters",
+        ));
+    }
+    if !valid_region_refs(&req.verified_regions) {
+        return Err(ApiError::unprocessable(
+            "invalid_verified_regions",
+            "verified region references must be unique and valid",
+        ));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let query =
+        format!("{EXTRACTION_REPORT_SELECT} WHERE report.id = $1 FOR UPDATE OF report, rights");
+    let row = sqlx::query_as::<_, ExtractionReportRow>(&query)
+        .bind(report_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ApiError::not_found("extraction_report_not_found"))?;
+    if row.created_by == Some(reviewer.user_id) {
+        return Err(ApiError::forbidden("extraction_self_review_forbidden"));
+    }
+    if !row.rights_available {
+        return Err(ApiError::forbidden("extraction_rights_unavailable"));
+    }
+    if row.review_decision.is_some() {
+        return Err(ApiError::conflict(
+            "extraction_review_already_recorded",
+            "this report already has a review decision",
+        ));
+    }
+
+    let expected = string_set(&row.expected_regions);
+    let extracted = string_set(&row.extracted_regions);
+    let missing: BTreeSet<String> = expected.difference(&extracted).cloned().collect();
+    let mut required_review = string_set(&row.uncertain_regions);
+    required_review.extend(string_set(&row.critical_regions));
+    let verified = region_set(&req.verified_regions);
+    if req.decision == "approved" {
+        if row.malware_scan_status != "clean" {
+            return Err(ApiError::conflict(
+                "extraction_scan_required",
+                "approval requires a clean scan result",
+            ));
+        }
+        if !missing.is_empty() {
+            return Err(ApiError::conflict(
+                "extraction_incomplete",
+                "missing regions must be extracted before approval",
+            ));
+        }
+        if verified != required_review {
+            return Err(ApiError::unprocessable(
+                "critical_review_required",
+                "approval must verify every critical and uncertain region",
+            ));
+        }
+    } else if !verified.is_subset(&expected) {
+        return Err(ApiError::unprocessable(
+            "invalid_verified_regions",
+            "rejected reviews may reference only expected regions",
+        ));
+    }
+
+    sqlx::query(
+        r#"INSERT INTO document_extraction_reviews
+               (id, report_id, reviewer_id, decision, verified_regions, note)
+           VALUES ($1, $2, $3, $4, $5, $6)"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(report_id)
+    .bind(reviewer.user_id)
+    .bind(&req.decision)
+    .bind(json!(verified))
+    .bind(note)
+    .execute(&mut *tx)
+    .await?;
+    audit(
+        &mut *tx,
+        reviewer.user_id,
+        "document_extraction_report_reviewed",
+        "document_extraction_report",
+        report_id,
+        json!({ "decision": req.decision, "verified_region_count": verified.len() }),
+    )
+    .await?;
+    tx.commit().await?;
+    let report = extraction_report(&state, report_id).await?;
+    Ok((StatusCode::CREATED, Json(extraction_report_json(report))))
 }
 
 // ---- ADMIN-03: AI cost/policy read-out ----------------------------------------
@@ -1263,6 +1931,7 @@ pub struct VariantReq {
     pub correct_index: i16,
     pub key_learning_point: String,
     pub exam_tip: Option<String>,
+    pub hint: Option<String>,
     pub high_yield: Option<bool>,
     pub source_ref: String,
 }
@@ -1277,6 +1946,7 @@ pub async fn create_variant(
     Json(req): Json<VariantReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
+    validate_hint_length(req.hint.as_deref())?;
     let _family = sqlx::query!("SELECT family_id FROM questions WHERE id = $1", question_id)
         .fetch_optional(&state.pool)
         .await?
@@ -1295,9 +1965,9 @@ pub async fn create_variant(
         r#"INSERT INTO question_versions
            (id, question_id, version, status, chapter_id, difficulty, vignette,
             lead_in, options, correct_index, key_learning_point, exam_tip,
-            high_yield, source_ref, created_by)
+            hint, high_yield, source_ref, created_by)
            SELECT $1, q.id, $3, 'draft', qv.chapter_id, $4, $5, $6, $7, $8,
-                  $9, $10, $11, $12, $13
+                  $9, $10, $11, $12, $13, $14
            FROM questions q
            JOIN question_versions qv ON qv.question_id = q.id
            WHERE q.id = $2
@@ -1312,6 +1982,7 @@ pub async fn create_variant(
         req.correct_index,
         req.key_learning_point,
         req.exam_tip,
+        req.hint,
         req.high_yield.unwrap_or(false),
         req.source_ref,
         user.user_id
@@ -1361,26 +2032,41 @@ pub async fn run_recovery_drill(
     // Build the canonical manifest exactly as packs.rs does, sign it, then
     // re-verify: a passing drill proves the recovery verification path works
     // on real published content; the tamper proof proves it can fail.
+    let chapter_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM curriculum_nodes
+         WHERE exam_id = $1 AND kind = 'chapter' ORDER BY id",
+    )
+    .bind(req.exam_id)
+    .fetch_all(&state.pool)
+    .await?;
     let rows = sqlx::query!(
-        r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
+        r#"SELECT id, chapter_id,
+                  encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
            FROM question_versions
-           WHERE chapter_id IN (SELECT id FROM curriculum_nodes WHERE exam_id = $1)
-             AND status = 'published'
-           ORDER BY id"#,
-        req.exam_id
+           WHERE chapter_id = ANY($1) AND status = 'published'
+           ORDER BY chapter_id, id"#,
+        &chapter_ids
     )
     .fetch_all(&state.pool)
     .await?;
-    let mut canonical = String::new();
+    let mut items = Vec::with_capacity(rows.len());
     for r in &rows {
-        canonical.push_str(&format!("{}:{}\n", r.id, r.checksum));
+        let cards = crate::routes::program::ensure_pregen(&state.pool, r.id).await?;
+        let checksum = crate::routes::packs::item_checksum(&r.checksum, &cards)?;
+        items.push((r.id, checksum));
     }
-    let key = crate::routes::packs::signing_key(&state);
-    let signature = crate::routes::packs::hmac_sha256_hex(&key, canonical.as_bytes());
-    let verify_ok = signature == crate::routes::packs::hmac_sha256_hex(&key, canonical.as_bytes());
+    let canonical = crate::routes::packs::manifest_canonical(
+        req.exam_id,
+        "recovery-drill",
+        &chapter_ids,
+        &items,
+    )?;
+    let key = crate::routes::packs::signing_key(&state)?;
+    let signature = crate::routes::packs::hmac_sha256_hex(key, canonical.as_bytes());
+    let verify_ok = signature == crate::routes::packs::hmac_sha256_hex(key, canonical.as_bytes());
     let tamper = format!("{canonical}TAMPERED");
     let tamper_detected =
-        signature != crate::routes::packs::hmac_sha256_hex(&key, tamper.as_bytes());
+        signature != crate::routes::packs::hmac_sha256_hex(key, tamper.as_bytes());
     let pass = verify_ok && tamper_detected && !rows.is_empty();
     let evidence = json!({
         "items": rows.len(),
