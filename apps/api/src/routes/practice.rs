@@ -56,6 +56,9 @@ pub(crate) struct PoolQuestion {
     pub options: serde_json::Value,
 }
 
+// 8 args is the session's honest shape; grouping would add a type with one
+// caller (same precedent as the extractive answer fn in coach.rs).
+#[allow(clippy::too_many_arguments)]
 async fn insert_session(
     pool: &sqlx::PgPool,
     user_id: Uuid,
