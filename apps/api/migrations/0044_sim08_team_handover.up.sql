@@ -1,5 +1,5 @@
 -- SIM-08: private teams and structured handovers stay attached to one case run.
-CREATE TABLE scenario_team_members (
+CREATE TABLE IF NOT EXISTS scenario_team_members (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES scenario_runs(id),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -10,10 +10,10 @@ CREATE TABLE scenario_team_members (
     UNIQUE (run_id, id)
 );
 
-CREATE UNIQUE INDEX idx_scenario_team_one_lead
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scenario_team_one_lead
     ON scenario_team_members (run_id)
     WHERE role = 'team_lead';
-CREATE INDEX idx_scenario_team_user
+CREATE INDEX IF NOT EXISTS idx_scenario_team_user
     ON scenario_team_members (user_id, run_id);
 
 INSERT INTO scenario_team_members (id, run_id, user_id, role, invited_by, joined_at)
@@ -21,7 +21,7 @@ SELECT gen_random_uuid(), run.id, run.user_id, 'team_lead', run.user_id, run.sta
 FROM scenario_runs run
 ON CONFLICT (run_id, user_id) DO NOTHING;
 
-CREATE TABLE scenario_team_invites (
+CREATE TABLE IF NOT EXISTS scenario_team_invites (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES scenario_runs(id),
     created_by UUID NOT NULL REFERENCES users(id),
@@ -34,7 +34,7 @@ CREATE TABLE scenario_team_invites (
     CHECK ((accepted_by IS NULL) = (accepted_at IS NULL))
 );
 
-CREATE INDEX idx_scenario_team_invites_run_expiry
+CREATE INDEX IF NOT EXISTS idx_scenario_team_invites_run_expiry
     ON scenario_team_invites (run_id, expires_at)
     WHERE accepted_at IS NULL;
 
@@ -65,6 +65,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS scenario_team_invites_accept_once ON scenario_team_invites;
 CREATE TRIGGER scenario_team_invites_accept_once
 BEFORE UPDATE OR DELETE ON scenario_team_invites
 FOR EACH ROW
@@ -81,12 +82,13 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS scenario_team_members_immutable ON scenario_team_members;
 CREATE TRIGGER scenario_team_members_immutable
 BEFORE UPDATE OR DELETE ON scenario_team_members
 FOR EACH ROW
 EXECUTE FUNCTION reject_scenario_team_record_mutation();
 
-CREATE TABLE scenario_handovers (
+CREATE TABLE IF NOT EXISTS scenario_handovers (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL REFERENCES scenario_runs(id),
     from_member_id UUID NOT NULL,
@@ -101,20 +103,22 @@ CREATE TABLE scenario_handovers (
     FOREIGN KEY (run_id, to_member_id) REFERENCES scenario_team_members(run_id, id)
 );
 
-CREATE INDEX idx_scenario_handovers_run_created
+CREATE INDEX IF NOT EXISTS idx_scenario_handovers_run_created
     ON scenario_handovers (run_id, created_at, id);
 
-CREATE TABLE scenario_handover_acknowledgements (
+CREATE TABLE IF NOT EXISTS scenario_handover_acknowledgements (
     handover_id UUID PRIMARY KEY REFERENCES scenario_handovers(id),
     acknowledged_by UUID NOT NULL REFERENCES users(id),
     acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+DROP TRIGGER IF EXISTS scenario_handovers_immutable ON scenario_handovers;
 CREATE TRIGGER scenario_handovers_immutable
 BEFORE UPDATE OR DELETE ON scenario_handovers
 FOR EACH ROW
 EXECUTE FUNCTION reject_scenario_team_record_mutation();
 
+DROP TRIGGER IF EXISTS scenario_handover_acknowledgements_immutable ON scenario_handover_acknowledgements;
 CREATE TRIGGER scenario_handover_acknowledgements_immutable
 BEFORE UPDATE OR DELETE ON scenario_handover_acknowledgements
 FOR EACH ROW

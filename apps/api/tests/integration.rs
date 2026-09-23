@@ -1758,7 +1758,7 @@ async fn qb16_fixed_resolution_requires_and_links_a_published_correction() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    seed::seed(&state.pool).await.expect("seed");
+    let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
     let qv = ids.question_versions[0];
 
@@ -9296,7 +9296,7 @@ async fn ai08_linked_revision_preserves_skips_and_fails_closed_after_quarantine(
          WHERE session_id = $1 ORDER BY item_index",
     )
     .bind(session_id)
-    .fetch_one(&state.pool)
+    .fetch_all(&state.pool)
     .await
     .unwrap();
     assert_eq!(items.len(), 2);

@@ -1,6 +1,6 @@
 -- SIM-07: appeal records and independent decisions remain separate from the
 -- original, immutable examiner evidence.
-CREATE TABLE scenario_assessment_appeals (
+CREATE TABLE IF NOT EXISTS scenario_assessment_appeals (
     id UUID PRIMARY KEY,
     run_id UUID NOT NULL UNIQUE REFERENCES scenario_runs(id),
     appellant_id UUID NOT NULL REFERENCES users(id),
@@ -8,10 +8,10 @@ CREATE TABLE scenario_assessment_appeals (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_scenario_assessment_appeals_created
+CREATE INDEX IF NOT EXISTS idx_scenario_assessment_appeals_created
     ON scenario_assessment_appeals (created_at DESC);
 
-CREATE TABLE scenario_assessment_appeal_reviews (
+CREATE TABLE IF NOT EXISTS scenario_assessment_appeal_reviews (
     id UUID PRIMARY KEY,
     appeal_id UUID NOT NULL UNIQUE REFERENCES scenario_assessment_appeals(id),
     reviewer_id UUID NOT NULL REFERENCES users(id),
@@ -31,11 +31,13 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS scenario_assessment_appeals_immutable ON scenario_assessment_appeals;
 CREATE TRIGGER scenario_assessment_appeals_immutable
 BEFORE UPDATE OR DELETE ON scenario_assessment_appeals
 FOR EACH ROW
 EXECUTE FUNCTION reject_scenario_assessment_appeal_mutation();
 
+DROP TRIGGER IF EXISTS scenario_assessment_appeal_reviews_immutable ON scenario_assessment_appeal_reviews;
 CREATE TRIGGER scenario_assessment_appeal_reviews_immutable
 BEFORE UPDATE OR DELETE ON scenario_assessment_appeal_reviews
 FOR EACH ROW
