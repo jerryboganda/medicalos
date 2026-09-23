@@ -1650,7 +1650,7 @@ pub async fn scenario_event(
     )
     .bind(run_id)
     .bind(&next)
-    .bind(transcript)
+    .bind(&transcript)
     .bind(finished)
     .execute(&mut *tx)
     .await?;
@@ -1848,7 +1848,7 @@ pub async fn replan_plan(
         .filter(|task| task.status == "pending")
         .map(|task| i64::from(task.estimated_minutes))
         .sum();
-    if committed <= req.daily_minutes {
+    if committed <= i64::from(req.daily_minutes) {
         tx.commit().await?;
         return Ok(Json(json!({
             "replanned": false,

@@ -435,7 +435,10 @@ pub async fn record_assessment(
     .await?
     .ok_or_else(|| ApiError::not_found("run_not_found"))?;
     if run.user_id == reviewer.user_id {
-        return Err(ApiError::forbidden("self_assessment_forbidden"));
+        return Err(ApiError::forbidden(
+            "self_assessment_forbidden",
+            "learners cannot act as their own examiner",
+        ));
     }
     if run.finished_at.is_none() {
         return Err(ApiError::conflict(
@@ -799,7 +802,10 @@ pub async fn review_scenario_assessment_appeal(
     .await?
     .ok_or_else(|| ApiError::not_found("scenario_assessment_appeal_not_found"))?;
     if reviewer.user_id == target.1 {
-        return Err(ApiError::forbidden("appeal_appellant_cannot_review"));
+        return Err(ApiError::forbidden(
+            "appeal_appellant_cannot_review",
+            "the appealing learner cannot review this appeal",
+        ));
     }
     let prior_assessor = sqlx::query_scalar::<_, bool>(
 		"SELECT EXISTS(SELECT 1 FROM scenario_rubric_evidence WHERE run_id = $1 AND reviewer_id = $2)",
@@ -809,7 +815,10 @@ pub async fn review_scenario_assessment_appeal(
 	.fetch_one(&mut *tx)
 	.await?;
     if prior_assessor {
-        return Err(ApiError::forbidden("appeal_assessor_cannot_review"));
+        return Err(ApiError::forbidden(
+            "appeal_assessor_cannot_review",
+            "the assessed learner cannot review this appeal",
+        ));
     }
     let already_reviewed = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM scenario_assessment_appeal_reviews WHERE appeal_id = $1)",

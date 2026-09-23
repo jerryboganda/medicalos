@@ -350,7 +350,12 @@ pub async fn create_private_import(
     .bind(&rights_ref)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| ApiError::forbidden("rights_unavailable"))?;
+    .ok_or_else(|| {
+        ApiError::forbidden(
+            "rights_unavailable",
+            "no active content-rights record permits this action",
+        )
+    })?;
 
     sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE")
         .bind(user.user_id)
@@ -430,7 +435,10 @@ pub async fn get_private_import(
     .await?
     .ok_or_else(|| ApiError::not_found("private_import_not_found"))?;
     if !metadata.available {
-        return Err(ApiError::forbidden("rights_unavailable"));
+        return Err(ApiError::forbidden(
+            "rights_unavailable",
+            "no active content-rights record permits this action",
+        ));
     }
     let content = sqlx::query_scalar::<_, String>(
         r#"SELECT d.content FROM private_documents d
@@ -446,7 +454,12 @@ pub async fn get_private_import(
     .bind(user.user_id)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| ApiError::forbidden("rights_unavailable"))?;
+    .ok_or_else(|| {
+        ApiError::forbidden(
+            "rights_unavailable",
+            "no active content-rights record permits this action",
+        )
+    })?;
     tx.commit().await?;
     Ok(Json(json!({
         "document_id": metadata.document_id,

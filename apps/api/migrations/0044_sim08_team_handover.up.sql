@@ -43,8 +43,12 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF TG_OP = 'DELETE'
-       OR NEW.id IS DISTINCT FROM OLD.id
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'scenario team invitations cannot be deleted'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF NEW.id IS DISTINCT FROM OLD.id
        OR NEW.run_id IS DISTINCT FROM OLD.run_id
        OR NEW.created_by IS DISTINCT FROM OLD.created_by
        OR NEW.role IS DISTINCT FROM OLD.role

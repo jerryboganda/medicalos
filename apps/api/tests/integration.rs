@@ -11223,6 +11223,43 @@ async fn library_media_and_image_cases_are_rights_checked() {
         ),
     )
     .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{case}");
+    assert_eq!(case["error"]["code"], "image_rights_unavailable", "{case}");
+
+    let (status, image_rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&token),
+            Some(serde_json::json!({
+                "ref_code": "LIC-2026-015",
+                "licensor": "Fixture image publisher",
+                "permitted_uses": ["display"],
+                "valid_from": "2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{image_rights}");
+
+    let (status, case) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Chest series", "kind": "stack", "modality": "CT",
+                "images": [
+                    {"url": "https://cdn.example.test/slice-1.png", "rights_ref": "LIC-2026-015"},
+                    {"url": "https://cdn.example.test/slice-2.png", "rights_ref": "LIC-2026-015"}
+                ],
+                "findings": "Fixture findings on the stack."
+            })),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{case}");
 
     let (status, list) = call(
@@ -11236,6 +11273,181 @@ async fn library_media_and_image_cases_are_rights_checked() {
     assert_eq!(cases[0]["kind"], "stack", "{list}");
     assert_eq!(cases[0]["images"].as_array().unwrap().len(), 2, "{list}");
     assert!(cases[0]["findings"].as_str().is_some(), "{list}");
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!(
+                "/v1/admin/content-rights/{}/revoke",
+                image_rights["rights_id"].as_str().unwrap()
+            ),
+            Some(&token),
+            Some(serde_json::json!({"reason":"Fixture grant ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert_eq!(revoked["revoked"], true, "{revoked}");
+
+    let (status, after_revoke) = call(
+        app,
+        request("GET", "/v1/me/image-cases", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_revoke}");
+    assert_eq!(
+        after_revoke["cases"].as_array().unwrap().len(),
+        0,
+        "{after_revoke}"
+    );
+}
+
+#[tokio::test]
+async fn img02_image_annotations_need_independent_review_and_hide_pending_work() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&author),
+            Some(serde_json::json!({
+                "ref_code": "IMG02-ANNOTATION-RIGHTS",
+                "licensor": "Fixture image publisher",
+                "permitted_uses": ["display"],
+                "valid_from": "2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rights}");
+
+    let (status, case) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&author),
+            Some(serde_json::json!({
+                "title": "Annotation fixture", "kind": "still", "modality": "XR",
+                "images": [{"url":"https://cdn.example.test/image.png",
+                             "rights_ref":"IMG02-ANNOTATION-RIGHTS"}],
+                "findings": "Fixture finding."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{case}");
+    let case_id = case["case_id"].as_str().unwrap();
+
+    let (status, annotation) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/image-cases/{case_id}/annotations"),
+            Some(&author),
+            Some(serde_json::json!({
+                "image_index": 0,
+                "x_percent": 35.5,
+                "y_percent": 62.25,
+                "body": "Fixture annotation text."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{annotation}");
+    let annotation_id = annotation["annotation_id"].as_str().unwrap();
+
+    let (status, pending) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/image-annotations", Some(&author), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(
+        pending["annotations"].as_array().unwrap().len(),
+        1,
+        "{pending}"
+    );
+    assert_eq!(pending["annotations"][0]["review_status"], "pending");
+
+    let (status, before_review) = call(
+        app.clone(),
+        request("GET", "/v1/me/image-cases", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{before_review}");
+    assert_eq!(
+        before_review["cases"][0]["annotations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0,
+        "{before_review}"
+    );
+
+    let review_path = format!("/v1/admin/image-annotations/{annotation_id}/review");
+    let (status, self_review) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &review_path,
+            Some(&author),
+            Some(serde_json::json!({"decision":"approved","note":"Reviewed fixture"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{self_review}");
+    assert_eq!(
+        self_review["error"]["code"], "annotation_review_requires_independent_reviewer",
+        "{self_review}"
+    );
+
+    let (status, decision) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &review_path,
+            Some(&reviewer),
+            Some(serde_json::json!({"decision":"approved","note":"Reviewed fixture"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decision}");
+    assert_eq!(decision["decision"], "approved");
+
+    let (status, after_review) = call(
+        app.clone(),
+        request("GET", "/v1/me/image-cases", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_review}");
+    let visible = &after_review["cases"][0]["annotations"];
+    assert_eq!(visible.as_array().unwrap().len(), 1, "{after_review}");
+    assert_eq!(visible[0]["image_index"], 0);
+    assert_eq!(visible[0]["x_percent"], 35.5);
+    assert_eq!(visible[0]["y_percent"], 62.25);
+    assert_eq!(visible[0]["body"], "Fixture annotation text.");
+
+    let (status, duplicate) = call(
+        app,
+        admin_req(
+            "POST",
+            &review_path,
+            Some(&reviewer),
+            Some(serde_json::json!({"decision":"rejected","note":"Second decision"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+    assert_eq!(duplicate["error"]["code"], "annotation_already_reviewed");
 }
 
 #[tokio::test]

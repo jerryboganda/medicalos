@@ -1380,7 +1380,7 @@ fn valid_region_refs(values: &[String]) -> bool {
                 && value.len() <= 128
                 && value.bytes().all(|character| {
                     character.is_ascii_alphanumeric()
-                        || matches!(character, b'_' | b'-' | '.' | ':' | '/')
+                        || matches!(character, b'_' | b'-' | b'.' | b':' | b'/')
                 })
                 && seen.insert(value.as_str())
         })
@@ -1614,7 +1614,12 @@ pub async fn create_extraction_report(
     .bind(&rights_ref)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| ApiError::forbidden("extraction_rights_unavailable"))?;
+    .ok_or_else(|| {
+        ApiError::forbidden(
+            "extraction_rights_unavailable",
+            "no active content-rights record permits this extraction",
+        )
+    })?;
     let report_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO document_extraction_reports
@@ -1697,10 +1702,16 @@ pub async fn review_extraction_report(
         .await?
         .ok_or_else(|| ApiError::not_found("extraction_report_not_found"))?;
     if row.created_by == Some(reviewer.user_id) {
-        return Err(ApiError::forbidden("extraction_self_review_forbidden"));
+        return Err(ApiError::forbidden(
+            "extraction_self_review_forbidden",
+            "extractors cannot review their own extraction report",
+        ));
     }
     if !row.rights_available {
-        return Err(ApiError::forbidden("extraction_rights_unavailable"));
+        return Err(ApiError::forbidden(
+            "extraction_rights_unavailable",
+            "no active content-rights record permits this extraction",
+        ));
     }
     if row.review_decision.is_some() {
         return Err(ApiError::conflict(

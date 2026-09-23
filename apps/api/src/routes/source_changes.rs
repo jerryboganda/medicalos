@@ -683,7 +683,7 @@ async fn refresh_session_receipt_on(
         receipt["score"] = json!(score);
         receipt["expected_score"] = Value::Null;
         receipt["source_correction_adjusted"] = json!(true);
-        if let (Some(mock_id), Some(pass_mark)) = (mock_id, pass_mark) {
+        if let (Some(_mock_id), Some(pass_mark)) = (mock_id, pass_mark) {
             let passed = score >= i64::from(pass_mark);
             let chapters = sqlx::query(
                 r#"SELECT c.name AS chapter,

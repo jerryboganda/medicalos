@@ -606,7 +606,7 @@ pub async fn create_session(
                     "source session does not exist or is not submitted",
                 )
             })?;
-            let pool_qs = sqlx::query!(
+            let mut pool_qs = sqlx::query!(
                 r#"SELECT id, vignette, lead_in, difficulty, options FROM (
                        SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                        FROM question_versions qv
@@ -789,7 +789,8 @@ pub async fn get_session(
     let mut out = Vec::with_capacity(items.len());
     for it in items {
         let opts: Vec<QuestionOption> =
-            serde_json::from_value(it.options).map_err(|_| ApiError::internal())?;
+            serde_json::from_value(it.options.unwrap_or_else(|| serde_json::json!([])))
+                .map_err(|_| ApiError::internal())?;
         let answered = it.attempt_id.is_some();
         let public_opts: Vec<serde_json::Value> = opts
             .iter()
