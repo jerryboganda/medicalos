@@ -762,7 +762,7 @@ pub async fn my_duels(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "duels": rows.iter().map(|r| json!({
+    Ok(Json(json!({ "duels": rows.into_iter().map(|r| json!({
         "duel_id": r.id,
         "status": r.status,
         "question_count": r.question_count,
