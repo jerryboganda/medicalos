@@ -69,6 +69,16 @@ async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     (status, v)
 }
 
+async fn call_text(app: Router, req: Request<Body>) -> (StatusCode, String) {
+    let resp = app.oneshot(req).await.expect("oneshot");
+    let status = resp.status();
+    let bytes = http_body_util::BodyExt::collect(resp.into_body())
+        .await
+        .expect("body")
+        .to_bytes();
+    (status, String::from_utf8_lossy(&bytes).to_string())
+}
+
 fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
     let mut builder = Request::builder()
         .method(method)
@@ -7451,7 +7461,7 @@ async fn variants_trends_drills_regression_and_qti() {
     assert!(buckets[0]["accuracy"].is_i64(), "{trends}");
 
     // INST-06: the QTI package export is real XML over published content.
-    let (status, qti) = call(
+    let (status, qti) = call_text(
         app.clone(),
         admin_req(
             "GET",
@@ -7461,8 +7471,9 @@ async fn variants_trends_drills_regression_and_qti() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{}", qti);
-    let qti_body = qti.to_string();
-    assert!(qti_body.contains("qti-package"), "{qti}");
-    assert!(qti_body.contains("imsmanifest"), "{qti}");
+    assert_eq!(status, StatusCode::OK, "{qti}");
+    assert!(qti.contains("qti-package"), "{qti}");
+    assert!(qti.contains("imsmanifest"), "{qti}");
+    assert!(qti.contains("<qti-assessment-item"), "{qti}");
+    assert!(qti.contains("<correctResponse>"), "{qti}");
 }
