@@ -13136,7 +13136,7 @@ async fn off02_concurrent_session_submit_returns_one_persisted_receipt() {
         "a lost-response retry reuses the stored receipt"
     );
 
-    let evidence_count: i64 = sqlx::query_scalar(
+    let evidence_count: i32 = sqlx::query_scalar(
         "SELECT evidence_count FROM learner_concept_state WHERE user_id = $1 AND chapter_id = $2",
     )
     .bind(learner_id)
