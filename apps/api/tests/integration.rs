@@ -6793,7 +6793,8 @@ async fn curriculum_builder_data_heatmap_filters_and_handle_lookup() {
         "{curriculum}"
     );
 
-    // Real evidence first, so the trend overlay has something to count.
+    // Real evidence first, so the trend overlay has something to count. The
+    // pool serves a random difficulty, so read it back off the item.
     let (status, session) = call(
         app.clone(),
         request(
@@ -6833,6 +6834,11 @@ async fn curriculum_builder_data_heatmap_filters_and_handle_lookup() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let served_difficulty = session["items"][0]["difficulty"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
     // PROG-01: unfiltered map first, then a drill-down with difficulty +
     // trend window, which must return the overlay accuracies.
     let (status, full) = call(
@@ -6849,7 +6855,9 @@ async fn curriculum_builder_data_heatmap_filters_and_handle_lookup() {
         app.clone(),
         request(
             "GET",
-            &format!("/v1/me/heatmap?system_id={system_id}&difficulty=medium&trend_days=30"),
+            &format!(
+                "/v1/me/heatmap?system_id={system_id}&difficulty={served_difficulty}&trend_days=30"
+            ),
             Some(&learner),
             None,
         ),
