@@ -1,6 +1,7 @@
 //! EX-01/02/03/05/06 and TRUST-05/QB-10 governance endpoints.
 
 use axum::extract::{Path, Query, State};
+use axum::response::IntoResponse;
 use axum::Json;
 use chrono::NaiveDate;
 use serde::Deserialize;
