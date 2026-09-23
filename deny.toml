@@ -1,6 +1,7 @@
-# cargo-deny policy: advisories (RustSec) use defaults; licenses must be
-# permissive or the project's own proprietary marker. Private project — the
-# final license choice is an owner decision (issue 12, brand/entity).
+# cargo-deny policy: advisories (RustSec) use defaults with the documented
+# exceptions below; licenses must be permissive or the project's own
+# proprietary marker. Private project — the final license choice is an owner
+# decision (issue 12, brand/entity).
 
 [licenses]
 allow = [
@@ -15,4 +16,18 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",
+    # webpki-roots (via openidconnect -> oauth2 -> reqwest -> hyper-rustls):
+    # permissive data license for the bundled TLS root store.
+    "CDLA-Permissive-2.0",
+]
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — Marvin Attack on the `rsa` crate; upstream has no
+    # patch (patched = []). The only rsa code in this tree is openidconnect
+    # verifying Id-token signatures with the provider's PUBLIC key. The timing
+    # attack applies to private-key DECRYPTION, which this service never
+    # performs. Revisit if rsa ships a constant-time release or if any
+    # private-key RSA path appears.
+    "RUSTSEC-2023-0071",
 ]

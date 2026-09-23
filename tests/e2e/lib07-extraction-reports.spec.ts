@@ -73,7 +73,7 @@ test('admin records extraction gaps and a separate reviewer verifies critical re
 				note: reviewBody.note,
 				reviewed_at: '2026-09-24T12:00:00Z'
 			}
-		})));
+		}));
 		await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(reports[0]) });
 	});
 	await page.route('**/v1/admin/library/extraction-reports', async (route) => {
