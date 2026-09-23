@@ -1277,7 +1277,7 @@ pub async fn create_variant(
     Json(req): Json<VariantReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
-    let family = sqlx::query!("SELECT family_id FROM questions WHERE id = $1", question_id)
+    let _family = sqlx::query!("SELECT family_id FROM questions WHERE id = $1", question_id)
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(|| ApiError::not_found("question_not_found"))?;
