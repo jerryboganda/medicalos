@@ -180,6 +180,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/review-debt", get(routes::review::review_debt))
         .route(
+            "/v1/me/session-policy",
+            axum::routing::patch(routes::accounts::set_session_policy),
+        )
+        .route(
             "/v1/admin/articles/{article_id}/media",
             post(routes::library::attach_media),
         )
@@ -579,6 +583,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::program::selection_policy),
         )
         .route("/api/v1/me/review-debt", get(routes::review::review_debt))
+        .route(
+            "/api/v1/me/session-policy",
+            axum::routing::patch(routes::accounts::set_session_policy),
+        )
         .route(
             "/api/v1/admin/articles/{article_id}/media",
             post(routes::library::attach_media),

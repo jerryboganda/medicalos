@@ -52,6 +52,16 @@
 		chapters: HeatChapter[];
 	}
 
+	interface Revision {
+		id: string;
+		to_version: number;
+		reason_code: string;
+		explanation: string;
+		automatic: boolean;
+		undone: boolean;
+	}
+
+	let revisions = $state<Revision[]>([]);
 	let learner = $state<LearnerChapter[]>([]);
 	let heatSystems = $state<HeatSystem[]>([]);
 	let drillSystem = $state('');
@@ -89,6 +99,7 @@
 		try {
 			const today = await Api.today();
 			learner = today.learner;
+			revisions = (today.revisions ?? []) as Revision[];
 		} finally {
 			loading = false;
 		}
@@ -206,6 +217,32 @@
 					{/each}
 				</ul>
 			{/each}
+		{/if}
+	</div>
+
+	<div class="card">
+		<h2>Plan timeline</h2>
+		<p class="muted" style="font-size: var(--text-sm);">
+			Every revision of today's plan, oldest rule first: why it changed,
+			whether the agent or you made it, and whether it was undone.
+		</p>
+		{#if revisions.length === 0}
+			<p class="muted">No revisions today — the plan is unchanged.</p>
+		{:else}
+			<ol style="font-size: var(--text-sm);">
+				{#each revisions as r (r.id)}
+					<li data-testid="plan-revision">
+						<strong>v{r.to_version}</strong>
+						· {r.reason_code.replace('_', ' ')}
+						· {r.automatic ? 'agent' : 'you'}
+						{#if r.undone}
+							· <span class="muted">undone</span>
+						{/if}
+						<br />
+						<span class="muted">{r.explanation}</span>
+					</li>
+				{/each}
+			</ol>
 		{/if}
 	</div>
 

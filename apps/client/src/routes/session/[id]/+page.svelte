@@ -23,6 +23,46 @@
 	let reportDone = $state('');
 	let reportError = $state('');
 
+	// UX-01: Focus Mode dims the surrounding chrome to the current item;
+	// horizontal swipe gestures move between answered items on touch.
+	// UX-02: the browser fullscreen toggle lives beside it.
+	let focusMode = $state(false);
+	let touchStartX = $state(null);
+
+	function toggleFocus() {
+		focusMode = !focusMode;
+	}
+
+	async function toggleFullscreen() {
+		try {
+			if (document.fullscreenElement) {
+				await document.exitFullscreen();
+			} else {
+				await document.documentElement.requestFullscreen();
+			}
+		} catch {
+			// Fullscreen can be refused (permissions/policy) — stay silent.
+		}
+	}
+
+	function touchStart(event) {
+		touchStartX = event.changedTouches[0]?.clientX ?? null;
+	}
+
+	function touchEnd(event) {
+		if (touchStartX === null || result) return;
+		const endX = event.changedTouches[0]?.clientX ?? null;
+		if (endX === null) return;
+		const dx = endX - touchStartX;
+		touchStartX = null;
+		if (Math.abs(dx) < 60 || !session || !item) return;
+		if (dx < 0 && current < session.items.length - 1 && item.answered) {
+			current += 1;
+		} else if (dx > 0 && current > 0) {
+			current -= 1;
+		}
+	}
+
 	const REPORT_CATEGORIES = [
 		['wrong_answer', 'Wrong answer'],
 		['bad_explanation', 'Bad explanation'],
@@ -208,7 +248,39 @@
 	onMount(load);
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} ontouchstart={touchStart} ontouchend={touchEnd} />
+
+<svelte:head>
+	{#if focusMode}
+		<style>
+			header.top,
+			nav {
+				display: none !important;
+			}
+		</style>
+	{/if}
+</svelte:head>
+
+{#if !loadFailed && !result && session}
+	<div class="card" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+		<button
+			class="btn {focusMode ? 'primary' : ''}"
+			type="button"
+			data-testid="focus-toggle"
+			onclick={toggleFocus}
+		>
+			{focusMode ? 'Exit Focus Mode' : 'Focus Mode'}
+		</button>
+		<button class="btn" type="button" data-testid="fullscreen-toggle" onclick={toggleFullscreen}>
+			{typeof document !== 'undefined' && document.fullscreenElement
+				? 'Exit fullscreen'
+				: 'Fullscreen'}
+		</button>
+		<span class="muted" style="font-size: var(--text-sm);">
+			In focus mode, swipe left or right to move between answered items.
+		</span>
+	</div>
+{/if}
 
 {#if loadFailed}
 	<p class="error-text" role="alert">{loadFailed}</p>

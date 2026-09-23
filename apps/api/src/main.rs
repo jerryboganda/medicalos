@@ -35,6 +35,14 @@ async fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(20),
         admin_token: std::env::var("ADMIN_TOKEN").ok().filter(|t| !t.is_empty()),
+        free_mock_attempts: std::env::var("FREE_MOCK_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3),
+        free_analytics_drills: std::env::var("FREE_ANALYTICS_DRILLS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5),
         free_daily_coach_turns: std::env::var("FREE_DAILY_COACH_TURNS")
             .ok()
             .and_then(|v| v.parse().ok())

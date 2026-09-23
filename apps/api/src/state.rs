@@ -11,6 +11,11 @@ pub struct AppState {
     pub admin_token: Option<String>,
     /// §26.1/AI-13: free daily AI allowance (Coach turns) — cost limit.
     pub free_daily_coach_turns: i64,
+    /// COM-01: full-mock attempts included in the free tier (§26.1).
+    pub free_mock_attempts: i64,
+    /// COM-01: free-tier daily chapter-analytics drill-downs (PROG-01
+    /// difficulty/trend views); beyond this the upgrade trigger fires.
+    pub free_analytics_drills: i64,
     /// §23: when set, the OpenAI-compatible adapter routes complex turns.
     pub openai_api_key: Option<String>,
     pub openai_base_url: String,

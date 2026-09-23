@@ -68,7 +68,7 @@ pub async fn login(
 ) -> ApiResult<Json<serde_json::Value>> {
     let email = req.email.trim().to_lowercase();
     let user = sqlx::query!(
-        "SELECT id, password_hash FROM users WHERE email = $1",
+        "SELECT id, password_hash, single_active_session FROM users WHERE email = $1",
         email
     )
     .fetch_optional(&state.pool)
@@ -76,6 +76,17 @@ pub async fn login(
     .ok_or_else(ApiError::unauthorized)?;
     if !verify_password(&req.password, &user.password_hash) {
         return Err(ApiError::unauthorized());
+    }
+    // CORE-07: the single-active-session policy retires every prior session
+    // the moment a new one is minted.
+    if user.single_active_session {
+        sqlx::query!(
+            "UPDATE auth_sessions SET revoked_at = now()
+             WHERE user_id = $1 AND revoked_at IS NULL",
+            user.id
+        )
+        .execute(&state.pool)
+        .await?;
     }
     let session = new_session_token();
     sqlx::query!(

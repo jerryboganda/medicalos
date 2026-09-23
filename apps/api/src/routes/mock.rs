@@ -139,6 +139,28 @@ pub async fn start_mock(
     .fetch_one(&state.pool)
     .await?
     .n;
+    // COM-01: the full-mock upgrade trigger originates from the entitlement
+    // check — free-tier accounts get free_mock_attempts full mocks total.
+    let total = sqlx::query!(
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts WHERE user_id = $1"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .n;
+    if total >= state.free_mock_attempts {
+        return Err(ApiError::forbidden_with_details(
+            "upgrade_required",
+            "full mocks beyond the free allowance need an upgrade",
+            serde_json::json!({
+                "trigger": "full_mock",
+                "entitlement": {
+                    "free_mock_attempts": state.free_mock_attempts,
+                    "used": total
+                }
+            }),
+        ));
+    }
     let allowed = sqlx::query!("SELECT attempts_allowed FROM mocks WHERE id = $1", mid)
         .fetch_one(&state.pool)
         .await?

@@ -34,6 +34,8 @@ pub struct CreateSessionReq {
     pub source_session_id: Option<Uuid>,
     /// EX-08: required for the timed preset, validated server-side.
     pub time_limit_seconds: Option<i64>,
+    /// QB-03: optional per-question budget for untimed sessions (seconds).
+    pub per_question_seconds: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +63,7 @@ async fn insert_session(
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
     time_limit_seconds: Option<i32>,
+    per_question_seconds: Option<i32>,
     pool_questions: &[PoolQuestion],
 ) -> ApiResult<Json<serde_json::Value>> {
     // EX-08: the server issues the deadline — the client never sets it, and
@@ -70,15 +73,16 @@ async fn insert_session(
     let sid = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO practice_sessions
-           (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds, deadline)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+           (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds, deadline, per_question_seconds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         sid,
         user_id,
         preset,
         chapter_id,
         source_session_id,
         time_limit_seconds,
-        deadline
+        deadline,
+        per_question_seconds
     )
     .execute(pool)
     .await?;
@@ -183,6 +187,25 @@ pub async fn create_session(
             let count = req.question_count.unwrap_or(10).clamp(1, 50) as i64;
             // EX-08: timed sessions carry a server-issued deadline. The floor
             // is configurable so CI/E2E can run short timed sessions.
+            // QB-03: the per-question budget is an untimed-session option.
+            let per_question_seconds = match req.per_question_seconds {
+                Some(budget) => {
+                    if req.preset == "timed" {
+                        return Err(ApiError::unprocessable(
+                            "invalid_per_question_budget",
+                            "per-question budgets apply to untimed sessions only",
+                        ));
+                    }
+                    if !(5..=3600).contains(&budget) {
+                        return Err(ApiError::unprocessable(
+                            "invalid_per_question_budget",
+                            "per_question_seconds must be 5-3600",
+                        ));
+                    }
+                    Some(budget as i32)
+                }
+                None => None,
+            };
             let time_limit_seconds = if req.preset == "timed" {
                 let limit = req.time_limit_seconds.ok_or_else(|| {
                     ApiError::unprocessable(
@@ -262,6 +285,7 @@ pub async fn create_session(
                 Some(chapter_id),
                 None,
                 time_limit_seconds,
+                per_question_seconds,
                 &qs,
             )
             .await
@@ -374,6 +398,7 @@ pub async fn create_session(
                 None,
                 None,
                 None,
+                None,
                 &qs,
             )
             .await
@@ -449,6 +474,7 @@ pub async fn create_session(
                 None,
                 Some(src),
                 None,
+                None,
                 &qs,
             )
             .await
@@ -469,7 +495,7 @@ pub async fn get_session(
     Path(sid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id
+        "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id, per_question_seconds AS \"per_question_seconds?\"
          FROM practice_sessions
          WHERE id = $1 AND user_id = $2",
         sid,
@@ -553,6 +579,7 @@ pub async fn get_session(
         "status": session.status,
         "mock_id": session.mock_id,
         "time_limit_seconds": session.time_limit_seconds,
+        "per_question_seconds": session.per_question_seconds,
         // EX-08: the client derives its countdown from these two values, so
         // changing the device clock never extends the timer.
         "deadline": session.deadline,
@@ -595,7 +622,7 @@ pub async fn apply_answer(
     req: AnswerReq,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT status, deadline, preset FROM practice_sessions WHERE id = $1 AND user_id = $2",
+        "SELECT status, deadline, preset, per_question_seconds AS \"per_question_seconds?\" FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
         user_id
     )
@@ -723,6 +750,16 @@ pub async fn apply_answer(
     // QB-17: clamp client-reported time into a sane range; out-of-range or
     // negative reports are dropped to NULL rather than trusted.
     let elapsed_ms = req.elapsed_ms.filter(|ms| (0..=3_600_000).contains(ms));
+    // QB-03: when the session carries a per-question budget, a reported pace
+    // beyond it is refused — the timer is optional but the cutoff is real.
+    if let (Some(budget), Some(elapsed)) = (session.per_question_seconds, elapsed_ms) {
+        if elapsed > budget as i64 * 1000 {
+            return Err(ApiError::unprocessable(
+                "question_time_exceeded",
+                "the per-question budget elapsed before this answer",
+            ));
+        }
+    }
     // QB-04: assistance evidence is declared by the session workspace. The
     // Coach's answer-first gate means a turn can never precede an attempt,
     // so there is no server-provable pre-answer assistance to record.

@@ -41,6 +41,8 @@ async fn setup() -> Arc<AppState> {
         pool,
         min_time_limit_seconds: 30,
         free_daily_questions: 10,
+        free_mock_attempts: 3,
+        free_analytics_drills: 2,
         community_min_sample: 2,
         admin_token: Some("test-admin".into()),
         free_daily_coach_turns: 20,
@@ -2166,6 +2168,8 @@ async fn coach_daily_allowance_enforced() {
         pool,
         min_time_limit_seconds: 30,
         free_daily_questions: 10,
+        free_mock_attempts: 3,
+        free_analytics_drills: 2,
         community_min_sample: 2,
         admin_token: Some("test-admin".into()),
         free_daily_coach_turns: 1,
@@ -6919,4 +6923,308 @@ async fn curriculum_builder_data_heatmap_filters_and_handle_lookup() {
     .await;
     assert_eq!(status, StatusCode::OK, "{duels}");
     assert_eq!(duels["duels"].as_array().unwrap().len(), 0, "{duels}");
+}
+
+#[tokio::test]
+async fn single_active_session_policy_and_device_limit() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let token_a = register_and_login(app.clone()).await;
+    let token_b = register_and_login(app.clone()).await;
+    let password = "longenough";
+    let email_a = format!("single-{}@example.test", Uuid::new_v4());
+
+    // Register account A directly to keep its credentials.
+    let (_, reg) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email_a, "password": password})),
+        ),
+    )
+    .await;
+    assert_eq!(reg["user_id"].as_str().is_some(), true, "{reg}");
+    let (_, first_login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email_a, "password": password})),
+        ),
+    )
+    .await;
+    let first_token = first_login["token"].as_str().unwrap().to_string();
+
+    // Turn the policy on with the FIRST token: it retires itself (by design,
+    // the next login is the surviving one).
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/me/session-policy",
+            Some(&first_token),
+            Some(serde_json::json!({"single_active_session": true})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "policy on retires the current session"
+    );
+
+    let (_, second_login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email_a, "password": password})),
+        ),
+    )
+    .await;
+    let second_token = second_login["token"].as_str().unwrap().to_string();
+
+    // A fresh login retires the previous active session.
+    let (_, third_login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email_a, "password": password})),
+        ),
+    )
+    .await;
+    let third_token = third_login["token"].as_str().unwrap().to_string();
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&second_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "old session rejected");
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&third_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "current session accepted");
+
+    // Without the policy, parallel sessions coexist (default off).
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&token_a), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{token_a}");
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&token_b), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let _ = password;
+
+    // CORE-07 hard device limit: shrink the cap, then a new device refuses.
+    let device_user_id: Uuid =
+        sqlx::query!("SELECT id AS \"id!\" FROM users WHERE email = $1", email_a)
+            .fetch_one(&state.pool)
+            .await
+            .expect("user")
+            .id;
+    sqlx::query!(
+        "UPDATE users SET max_devices = 1 WHERE id = $1",
+        device_user_id
+    )
+    .execute(&state.pool)
+    .await
+    .expect("limit");
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/devices",
+            Some(&third_token),
+            Some(serde_json::json!({"device_key": "second-device"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "devices_exhausted", "{body}");
+}
+
+#[tokio::test]
+async fn per_question_budget_enforced_on_untimed_sessions() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1,
+                "question_count": 1, "per_question_seconds": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["per_question_seconds"], 5, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    // A reported pace far beyond the budget is refused.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "elapsed_ms": 60000,
+                "idempotency_key": "pqb-slow"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"]["code"], "question_time_exceeded", "{body}");
+
+    // Within the budget the answer records normally.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "elapsed_ms": 3000,
+                "idempotency_key": "pqb-fast"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Budgets never apply to timed sessions.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "timed", "chapter_id": ids.chapter1,
+                "question_count": 1, "time_limit_seconds": 60,
+                "per_question_seconds": 30
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["error"]["code"], "invalid_per_question_budget",
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn upgrade_triggers_fire_for_full_mock_and_chapter_analytics() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    // COM-01 chapter analytics: the free tier gets two drill-downs a day
+    // (setup pins free_analytics_drills to 2); the third fires the trigger.
+    for _ in 0..2 {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "GET",
+                "/v1/me/heatmap?difficulty=medium&trend_days=30",
+                Some(&learner),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/heatmap?difficulty=medium&trend_days=30",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "upgrade_required", "{body}");
+    assert_eq!(
+        body["error"]["details"]["trigger"], "chapter_analytics",
+        "{body}"
+    );
+    // The base heatmap (no drill-down) stays free.
+    let (status, base) = call(
+        app.clone(),
+        request("GET", "/v1/me/heatmap", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{base}");
+
+    // COM-01 full mock: the free tier gets three mock attempts; a fourth
+    // start fires the trigger with the entitlement details. The fixture
+    // mock's own allowance is raised so only the entitlement can stop us.
+    sqlx::query!("UPDATE mocks SET attempts_allowed = 5")
+        .execute(&state.pool)
+        .await
+        .expect("raise allowance");
+    let (status, mocks) = call(
+        app.clone(),
+        request("GET", "/v1/mocks", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mocks}");
+    let mock_list = mocks["mocks"].as_array().unwrap();
+    assert!(!mock_list.is_empty(), "{mocks}");
+    let mock_id = mock_list[0]["mock_id"].as_str().unwrap().to_string();
+    for _ in 0..3 {
+        let (status, started) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/mocks/{}/start", mock_id),
+                Some(&learner),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+    }
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{}/start", mock_id),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "upgrade_required", "{body}");
+    assert_eq!(body["error"]["details"]["trigger"], "full_mock", "{body}");
 }

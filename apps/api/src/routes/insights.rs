@@ -89,6 +89,46 @@ pub async fn mastery_heatmap(
             ));
         }
     }
+    // COM-01: the difficulty/trend drill-down is the chapter-analytics
+    // premium view. The trigger fires from this entitlement check — free
+    // accounts get free_analytics_drills drill-downs per day.
+    let is_drill = q.difficulty.is_some() || q.trend_days.is_some();
+    if is_drill {
+        let day = chrono::Utc::now().date_naive();
+        let used = sqlx::query!(
+            r#"SELECT count AS "count!" FROM entitlement_usage
+               WHERE user_id = $1 AND key = 'analytics_drill' AND day = $2"#,
+            user.user_id,
+            day
+        )
+        .fetch_optional(&state.pool)
+        .await?
+        .map(|r| r.count)
+        .unwrap_or(0);
+        if used >= state.free_analytics_drills {
+            return Err(crate::error::ApiError::forbidden_with_details(
+                "upgrade_required",
+                "chapter-analytics drill-downs beyond the free daily allowance need an upgrade",
+                serde_json::json!({
+                    "trigger": "chapter_analytics",
+                    "entitlement": {
+                        "free_daily_drills": state.free_analytics_drills,
+                        "used_today": used
+                    }
+                }),
+            ));
+        }
+        sqlx::query!(
+            r#"INSERT INTO entitlement_usage (user_id, key, day, count)
+               VALUES ($1, 'analytics_drill', $2, 1)
+               ON CONFLICT (user_id, key, day) DO UPDATE
+                 SET count = entitlement_usage.count + 1"#,
+            user.user_id,
+            day
+        )
+        .execute(&state.pool)
+        .await?;
+    }
     // Mastery bands: config override, else the §24 default quad-points.
     let bands: Vec<i64> = sqlx::query!(
         r#"SELECT value->0 AS "lo!", value->1 AS "hi!" FROM app_settings

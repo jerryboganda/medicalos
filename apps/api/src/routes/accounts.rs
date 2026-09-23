@@ -37,6 +37,40 @@ pub async fn register_device(
         .chars()
         .take(100)
         .collect::<String>();
+    // CORE-07: hard device limit — a NEW device beyond max_devices is
+    // refused; re-registering an existing device is always fine.
+    let existing = sqlx::query!(
+        "SELECT 1 AS one FROM user_devices
+         WHERE user_id = $1 AND device_key = $2",
+        user.user_id,
+        key
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if existing.is_none() {
+        let limit = sqlx::query!(
+            "SELECT max_devices AS "max_devices!" FROM users WHERE id = $1",
+            user.user_id
+        )
+        .fetch_one(&state.pool)
+        .await?
+        .max_devices;
+        let active = sqlx::query!(
+            r#"SELECT COUNT(*) AS "n!" FROM user_devices
+               WHERE user_id = $1 AND revoked_at IS NULL"#,
+            user.user_id
+        )
+        .fetch_one(&state.pool)
+        .await?
+        .n;
+        if active >= limit as i64 {
+            return Err(ApiError::forbidden_with_details(
+                "devices_exhausted",
+                format!("device limit reached ({limit}) - revoke a device first"),
+                serde_json::json!({ "device_limit": { "limit": limit, "active": active } }),
+            ));
+        }
+    }
     let id = Uuid::new_v4();
     let row = sqlx::query!(
         r#"INSERT INTO user_devices (id, user_id, device_key, label)
@@ -142,4 +176,39 @@ pub async fn delete_account(
     .await?;
     tx.commit().await?;
     Ok(Json(json!({ "deleted": true })))
+}
+
+// ---- CORE-07: the single-active-session policy toggle ------------------------
+
+#[derive(Deserialize)]
+pub struct SessionPolicyReq {
+    pub single_active_session: bool,
+}
+
+/// When on, the next login retires every prior session for this account.
+pub async fn set_session_policy(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<SessionPolicyReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    sqlx::query!(
+        "UPDATE users SET single_active_session = $2 WHERE id = $1",
+        user.user_id,
+        req.single_active_session
+    )
+    .execute(&state.pool)
+    .await?;
+    if req.single_active_session {
+        // Turning the policy on takes effect immediately for this account.
+        sqlx::query!(
+            "UPDATE auth_sessions SET revoked_at = now()
+             WHERE user_id = $1 AND revoked_at IS NULL",
+            user.user_id
+        )
+        .execute(&state.pool)
+        .await?;
+    }
+    Ok(Json(
+        serde_json::json!({ "single_active_session": req.single_active_session }),
+    ))
 }
