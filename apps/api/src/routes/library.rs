@@ -679,6 +679,28 @@ pub async fn list_image_cases(
     )
     .fetch_all(&state.pool)
     .await?;
+    // IMG-02: only independently approved annotations reach learners —
+    // pending and rejected notes stay in the editorial queue.
+    let approved = sqlx::query!(
+        r#"SELECT a.case_id, a.id, a.image_index, a.x_percent, a.y_percent, a.body
+           FROM image_case_annotations a
+           JOIN image_case_annotation_reviews r ON r.annotation_id = a.id
+           WHERE r.decision = 'approved'
+           ORDER BY a.created_at"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut by_case: std::collections::HashMap<Uuid, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for a in &approved {
+        by_case.entry(a.case_id).or_default().push(json!({
+            "annotation_id": a.id,
+            "image_index": a.image_index,
+            "x_percent": a.x_percent,
+            "y_percent": a.y_percent,
+            "body": a.body,
+        }));
+    }
     let cases: Vec<serde_json::Value> = rows
         .iter()
         .map(|r| {
@@ -689,8 +711,194 @@ pub async fn list_image_cases(
                 "images": r.images,
                 "modality": r.modality,
                 "findings": r.findings,
+                "annotations": by_case.get(&r.id).cloned().unwrap_or_default(),
             })
         })
         .collect();
     Ok(Json(json!({ "cases": cases })))
+}
+
+// ---- IMG-02: annotation authoring and independent review --------------------
+// Annotations are immutable teaching notes (DB triggers refuse UPDATE/DELETE);
+// their review status is derived from the presence of a decision row, and
+// learners only ever see approved ones.
+
+#[derive(Deserialize)]
+pub struct ImageAnnotationReq {
+    pub image_index: i32,
+    pub x_percent: f64,
+    pub y_percent: f64,
+    pub body: String,
+}
+
+pub async fn create_image_annotation(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(case_id): Path<Uuid>,
+    Json(req): Json<ImageAnnotationReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+    state.require_admin(provided)?;
+    if req.image_index < 0 {
+        return Err(ApiError::unprocessable(
+            "invalid_image_index",
+            "image_index must be 0 or greater",
+        ));
+    }
+    if !(0.0..=100.0).contains(&req.x_percent) || !(0.0..=100.0).contains(&req.y_percent) {
+        return Err(ApiError::unprocessable(
+            "invalid_annotation_position",
+            "x_percent and y_percent must be within 0-100",
+        ));
+    }
+    let body = req.body.trim();
+    if body.is_empty() || body.chars().count() > 1000 {
+        return Err(ApiError::unprocessable(
+            "invalid_annotation_body",
+            "annotation body must be 1-1000 characters",
+        ));
+    }
+    let case_exists = sqlx::query!("SELECT 1 AS one FROM image_cases WHERE id = $1", case_id)
+        .fetch_optional(&state.pool)
+        .await?;
+    if case_exists.is_none() {
+        return Err(ApiError::not_found("image_case_not_found"));
+    }
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO image_case_annotations
+           (id, case_id, image_index, x_percent, y_percent, body, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        id,
+        case_id,
+        req.image_index,
+        req.x_percent,
+        req.y_percent,
+        body,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "annotation_id": id, "review_status": "pending" })),
+    ))
+}
+
+pub async fn list_image_annotations(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+    state.require_admin(provided)?;
+    let rows = sqlx::query!(
+        r#"SELECT a.id, a.case_id, a.image_index, a.x_percent, a.y_percent, a.body,
+                  a.created_by, a.created_at,
+                  r.decision AS "decision?", r.reviewer_id AS "reviewer_id?",
+                  r.note AS "note?", r.created_at AS "reviewed_at?"
+           FROM image_case_annotations a
+           LEFT JOIN image_case_annotation_reviews r ON r.annotation_id = a.id
+           ORDER BY a.created_at DESC LIMIT 200"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let annotations: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "annotation_id": r.id,
+                "case_id": r.case_id,
+                "image_index": r.image_index,
+                "x_percent": r.x_percent,
+                "y_percent": r.y_percent,
+                "body": r.body,
+                "created_by": r.created_by,
+                "created_at": r.created_at,
+                "review_status": r.decision.as_deref().unwrap_or("pending"),
+                "decision": r.decision,
+                "reviewer_id": r.reviewer_id,
+                "note": r.note,
+                "reviewed_at": r.reviewed_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "annotations": annotations })))
+}
+
+#[derive(Deserialize)]
+pub struct ImageAnnotationReviewReq {
+    pub decision: String,
+    pub note: Option<String>,
+}
+
+pub async fn review_image_annotation(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(annotation_id): Path<Uuid>,
+    Json(req): Json<ImageAnnotationReviewReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+    state.require_admin(provided)?;
+    if !matches!(req.decision.as_str(), "approved" | "rejected") {
+        return Err(ApiError::unprocessable(
+            "invalid_decision",
+            "decision must be approved or rejected",
+        ));
+    }
+    let note = req
+        .note
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
+    if note.as_deref().is_some_and(|n| n.chars().count() > 500) {
+        return Err(ApiError::unprocessable(
+            "invalid_note",
+            "note must be at most 500 characters",
+        ));
+    }
+    let annotation = sqlx::query!(
+        "SELECT id, created_by FROM image_case_annotations WHERE id = $1",
+        annotation_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    let annotation = annotation.ok_or_else(|| ApiError::not_found("image_annotation_not_found"))?;
+    if annotation.created_by == user.user_id {
+        return Err(ApiError::forbidden(
+            "annotation_review_requires_independent_reviewer",
+            "the annotation's author cannot review it themselves",
+        ));
+    }
+    let existing = sqlx::query!(
+        "SELECT decision FROM image_case_annotation_reviews WHERE annotation_id = $1",
+        annotation_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if existing.is_some() {
+        return Err(ApiError::conflict(
+            "annotation_already_reviewed",
+            "this annotation already has a final review decision",
+        ));
+    }
+    sqlx::query!(
+        "INSERT INTO image_case_annotation_reviews
+           (annotation_id, reviewer_id, decision, note)
+         VALUES ($1, $2, $3, $4)",
+        annotation_id,
+        user.user_id,
+        req.decision,
+        note,
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "annotation_id": annotation_id,
+        "decision": req.decision,
+        "reviewer_id": user.user_id,
+        "note": note,
+        "review_status": req.decision,
+    })))
 }

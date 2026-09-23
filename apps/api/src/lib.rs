@@ -227,6 +227,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/admin/image-cases",
             post(routes::library::create_image_case),
         )
+        .route(
+            "/v1/admin/image-cases/{case_id}/annotations",
+            post(routes::library::create_image_annotation),
+        )
+        .route(
+            "/v1/admin/image-annotations",
+            get(routes::library::list_image_annotations),
+        )
+        .route(
+            "/v1/admin/image-annotations/{annotation_id}/review",
+            post(routes::library::review_image_annotation),
+        )
         .route("/v1/me/image-cases", get(routes::library::list_image_cases))
         .route(
             "/v1/analytics/events",
@@ -828,6 +840,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/admin/image-cases",
             post(routes::library::create_image_case),
+        )
+        .route(
+            "/api/v1/admin/image-cases/{case_id}/annotations",
+            post(routes::library::create_image_annotation),
+        )
+        .route(
+            "/api/v1/admin/image-annotations",
+            get(routes::library::list_image_annotations),
+        )
+        .route(
+            "/api/v1/admin/image-annotations/{annotation_id}/review",
+            post(routes::library::review_image_annotation),
         )
         .route(
             "/api/v1/me/image-cases",

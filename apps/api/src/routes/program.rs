@@ -265,7 +265,26 @@ pub async fn add_member(
     Path(institution_id): Path<Uuid>,
     Json(req): Json<JoinReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &headers)?;
+    // Tenant-scoped authority (CORE-04): institution admins manage their own
+    // membership; the global admin token stays valid for operator tooling.
+    let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+    let via_admin_token = state.require_admin(provided).is_ok();
+    if !via_admin_token {
+        let staff = sqlx::query!(
+            "SELECT 1 AS one FROM institution_members
+             WHERE institution_id = $1 AND user_id = $2 AND role = 'admin'",
+            institution_id,
+            user.user_id
+        )
+        .fetch_optional(&state.pool)
+        .await?;
+        if staff.is_none() {
+            return Err(ApiError::forbidden(
+                "admin_required",
+                "institution membership is managed by the institution's admins",
+            ));
+        }
+    }
     let role = req.role.unwrap_or_else(|| "learner".into());
     if !matches!(
         role.as_str(),
@@ -1903,8 +1922,12 @@ pub async fn replan_plan(
             deferred.push(t.title.clone());
         }
     }
+    // fork_plan_on regenerates task ids; match the deferred work through the
+    // stable task_key it preserves across versions.
     sqlx::query!(
-        "DELETE FROM plan_tasks WHERE plan_id = $1 AND id = ANY($2)",
+        r#"DELETE FROM plan_tasks
+           WHERE plan_id = $1
+             AND task_key IN (SELECT task_key FROM plan_tasks WHERE id = ANY($2))"#,
         new_plan_id,
         &deferred_ids
     )

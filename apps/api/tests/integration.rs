@@ -935,8 +935,9 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         2
     );
 
-    // Double submit is rejected.
-    let (status, _) = call(
+    // Double submit replays the stored receipt (OFF-02): the learner who
+    // retries after a lost response gets the original score, not an error.
+    let (status, replayed) = call(
         app.clone(),
         request(
             "POST",
@@ -946,7 +947,11 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(
+        replayed, result,
+        "the replayed receipt matches the original"
+    );
 
     // Plan: cold-start task done; a justified, persisted revision exists.
     let (status, today) = call(
@@ -7504,6 +7509,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
     let m2 = register_id(app.clone()).await;
     let m3 = register_id(app.clone()).await;
     let m4 = register_id(app.clone()).await;
+    let m5 = register_id(app.clone()).await;
 
     // §18.1 role vocabulary includes content roles now.
     let (status, member) = call(
@@ -7525,7 +7531,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
             "POST",
             &format!("/v1/institutions/{inst_a_id}/cohorts"),
             Some(&staff_a),
-            Some(serde_json::json!({"name": "Small", "member_ids": [m1, m2]})),
+            Some(serde_json::json!({"name": "Small", "member_ids": [m2, m3]})),
         ),
     )
     .await;
@@ -7579,7 +7585,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
             &format!("/v1/institutions/{inst_a_id}/cohorts"),
             Some(&staff_a),
             Some(serde_json::json!({
-                "name": "Big", "member_ids": [m1, m2, m3, m4, member_id]
+                "name": "Big", "member_ids": [m2, m3, m4, m5, member_id]
             })),
         ),
     )
@@ -12507,6 +12513,19 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Enabling the policy retires the current session (CORE-07); re-login so
+    // the password session stays usable for the admin-tier assertions below.
+    let (_, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({ "email": email, "password": "longenough" })),
+        ),
+    )
+    .await;
+    let password_token = login["token"].as_str().unwrap().to_string();
 
     let config_uri = format!("/v1/admin/institutions/{institution_id}/sso/oidc");
     let (status, denied) = call(
@@ -15105,7 +15124,13 @@ async fn lib07_extraction_reports_expose_gaps_and_require_distinct_review() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{approved}");
     assert_eq!(approved["status"], "complete");
-    assert_eq!(approved["verified_regions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        approved["review"]["verified_regions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let (status, duplicate_review) = call(
         app.clone(),
         admin_req("POST", &review_path, Some(&reviewer), Some(review)),

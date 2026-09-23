@@ -102,6 +102,10 @@ impl IntoResponse for ApiError {
 impl From<sqlx::Error> for ApiError {
     fn from(e: sqlx::Error) -> Self {
         tracing::error!(error = %e, "database error");
+        // Integration tests run without a tracing subscriber; stderr keeps
+        // sqlx failures visible in CI test output instead of vanishing as
+        // bare 500s.
+        eprintln!("database error: {e}");
         ApiError::internal()
     }
 }
