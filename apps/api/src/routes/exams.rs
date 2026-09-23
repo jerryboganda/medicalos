@@ -377,3 +377,75 @@ pub async fn readiness(
         }
     })))
 }
+
+// ---- INST-06: QTI 2.1 package export -------------------------------------------
+
+/// Real QTI 2.1 XML for an exam's published questions: a package envelope
+/// plus one <assessmentItem> per version. Exchange-ready output; certification
+/// of a consuming LMS is a separate activity (§18.5) and is never claimed here.
+pub async fn qti_export(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(exam_id): Path<Uuid>,
+) -> Result<axum::response::Response, ApiError> {
+    let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+    state.require_admin(provided)?;
+    let rows = sqlx::query!(
+        r#"SELECT qv.id, qv.lead_in, qv.options, qv.correct_index
+           FROM question_versions qv
+           JOIN curriculum_nodes c ON c.id = qv.chapter_id
+           WHERE c.exam_id = $1 AND qv.status = 'published'
+           ORDER BY qv.id"#,
+        exam_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let esc = |t: &str| {
+        t.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let mut items = String::new();
+    for r in &rows {
+        let opts: Vec<serde_json::Value> =
+            serde_json::from_value(r.options.clone()).unwrap_or_default();
+        let mut choices = String::new();
+        for (i, o) in opts.iter().enumerate() {
+            let letter = format!("C{}", i + 1);
+            let text = o["text"].as_str().unwrap_or("");
+            choices.push_str(&format!(
+                "      <simpleChoice identifier=\"{letter}\">{}</simpleChoice>\n",
+                esc(text)
+            ));
+        }
+        let correct = format!("C{}", r.correct_index + 1);
+        items.push_str(&format!(
+            "  <qti-assessment-item identifier=\"{id}\" title=\"Item {id}\">\n    \
+             <responseDeclaration identifier=\"RESPONSE\" cardinality=\"single\" baseType=\"identifier\">\n      \
+             <correctResponse><value>{correct}</value></correctResponse>\n    \
+             </responseDeclaration>\n    \
+             <itemBody>\n      <p>{lead}</p>\n{choices}    </itemBody>\n  </qti-assessment-item>\n",
+            id = r.id,
+            lead = esc(&r.lead_in),
+            correct = correct,
+            choices = choices,
+        ));
+    }
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<qti-package>\n<imsmanifest identifier=\"MANIFEST-{exam}\"/>\n{items}</qti-package>\n",
+        exam = exam_id,
+        items = items
+    );
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "text/xml; charset=utf-8"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=qti-{exam_id}.xml"),
+            ),
+        ],
+        xml,
+    )
+        .into_response())
+}

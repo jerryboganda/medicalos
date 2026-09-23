@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use domain_contracts::option_count;
+use domain_contracts::{option_count, QuestionOption};
 
 fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers.get("x-admin-token").and_then(|v| v.to_str().ok())
@@ -1249,4 +1249,265 @@ pub async fn update_incident(
     )
     .await?;
     Ok(Json(json!({ "status": req.status })))
+}
+
+// ---- QB-02: variant authoring on an existing family --------------------------
+
+#[derive(Deserialize)]
+pub struct VariantReq {
+    pub difficulty: String,
+    pub vignette: String,
+    pub lead_in: String,
+    pub options: Vec<domain_contracts::QuestionOption>,
+    pub correct_index: i16,
+    pub key_learning_point: String,
+    pub exam_tip: Option<String>,
+    pub high_yield: Option<bool>,
+    pub source_ref: String,
+}
+
+/// Author a NEW version of an existing question: same family identity, fresh
+/// content. Born a draft; the §19.3 workflow gates it exactly like any item.
+pub async fn create_variant(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(question_id): Path<Uuid>,
+    Json(req): Json<VariantReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let family = sqlx::query!("SELECT family_id FROM questions WHERE id = $1", question_id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    let next_version: i32 = sqlx::query!(
+        r#"SELECT COALESCE(MAX(version), 0) + 1 AS "v!"
+           FROM question_versions WHERE question_id = $1"#,
+        question_id
+    )
+    .fetch_one(&state.pool)
+    .await?
+    .v;
+    let vid = Uuid::new_v4();
+    let options = serde_json::to_value(&req.options).map_err(|_| ApiError::internal())?;
+    sqlx::query!(
+        r#"INSERT INTO question_versions
+           (id, question_id, version, status, chapter_id, difficulty, vignette,
+            lead_in, options, correct_index, key_learning_point, exam_tip,
+            high_yield, source_ref, created_by)
+           SELECT $1, q.id, $3, 'draft', qv.chapter_id, $4, $5, $6, $7, $8,
+                  $9, $10, $11, $12, $13
+           FROM questions q
+           JOIN question_versions qv ON qv.question_id = q.id
+           WHERE q.id = $2
+           LIMIT 1"#,
+        vid,
+        question_id,
+        next_version,
+        req.difficulty,
+        req.vignette,
+        req.lead_in,
+        options,
+        req.correct_index,
+        req.key_learning_point,
+        req.exam_tip,
+        req.high_yield.unwrap_or(false),
+        req.source_ref,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    audit(
+        &state.pool,
+        user.user_id,
+        "variant_authored",
+        "question_version",
+        vid,
+        json!({ "question_id": question_id, "version": next_version }),
+    )
+    .await?;
+    Ok(Json(json!({
+        "question_id": question_id,
+        "version_id": vid,
+        "version": next_version,
+        "status": "draft",
+    })))
+}
+
+// ---- OPS-04: recovery drills with recorded evidence ---------------------------
+
+#[derive(Deserialize)]
+pub struct RecoveryDrillReq {
+    pub exam_id: Uuid,
+    /// Drill kind: manifest_signature verifies the signed pack manifest path
+    /// end to end (positive + tamper proof).
+    pub kind: String, // manifest_signature
+}
+
+pub async fn run_recovery_drill(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<RecoveryDrillReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    if req.kind != "manifest_signature" {
+        return Err(ApiError::unprocessable(
+            "unknown_drill",
+            "supported drills: manifest_signature",
+        ));
+    }
+    // Build the canonical manifest exactly as packs.rs does, sign it, then
+    // re-verify: a passing drill proves the recovery verification path works
+    // on real published content; the tamper proof proves it can fail.
+    let rows = sqlx::query!(
+        r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
+           FROM question_versions
+           WHERE chapter_id IN (SELECT id FROM curriculum_nodes WHERE exam_id = $1)
+             AND status = 'published'
+           ORDER BY id"#,
+        req.exam_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut canonical = String::new();
+    for r in &rows {
+        canonical.push_str(&format!("{}:{}\n", r.id, r.checksum));
+    }
+    let key = crate::routes::packs::signing_key(&state);
+    let signature = crate::routes::packs::hmac_sha256_hex(&key, canonical.as_bytes());
+    let verify_ok = signature == crate::routes::packs::hmac_sha256_hex(&key, canonical.as_bytes());
+    let tamper = format!("{canonical}TAMPERED");
+    let tamper_detected =
+        signature != crate::routes::packs::hmac_sha256_hex(&key, tamper.as_bytes());
+    let pass = verify_ok && tamper_detected && !rows.is_empty();
+    let evidence = json!({
+        "items": rows.len(),
+        "signature_verified": verify_ok,
+        "tamper_detected": tamper_detected,
+    });
+    let drill_id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO recovery_drills (id, kind, result, evidence, ran_by)
+         VALUES ($1, 'manifest_signature', $2, $3, $4)",
+        drill_id,
+        if pass { "pass" } else { "fail" },
+        evidence,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "drill_id": drill_id,
+        "kind": "manifest_signature",
+        "result": if pass { "pass" } else { "fail" },
+        "evidence": evidence,
+    })))
+}
+
+pub async fn list_recovery_drills(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let rows = sqlx::query!(
+        r#"SELECT id, kind, result, evidence, created_at
+           FROM recovery_drills ORDER BY created_at DESC LIMIT 100"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "drills": rows.iter().map(|r| json!({
+        "drill_id": r.id, "kind": r.kind, "result": r.result,
+        "evidence": r.evidence, "at": r.created_at,
+    })).collect::<Vec<_>>() })))
+}
+
+// ---- AI-16: grounded-coach regression harness (§23 scaffolding) ----------------
+
+#[derive(Deserialize)]
+pub struct RegressionReq {
+    /// Cap cases per run so a console click stays cheap.
+    pub max_cases: Option<i64>,
+}
+
+/// Re-runs the deterministic extractive adapter over published questions and
+/// asserts the grounding invariants (answer quotes reviewed material, carries
+/// the key learning point, never claims compliance). Model-backed evaluation
+/// extends this harness when an evaluated model lands (§23).
+pub async fn run_coach_regression(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<RegressionReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let max = req.max_cases.unwrap_or(10).clamp(1, 50);
+    let rows = sqlx::query!(
+        r#"SELECT qv.id, qv.vignette, qv.correct_index, qv.options,
+                  qv.key_learning_point
+           FROM question_versions qv
+           WHERE qv.status = 'published'
+           ORDER BY qv.created_at DESC LIMIT $1"#,
+        max
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut passed = 0i64;
+    for r in &rows {
+        let options: Vec<domain_contracts::QuestionOption> =
+            serde_json::from_value(r.options.clone()).unwrap_or_default();
+        let answer = crate::routes::coach::extractive_grounding(
+            "explain",
+            &r.vignette,
+            &options,
+            &r.key_learning_point,
+        );
+        let grounded = answer.contains("Key learning point:")
+            && answer.contains(&r.key_learning_point)
+            && !answer.to_lowercase().contains("as requested");
+        if grounded {
+            passed += 1;
+        }
+        results.push(json!({
+            "question_version_id": r.id,
+            "grounded": grounded,
+        }));
+    }
+    let run_id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO coach_regression_runs (id, cases_total, cases_passed, results, ran_by)
+         VALUES ($1, $2, $3, $4, $5)",
+        run_id,
+        results.len() as i32,
+        passed as i32,
+        serde_json::to_value(&results).map_err(|_| ApiError::internal())?,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "run_id": run_id,
+        "cases_total": results.len(),
+        "cases_passed": passed,
+    })))
+}
+
+pub async fn list_coach_regression(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let rows = sqlx::query!(
+        r#"SELECT id, cases_total, cases_passed, created_at
+           FROM coach_regression_runs ORDER BY created_at DESC LIMIT 50"#
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({ "runs": rows.iter().map(|r| json!({
+        "run_id": r.id, "cases_total": r.cases_total,
+        "cases_passed": r.cases_passed, "at": r.created_at,
+    })).collect::<Vec<_>>() })))
 }

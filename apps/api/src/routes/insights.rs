@@ -240,3 +240,70 @@ pub async fn mastery_heatmap(
         json!({ "systems": systems, "bands": {"weak_below": weak_at, "strong_at": strong_at} }),
     ))
 }
+
+// ---- CORE-05: per-chapter accuracy trend (§8.8) -------------------------------
+
+#[derive(Deserialize)]
+pub struct TrendsQuery {
+    pub days: Option<i64>,
+    pub chapter_id: Option<Uuid>,
+}
+
+/// Weekly accuracy buckets per chapter from real, non-assisted attempts.
+/// Weeks with no evidence are absent — the chart shows gaps as gaps.
+pub async fn accuracy_trends(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Query(q): Query<TrendsQuery>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let days = q.days.unwrap_or(30).clamp(7, 365);
+    let since = chrono::Utc::now() - chrono::Duration::days(days);
+    let rows = sqlx::query!(
+        r#"SELECT qv.chapter_id, c.name AS chapter_name,
+                  date_trunc('week', a.created_at)::date AS week_start,
+                  COUNT(*) FILTER (WHERE a.correct IS NOT NULL) AS "answered!",
+                  COUNT(*) FILTER (WHERE a.correct = TRUE) AS "correct!"
+           FROM attempts a
+           JOIN question_versions qv ON qv.id = a.question_version_id
+           JOIN curriculum_nodes c ON c.id = qv.chapter_id
+           WHERE a.user_id = $1 AND a.assisted = FALSE
+             AND a.correct IS NOT NULL AND a.created_at >= $2
+             AND ($3::uuid IS NULL OR qv.chapter_id = $3)
+           GROUP BY qv.chapter_id, c.name, week_start
+           ORDER BY c.name, week_start"#,
+        user.user_id,
+        since,
+        q.chapter_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    let mut chapters: Vec<serde_json::Value> = Vec::new();
+    for r in rows {
+        let accuracy = if r.answered > 0 {
+            Some(r.correct * 100 / r.answered)
+        } else {
+            None
+        };
+        let bucket = json!({
+            "week_start": r.week_start,
+            "answered": r.answered,
+            "accuracy": accuracy,
+        });
+        if let Some(ch) = chapters
+            .iter_mut()
+            .find(|c| c["chapter_id"] == r.chapter_id.to_string())
+        {
+            ch["buckets"].as_array_mut().unwrap().push(bucket);
+        } else {
+            chapters.push(json!({
+                "chapter_id": r.chapter_id,
+                "chapter_name": r.chapter_name,
+                "buckets": [bucket],
+            }));
+        }
+    }
+    Ok(Json(json!({
+        "window_days": days,
+        "chapters": chapters,
+    })))
+}

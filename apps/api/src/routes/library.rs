@@ -20,35 +20,82 @@ pub async fn search(
     _user: AuthUser,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let pattern = format!("%{}%", q.get("q").map(String::as_str).unwrap_or(""));
+    // LIB-02 hybrid ranking: the whole-phrase match anchors the query, then
+    // per-token hits add weighted signal (title hits outweigh body hits).
+    // Pure lexical by design — no vector index is claimed or faked.
+    let query = q
+        .get("q")
+        .map(|s| s.trim().to_lowercase())
+        .unwrap_or_default();
+    if query.is_empty() {
+        return Ok(Json(json!({ "results": [] })));
+    }
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| t.len() >= 2)
+        .map(String::from)
+        .collect();
+    let patterns: Vec<String> = tokens
+        .iter()
+        .map(|t| format!("%{t}%"))
+        .chain(std::iter::once(format!("%{query}%")))
+        .collect();
     // Only the latest published version of each article is searchable.
     let rows = sqlx::query!(
-        r#"SELECT a.id, a.slug, a.title, av.version, av.body,
-                  (a.title ILIKE $1) AS title_match
+        r#"SELECT a.id, a.slug, a.title, av.version, av.body, av.source_ref
            FROM articles a
            JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'
-           WHERE (a.title ILIKE $1 OR av.body ILIKE $1)
+           WHERE (a.title ILIKE ANY($1) OR av.body ILIKE ANY($1))
              AND av.version = (
                  SELECT MAX(version) FROM article_versions
                  WHERE article_id = a.id AND status = 'published')
-           ORDER BY title_match DESC, a.title LIMIT 25"#,
-        pattern
+           LIMIT 100"#,
+        &patterns
     )
     .fetch_all(&state.pool)
     .await?;
-    let results: Vec<serde_json::Value> = rows
+    let mut scored: Vec<(i64, serde_json::Value)> = rows
         .into_iter()
         .map(|r| {
-            json!({
+            let title_lower = r.title.to_lowercase();
+            let body_lower = r.body.to_lowercase();
+            let mut score: i64 = 0;
+            if body_lower.contains(&query) {
+                score += 5;
+            }
+            for t in &tokens {
+                if title_lower.contains(t) {
+                    score += 10;
+                }
+                if body_lower.contains(t) {
+                    score += 2;
+                }
+            }
+            let article = json!({
                 "article_id": r.id,
                 "slug": r.slug,
                 "title": r.title,
                 "version": r.version,
-                "title_match": r.title_match,
+                "score": score,
+                "source_ref": r.source_ref,
                 // A body excerpt keeps the list honest about what matched.
                 "excerpt": r.body.chars().take(200).collect::<String>(),
-            })
+            });
+            (score, article)
         })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0).then_with(|| {
+            a.1["title"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b.1["title"].as_str().unwrap_or(""))
+        })
+    });
+    let results: Vec<serde_json::Value> = scored
+        .into_iter()
+        .take(25)
+        .map(|(_, article)| article)
         .collect();
     Ok(Json(json!({ "results": results })))
 }

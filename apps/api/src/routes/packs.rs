@@ -82,7 +82,7 @@ pub async fn export_account(
 
 // ---- OFF-01: signed pack manifests -------------------------------------------
 
-fn signing_key(state: &AppState) -> Vec<u8> {
+pub(crate) fn signing_key(state: &AppState) -> Vec<u8> {
     // # ponytail: HMAC key from env with a dev fallback; a KMS-held key is
     // the Phase 3 hardening step when packs carry licensed media.
     state
@@ -93,7 +93,7 @@ fn signing_key(state: &AppState) -> Vec<u8> {
         .to_vec()
 }
 
-fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
+pub(crate) fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
     // RFC 2104 HMAC-SHA256 over sha2 — no extra dependency.
     const BLOCK: usize = 64;
     let mut k = key.to_vec();

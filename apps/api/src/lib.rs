@@ -217,6 +217,31 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::community::profile_by_handle),
         )
         .route("/v1/me/duels", get(routes::community::my_duels))
+        .route("/v1/me/trends", get(routes::insights::accuracy_trends))
+        .route(
+            "/v1/admin/questions/{question_id}/versions",
+            post(routes::admin::create_variant),
+        )
+        .route(
+            "/v1/admin/recovery-drills/run",
+            post(routes::admin::run_recovery_drill),
+        )
+        .route(
+            "/v1/admin/recovery-drills",
+            get(routes::admin::list_recovery_drills),
+        )
+        .route(
+            "/v1/admin/coach-regression/run",
+            post(routes::admin::run_coach_regression),
+        )
+        .route(
+            "/v1/admin/coach-regression",
+            get(routes::admin::list_coach_regression),
+        )
+        .route(
+            "/v1/admin/qti/packages/{exam_id}",
+            get(routes::exams::qti_export),
+        )
         .route("/v1/me/institutions", get(routes::program::my_institutions))
         .route(
             "/v1/admin/settings",
@@ -624,6 +649,31 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::community::profile_by_handle),
         )
         .route("/api/v1/me/duels", get(routes::community::my_duels))
+        .route("/api/v1/me/trends", get(routes::insights::accuracy_trends))
+        .route(
+            "/api/v1/admin/questions/{question_id}/versions",
+            post(routes::admin::create_variant),
+        )
+        .route(
+            "/api/v1/admin/recovery-drills/run",
+            post(routes::admin::run_recovery_drill),
+        )
+        .route(
+            "/api/v1/admin/recovery-drills",
+            get(routes::admin::list_recovery_drills),
+        )
+        .route(
+            "/api/v1/admin/coach-regression/run",
+            post(routes::admin::run_coach_regression),
+        )
+        .route(
+            "/api/v1/admin/coach-regression",
+            get(routes::admin::list_coach_regression),
+        )
+        .route(
+            "/api/v1/admin/qti/packages/{exam_id}",
+            get(routes::exams::qti_export),
+        )
         .route(
             "/api/v1/me/institutions",
             get(routes::program::my_institutions),

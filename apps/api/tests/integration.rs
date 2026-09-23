@@ -7252,3 +7252,217 @@ async fn upgrade_triggers_fire_for_full_mock_and_chapter_analytics() {
     assert_eq!(body["error"]["code"], "upgrade_required", "{body}");
     assert_eq!(body["error"]["details"]["trigger"], "full_mock", "{body}");
 }
+
+#[tokio::test]
+async fn variants_trends_drills_regression_and_qti() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+
+    // QB-02: author a second version on an existing family, through the gate.
+    let original = ids.question_versions[0];
+    let question_id: Uuid = sqlx::query!(
+        "SELECT question_id AS \"qid!\" FROM question_versions WHERE id = $1",
+        original
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("family")
+    .qid;
+    let (status, variant) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/questions/{question_id}/versions"),
+            Some(&author),
+            Some(serde_json::json!({
+                "difficulty": "hard",
+                "vignette": "Variant v2: the numbers changed, the concept holds.",
+                "lead_in": "What applies?",
+                "options": [
+                    {"text": "Right", "rationale": "Correct per the fixture."},
+                    {"text": "Wrong", "rationale": "Incorrect per the fixture."}
+                ],
+                "correct_index": 0,
+                "key_learning_point": "Variants probe the same concept.",
+                "source_ref": "Fixture"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{variant}");
+    assert_eq!(variant["status"], "draft", "{variant}");
+    assert_eq!(variant["version"], 2, "{variant}");
+    let variant_vid: Uuid = variant["version_id"].as_str().unwrap().parse().unwrap();
+    // Same family as the original.
+    let family = sqlx::query!(
+        r#"SELECT q.family_id AS "fid!" FROM questions q
+           JOIN question_versions qv ON qv.question_id = q.id WHERE qv.id = $1"#,
+        variant_vid
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("variant family")
+    .fid;
+    let original_family = sqlx::query!(
+        r#"SELECT q.family_id AS "fid!" FROM questions q
+           JOIN question_versions qv ON qv.question_id = q.id WHERE qv.id = $1"#,
+        original
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("original family")
+    .fid;
+    assert_eq!(family, original_family, "variant keeps the family identity");
+
+    // The v2 draft goes through the §19.3 gate like any item.
+    let (status, wf) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/assessment-workflow",
+            Some(&author),
+            Some(serde_json::json!({"action": "submit", "version_ids": [variant_vid]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/assessment-workflow",
+            Some(&reviewer),
+            Some(serde_json::json!({"action": "approve", "version_ids": [variant_vid]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/assessment-workflow",
+            Some(&reviewer),
+            Some(serde_json::json!({"action": "publish", "version_ids": [variant_vid]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+
+    // OPS-04: the recovery drill verifies the signed-manifest path and
+    // records evidence.
+    let (status, drill) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/recovery-drills/run",
+            Some(&reviewer),
+            Some(serde_json::json!({"kind": "manifest_signature", "exam_id": format!("{}", ids.exam_id)})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{drill}");
+    assert_eq!(drill["result"], "pass", "{drill}");
+    assert_eq!(drill["evidence"]["tamper_detected"], true, "{drill}");
+    let (status, list) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/recovery-drills", Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list["drills"].as_array().unwrap().len() >= 1, "{list}");
+
+    // AI-16: the grounded-coach regression harness runs real cases.
+    let (status, run) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/coach-regression/run",
+            Some(&reviewer),
+            Some(serde_json::json!({"max_cases": 5})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{run}");
+    assert_eq!(run["cases_total"], 5, "{run}");
+    assert_eq!(run["cases_passed"], 5, "{run}");
+    let (status, runs) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/coach-regression", Some(&reviewer), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{runs}");
+    assert!(runs["runs"].as_array().unwrap().len() >= 1, "{runs}");
+
+    // CORE-05: the trend endpoint returns a real bucket for the learner.
+    let learner = register_and_login(app.clone()).await;
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0, "chosen_index": 0, "idempotency_key": "trend-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, trends) = call(
+        app.clone(),
+        request("GET", "/v1/me/trends?days=30", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{trends}");
+    let trend_chapters = trends["chapters"].as_array().unwrap();
+    assert!(!trend_chapters.is_empty(), "{trends}");
+    let buckets = trend_chapters[0]["buckets"].as_array().unwrap();
+    assert!(buckets[0]["answered"].as_i64().unwrap() >= 1, "{trends}");
+    assert!(buckets[0]["accuracy"].is_i64(), "{trends}");
+
+    // INST-06: the QTI package export is real XML over published content.
+    let (status, qti) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/qti/packages/{}", ids.exam_id),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", qti);
+    let qti_body = qti.to_string();
+    assert!(qti_body.contains("qti-package"), "{qti}");
+    assert!(qti_body.contains("imsmanifest"), "{qti}");
+}

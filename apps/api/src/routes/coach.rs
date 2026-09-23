@@ -173,6 +173,26 @@ fn extractive_answer(
     parts.join(" ")
 }
 
+/// AI-16: pure deterministic grounding seam for the regression harness —
+/// no DB, no user; adapter-in, answer-out.
+pub fn extractive_grounding(
+    prompt_type: &str,
+    message: &str,
+    options: &[QuestionOption],
+    key_point: &str,
+) -> String {
+    extractive_answer(
+        prompt_type,
+        message,
+        None,
+        0,
+        options,
+        key_point,
+        None,
+        "regression",
+    )
+}
+
 pub async fn coach_turn(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
