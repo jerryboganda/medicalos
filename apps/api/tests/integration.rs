@@ -7374,7 +7374,7 @@ async fn variants_trends_drills_regression_and_qti() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert!(list["drills"].as_array().unwrap().len() >= 1, "{list}");
+    assert!(!list["drills"].as_array().unwrap().is_empty(), "{list}");
 
     // AI-16: the grounded-coach regression harness runs real cases.
     let (status, run) = call(
@@ -7396,7 +7396,7 @@ async fn variants_trends_drills_regression_and_qti() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{runs}");
-    assert!(runs["runs"].as_array().unwrap().len() >= 1, "{runs}");
+    assert!(!runs["runs"].as_array().unwrap().is_empty(), "{runs}");
 
     // CORE-05: the trend endpoint returns a real bucket for the learner.
     let learner = register_and_login(app.clone()).await;
