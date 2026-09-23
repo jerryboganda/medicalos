@@ -3122,8 +3122,8 @@ async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts()
     .fetch_one(&state.pool)
     .await
     .expect("question version fixture");
-    let question_id: Uuid = old.try_get("question_id").unwrap();
-    let question_version: i32 = old.try_get("version").unwrap();
+    let _question_id: Uuid = old.try_get("question_id").unwrap();
+    let _question_version: i32 = old.try_get("version").unwrap();
     let chapter_id: Uuid = old.try_get("chapter_id").unwrap();
     let options: Value = old.try_get("options").unwrap();
     let old_correct_index: i16 = old.try_get("correct_index").unwrap();
@@ -8954,7 +8954,7 @@ async fn ai08_legacy_capacity_receipt_remains_undoable() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    let ids = seed::seed(&state.pool).await.expect("seed");
+    let _ids = seed::seed(&state.pool).await.expect("seed");
     let learner = register_and_login(app.clone()).await;
     let (status, today) = call(
         app.clone(),
@@ -9699,7 +9699,7 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
         .any(|task| { task["id"] == protected_task_id.to_string() && task["protected"] == true }));
 
     let (status, stale) = call(
-        app,
+        app.clone(),
         request(
             "POST",
             "/v1/me/plan/replan",
@@ -10162,7 +10162,7 @@ async fn ai04_next_action_respects_time_evidence_and_current_plan() {
         )
         .bind(learner_id)
         .bind(chapter_id)
-        .bind(*question_version_id)
+        .bind(question_version_id)
         .bind(correct)
         .execute(&state.pool)
         .await
@@ -12968,7 +12968,7 @@ async fn qb13_calculators_conversions_and_assisted_hints() {
     assert_eq!(status, StatusCode::OK, "{timed}");
     let timed_sid = timed["session_id"].as_str().unwrap();
     let (status, denied) = call(
-        app,
+        app.clone(),
         request(
             "GET",
             &format!("/v1/practice/sessions/{timed_sid}/items/0/hint"),

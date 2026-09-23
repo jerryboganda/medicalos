@@ -117,6 +117,9 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
       VITE_API_BASE: http://127.0.0.1:8080
       MIN_TIME_LIMIT_SECONDS: "5"
+      # CI-only fixture for offline-pack manifest signing; production uses the
+      # VPS_PACK_SIGNING_KEY secret (docs/deployment/production.md).
+      PACK_SIGNING_KEY: ci-only-pack-signing-key-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
