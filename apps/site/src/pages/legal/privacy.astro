@@ -1,0 +1,80 @@
+---
+// Privacy policy — honest draft grounded in actual data practices:
+// this static site collects nothing; the app's practices follow the master
+// plan's privacy rules and the shipped account/deletion features.
+import Base from '../../layouts/Base.astro';
+import { appUrl, siteName } from '../../lib/site.js';
+---
+
+<Base
+	current=""
+	title="Privacy"
+	description="Draft privacy policy: what this static site collects (nothing) and what the application records."
+>
+	<article class="legal">
+		<h1>Privacy</h1>
+		<p class="draft-banner small">
+			Draft for owner review — pending legal sign-off. It describes current
+			behavior, not aspirations.
+		</p>
+
+		<h2>1. This website</h2>
+		<p>
+			This marketing site is static. It holds no learner data, sets no
+			tracking or advertising cookies, and runs no analytics. It links to
+			the application; it never receives your data.
+		</p>
+
+		<h2>2. What the application records</h2>
+		<p>
+			Your account (email and sign-in method, including institutional
+			single sign-on where configured), your registered devices and
+			sessions, your study evidence — answers, confidence, declared
+			assistance, elapsed time — your plans and goals, your notes and
+			question marks, and any private imports you upload.
+		</p>
+
+		<h2>3. What stays yours alone</h2>
+		<p>
+			Notes, question marks, and private imports are readable only by your
+			account. Private imports may not contain patient-identifiable
+			information and are readable only while licensing permits. Assisted
+			attempts are excluded from community statistics.
+		</p>
+
+		<h2>4. Institutions</h2>
+		<p>
+			Where your account is enrolled by an institution, institution staff
+			can see program-level progress within policy — never your private
+			notes, imports, or private feedback beyond what policy grants.
+			Access is role-scoped and audited.
+		</p>
+
+		<h2>5. Deletion</h2>
+		<p>
+			You can delete your account from the application. Deletion is
+			immediate for active sessions and propagates through your stored
+			data under the retention policy documented with the service.
+		</p>
+
+		<h2>6. AI assistance</h2>
+		<p>
+			Tutoring features are deterministic or run under licensed, audited
+			model providers; prompts carry your study context, not your
+			identity, and tutoring that uses your data is disclosed in the
+			product where it happens.
+		</p>
+
+		<h2>7. Changes</h2>
+		<p>
+			This policy will be updated before any material change in data
+			practices takes effect — including the opening of payments — and the
+			service will surface significant changes in the application.
+		</p>
+
+		<p class="muted small">
+			Privacy questions while the service is in development: use the
+			in-app channels — <a href={appUrl}>open the app</a>.
+		</p>
+	</article>
+</Base>

@@ -1,0 +1,46 @@
+---
+// Download — the web app is the one real, live client; the Tauri desktop and
+// mobile shells are internal betas and are described as exactly that.
+import Base from '../layouts/Base.astro';
+import { appUrl } from '../lib/site.js';
+---
+
+<Base
+	current="/download/"
+	title="Download"
+	description="Use the web app now — desktop and mobile apps are in internal beta and not yet published."
+>
+	<section>
+		<h1>Get the app</h1>
+		<p class="prose">
+			One account, one learning loop. Today, the browser is the honest way
+			in — the native shells have not shipped.
+		</p>
+	</section>
+
+	<section>
+		<h2>Web — live</h2>
+		<p class="prose">
+			Runs in any modern browser, keeps your in-session work safe across
+			dropped connections, and works on phones.
+		</p>
+		<div class="actions">
+			<a class="btn primary" href={appUrl}>Open the web app</a>
+		</div>
+	</section>
+
+	<section>
+		<h2>Desktop and mobile — internal beta</h2>
+		<p class="prose">
+			Native desktop and mobile apps are in internal beta builds. They will
+			be published — signed, with staged updates — when the Phase 3 release
+			gate passes. No early download links exist, and none will be faked
+			here.
+		</p>
+		<p class="muted small">
+			App deep-link association files are already served from this site at
+			<code>/.well-known/</code>; they make no claim until the first signed
+			beta identifiers are registered.
+		</p>
+	</section>
+</Base>

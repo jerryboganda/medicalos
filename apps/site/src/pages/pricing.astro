@@ -1,0 +1,80 @@
+---
+// Pricing — the approved 7C tier vocabulary with honest, undecided prices.
+// No payment form exists anywhere on the site (COM-02 not built; §26.1
+// requires per-market payment rules before a paywall is built).
+import Base from '../layouts/Base.astro';
+import { appUrl, paymentNote, tiers } from '../lib/site.js';
+---
+
+<Base
+	current="/pricing/"
+	title="Pricing"
+	description="Five tiers: Free, Student, Pro, Ultimate, Institutional. Prices are to be announced — this page shows what each tier is planned to include, honestly."
+>
+	<section>
+		<h1>Pricing</h1>
+		<p class="prose">
+			Five tiers, no lifetime plan. Free is live today. The paid tiers and
+			their feature lines below are the plan — what is not yet decided is
+			the price, and we will not invent one.
+		</p>
+	</section>
+
+	<div class="tiers">
+		{
+			tiers.map((tier) => (
+				<div class="tier">
+					<h3>{tier.name}</h3>
+					<p class="muted small">{tier.blurb}</p>
+					<p class="price">
+						{tier.status === 'available' ? 'Free — live today' : 'To be announced'}
+					</p>
+					<ul>
+						{tier.points.map((point) => (
+							<li>{point}</li>
+						))}
+					</ul>
+				</div>
+			))
+		}
+	</div>
+
+	<section class="help-group">
+		<h2>Questions we can already answer</h2>
+		<details>
+			<summary>Why are there no prices?</summary>
+			<p class="muted">
+				Free allowances, regional price tiers, and institutional licensing
+				are still owner decisions. This page changes the day they are made.
+			</p>
+		</details>
+		<details>
+			<summary>How will payment work on the web?</summary>
+			<p class="muted">{paymentNote}</p>
+		</details>
+		<details>
+			<summary>Is the free tier real?</summary>
+			<p class="muted">
+				Yes — it is live. A daily question allowance with full
+				explanations, plans, and streaks. The exact daily allowance number
+				is one of the pending decisions; the app shows it honestly in
+				context rather than this page guessing it.
+			</p>
+		</details>
+		<details>
+			<summary>Do cheaper tiers lose features that matter?</summary>
+			<p class="muted">
+				No. Accessibility, security, export, and transparency controls are
+				retained on every paid tier, and clinical accuracy is never
+				reduced in cheaper tiers.
+			</p>
+		</details>
+	</section>
+
+	<section>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/login`}>Start on Free</a>
+			<a class="btn" href="/help/">Questions about accounts</a>
+		</div>
+	</section>
+</Base>

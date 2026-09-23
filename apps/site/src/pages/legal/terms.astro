@@ -1,0 +1,88 @@
+---
+// Terms of use — honest draft grounded in the product's actual pilot state.
+// Owner review required before the site goes live publicly.
+import Base from '../../layouts/Base.astro';
+import { appUrl, siteName } from '../../lib/site.js';
+---
+
+<Base
+	current=""
+	title="Terms of use"
+	description="Draft terms of use for the pilot service."
+>
+	<article class="legal">
+		<h1>Terms of use</h1>
+		<p class="draft-banner small">
+			Draft for owner review — pending legal sign-off. This text describes
+			the service as it actually behaves today.
+		</p>
+
+		<h2>1. The service</h2>
+		<p>
+			{siteName} is a study platform for medical exam preparation. The
+			service is in active development. The live application currently
+			serves a synthetic pilot examination with fixture content; no
+			published clinical content pack exists yet.
+		</p>
+
+		<h2>2. Not medical advice</h2>
+		<p>
+			Everything in the service — questions, explanations, tutoring,
+			calculators — is provided for learning. It is not medical advice,
+			diagnosis, or treatment guidance, and it must not be used to make
+			decisions about real patients.
+		</p>
+
+		<h2>3. Your account</h2>
+		<p>
+			You are responsible for your credentials and for activity under your
+			account. You may be subject to a device limit and an optional
+			single-active-session policy. You can delete your account from the
+			application at any time.
+		</p>
+
+		<h2>4. Acceptable use</h2>
+		<p>
+			Do not attempt to extract, redistribute, or resell service content;
+			do not interfere with other learners or with service integrity
+			measures; do not upload content you have no right to use, and never
+			upload patient-identifiable information.
+		</p>
+
+		<h2>5. Content and reporting</h2>
+		<p>
+			Questions can be reported in-app. Reported items are excluded from
+			new practice pools while under review and are resolved within the
+			published deadlines. Corrections are recorded as separate public
+			changelog entries; your reporter notes are never published.
+		</p>
+
+		<h2>6. Payment</h2>
+		<p>
+			The service is free while it is in development. Paid tiers are
+			planned; when payments open, the applicable prices, methods, and
+			terms will be published on the pricing page before any charge can
+			occur. No payment is taken today.
+		</p>
+
+		<h2>7. No warranty</h2>
+		<p>
+			The service is provided “as is” during development. Availability,
+			features, and content may change without notice as the product moves
+			through its release gates.
+		</p>
+
+		<h2>8. Governing terms</h2>
+		<p>
+			The operating entity, governing law, and jurisdiction will be
+			specified here by the operator. Contact and dispute details will be
+			published on this page when they are decided.
+		</p>
+
+		<p class="muted small">
+			Questions about these terms: use the in-app reporting and feedback
+			channels while the service is in development —
+			<a href={appUrl}>open the app</a>.
+		</p>
+	</article>
+</Base>

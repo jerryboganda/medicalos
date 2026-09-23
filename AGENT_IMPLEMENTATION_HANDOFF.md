@@ -39,4 +39,4 @@ Completion reports state implemented / tested / partial / blocked / deliberately
 
 ## Current state
 
-Phase 0 in progress: see `.scratch/phase-0-decisions/spec.md` and open owner decisions (issues 09–19) before assuming any unresolved choice.
+Production serves the connected Phase 1 slice at medicalos.polytronx.com; the ledger (`docs/requirements/traceability.md`) is the live per-ID status. The `remaining-phases` stretch runs on branch `codex/remaining-phases` (`.scratch/remaining-phases/`). Before assuming any unresolved choice, check the still-open owner decisions in `.scratch/phase-0-decisions/issues/` and the ledger's `blocked` rows — they gate billing, pricing, deep-link identifiers, and site deployment, not the core loop.

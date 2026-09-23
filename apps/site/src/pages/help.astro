@@ -1,0 +1,99 @@
+---
+// Help — index-first: real answers about shipped behavior only.
+import Base from '../layouts/Base.astro';
+import { appUrl } from '../lib/site.js';
+
+const groups = [
+	{
+		name: 'Your account',
+		items: [
+			{
+				q: 'Can I use one account on several devices?',
+				a: 'Yes, within a device limit you can manage from the app. You can also enable a single-active-session policy, which signs out the previous device the moment a new one signs in.'
+			},
+			{
+				q: 'How do I delete my account?',
+				a: 'From in-app settings. Deletion is real: your sessions are rejected immediately and your data is removed — it is not a hiding of the account.'
+			}
+		]
+	},
+	{
+		name: 'Practice',
+		items: [
+			{
+				q: 'What happens with the free allowance?',
+				a: 'A daily question allowance with full explanations. When you reach it, the app tells you plainly and stops counting — the coach never nags you to upgrade.'
+			},
+			{
+				q: 'Can my phone lose an answer?',
+				a: 'Answers are acknowledged by the server and stored durably; the session keeps selection, navigation, notes, and marks locally, so a dropped connection or a closed tab does not lose your work. Timed sessions auto-submit locally with warnings at ten, five, and one minutes.'
+			},
+			{
+				q: 'What are tutor hints?',
+				a: 'Reasoning hints authored for a question. Opening one is recorded as assisted evidence — assisted attempts are excluded from community statistics and screening, so your honest numbers stay honest.'
+			},
+			{
+				q: 'I think a question is wrong.',
+				a: 'Report it from the question. It is acknowledged immediately with visible deadlines — 24 hours to acknowledge, 72 hours to resolve — and it is excluded from new pools while under review. If it is fixed, you can see the corrected version and your note stays private to you.'
+			}
+		]
+	},
+	{
+		name: 'Offline and sync',
+		items: [
+			{
+				q: 'Does it work offline?',
+				a: 'Practice sessions keep a local-first copy of your in-session work and replay it when you reconnect. Downloadable offline packs and their lease handling are part of the planned Pro tier.'
+			}
+		]
+	},
+	{
+		name: 'Data and privacy',
+		items: [
+			{
+				q: 'Who can see my notes and imports?',
+				a: 'Only you. Notes are private by default; private imports are readable only by your account while licensing permits, and may not contain patient-identifiable information.'
+			},
+			{
+				q: 'Does this website track me?',
+				a: 'No. This marketing site is static, holds no learner data, and runs no analytics or ad trackers.'
+			}
+		]
+	}
+];
+---
+
+<Base
+	current="/help/"
+	title="Help"
+	description="Straight answers about accounts, devices, practice, offline behavior, reporting, and privacy."
+>
+	<section>
+		<h1>Help</h1>
+		<p class="prose">
+			Everything here describes behavior that exists in the live app today.
+			If something is only planned, the answer says so.
+		</p>
+	</section>
+
+	{
+		groups.map((group) => (
+			<section class="help-group">
+				<h2>{group.name}</h2>
+				{group.items.map((item) => (
+					<details>
+						<summary>{item.q}</summary>
+						<p class="muted">{item.a}</p>
+					</details>
+				))}
+			</section>
+		))
+	}
+
+	<section>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/today`}>Open the app</a>
+			<a class="btn" href="/legal/privacy/">Read the privacy draft</a>
+		</div>
+	</section>
+</Base>

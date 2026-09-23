@@ -1,5 +1,141 @@
 [
   {
+    "date": "2026-09-24",
+    "macrostructure": "Narrative Workflow (landing) + Catalogue/Index-First/Long Document inner pages",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens — system-managed, shared with app)",
+    "enrichment": "none (typography only)",
+    "variation": "first public marketing build: N6 masthead nav, Ft1 mast-headed footer, motion-cut",
+    "brief": "GROW-02 Astro marketing site (landing, exams, pricing, help, download, legal, .well-known)"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "rights grant form and revocation ledger added to the existing operator console",
+    "brief": "LIB-06 operator rights ledger management"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "checksum-bound extraction manifest and region-by-region review in the existing operator console",
+    "brief": "LIB-07 document extraction completeness and review"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing learner Library)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "private import form and rights status added beneath reviewed article search",
+    "brief": "LIB-06 rights-checked private text and Markdown imports"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing learner Today plan)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "free-allowance no-fit explanation inside the existing next-action result region",
+    "brief": "AI-04 full-task eligibility against remaining daily questions"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing learner Today plan)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "read-only next-action result and no-fit state inside the existing plan controls",
+    "brief": "AI-04 time-budgeted next action"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing learner Today plan)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "compact plan controls with task-level protection and separate estimated minutes/question counts in the existing Today flow",
+    "brief": "AI-08 protected tasks, estimated-time capacity controls, and plan revision"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "grouped report cards with visible SLA deadlines and correction outcomes",
+    "brief": "QB-08/QB-16 report resolution queue and reporter feedback"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "stable concept identities and many-to-many curriculum mapping inside the existing console",
+    "brief": "CORE-10 curriculum mapping to versioned concept identities"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing login and operator console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "institution sign-in handoff with compact mobile navigation",
+    "brief": "Institution OIDC login, provider setup, and responsive callback"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing faculty workspace)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "chapter checklist and coverage table within existing workspace",
+    "brief": "Faculty workspace: program curriculum mapping and privacy-preserving coverage"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing learner session workspace)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "answer-gated one-tap cards in the existing feedback panel, cached with the session",
+    "brief": "AI-18 source-linked pre-generated tutoring cards"
+  },
+  {
+    "date": "2026-09-23",
+    "macrostructure": "App Shell (existing learner session workspace)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "responsive tool tray and question workspace within the existing session card system",
+    "brief": "QB-13 session calculators, conversions, text sizing, tutor hints, notes, marks, and local-first timer state"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "finished-case queue, ordered transcript, and criterion forms within the existing admin workspace",
+    "brief": "SIM-04 examiner workflow with transcript-index evidence"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing learner navigation)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "published station list leading into authored action controls, numbered debrief, and a read-only alternate timeline",
+    "brief": "SIM-01/SIM-06 learner scenario and counterfactual replay flow"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing learner debrief and editorial console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "learner appeal status in the debrief and a separate evidence-led independent review queue in the existing admin workspace",
+    "brief": "SIM-07 independent assessment appeal workflow"
+  },
+  {
+    "date": "2026-09-24",
+    "macrostructure": "App Shell (existing scenario workspace)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "a compact role roster, short-lived invitation code, and SBAR handover records inside the authored case flow",
+    "brief": "SIM-08 team roles and handover"
+  },
+  {
     "date": "2026-09-18",
     "macrostructure": "App Shell (owner §7.4: single-column mobile, side-rail desktop; no marketing hero/footer)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens: dark paper · violet accent · sans display)",

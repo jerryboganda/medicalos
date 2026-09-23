@@ -21,3 +21,7 @@ Thumbs.db
 # Session-local tool state
 .zcode/
 Cargo.lock
+
+# Playwright output
+test-results/
+playwright-report/

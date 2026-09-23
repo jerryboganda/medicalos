@@ -1,0 +1,54 @@
+---
+// Per-exam pages, generated from the registry data in src/lib/site.js.
+// Every page carries its true status; format details are deliberately
+// omitted (the registry cites official sources rather than historical labels).
+import Base from '../../layouts/Base.astro';
+import { appUrl, examFamilies, examStatusLabels } from '../../lib/site.js';
+
+export function getStaticPaths() {
+	return examFamilies.map((exam) => ({ params: { slug: exam.slug }, props: { exam } }));
+}
+
+const { exam } = Astro.props;
+---
+
+<Base
+	current="/exams/"
+	title={exam.name}
+	description={exam.summary}
+>
+	<section>
+		<p><a href="/exams/">← All exams</a></p>
+		<h1>{exam.name}</h1>
+		<p>
+			<span class={`status ${exam.status === 'in-development' ? 'dev' : ''}`}>
+				{examStatusLabels[exam.status]} · {exam.region}
+			</span>
+		</p>
+		<p class="prose">{exam.summary}</p>
+	</section>
+
+	<section>
+		<h2>What this pack will cover</h2>
+		<ul class="prose">
+			{exam.coverage.map((point) => <li>{point}</li>)}
+		</ul>
+		<p class="muted small">
+			Planned scope, not a shipped syllabus. Coverage is finalised against
+			the official blueprint before any content is reviewed or published.
+		</p>
+	</section>
+
+	<section>
+		<h2>While the pack is built</h2>
+		<p class="prose">
+			You can create a free account, set your exam date, and run the full
+			loop on the synthetic pilot exam — every plan, practice, and evidence
+			feature is live.
+		</p>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/login`}>Create a free account</a>
+			<a class="btn" href="/help/">How the app works</a>
+		</div>
+	</section>
+</Base>

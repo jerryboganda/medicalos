@@ -9,6 +9,9 @@
     "preview": "astro preview"
   },
   "dependencies": {
+    "@fontsource/fraunces": "^5.0.0",
+    "@fontsource/manrope": "^5.0.0",
+    "@medical-os/design-system": "*",
     "astro": "^5.0.0"
   }
 }

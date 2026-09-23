@@ -1,0 +1,53 @@
+---
+// Exam registry index — honest catalogue of families and their real status.
+import Base from '../../layouts/Base.astro';
+import { appUrl, examFamilies, examRegistryNote, examStatusLabels } from '../../lib/site.js';
+---
+
+<Base
+	current="/exams/"
+	title="Exam registry"
+	description="The exam families Medical Learning OS is built to carry — with honest availability status. No published content pack exists yet."
+>
+	<section>
+		<h1>Exam registry</h1>
+		<p class="prose">
+			Each pack is built against the official exam blueprint and passes a
+			rights, review, and coverage gate before it serves a single question.
+			Status below is the honest one: nothing is published yet.
+		</p>
+	</section>
+
+	<div class="registry">
+		{
+			examFamilies.map((exam) => (
+				<div class="registry-row">
+					<span class="name">
+						<a href={`/exams/${exam.slug}/`}>{exam.name}</a>
+					</span>
+					<span class="region">{exam.region}</span>
+					<span class={`status ${exam.status === 'in-development' ? 'dev' : ''}`}>
+						{examStatusLabels[exam.status]}
+					</span>
+				</div>
+			))
+		}
+	</div>
+
+	<section>
+		<h2>Also designed for</h2>
+		<p class="prose muted">{examRegistryNote}</p>
+	</section>
+
+	<section>
+		<h2>What you can use today</h2>
+		<p class="prose">
+			The live app serves a synthetic pilot exam — real product behavior,
+			fixture content — so you can try the full loop before any pack ships.
+		</p>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/today`}>Open the pilot</a>
+			<a class="btn" href="/pricing/">See the pricing plan</a>
+		</div>
+	</section>
+</Base>

@@ -7,14 +7,25 @@ export default defineConfig({
 	use: {
 		baseURL: 'http://127.0.0.1:4173'
 	},
-	webServer: {
-		// Bind explicitly to IPv4 — vite's default `localhost` can resolve to
-		// ::1 on CI while the browser dials 127.0.0.1.
-		command:
-			'npm run preview -w @medical-os/client -- --host 127.0.0.1 --port 4173',
-		cwd: '../..',
-		port: 4173,
-		reuseExistingServer: true,
-		timeout: 60_000
-	}
+	webServer: [
+		{
+			// Bind explicitly to IPv4 — vite's default `localhost` can resolve to
+			// ::1 on CI while the browser dials 127.0.0.1.
+			command:
+				'npm run preview -w @medical-os/client -- --host 127.0.0.1 --port 4173',
+			cwd: '../..',
+			port: 4173,
+			reuseExistingServer: true,
+			timeout: 60_000
+		},
+		{
+			// Astro marketing site (GROW-02) — static preview for site specs.
+			command:
+				'npm run preview -w @medical-os/site -- --host 127.0.0.1 --port 4174',
+			cwd: '../..',
+			port: 4174,
+			reuseExistingServer: true,
+			timeout: 60_000
+		}
+	]
 });

@@ -145,6 +145,8 @@ jobs:
         run: npm install
       - name: Build client
         run: npm run build -w @medical-os/client
+      - name: Build site
+        run: npm run build -w @medical-os/site
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
         working-directory: tests/e2e

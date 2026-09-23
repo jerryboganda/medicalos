@@ -1,17 +1,54 @@
 ---
-// Placeholder page — per-exam pages, pricing, and checkout arrive with the
-// Phase 1 GROW-02 slice. Never renders learner data or fabricated metrics
-// (TRUST-01: no invented success rates, §2.3).
+// Narrative Workflow landing — the product loop (aim → plan → practice →
+// evidence) told in numbered stages. Every stage names shipped features
+// only; every CTA routes to the live app's free tier (TRUST-01).
+import Base from '../layouts/Base.astro';
+import { appUrl, productStages } from '../lib/site.js';
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Medical Learning OS</title>
-	</head>
-	<body>
-		<h1>Medical Learning OS</h1>
-		<p>Marketing site scaffold. Public pages begin with the Phase 1 slice.</p>
-	</body>
-</html>
+<Base current="/" description="A medical learning OS that plans your day, times your practice, and turns every attempt into honest evidence. Start free.">
+	<section class="hero">
+		<p class="stages-line">
+			<strong>1.0</strong> aim · <strong>2.0</strong> plan · <strong>3.0</strong> practice · <strong>4.0</strong> evidence
+		</p>
+		<h1>Study what the plan chooses, and trust what the numbers say.</h1>
+		<p class="prose">
+			A learning OS for medical exams: it plans your day around your time
+			budget, runs practice that survives a dropped connection, and reports
+			evidence from your own attempts — never a readiness score it cannot
+			prove.
+		</p>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/today`}>Try five questions — no account</a>
+			<a class="btn" href={`${appUrl}/login`}>Create a free account</a>
+		</div>
+	</section>
+
+	{
+		productStages.map((stage) => (
+			<section class="stage">
+				<div>
+					<div class="stage-label">{stage.label}</div>
+					<h2>{stage.name}</h2>
+				</div>
+				<p class="prose">{stage.text}</p>
+			</section>
+		))
+	}
+
+	<section>
+		<h2>What this is not</h2>
+		<p class="prose">
+			Not a finished question bank: the live app serves a synthetic pilot
+			exam while content packs are built and clinically reviewed. Not a
+			crystal ball: there is no readiness score, percentile, or pass
+			prediction, because none can be honestly validated yet. Not free of
+			charge forever: paid tiers are planned, and prices will appear here
+			when they are decided — not before.
+		</p>
+		<p class="muted">
+			<a href="/exams/">See the exam registry</a> ·
+			<a href="/pricing/">Read the pricing plan</a>
+		</p>
+	</section>
+</Base>

@@ -1,0 +1,454 @@
+/* Hallmark · macrostructure: Narrative Workflow · tone: calm utilitarian, evidence-first · anchor hue: violet ~285°
+ * genre: editorial · theme: owner-locked §7.1 tokens (Midnight-equivalent — system-managed, no rotation)
+ * nav: N6 newspaper masthead · footer: Ft1 mast-headed · enrichment: none (typography only) · motion: cut
+ * inferred: audience = medical exam candidates + institutions · use = start free in the live app
+ */
+
+/* ---- site-level token lifts (nothing inline below; hallmark locked tokens) */
+
+:root {
+	--text-2xl: 28px;
+	--text-display: clamp(30px, 5vw, 40px);
+	--text-display-xl: clamp(38px, 7vw, 62px);
+	--content-measure: 62ch;
+	--wide-measure: 88ch;
+	--hairline: var(--color-surface-elevated);
+	--rule-strong: var(--color-accent);
+}
+
+/* ---- base ---------------------------------------------------------------- */
+
+html,
+body {
+	overflow-x: clip; /* gate 34: clip, never hidden */
+}
+
+body {
+	margin: 0;
+	background: var(--color-canvas);
+	color: var(--color-text-primary);
+	font-family: var(--font-body);
+	font-size: var(--text-body);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+	font-family: var(--font-display);
+	font-style: normal; /* gate 38a: italic headers banned */
+	font-weight: 600;
+	line-height: 1.15;
+	color: var(--color-text-primary);
+	overflow-wrap: anywhere; /* gate 51 */
+	min-width: 0;
+	margin: 0 0 var(--space-md);
+}
+
+h1 {
+	font-size: var(--text-display-xl);
+}
+
+h2 {
+	font-size: var(--text-display);
+}
+
+h3 {
+	font-size: var(--text-xl);
+}
+
+p {
+	margin: 0 0 var(--space-md);
+	max-width: var(--content-measure);
+}
+
+a {
+	color: var(--color-accent);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+}
+
+a:hover {
+	color: var(--color-text-primary);
+}
+
+:focus-visible {
+	outline: 2px solid var(--color-focus);
+	outline-offset: 2px; /* instant, never animated */
+}
+
+.muted {
+	color: var(--color-text-secondary);
+}
+
+.small {
+	font-size: var(--text-sm);
+}
+
+/* ---- masthead (N6) -------------------------------------------------------- */
+
+.mast-issue-line {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-md);
+	padding: var(--space-sm) var(--space-lg);
+	border-bottom: 1px solid var(--hairline);
+	font-size: var(--text-sm);
+	color: var(--color-text-secondary);
+	font-variant-caps: all-small-caps;
+	letter-spacing: 0.06em;
+}
+
+.mast-brand {
+	display: block;
+	text-align: center;
+	padding: var(--space-xl) var(--space-lg) var(--space-md);
+	font-family: var(--font-display);
+	font-weight: 600;
+	font-size: var(--text-2xl);
+	color: var(--color-text-primary);
+	text-decoration: none;
+}
+
+.mast-nav {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--space-xs) var(--space-lg);
+	padding: 0 var(--space-lg) var(--space-md);
+	border-bottom: 3px double var(--hairline);
+}
+
+.mast-nav a {
+	color: var(--color-text-secondary);
+	text-decoration: none;
+	white-space: nowrap; /* gate 49: links never wrap mid-label */
+	padding: var(--space-xs) 0;
+	border-bottom: 1px solid transparent;
+}
+
+.mast-nav a:hover {
+	color: var(--color-text-primary);
+}
+
+.mast-nav a[aria-current='page'] {
+	color: var(--color-text-primary);
+	border-bottom-color: var(--rule-strong);
+}
+
+/* ---- skip link (hidden until keyboard focus) -------------------------------- */
+
+.skip-link {
+	position: absolute;
+	left: -9999px;
+	background: var(--color-surface);
+	color: var(--color-text-primary);
+	padding: var(--space-sm) var(--space-lg);
+	border-radius: var(--radius-control);
+	z-index: 10;
+}
+
+.skip-link:focus-visible {
+	left: var(--space-sm);
+	top: var(--space-sm);
+}
+
+/* ---- page frame ----------------------------------------------------------- */
+
+.page {
+	max-width: var(--wide-measure);
+	margin: 0 auto;
+	padding: var(--space-3xl) var(--space-lg) var(--space-3xl);
+}
+
+.page > * + * {
+	margin-top: var(--space-2xl);
+}
+
+.prose {
+	max-width: var(--content-measure);
+}
+
+/* ---- buttons (a-only; static site, no forms) ------------------------------ */
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-md);
+	align-items: center;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	padding: var(--space-sm) var(--space-xl);
+	border-radius: var(--radius-control);
+	border: 1px solid var(--color-surface-elevated);
+	color: var(--color-text-primary);
+	text-decoration: none;
+	white-space: nowrap; /* gate 49 */
+	transition: background var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out);
+}
+
+.btn:hover {
+	background: var(--color-surface-hover);
+}
+
+.btn:active {
+	transform: translateY(1px);
+}
+
+.btn.primary {
+	background: var(--color-action-primary);
+	border-color: transparent;
+}
+
+.btn.primary:hover {
+	background: var(--color-action-hover);
+}
+
+/* ---- hero ----------------------------------------------------------------- */
+
+.hero {
+	padding-top: var(--space-2xl);
+}
+
+.hero h1 {
+	max-width: var(--wide-measure);
+}
+
+.hero .stages-line {
+	font-family: var(--font-display);
+	font-size: var(--text-display);
+	color: var(--color-text-secondary);
+	margin-bottom: var(--space-md);
+}
+
+.hero .stages-line strong {
+	color: var(--color-text-primary);
+	font-weight: 600;
+}
+
+/* ---- narrative workflow stages --------------------------------------------- */
+
+.stage {
+	border-top: 3px solid var(--hairline);
+	padding-top: var(--space-xl);
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--space-md) var(--space-2xl);
+}
+
+.stage .stage-label {
+	font-family: var(--font-display);
+	font-size: var(--text-display);
+	color: var(--rule-strong);
+	line-height: 1;
+}
+
+.stage h2 {
+	margin-top: var(--space-xs);
+}
+
+@media (min-width: 48rem) {
+	.stage {
+		grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+	}
+}
+
+/* ---- status badges --------------------------------------------------------- */
+
+.status {
+	display: inline-block;
+	font-size: var(--text-sm);
+	padding: 2px var(--space-md);
+	border-radius: 999px;
+	border: 1px solid var(--hairline);
+	color: var(--color-text-secondary);
+	white-space: nowrap;
+}
+
+.status.dev {
+	color: var(--color-warning);
+	border-color: var(--color-warning);
+}
+
+/* ---- registry / catalogue rows ---------------------------------------------- */
+
+.registry {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	border-top: 1px solid var(--hairline);
+}
+
+.registry-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-sm) var(--space-md);
+	padding: var(--space-md) 0;
+	border-bottom: 1px solid var(--hairline);
+}
+
+.registry-row .name {
+	font-family: var(--font-display);
+	font-size: var(--text-body-lg);
+	font-weight: 600;
+}
+
+.registry-row .region {
+	color: var(--color-text-secondary);
+	font-size: var(--text-sm);
+}
+
+.registry-row .status {
+	margin-left: auto;
+}
+
+/* ---- pricing tiers (catalogue) ---------------------------------------------- */
+
+.tiers {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(0, 210px));
+	gap: var(--space-md);
+}
+
+.tier {
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-card);
+	padding: var(--space-lg);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+}
+
+.tier h3 {
+	margin: 0;
+}
+
+.tier .price {
+	font-family: var(--font-display);
+	color: var(--color-text-secondary);
+}
+
+.tier ul {
+	margin: 0;
+	padding-left: 1.1em;
+	color: var(--color-text-secondary);
+	font-size: var(--text-sm);
+}
+
+.tier li + li {
+	margin-top: var(--space-xs);
+}
+
+/* ---- help (index-first) ------------------------------------------------------ */
+
+.help-group h2 {
+	font-size: var(--text-xl);
+	margin-top: var(--space-2xl);
+}
+
+.help-group details {
+	border-bottom: 1px solid var(--hairline);
+}
+
+.help-group summary {
+	cursor: pointer;
+	padding: var(--space-md) 0;
+	font-weight: 600;
+	color: var(--color-text-primary);
+}
+
+.help-group summary:hover {
+	color: var(--color-accent);
+}
+
+.help-group details[open] summary {
+	color: var(--color-accent);
+}
+
+.help-group details > p {
+	padding-bottom: var(--space-md);
+}
+
+/* ---- legal (long document) ---------------------------------------------------- */
+
+.legal {
+	max-width: var(--content-measure);
+}
+
+.legal h2 {
+	font-size: var(--text-xl);
+	margin-top: var(--space-2xl);
+}
+
+.draft-banner {
+	border: 1px solid var(--color-warning);
+	border-radius: var(--radius-control);
+	padding: var(--space-md) var(--space-lg);
+	color: var(--color-text-primary);
+	background: transparent;
+}
+
+/* ---- footer (Ft1 mast-headed) --------------------------------------------------- */
+
+.foot {
+	border-top: 1px solid var(--hairline);
+	margin-top: var(--space-3xl);
+	padding: var(--space-2xl) var(--space-lg);
+	text-align: center;
+}
+
+.foot .foot-brand {
+	font-family: var(--font-display);
+	font-weight: 600;
+	font-size: var(--text-xl);
+	color: var(--color-text-primary);
+	text-decoration: none;
+}
+
+.foot .foot-tagline {
+	color: var(--color-text-secondary);
+	margin: var(--space-xs) 0 var(--space-md);
+}
+
+.foot nav {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--space-xs) var(--space-lg);
+	margin-bottom: var(--space-md);
+}
+
+.foot nav a {
+	color: var(--color-text-secondary);
+	white-space: nowrap;
+}
+
+.foot nav a:hover {
+	color: var(--color-text-primary);
+}
+
+.foot .colophon {
+	color: var(--color-text-secondary);
+	font-size: var(--text-sm);
+	max-width: var(--content-measure);
+	margin: 0 auto;
+}
+
+/* ---- motion: cut (static site; only the reduced-motion guard remains) ----------- */
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition-duration: 0ms !important;
+	}
+
+	.btn:active {
+		transform: none;
+	}
+}
