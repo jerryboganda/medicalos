@@ -437,15 +437,15 @@ pub async fn qti_export(
         exam = exam_id,
         items = items
     );
-    Ok((
-        [
-            (axum::http::header::CONTENT_TYPE, "text/xml; charset=utf-8"),
-            (
-                axum::http::header::CONTENT_DISPOSITION,
-                format!("attachment; filename=qti-{exam_id}.xml"),
-            ),
-        ],
-        xml,
-    )
-        .into_response())
+    let disposition = format!("attachment; filename=qti-{exam_id}.xml");
+    let mut response_headers = axum::http::HeaderMap::new();
+    response_headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("text/xml; charset=utf-8"),
+    );
+    response_headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        axum::http::HeaderValue::from_str(&disposition).map_err(|_| ApiError::internal())?,
+    );
+    Ok((response_headers, xml).into_response())
 }
