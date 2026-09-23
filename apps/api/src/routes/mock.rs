@@ -142,7 +142,8 @@ pub async fn start_mock(
     // COM-01: the full-mock upgrade trigger originates from the entitlement
     // check — free-tier accounts get free_mock_attempts full mocks total.
     let total = sqlx::query!(
-        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts WHERE user_id = $1"#,
+        r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM practice_sessions
+           WHERE user_id = $1 AND mock_id IS NOT NULL"#,
         user.user_id
     )
     .fetch_one(&state.pool)

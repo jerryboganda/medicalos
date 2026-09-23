@@ -117,7 +117,11 @@ async fn insert_session(
                 .collect(),
         });
     }
-    Ok(Json(serde_json::json!({"session_id": sid, "items": items})))
+    Ok(Json(serde_json::json!({
+        "session_id": sid,
+        "items": items,
+        "per_question_seconds": per_question_seconds,
+    })))
 }
 
 pub async fn create_session(
