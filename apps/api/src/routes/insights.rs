@@ -105,7 +105,7 @@ pub async fn mastery_heatmap(
         .await?
         .map(|r| r.count)
         .unwrap_or(0);
-        if used >= state.free_analytics_drills {
+        if i64::from(used) >= state.free_analytics_drills {
             return Err(crate::error::ApiError::forbidden_with_details(
                 "upgrade_required",
                 "chapter-analytics drill-downs beyond the free daily allowance need an upgrade",

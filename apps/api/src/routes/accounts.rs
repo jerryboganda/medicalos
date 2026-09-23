@@ -49,7 +49,7 @@ pub async fn register_device(
     .await?;
     if existing.is_none() {
         let limit = sqlx::query!(
-            r#"SELECT max_devices AS "max_devices!" FROM users WHERE id = $1",
+            r#"SELECT max_devices AS "max_devices!" FROM users WHERE id = $1"#,
             user.user_id
         )
         .fetch_one(&state.pool)
