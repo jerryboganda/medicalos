@@ -174,7 +174,7 @@ pub async fn mastery_heatmap(
         });
         if let Some((answered, correct, recent_correct)) = overlays.get(&r.chapter_id) {
             entry["filtered_accuracy"] = if *answered > 0 {
-                json!(Some((*correct * 100 / *answered) as i64))
+                json!(Some(*correct * 100 / *answered))
             } else {
                 json!(None::<i64>)
             };
