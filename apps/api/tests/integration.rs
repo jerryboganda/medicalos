@@ -6972,11 +6972,14 @@ async fn single_active_session_policy_and_device_limit() {
         ),
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::UNAUTHORIZED,
-        "policy on retires the current session"
-    );
+    assert_eq!(status, StatusCode::OK, "policy stored");
+    // Turning the policy on retires the very session that enabled it.
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&first_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "self-retired");
 
     let (_, second_login) = call(
         app.clone(),
