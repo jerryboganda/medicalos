@@ -10,7 +10,7 @@ use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetada
 use openidconnect::reqwest;
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce as OidcNonce,
-    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, TokenResponse,
 };
 use rand::RngCore;
 use serde::Deserialize;
@@ -411,7 +411,8 @@ pub async fn start_login(
             CsrfToken::new_random,
             OidcNonce::new_random,
         )
-        .add_scope(Scope::new("openid".into()))
+        // The AuthorizationCode flow adds the `openid` scope itself; adding
+        // it again produced a doubled scope in the authorize URL.
         .set_pkce_challenge(challenge)
         .url();
     let state_value = csrf.secret();

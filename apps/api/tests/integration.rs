@@ -840,8 +840,14 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
 
     let chapter1 = today["tasks"][0]["chapter_id"].as_str().map(str::to_string);
     let chapter1 = Uuid::parse_str(&chapter1.expect("cold-start task has chapter")).unwrap();
+    let task_key: Uuid = today["tasks"][0]["task_key"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
-    // Tutor session over the cold-start chapter.
+    // Tutor session launched from the cold-start plan task (AI-08 task
+    // identity): completing it is what marks the task done.
     let (status, session) = call(
         app.clone(),
         request(
@@ -849,7 +855,8 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             "/v1/practice/sessions",
             Some(&token),
             Some(serde_json::json!({
-                "preset": "tutor", "chapter_id": chapter1, "question_count": 2
+                "preset": "tutor", "chapter_id": chapter1, "question_count": 2,
+                "plan_task_key": task_key
             })),
         ),
     )
@@ -9603,12 +9610,17 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
         .execute(&state.pool)
         .await
         .expect("mark completed task");
+    let done_task_key: Uuid = sqlx::query_scalar("SELECT task_key FROM plan_tasks WHERE id = $1")
+        .bind(done_task_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("cold-start task carries its task_key");
     let protected_task_id = Uuid::new_v4();
     let early_optional_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO plan_tasks
-           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, created_at)
-         VALUES ($1, $2, 'practice', 'Earlier optional practice', $3, 5, 8, now() - interval '1 second')",
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, task_key, created_at)
+         VALUES ($1, $2, 'practice', 'Earlier optional practice', $3, 5, 8, $1, now() - interval '1 second')",
     )
     .bind(early_optional_id)
     .bind(plan_id)
@@ -9618,8 +9630,8 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
     .expect("add earlier optional task fixture");
     sqlx::query(
         "INSERT INTO plan_tasks
-           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
-         VALUES ($1, $2, 'practice', 'Protected review', $3, 4, 6)",
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, task_key)
+         VALUES ($1, $2, 'practice', 'Protected review', $3, 4, 6, $1)",
     )
     .bind(protected_task_id)
     .bind(plan_id)
@@ -9630,8 +9642,8 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
     let deferred_task_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO plan_tasks
-           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
-         VALUES ($1, $2, 'practice', 'Optional practice', $3, 3, 5)",
+           (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes, task_key)
+         VALUES ($1, $2, 'practice', 'Optional practice', $3, 3, 5, $1)",
     )
     .bind(deferred_task_id)
     .bind(plan_id)
@@ -9697,12 +9709,10 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
         .as_array()
         .unwrap()
         .iter()
-        .any(|task| { task["id"] == done_task_id.to_string() && task["status"] == "done" }));
-    assert!(current["tasks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|task| { task["id"] == protected_task_id.to_string() && task["protected"] == true }));
+        .any(|task| { task["task_key"] == done_task_key.to_string() && task["status"] == "done" }));
+    assert!(current["tasks"].as_array().unwrap().iter().any(|task| {
+        task["task_key"] == protected_task_id.to_string() && task["protected"] == true
+    }));
 
     let (status, stale) = call(
         app.clone(),
@@ -15224,7 +15234,9 @@ async fn lib07_extraction_reports_expose_gaps_and_require_distinct_review() {
         "critical_regions":[],
         "content":"source bytes must not enter this API"
     });
-    let (status, unexpected_field) = call(
+    // The rejection is axum's plain-text JsonRejection (deny_unknown_fields),
+    // so read it as text and assert only the status.
+    let (status, unexpected_field) = call_text(
         app,
         admin_req(
             "POST",

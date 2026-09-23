@@ -159,7 +159,7 @@ pub async fn get_article(
     Path(slug): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let article = sqlx::query!(
-        r#"SELECT a.id, a.slug, a.title, av.version, av.body, av.source_ref,
+        r#"SELECT a.id, a.slug, a.title, av.id AS "version_id!", av.version, av.body, av.source_ref,
                   av.jurisdiction AS "jurisdiction?", av.effective_from AS "effective_from?",
                   av.effective_to AS "effective_to?"
            FROM articles a
@@ -177,13 +177,13 @@ pub async fn get_article(
         "INSERT INTO article_reads (user_id, article_version_id)
          VALUES ($1, $2) ON CONFLICT DO NOTHING",
         _user.user_id,
-        article.id
+        article.version_id
     )
     .execute(&state.pool)
     .await?;
     let citations = sqlx::query!(
         "SELECT anchor, target, kind FROM article_citations WHERE version_id = $1",
-        article.id
+        article.version_id
     )
     .fetch_all(&state.pool)
     .await?;
