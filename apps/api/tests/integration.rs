@@ -7047,6 +7047,19 @@ async fn single_active_session_policy_and_device_limit() {
     .execute(&state.pool)
     .await
     .expect("limit");
+    // First device fits under the cap...
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/devices",
+            Some(&third_token),
+            Some(serde_json::json!({"device_key": "first-device"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // ...a second one hits the hard limit.
     let (status, body) = call(
         app.clone(),
         request(
