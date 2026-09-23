@@ -141,7 +141,7 @@ fn oidc_http_client() -> ApiResult<reqwest::Client> {
 }
 
 fn credential_cipher(key: &str) -> ApiResult<ChaCha20Poly1305> {
-    if key.as_bytes().len() < 32 {
+    if key.len() < 32 {
         return Err(ApiError::unprocessable(
             "oidc_encryption_unavailable",
             "OIDC_CREDENTIAL_KEY must contain at least 32 bytes",

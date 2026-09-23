@@ -576,9 +576,7 @@ pub async fn record_change(
     )
     .await?;
     if req.classification == "invalid_answer_key" {
-        let body = format!(
-            "A source change may affect a question answer key. Review your saved result and the corrected content notice when it arrives."
-        );
+        let body = "A source change may affect a question answer key. Review your saved result and the corrected content notice when it arrives.";
         sqlx::query(
             r#"INSERT INTO notifications (id, user_id, category, title, body, deep_link)
                SELECT gen_random_uuid(), affected.user_id, 'content_update',
@@ -642,7 +640,7 @@ async fn refresh_session_receipt_on(
     .bind(session_id)
     .fetch_optional(&mut *conn)
     .await?
-    .ok_or_else(|| ApiError::internal())?;
+    .ok_or_else(ApiError::internal)?;
     let receipt = session.try_get::<Option<Value>, _>("result_payload")?;
     let mock_id: Option<Uuid> = session.try_get("mock_id")?;
     if receipt.is_none() && mock_id.is_none() {

@@ -323,7 +323,7 @@ pub async fn maybe_create_revision(
         tx.commit().await?;
         return Ok(());
     }
-    if count_today_revisions_on(&mut *tx, user_id).await? >= i64::from(MAX_PLAN_REVISIONS_PER_DAY) {
+    if count_today_revisions_on(&mut tx, user_id).await? >= i64::from(MAX_PLAN_REVISIONS_PER_DAY) {
         tx.commit().await?;
         return Ok(());
     }
@@ -340,7 +340,7 @@ pub async fn maybe_create_revision(
         return Ok(());
     }
 
-    let (new_plan_id, to_version) = fork_plan_on(&mut *tx, current.id, current.version).await?;
+    let (new_plan_id, to_version) = fork_plan_on(&mut tx, current.id, current.version).await?;
     let revision_id = Uuid::new_v4();
     let title = format!("Re-practice: {} missed question(s)", missed);
     sqlx::query!(

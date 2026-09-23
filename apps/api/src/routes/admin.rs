@@ -493,7 +493,7 @@ async fn transition_version(
                     "only approved versions can be published",
                 ));
             }
-            crate::routes::program::ensure_pregen_on(&mut *tx, vid).await?;
+            crate::routes::program::ensure_pregen_on(&mut tx, vid).await?;
             audit(
                 &mut *tx,
                 actor,

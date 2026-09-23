@@ -716,7 +716,7 @@ pub async fn undo_revision(
         ));
     }
 
-    let (new_plan_id, new_version) = agent::fork_plan_on(&mut *tx, plan.id, plan.version).await?;
+    let (new_plan_id, new_version) = agent::fork_plan_on(&mut tx, plan.id, plan.version).await?;
     sqlx::query!(
         "DELETE FROM plan_tasks WHERE plan_id = $1 AND added_by_revision = $2",
         new_plan_id,

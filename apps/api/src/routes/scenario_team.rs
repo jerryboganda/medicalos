@@ -35,7 +35,7 @@ pub(crate) async fn role_on(
 
 async fn role_for(pool: &PgPool, run_id: Uuid, user_id: Uuid) -> ApiResult<Option<String>> {
     let mut connection = pool.acquire().await?;
-    role_on(&mut *connection, run_id, user_id).await
+    role_on(&mut connection, run_id, user_id).await
 }
 
 #[derive(sqlx::FromRow)]
@@ -343,7 +343,7 @@ pub async fn create_handover(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("run_not_found"))?;
-    let role = role_on(&mut *tx, run_id, user.user_id)
+    let role = role_on(&mut tx, run_id, user.user_id)
         .await?
         .ok_or_else(|| ApiError::not_found("run_not_found"))?;
     if run.finished_at.is_some() {

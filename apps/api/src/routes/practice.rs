@@ -1072,7 +1072,7 @@ pub async fn apply_answer(
             let now = chrono::Utc::now();
             let recorded_at = req.client_recorded_at.as_ref();
             let accepted = matches!(session.preset.as_str(), "tutor" | "timed")
-                && now <= deadline.clone() + chrono::Duration::minutes(10)
+                && now <= deadline + chrono::Duration::minutes(10)
                 && recorded_at.is_some_and(|at| at >= &session.created_at && at <= &deadline);
             if !accepted {
                 return Err(ApiError::conflict(
@@ -1184,7 +1184,7 @@ pub async fn apply_answer(
     // client cannot omit that assistance when it records the answer.
     let assisted = req.assisted.unwrap_or(false) || item.hint_used || late_offline_sync;
     let offline_recorded_at = if late_offline_sync {
-        req.client_recorded_at.clone()
+        req.client_recorded_at
     } else {
         None
     };
@@ -1528,7 +1528,7 @@ pub async fn submit(
         applied_completion = updated.rows_affected() > 0;
     }
     if applied_completion {
-        agent::mark_linked_task_done_on(&mut *tx, user.user_id, plan_task_key).await?;
+        agent::mark_linked_task_done_on(&mut tx, user.user_id, plan_task_key).await?;
     }
     tx.commit().await?;
 
@@ -1699,6 +1699,7 @@ pub async fn submit(
     Ok(Json(receipt))
 }
 
+#[allow(clippy::too_many_arguments)] // planner response assembly; each arg maps to one wire field
 async fn response_for_question(
     state: &AppState,
     preset: &str,

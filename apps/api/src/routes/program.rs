@@ -138,7 +138,7 @@ pub(crate) async fn ensure_pregen_on(
 
 pub(crate) async fn ensure_pregen(pool: &PgPool, vid: Uuid) -> ApiResult<Vec<TutoringCard>> {
     let mut tx = pool.begin().await?;
-    let cards = ensure_pregen_on(&mut *tx, vid).await?;
+    let cards = ensure_pregen_on(&mut tx, vid).await?;
     tx.commit().await?;
     Ok(cards)
 }
@@ -1859,7 +1859,7 @@ pub async fn replan_plan(
             "version": current.version,
         })));
     }
-    if crate::agent::count_today_revisions_on(&mut *tx, user.user_id).await?
+    if crate::agent::count_today_revisions_on(&mut tx, user.user_id).await?
         >= i64::from(crate::agent::MAX_PLAN_REVISIONS_PER_DAY)
     {
         return Err(ApiError::conflict_with_details(
@@ -1882,7 +1882,7 @@ pub async fn replan_plan(
     }
 
     let (new_plan_id, to_version) =
-        crate::agent::fork_plan_on(&mut *tx, current.id, current.version).await?;
+        crate::agent::fork_plan_on(&mut tx, current.id, current.version).await?;
     let mut kept_ids: Vec<Uuid> = Vec::new();
     let mut deferred_ids: Vec<Uuid> = Vec::new();
     let mut kept: Vec<String> = Vec::new();
