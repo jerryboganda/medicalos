@@ -1541,6 +1541,10 @@ pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<serde_j
                 "on": event.get("on").and_then(serde_json::Value::as_str),
                 "to": event.get("to").and_then(serde_json::Value::as_str),
                 "actor_role": event.get("actor_role").and_then(serde_json::Value::as_str),
+                // SIM-03: authored text-mode uncertainty travels with the
+                // event so the learner and examiner see it before feedback.
+                "uncertain": event.get("uncertain").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                "uncertainty_reason": event.get("uncertainty_reason").and_then(serde_json::Value::as_str),
             })
         })
         .collect()
