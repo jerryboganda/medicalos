@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count AS \"count!\" FROM entitlement_usage\n           WHERE user_id = $1 AND key = 'library_retrieval' AND day = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ba56a2d86fa1f6139308cf97194bbe54c21b48580381a86e7ee6e6737cf602e7"
+}
