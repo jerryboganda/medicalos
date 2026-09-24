@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO scenario_transcript_corrections\n           (id, run_id, event_index, original_event, corrected_text, corrected_by)\n         VALUES ($1, $2, $3, $4, $5, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "22da9fd5790c72dfd77bd80002880d8a239662f405a24da8ff890eb3e1176d0c"
+}

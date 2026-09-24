@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"total!\",\n                  COALESCE(SUM(CASE WHEN a.correct THEN 1 ELSE 0 END), 0) AS \"correct!\"\n           FROM attempts a\n           WHERE a.user_id = $1\n             AND a.chosen_index IS NOT NULL\n             AND a.created_at >= now() - interval '30 days'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "00c20061ee7b5e512cad64b19b39970b044b925482dbe5375eb1d014610ec68f"
+}

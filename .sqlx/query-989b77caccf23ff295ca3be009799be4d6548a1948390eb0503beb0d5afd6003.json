@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) + 1 AS \"rank!\"\n                   FROM competition_entries\n                   WHERE competition_id = $1\n                     AND (score > $2 OR (score = $2 AND total_time_ms < $3))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rank!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "989b77caccf23ff295ca3be009799be4d6548a1948390eb0503beb0d5afd6003"
+}

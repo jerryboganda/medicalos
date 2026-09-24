@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n               (SELECT streak_count FROM engagement_days\n                WHERE user_id = $1 AND day = CURRENT_DATE) AS \"streak?\",\n               (SELECT COUNT(*) FROM engagement_days\n                WHERE user_id = $1 AND day >= CURRENT_DATE - interval '6 days'\n                  AND goal_met) AS \"met_week!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "streak?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "met_week!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9a8d82044cd233807c949cf513c3f9c6e0aa53345b95c036c4d30905e152292c"
+}
