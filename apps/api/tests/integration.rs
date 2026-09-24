@@ -8894,7 +8894,7 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     let seeded_count = initial_today["tasks"][0]["question_count"]
         .as_i64()
         .expect("task carries its question count");
-    assert!(seeded_count >= 1 && seeded_count <= 10, "{initial_today}");
+    assert!((1..=10).contains(&seeded_count), "{initial_today}");
     assert_eq!(initial_today["tasks"][0]["estimated_minutes"], 15);
     let task_key = initial_today["tasks"][0]["task_key"].clone();
 
