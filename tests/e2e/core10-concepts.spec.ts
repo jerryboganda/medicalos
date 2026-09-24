@@ -114,7 +114,9 @@ test('editor creates a versioned concept and maps it to a curriculum node on mob
 	await page.getByTestId('concept-version-definition').fill('Blood pumped by a ventricle per unit time.');
 	await page.getByTestId('concept-version-save').click();
 	await expect(page.getByTestId('concept-message')).toContainText('Version 2');
-	await expect(page.getByText('Cardiac output · cardiac-output · v2')).toBeVisible();
+	await expect(
+				page.getByText('Cardiac output · cardiac-output · v2').first()
+			).toBeVisible();
 
 	const noHorizontalOverflow = await page.evaluate(
 		() => document.documentElement.scrollWidth <= window.innerWidth

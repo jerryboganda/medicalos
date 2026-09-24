@@ -51,18 +51,40 @@ pub async fn get_or_create_today(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResul
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(ch) = first {
-        let title = format!("Tutor practice: {} (10 questions)", ch.name);
-        sqlx::query!(
-            "INSERT INTO plan_tasks
-               (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
-             VALUES ($1, $2, 'practice', $3, $4, 10, 15)",
-            Uuid::new_v4(),
-            plan_id,
-            title,
+        // Size the task to the chapter's honest pool: a task asking for more
+        // questions than exist would be unsatisfiable by construction.
+        let eligible: i64 = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) FROM question_versions qv
+               WHERE qv.chapter_id = $1 AND qv.status = 'published'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM question_reports r
+                     WHERE r.question_version_id = qv.id
+                       AND r.status IN ('open', 'quarantined'))"#,
             ch.id
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
+        if eligible > 0 {
+            let count = eligible.min(10);
+            let title = format!(
+                "Tutor practice: {} ({} question{})",
+                ch.name,
+                count,
+                if count == 1 { "" } else { "s" }
+            );
+            sqlx::query!(
+                "INSERT INTO plan_tasks
+                   (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)
+                 VALUES ($1, $2, 'practice', $3, $4, $5, 15)",
+                Uuid::new_v4(),
+                plan_id,
+                title,
+                ch.id,
+                i32::try_from(count).unwrap_or(10),
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     tx.commit().await?;
     Ok((plan_id, 1))

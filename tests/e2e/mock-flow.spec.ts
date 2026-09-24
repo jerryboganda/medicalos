@@ -35,7 +35,7 @@ test('mock flow: start, deferred feedback, pass, percentile hidden', async ({
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 	await page.getByTestId('option-0').click();
 	await page.getByTestId('answer').click();
-	await expect(page.getByTestId('mock-recorded')).toBeVisible();
+	await expect(page.getByTestId('assessment-recorded')).toBeVisible();
 	await expect(page.getByTestId('feedback')).toHaveCount(0);
 
 	await page.getByTestId('next').click();

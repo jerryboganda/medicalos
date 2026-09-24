@@ -39,7 +39,7 @@ test('session tools autosave notes and marks and replay an offline answer', asyn
 
 	await page.getByTestId('text-size-3').click();
 	await page.getByTestId('tools-toggle').click();
-	await page.getByLabel('Medical calculator').selectOption('bmi');
+	await page.getByRole('combobox', { name: 'Medical calculator' }).selectOption('bmi');
 	await page.getByTestId('calc-input-weight_kg').fill('70');
 	await page.getByTestId('calc-input-height_m').fill('1.75');
 	await page.getByTestId('calculate').click();

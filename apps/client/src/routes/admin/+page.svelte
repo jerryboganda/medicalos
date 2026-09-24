@@ -1156,7 +1156,7 @@
 						data-testid={'content-right-' + right.rights_id}
 					>
 						<strong>{right.ref_code}</strong>
-						<span class="chip">{right.status}</span>
+						<span class="chip">{right.status.charAt(0).toUpperCase() + right.status.slice(1)}</span>
 						<p class="muted">{right.licensor} · {right.territory}</p>
 							<p class="muted">Permitted: {right.permitted_uses.join(', ')}</p>
 						<p class="muted">
