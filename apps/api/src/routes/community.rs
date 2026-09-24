@@ -802,7 +802,7 @@ pub async fn share_cards(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let min_sample = i64::from(state.community_min_sample);
+    let min_sample = state.community_min_sample;
     let mut cards = Vec::new();
     let mut unavailable = Vec::new();
 
