@@ -11354,6 +11354,23 @@ async fn core03_library_retrieval_allowance_gates_the_free_tier() {
     let state = setup().await;
     let app = router(state.clone());
     seed::seed(&state.pool).await.expect("seed");
+    // A real article so the exhausted-allowance read resolves past 404.
+    let aid = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO articles (id, slug, title) VALUES ($1, 'allowance-fixture', 'Allowance fixture')",
+    )
+    .bind(aid)
+    .execute(&state.pool)
+    .await
+    .expect("seed article");
+    sqlx::query(
+        "INSERT INTO article_versions (id, article_id, version, status, body, source_ref) VALUES ($1, $2, 1, 'published', 'Fixture body for the allowance gate.', 'Fixture library')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(aid)
+    .execute(&state.pool)
+    .await
+    .expect("seed version");
     let token = register_and_login(app.clone()).await;
 
     // Three retrievals are free; the test AppState sets the allowance to 3.
@@ -11380,7 +11397,12 @@ async fn core03_library_retrieval_allowance_gates_the_free_tier() {
     // Article opens share the same allowance.
     let (status, article) = call(
         app.clone(),
-        request("GET", "/v1/library/articles/anything", Some(&token), None),
+        request(
+            "GET",
+            "/v1/library/articles/allowance-fixture",
+            Some(&token),
+            None,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{article}");
