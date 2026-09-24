@@ -845,9 +845,13 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         .unwrap()
         .parse()
         .unwrap();
+    let task_question_count = today["tasks"][0]["question_count"]
+        .as_i64()
+        .expect("cold-start task carries its question count");
 
     // Tutor session launched from the cold-start plan task (AI-08 task
-    // identity): completing it is what marks the task done.
+    // identity): completing it is what marks the task done. The session must
+    // match the task's own capacity.
     let (status, session) = call(
         app.clone(),
         request(
@@ -855,7 +859,8 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             "/v1/practice/sessions",
             Some(&token),
             Some(serde_json::json!({
-                "preset": "tutor", "chapter_id": chapter1, "question_count": 2,
+                "preset": "tutor", "chapter_id": chapter1,
+                "question_count": task_question_count,
                 "plan_task_key": task_key
             })),
         ),
@@ -863,7 +868,10 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
     let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
-    assert_eq!(session["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        session["items"].as_array().unwrap().len(),
+        task_question_count as usize
+    );
     // No answer keys or rationales before answering (§11.3).
     assert!(session["items"][0]["options"][0].get("rationale").is_none());
 
@@ -3779,7 +3787,10 @@ async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts()
         corrected_session["items"][0]["correct_index"],
         replacement_correct_index
     );
-    assert_eq!(corrected_session["items"][0]["corrected"], true);
+    assert_eq!(
+        corrected_session["items"][0]["corrected"], true,
+        "{corrected_session}"
+    );
     assert_eq!(
         corrected_session["items"][0]["corrected_version_id"],
         replacement_version_id.to_string()
@@ -9728,11 +9739,20 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
     assert_eq!(stale["error"]["code"], "stale_plan_version");
     assert_eq!(stale["error"]["details"]["current_version"], 2);
 
+    // The replan fork regenerates row ids; resolve the protected task's
+    // current row through its fork-stable task_key.
+    let protected_current_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM plan_tasks WHERE plan_id = $1 AND task_key = $2")
+            .bind(latest_plan_id)
+            .bind(protected_task_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("protected task exists in the current plan");
     let (status, unprotected) = call(
         app.clone(),
         request(
             "PUT",
-            &format!("/v1/plans/{latest_plan_id}/tasks/{protected_task_id}/protection"),
+            &format!("/v1/plans/{latest_plan_id}/tasks/{protected_current_id}/protection"),
             Some(&learner),
             Some(serde_json::json!({"protected":false})),
         ),

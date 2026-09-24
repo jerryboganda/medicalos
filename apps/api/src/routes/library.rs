@@ -644,6 +644,32 @@ pub async fn create_image_case(
             ));
         }
     }
+    // IMG-01/02: every referenced rights record must be active and permit
+    // display — an unavailable license blocks the case at authoring time.
+    let mut checked_refs: Vec<&str> = Vec::new();
+    for img in &req.images {
+        if checked_refs.contains(&img.rights_ref.as_str()) {
+            continue;
+        }
+        checked_refs.push(&img.rights_ref);
+        let available = sqlx::query!(
+            r#"SELECT 1 AS one FROM content_rights
+               WHERE ref_code = $1
+                 AND revoked_at IS NULL
+                 AND valid_from <= CURRENT_DATE
+                 AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+                 AND permitted_uses @> '["display"]'::jsonb"#,
+            img.rights_ref.trim(),
+        )
+        .fetch_optional(&state.pool)
+        .await?;
+        if available.is_none() {
+            return Err(ApiError::forbidden(
+                "image_rights_unavailable",
+                "no active content-rights record permits displaying these images",
+            ));
+        }
+    }
     let findings = req.findings.trim();
     if findings.is_empty() {
         return Err(ApiError::unprocessable(
