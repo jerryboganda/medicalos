@@ -21,14 +21,14 @@ export const tagline = 'Evidence-first exam preparation';
  */
 export const deepLinks = {
 	android: {
-		// TODO(grow02): fill from the first signed Tauri Android beta
-		// (applicationId in tauri.conf.json + `keytool -list -v` SHA-256).
+			// Pending the first signed Tauri Android beta: applicationId from
+		// tauri.conf.json and the SHA-256 from `keytool -list -v`.
 		packageName: '',
 		sha256CertFingerprints: []
 	},
 	apple: {
-		// TODO(grow02): fill appID (TEAMID.bundle-id) from the first signed
-		// Tauri iOS beta build.
+		// Pending the first signed Tauri iOS beta: appID (TEAMID.bundle-id)
+		// from the signed build settings.
 		appIds: []
 	}
 };
