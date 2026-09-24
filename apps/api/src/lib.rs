@@ -242,6 +242,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/me/image-cases", get(routes::library::list_image_cases))
         .route(
+            "/v1/me/image-cases/{case_id}",
+            get(routes::library::get_image_case),
+        )
+        .route(
             "/v1/analytics/events",
             post(routes::analytics::receive_events),
         )
@@ -865,6 +869,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/me/image-cases",
             get(routes::library::list_image_cases),
+        )
+        .route(
+            "/api/v1/me/image-cases/{case_id}",
+            get(routes::library::get_image_case),
         )
         .route(
             "/api/v1/analytics/events",

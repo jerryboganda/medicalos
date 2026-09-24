@@ -525,6 +525,34 @@ export interface OidcProviderUpdate {
 	enabled: boolean;
 }
 
+export interface ImageCase {
+	case_id: string;
+	title: string;
+	kind: 'still' | 'stack';
+	modality: string | null;
+	images: { url: string; rights_ref: string }[];
+	findings: string;
+	annotations: {
+		annotation_id: string;
+		image_index: number;
+		x_percent: number;
+		y_percent: number;
+		body: string;
+	}[];
+}
+
+export interface AdminImageAnnotation {
+	annotation_id: string;
+	case_id: string;
+	image_index: number;
+	x_percent: number;
+	y_percent: number;
+	body: string;
+	review_status: 'pending' | 'approved' | 'rejected';
+	decision: 'approved' | 'rejected' | null;
+	note: string | null;
+}
+
 export const Api = {
 	register: (email: string, password: string) =>
 		call<{ user_id: string }>('POST', '/v1/auth/register', { email, password }),
@@ -609,6 +637,30 @@ export const Api = {
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
 	listScenarios: () => call<{ scenarios: ScenarioSummary[] }>('GET', '/v1/scenarios'),
+	imageCases: () => call<{ cases: ImageCase[] }>('GET', '/v1/me/image-cases'),
+	imageCase: (caseId: string) =>
+		call<ImageCase>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
+	adminImageAnnotations: () =>
+		call<{ annotations: AdminImageAnnotation[] }>('GET', '/v1/admin/image-annotations'),
+	createImageAnnotation: (
+		caseId: string,
+		body: { image_index: number; x_percent: number; y_percent: number; body: string }
+	) =>
+		call<{ annotation_id: string; review_status: 'pending' }>(
+			'POST',
+			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/annotations`,
+			body
+		),
+	reviewImageAnnotation: (
+		annotationId: string,
+		decision: 'approved' | 'rejected',
+		note?: string
+	) =>
+		call<{ annotation_id: string; decision: 'approved' | 'rejected' }>(
+			'POST',
+			`/v1/admin/image-annotations/${encodeURIComponent(annotationId)}/review`,
+			{ decision, note }
+		),
 	startScenario: (scenarioSlug: string) =>
 		call<{
 			run_id: string;

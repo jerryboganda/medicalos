@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::PgConnection;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -663,11 +664,39 @@ pub struct ImageRef {
     pub rights_ref: String,
 }
 
+async fn require_display_rights(
+    connection: &mut PgConnection,
+    rights_refs: &[String],
+) -> ApiResult<()> {
+    let mut required = rights_refs.to_vec();
+    required.sort();
+    required.dedup();
+    let available = sqlx::query_scalar::<_, String>(
+        r#"SELECT ref_code FROM content_rights
+           WHERE ref_code = ANY($1)
+             AND revoked_at IS NULL
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             AND permitted_uses @> '["display"]'::jsonb
+           FOR SHARE"#,
+    )
+    .bind(&required)
+    .fetch_all(&mut *connection)
+    .await?;
+    if available.len() != required.len() {
+        return Err(ApiError::forbidden(
+            "image_rights_unavailable",
+            "every image needs a current content-rights grant that permits display",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn create_image_case(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     headers: axum::http::HeaderMap,
-    Json(req): Json<ImageCaseReq>,
+    Json(mut req): Json<ImageCaseReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
@@ -690,40 +719,22 @@ pub async fn create_image_case(
             "1-200 images per case",
         ));
     }
-    for img in &req.images {
+    for img in &mut req.images {
         if !img.url.starts_with("https://") || img.rights_ref.trim().is_empty() {
             return Err(ApiError::unprocessable(
                 "invalid_image",
                 "every image needs an https URL and a rights reference (IMG-01)",
             ));
         }
+        img.rights_ref = img.rights_ref.trim().to_ascii_uppercase();
     }
-    // IMG-01/02: every referenced rights record must be active and permit
-    // display — an unavailable license blocks the case at authoring time.
-    let mut checked_refs: Vec<&str> = Vec::new();
-    for img in &req.images {
-        if checked_refs.contains(&img.rights_ref.as_str()) {
-            continue;
-        }
-        checked_refs.push(&img.rights_ref);
-        let available = sqlx::query!(
-            r#"SELECT 1 AS one FROM content_rights
-               WHERE ref_code = $1
-                 AND revoked_at IS NULL
-                 AND valid_from <= CURRENT_DATE
-                 AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
-                 AND permitted_uses @> '["display"]'::jsonb"#,
-            img.rights_ref.trim(),
-        )
-        .fetch_optional(&state.pool)
-        .await?;
-        if available.is_none() {
-            return Err(ApiError::forbidden(
-                "image_rights_unavailable",
-                "no active content-rights record permits displaying these images",
-            ));
-        }
-    }
+    let rights_refs = req
+        .images
+        .iter()
+        .map(|image| image.rights_ref.clone())
+        .collect::<Vec<_>>();
+    let mut tx = state.pool.begin().await?;
+    require_display_rights(&mut *tx, &rights_refs).await?;
     let findings = req.findings.trim();
     if findings.is_empty() {
         return Err(ApiError::unprocessable(
@@ -744,78 +755,182 @@ pub async fn create_image_case(
         req.modality,
         user.user_id
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    crate::routes::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "image_case_created",
+        "image_case",
+        id,
+        json!({ "kind": req.kind, "image_count": req.images.len() }),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "case_id": id })))
+}
+
+#[derive(sqlx::FromRow)]
+struct ImageCaseRow {
+    id: Uuid,
+    title: String,
+    kind: String,
+    images: serde_json::Value,
+    findings: String,
+    modality: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ApprovedImageAnnotation {
+    case_id: Uuid,
+    id: Uuid,
+    image_index: i32,
+    x_percent: f64,
+    y_percent: f64,
+    body: String,
 }
 
 pub async fn list_image_cases(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let rows = sqlx::query!(
-        r#"SELECT id, title, kind, images, findings, modality AS "modality?"
-           FROM image_cases ORDER BY created_at DESC LIMIT 100"#
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    // IMG-02: only independently approved annotations reach learners —
-    // pending and rejected notes stay in the editorial queue.
-    let approved = sqlx::query!(
-        r#"SELECT a.case_id, a.id, a.image_index, a.x_percent, a.y_percent, a.body
-           FROM image_case_annotations a
-           JOIN image_case_annotation_reviews r ON r.annotation_id = a.id
-           WHERE r.decision = 'approved'
-           ORDER BY a.created_at"#
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let mut by_case: std::collections::HashMap<Uuid, Vec<serde_json::Value>> =
-        std::collections::HashMap::new();
-    for a in &approved {
-        by_case.entry(a.case_id).or_default().push(json!({
-            "annotation_id": a.id,
-            "image_index": a.image_index,
-            "x_percent": a.x_percent,
-            "y_percent": a.y_percent,
-            "body": a.body,
-        }));
-    }
-    // IMG-01: a case whose image rights are no longer active stops serving.
-    let active_refs: std::collections::HashSet<String> = sqlx::query!(
+    let mut tx = state.pool.begin().await?;
+    // Hold shared locks until this response is fully read so a concurrent
+    // license revocation cannot commit between the rights check and delivery.
+    let active_refs = sqlx::query_scalar::<_, String>(
         r#"SELECT ref_code FROM content_rights
            WHERE revoked_at IS NULL
              AND valid_from <= CURRENT_DATE
              AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
-             AND permitted_uses @> '["display"]'::jsonb"#
+             AND permitted_uses @> '["display"]'::jsonb
+           FOR SHARE"#,
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await?
     .into_iter()
-    .map(|r| r.ref_code)
-    .collect();
-    let cases: Vec<serde_json::Value> = rows
-        .iter()
-        .filter(|r| {
-            let images: Vec<ImageRef> =
-                serde_json::from_value(r.images.clone()).unwrap_or_default();
-            images
-                .iter()
-                .all(|img| active_refs.contains(&img.rights_ref))
+    .collect::<std::collections::HashSet<_>>();
+    let mut active_ref_list = active_refs.iter().cloned().collect::<Vec<_>>();
+    active_ref_list.sort();
+    let rows = sqlx::query_as::<_, ImageCaseRow>(
+        r#"SELECT id, title, kind, images, findings, modality
+           FROM image_cases
+           WHERE jsonb_typeof(images) = 'array'
+             AND jsonb_array_length(
+                   CASE WHEN jsonb_typeof(images) = 'array' THEN images ELSE '[]'::jsonb END
+                 ) > 0
+             AND NOT EXISTS (
+                   SELECT 1
+                   FROM jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(images) = 'array' THEN images ELSE '[]'::jsonb END
+                   ) AS image
+                   WHERE UPPER(BTRIM(COALESCE(image.value ->> 'rights_ref', ''))) <> ALL($1)
+                 )
+           ORDER BY created_at DESC LIMIT 100"#,
+    )
+    .bind(&active_ref_list)
+    .fetch_all(&mut *tx)
+    .await?;
+    let cases = rows
+        .into_iter()
+        .filter_map(|row| {
+            let images: Vec<ImageRef> = serde_json::from_value(row.images.clone()).ok()?;
+            (!images.is_empty()
+                && images.iter().all(|image| {
+                    active_refs.contains(&image.rights_ref.trim().to_ascii_uppercase())
+                }))
+            .then_some(row)
         })
-        .map(|r| {
+        .collect::<Vec<_>>();
+    let case_ids = cases.iter().map(|case| case.id).collect::<Vec<_>>();
+    let approved = if case_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, ApprovedImageAnnotation>(
+            r#"SELECT annotation.case_id, annotation.id, annotation.image_index,
+                      annotation.x_percent, annotation.y_percent, annotation.body
+               FROM image_case_annotations annotation
+               JOIN image_case_annotation_reviews review
+                 ON review.annotation_id = annotation.id
+               WHERE annotation.case_id = ANY($1) AND review.decision = 'approved'
+               ORDER BY annotation.created_at, annotation.id"#,
+        )
+        .bind(&case_ids)
+        .fetch_all(&mut *tx)
+        .await?
+    };
+    let mut by_case: std::collections::HashMap<Uuid, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for annotation in approved {
+        by_case.entry(annotation.case_id).or_default().push(json!({
+            "annotation_id": annotation.id,
+            "image_index": annotation.image_index,
+            "x_percent": annotation.x_percent,
+            "y_percent": annotation.y_percent,
+            "body": annotation.body,
+        }));
+    }
+    let cases = cases
+        .into_iter()
+        .map(|case| {
             json!({
-                "case_id": r.id,
-                "title": r.title,
-                "kind": r.kind,
-                "images": r.images,
-                "modality": r.modality,
-                "findings": r.findings,
-                "annotations": by_case.get(&r.id).cloned().unwrap_or_default(),
+                "case_id": case.id,
+                "title": case.title,
+                "kind": case.kind,
+                "images": case.images,
+                "modality": case.modality,
+                "findings": case.findings,
+                "annotations": by_case.remove(&case.id).unwrap_or_default(),
             })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    tx.commit().await?;
     Ok(Json(json!({ "cases": cases })))
+}
+
+pub async fn get_image_case(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path(case_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let case = sqlx::query!(
+        r#"SELECT id, title, kind, images, findings, modality AS "modality?"
+           FROM image_cases WHERE id = $1"#,
+        case_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("image_case_not_found"))?;
+    // IMG-02: only independently approved annotations reach learners.
+    let annotations = sqlx::query!(
+        r#"SELECT a.id, a.image_index, a.x_percent, a.y_percent, a.body
+           FROM image_case_annotations a
+           JOIN image_case_annotation_reviews r ON r.annotation_id = a.id
+           WHERE a.case_id = $1
+           ORDER BY a.image_index, a.created_at"#,
+        case_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(json!({
+        "case_id": case.id,
+        "title": case.title,
+        "kind": case.kind,
+        "images": case.images,
+        "modality": case.modality,
+        // IMG-02: the explicit findings disclosure happens here, on request —
+        // platform review does not establish clinical validity.
+        "findings": case.findings,
+        "annotations": annotations
+            .iter()
+            .map(|a| json!({
+                "annotation_id": a.id,
+                "image_index": a.image_index,
+                "x_percent": a.x_percent,
+                "y_percent": a.y_percent,
+                "body": a.body,
+            }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 // ---- IMG-02: annotation authoring and independent review --------------------
@@ -859,12 +974,27 @@ pub async fn create_image_annotation(
             "annotation body must be 1-1000 characters",
         ));
     }
-    let case_exists = sqlx::query!("SELECT 1 AS one FROM image_cases WHERE id = $1", case_id)
-        .fetch_optional(&state.pool)
-        .await?;
-    if case_exists.is_none() {
-        return Err(ApiError::not_found("image_case_not_found"));
+    let mut tx = state.pool.begin().await?;
+    let images_value = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT images FROM image_cases WHERE id = $1 FOR SHARE",
+    )
+    .bind(case_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("image_case_not_found"))?;
+    let images: Vec<ImageRef> =
+        serde_json::from_value(images_value).map_err(|_| ApiError::internal())?;
+    if req.image_index as usize >= images.len() {
+        return Err(ApiError::unprocessable(
+            "invalid_image_index",
+            "image_index must refer to an image in this case",
+        ));
     }
+    let rights_refs = images
+        .iter()
+        .map(|image| image.rights_ref.trim().to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    require_display_rights(&mut *tx, &rights_refs).await?;
     let id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO image_case_annotations
@@ -878,8 +1008,18 @@ pub async fn create_image_annotation(
         body,
         user.user_id
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    crate::routes::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "image_case_annotation_created",
+        "image_case_annotation",
+        id,
+        json!({ "case_id": case_id, "image_index": req.image_index }),
+    )
+    .await?;
+    tx.commit().await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "annotation_id": id, "review_status": "pending" })),
@@ -894,13 +1034,15 @@ pub async fn list_image_annotations(
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let rows = sqlx::query!(
-        r#"SELECT a.id, a.case_id, a.image_index, a.x_percent, a.y_percent, a.body,
-                  a.created_by, a.created_at,
-                  r.decision AS "decision?", r.reviewer_id AS "reviewer_id?",
-                  r.note AS "note?", r.created_at AS "reviewed_at?"
+        r#"SELECT a.id, a.case_id, c.title AS case_title, a.image_index,
+                  a.x_percent, a.y_percent, a.body, a.created_at,
+                  r.decision AS "decision?", r.note AS "note?",
+                  r.created_at AS "reviewed_at?"
            FROM image_case_annotations a
+           JOIN image_cases c ON c.id = a.case_id
            LEFT JOIN image_case_annotation_reviews r ON r.annotation_id = a.id
-           ORDER BY a.created_at DESC LIMIT 200"#
+           WHERE r.annotation_id IS NULL
+           ORDER BY a.created_at, a.id LIMIT 200"#
     )
     .fetch_all(&state.pool)
     .await?;
@@ -910,17 +1052,13 @@ pub async fn list_image_annotations(
             json!({
                 "annotation_id": r.id,
                 "case_id": r.case_id,
+                "case_title": r.case_title,
                 "image_index": r.image_index,
                 "x_percent": r.x_percent,
                 "y_percent": r.y_percent,
                 "body": r.body,
-                "created_by": r.created_by,
                 "created_at": r.created_at,
-                "review_status": r.decision.as_deref().unwrap_or("pending"),
-                "decision": r.decision,
-                "reviewer_id": r.reviewer_id,
-                "note": r.note,
-                "reviewed_at": r.reviewed_at,
+                "review_status": "pending",
             })
         })
         .collect();
@@ -958,11 +1096,13 @@ pub async fn review_image_annotation(
             "note must be at most 500 characters",
         ));
     }
+    let mut tx = state.pool.begin().await?;
     let annotation = sqlx::query!(
-        "SELECT id, created_by FROM image_case_annotations WHERE id = $1",
+        "SELECT id, case_id, image_index, created_by
+         FROM image_case_annotations WHERE id = $1 FOR UPDATE",
         annotation_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let annotation = annotation.ok_or_else(|| ApiError::not_found("image_annotation_not_found"))?;
     if annotation.created_by == user.user_id {
@@ -971,34 +1111,58 @@ pub async fn review_image_annotation(
             "the annotation's author cannot review it themselves",
         ));
     }
-    let existing = sqlx::query!(
-        "SELECT decision FROM image_case_annotation_reviews WHERE annotation_id = $1",
-        annotation_id
+    let images_value = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT images FROM image_cases WHERE id = $1 FOR SHARE",
     )
-    .fetch_optional(&state.pool)
+    .bind(annotation.case_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("image_case_not_found"))?;
+    let images: Vec<ImageRef> =
+        serde_json::from_value(images_value).map_err(|_| ApiError::internal())?;
+    if annotation.image_index < 0 || annotation.image_index as usize >= images.len() {
+        return Err(ApiError::conflict(
+            "annotation_image_unavailable",
+            "the annotation no longer points to an image in this case",
+        ));
+    }
+    let rights_refs = images
+        .iter()
+        .map(|image| image.rights_ref.trim().to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    require_display_rights(&mut *tx, &rights_refs).await?;
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO image_case_annotation_reviews
+           (annotation_id, reviewer_id, decision, note)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (annotation_id) DO NOTHING
+         RETURNING annotation_id",
+    )
+    .bind(annotation_id)
+    .bind(user.user_id)
+    .bind(&req.decision)
+    .bind(note.as_deref())
+    .fetch_optional(&mut *tx)
     .await?;
-    if existing.is_some() {
+    if inserted.is_none() {
         return Err(ApiError::conflict(
             "annotation_already_reviewed",
             "this annotation already has a final review decision",
         ));
     }
-    sqlx::query!(
-        "INSERT INTO image_case_annotation_reviews
-           (annotation_id, reviewer_id, decision, note)
-         VALUES ($1, $2, $3, $4)",
-        annotation_id,
+    crate::routes::admin::audit(
+        &mut *tx,
         user.user_id,
-        req.decision,
-        note,
+        "image_case_annotation_reviewed",
+        "image_case_annotation",
+        annotation_id,
+        json!({ "decision": req.decision }),
     )
-    .execute(&state.pool)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({
         "annotation_id": annotation_id,
         "decision": req.decision,
-        "reviewer_id": user.user_id,
-        "note": note,
         "review_status": req.decision,
     })))
 }

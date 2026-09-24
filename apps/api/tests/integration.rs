@@ -11319,6 +11319,24 @@ async fn library_media_and_image_cases_are_rights_checked() {
     assert_eq!(cases[0]["images"].as_array().unwrap().len(), 2, "{list}");
     assert!(cases[0]["findings"].as_str().is_some(), "{list}");
 
+    // Detail on request reveals the findings.
+    let case_id = cases[0]["case_id"].as_str().unwrap();
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/image-cases/{case_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["findings"], "Fixture findings on the stack.",
+        "{detail}"
+    );
+
     let (status, revoked) = call(
         app.clone(),
         admin_req(
