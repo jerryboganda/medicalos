@@ -39,6 +39,16 @@
 		}[]
 	>([]);
 	let lastShare = $state('');
+	let cards = $state<
+		{
+			kind: string;
+			headline: string;
+			subline: string;
+			detail: string;
+			share_text: string;
+		}[]
+	>([]);
+	let unavailableCards = $state<{ kind: string; reason: string }[]>([]);
 
 	async function refresh() {
 		try {
@@ -62,6 +72,48 @@
 		} catch {
 			examId = '';
 		}
+		try {
+			const share = await Api.shareCards();
+			cards = share.cards;
+			unavailableCards = share.unavailable;
+		} catch {
+			cards = [];
+			unavailableCards = [];
+		}
+	}
+
+	function copyShare(text: string) {
+		void navigator.clipboard?.writeText(text);
+		lastShare = text;
+	}
+
+	function downloadCard(card: (typeof cards)[number]) {
+		const styles = getComputedStyle(document.documentElement);
+		const token = (name: string, fallback: string) =>
+			styles.getPropertyValue(name).trim() || fallback;
+		const canvas = token('--color-canvas', '#09090f');
+		const surface = token('--color-surface', '#14141e');
+		const accent = token('--color-accent', '#a78bfa');
+		const ink = token('--color-text-primary', '#f5f3ff');
+		const muted = token('--color-text-secondary', '#b8b4c6');
+		const esc = (s: string) =>
+			s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+		const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="315" viewBox="0 0 600 315">
+	<rect width="600" height="315" rx="20" fill="${canvas}"/>
+	<rect x="1" y="1" width="598" height="313" rx="19" fill="${surface}" stroke="${accent}"/>
+	<text x="40" y="70" fill="${muted}" font-family="system-ui" font-size="15">Medical Learning OS</text>
+	<text x="40" y="150" fill="${ink}" font-family="Georgia, serif" font-size="58" font-weight="600">${esc(card.headline)}</text>
+	<text x="40" y="195" fill="${accent}" font-family="system-ui" font-size="20">${esc(card.subline)}</text>
+	<text x="40" y="235" fill="${muted}" font-family="system-ui" font-size="16">${esc(card.detail)}</text>
+	<text x="40" y="280" fill="${muted}" font-family="system-ui" font-size="13">Real numbers from real attempts — nothing invented.</text>
+</svg>`;
+		const blob = new Blob([svg], { type: 'image/svg+xml' });
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		anchor.href = url;
+		anchor.download = `share-${card.kind}.svg`;
+		anchor.click();
+		URL.revokeObjectURL(url);
 	}
 
 	async function optIn(e: Event) {
@@ -354,6 +406,47 @@
 					{/each}
 				</ul>
 			{/if}
+		{/if}
+	</div>
+{/if}
+
+{#if cards.length > 0 || unavailableCards.length > 0}
+	<div class="card">
+		<h2>Share cards</h2>
+		<p class="muted" style="font-size: var(--text-sm);">
+			Real numbers from your own record only. Cards never contain question
+			content, and nothing is shared until you share it.
+		</p>
+		{#each cards as card (card.kind)}
+			<div class="share-card" data-testid={'share-' + card.kind}>
+				<strong class="share-headline">{card.headline}</strong>
+				<span class="muted">{card.subline}</span>
+				<span class="muted small">{card.detail}</span>
+				<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+					<button
+						class="btn"
+						type="button"
+						onclick={() => copyShare(card.share_text)}
+					>
+						Copy share text
+					</button>
+					<button
+						class="btn"
+						type="button"
+						onclick={() => downloadCard(card)}
+					>
+						Download card
+					</button>
+				</div>
+			</div>
+		{/each}
+		{#each unavailableCards as item (item.kind)}
+			<p class="muted small" data-testid={'share-unavailable-' + item.kind}>
+				{item.kind}: {item.reason}
+			</p>
+		{/each}
+		{#if lastShare}
+			<p class="feedback" role="status" data-testid="share-copied">Copied to the clipboard.</p>
 		{/if}
 	</div>
 {/if}

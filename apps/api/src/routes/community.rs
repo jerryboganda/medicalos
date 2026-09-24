@@ -792,3 +792,129 @@ pub async fn list_groups(
         "members": r.members,
     })).collect::<Vec<_>>() })))
 }
+
+// ---- GROW-01: share cards ----------------------------------------------------
+// Score, consistency, and league cards built only from real records (§26.1).
+// Cards never carry question content; unavailable cards state the honest
+// reason instead of inventing numbers (TRUST-01).
+
+pub async fn share_cards(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let min_sample = i64::from(state.community_min_sample);
+    let mut cards = Vec::new();
+    let mut unavailable = Vec::new();
+
+    // Score: real answered attempts over the last 30 days, gated like the
+    // community statistics (QB-15) so no small-sample number is shareable.
+    // Nothing for speed (§17): only accuracy is reported.
+    let score = sqlx::query!(
+        r#"SELECT COUNT(*) AS "total!",
+                  COALESCE(SUM(CASE WHEN a.correct THEN 1 ELSE 0 END), 0) AS "correct!"
+           FROM attempts a
+           WHERE a.user_id = $1
+             AND a.chosen_index IS NOT NULL
+             AND a.created_at >= now() - interval '30 days'"#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    if score.total >= min_sample {
+        let percent = (score.correct * 100) / score.total;
+        cards.push(json!({
+            "kind": "score",
+            "headline": format!("{percent}%"),
+            "subline": "accuracy over the last 30 days",
+            "detail": format!("{} of {} answered correctly", score.correct, score.total),
+            "share_text": format!(
+                "My 30-day accuracy on Medical Learning OS: {percent}% ({} of {} questions answered correctly).",
+                score.correct, score.total
+            ),
+        }));
+    } else {
+        unavailable.push(json!({
+            "kind": "score",
+            "reason": format!(
+                "a shareable accuracy needs at least {min_sample} answered questions in the last 30 days"
+            ),
+        }));
+    }
+
+    // Consistency: today's streak and last week's met goals (ENG-01 records).
+    let consistency = sqlx::query!(
+        r#"SELECT
+               (SELECT streak_count FROM engagement_days
+                WHERE user_id = $1 AND day = CURRENT_DATE) AS "streak?",
+               (SELECT COUNT(*) FROM engagement_days
+                WHERE user_id = $1 AND day >= CURRENT_DATE - interval '6 days'
+                  AND goal_met) AS "met_week!"
+        "#,
+        user.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    match consistency.streak {
+        Some(streak) if streak > 0 => {
+            cards.push(json!({
+                "kind": "consistency",
+                "headline": format!("{streak}-day streak"),
+                "subline": "daily practice",
+                "detail": format!("goal met on {} of the last 7 days", consistency.met_week),
+                "share_text": format!(
+                    "My practice streak on Medical Learning OS: {streak} days in a row (goal met {} of the last 7 days).",
+                    consistency.met_week
+                ),
+            }));
+        }
+        _ => unavailable.push(json!({
+            "kind": "consistency",
+            "reason": "no active streak — answer a question today to start one",
+        })),
+    }
+
+    // League: the learner's most recent competition entry, ranked by the same
+    // ordering the leaderboard publishes (score desc, time asc).
+    let entry = sqlx::query!(
+        r#"SELECT ce.competition_id, ce.handle, ce.score, c.title
+           FROM competition_entries ce
+           JOIN competitions c ON c.id = ce.competition_id
+           WHERE ce.user_id = $1
+           ORDER BY ce.submitted_at DESC
+           LIMIT 1"#,
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    match entry {
+        Some(e) => {
+            let rank = sqlx::query_scalar!(
+                r#"SELECT COUNT(*) + 1 AS "rank!"
+                   FROM competition_entries
+                   WHERE competition_id = $1
+                     AND (score > $2 OR (score = $2 AND total_time_ms < $3))"#,
+                e.competition_id,
+                e.score,
+                e.total_time_ms
+            )
+            .fetch_one(&state.pool)
+            .await?;
+            cards.push(json!({
+                "kind": "league",
+                "headline": format!("Rank {rank}"),
+                "subline": format!("{} — {}", e.handle, e.title),
+                "detail": format!("score {} in the latest competition", e.score),
+                "share_text": format!(
+                    "{} finished rank {rank} in the {} competition on Medical Learning OS with a score of {}.",
+                    e.handle, e.title, e.score
+                ),
+            }));
+        }
+        None => unavailable.push(json!({
+            "kind": "league",
+            "reason": "no competition entries yet — join a competition to share a rank",
+        })),
+    }
+
+    Ok(Json(json!({ "cards": cards, "unavailable": unavailable })))
+}

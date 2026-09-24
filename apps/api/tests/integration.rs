@@ -11349,6 +11349,168 @@ async fn library_media_and_image_cases_are_rights_checked() {
 }
 
 #[tokio::test]
+async fn grow01_share_cards_are_honest_and_question_free() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+
+    // Register explicitly: the share fixtures need the learner's user id.
+    let register = |app: Router, tag: String| {
+        let email = format!("share-{tag}-{}@example.test", Uuid::new_v4());
+        async move {
+            let (status, reg) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    "/v1/auth/register",
+                    None,
+                    Some(serde_json::json!({"email": email, "password": "longenough"})),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{reg}");
+            let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
+            let (status, login) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    "/v1/auth/login",
+                    None,
+                    Some(serde_json::json!({"email": email, "password": "longenough"})),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{login}");
+            let token = login["token"].as_str().unwrap().to_string();
+            (user_id, token)
+        }
+    };
+    let (learner_id, token) = register(app.clone(), "learner".into()).await;
+    let (rival_id, _rival_token) = register(app.clone(), "rival".into()).await;
+
+    // Fresh learner: nothing to share, and nothing is invented.
+    let (status, share) = call(
+        app.clone(),
+        request("GET", "/v1/me/share-cards", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{share}");
+    assert_eq!(share["cards"].as_array().unwrap().len(), 0);
+    let reasons: Vec<String> = share["unavailable"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["kind"].as_str().unwrap().to_string())
+        .collect();
+    assert!(reasons.contains(&"score".to_string()));
+    assert!(reasons.contains(&"consistency".to_string()));
+    assert!(reasons.contains(&"league".to_string()));
+
+    // Answer two seeded questions correctly (meets the QB-15 minimum of 2).
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid = session["session_id"].as_str().unwrap();
+    for (index, item) in session["items"].as_array().unwrap().iter().enumerate() {
+        let correct = item["correct_index"].as_i64().unwrap() as i16;
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&token),
+                Some(
+                    serde_json::json!({"item_index": index, "chosen_index": correct,
+                                       "idempotency_key": format!("share-{index}")}),
+                ),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // Consistency and league fixtures: a 5-day streak and one competition.
+    sqlx::query(
+        "INSERT INTO engagement_days (user_id, day, questions_answered, goal_met, streak_count)
+         VALUES ($1, CURRENT_DATE, 2, true, 5)",
+    )
+    .bind(learner_id)
+    .execute(&state.pool)
+    .await
+    .expect("streak fixture");
+    let comp_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO competitions (id, title, exam_id, question_ids, starts_at, ends_at, status)
+         VALUES ($1, 'Fixture League', $2, '[]', now() - interval '2 days', now() + interval '2 days', 'closed')",
+    )
+    .bind(comp_id)
+    .bind(ids.exam_id)
+    .execute(&state.pool)
+    .await
+    .expect("competition fixture");
+    sqlx::query(
+        "INSERT INTO competition_entries (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
+         VALUES ($1, $2, $3, 'rival-racer', '[]', 90, 50000, 1)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(comp_id)
+    .bind(rival_id)
+    .execute(&state.pool)
+    .await
+    .expect("rival entry");
+    sqlx::query(
+        "INSERT INTO competition_entries (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
+         VALUES ($1, $2, $3, 'share-fixture', '[]', 80, 60000, 2)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(comp_id)
+    .bind(learner_id)
+    .execute(&state.pool)
+    .await
+    .expect("learner entry");
+
+    let (status, share) = call(
+        app,
+        request("GET", "/v1/me/share-cards", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{share}");
+    let cards = share["cards"].as_array().unwrap();
+    let kinds: Vec<String> = cards
+        .iter()
+        .map(|c| c["kind"].as_str().unwrap().to_string())
+        .collect();
+    assert!(kinds.contains(&"score".to_string()));
+    assert!(kinds.contains(&"consistency".to_string()));
+    assert!(kinds.contains(&"league".to_string()));
+
+    let score_card = cards.iter().find(|c| c["kind"] == "score").unwrap();
+    assert_eq!(score_card["headline"], "100%");
+    let consistency_card = cards.iter().find(|c| c["kind"] == "consistency").unwrap();
+    assert_eq!(consistency_card["headline"], "5-day streak");
+    let league_card = cards.iter().find(|c| c["kind"] == "league").unwrap();
+    assert_eq!(league_card["headline"], "Rank 2");
+    assert_eq!(league_card["subline"], "share-fixture — Fixture League");
+
+    // GROW-01: no question content anywhere in the payload.
+    let body = share.to_string().to_lowercase();
+    assert!(!body.contains("vignette"));
+    assert!(!body.contains("correct_index"));
+    assert!(!body.contains("lead_in"));
+}
+
+#[tokio::test]
 async fn core03_library_retrieval_allowance_gates_the_free_tier() {
     let _g = LOCK.lock().await;
     let state = setup().await;

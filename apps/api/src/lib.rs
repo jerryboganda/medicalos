@@ -205,6 +205,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/admin/competitions/{comp_id}/prize-review",
             post(routes::community::prize_review),
         )
+        .route("/v1/me/share-cards", get(routes::community::share_cards))
         .route("/v1/me/plan/replan", post(routes::program::replan_plan))
         .route(
             "/v1/me/exam-switch/{to_exam_id}/gap-report",
@@ -814,6 +815,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/competitions/{comp_id}/claim",
             post(routes::community::claim_prize),
+        )
+        .route(
+            "/api/v1/me/share-cards",
+            get(routes::community::share_cards),
         )
         .route(
             "/api/v1/admin/competitions/{comp_id}/prize-review",

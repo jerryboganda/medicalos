@@ -1224,6 +1224,17 @@ export const Api = {
 			}
 		),
 	myDuels: () => call<{ duels: unknown[] }>('GET', '/v1/me/duels'),
+	shareCards: () =>
+		call<{
+			cards: {
+				kind: string;
+				headline: string;
+				subline: string;
+				detail: string;
+				share_text: string;
+			}[];
+			unavailable: { kind: string; reason: string }[];
+		}>('GET', '/v1/me/share-cards'),
 	duelState: (duelId: string) =>
 		call<{ status: string; winner: string | null; sides: unknown[] }>(
 			'GET',
