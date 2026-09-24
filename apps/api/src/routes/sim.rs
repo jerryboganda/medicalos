@@ -496,13 +496,14 @@ pub async fn record_assessment(
         .collect();
     // SIM-03: transcript events marked uncertain stay uncertain for evidence
     // purposes until a correction covers them.
-    let corrected_indexes: HashSet<i32> = sqlx::query_scalar(
+    let corrected_indexes: HashSet<usize> = sqlx::query_scalar(
         "SELECT event_index FROM scenario_transcript_corrections WHERE run_id = $1",
     )
     .bind(run_id)
     .fetch_all(&mut *tx)
     .await?
     .into_iter()
+    .map(|index: i32| index as usize)
     .collect();
     let uncertain_events: HashSet<i32> = run
         .transcript
@@ -514,7 +515,7 @@ pub async fn record_assessment(
                 .filter(|(_, event)| {
                     event.get("uncertain").and_then(serde_json::Value::as_bool) == Some(true)
                 })
-                .map(|(index, _)| index as i32)
+                .map(|(index, _)| index)
                 .collect()
         })
         .unwrap_or_default();
