@@ -63,7 +63,8 @@ pub async fn get_or_create_today(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResul
             ch.id
         )
         .fetch_one(&mut *tx)
-        .await?;
+        .await?
+        .unwrap_or(0);
         if eligible > 0 {
             let count = eligible.min(10);
             let title = format!(
