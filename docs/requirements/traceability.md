@@ -179,7 +179,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | COMP-02 | Scoring with guess penalty, capped speed bonus, tie-breaks | tested (engine scope: competition-scoring crate — 5/10/15 configurable points, 25% wrong penalty, 20% capped correct-only speed bonus, tie-break ladder score→accuracy→time→submission; native+wasm; live-event wiring lands with COMP-01) | run 35367410576 |
 | COMP-03 | Leagues and duels | in-progress (private duels: same-rules sessions per side, settle on second submit with time tie-break and honest draws; leagues pending) | run 35783063874 |
 | COMP-04 | Anti-cheat, integrity review, prizes only after review | tested (prize claims require a closed competition, completed integrity review, and an unflagged entry; leaderboard marks flagged entries and computes prize_eligible honestly) | run 35783063874 |
-| GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | in-progress (duel challenge by handle with share tokens surfaced in the community page; deep-link app plumbing, share cards and ambassador codes pending) | run 35803038827 |
+| GROW-01 | Share cards, duel links, deferred deep links, ambassador codes | tested for share cards (score/consistency/league cards from real records only, honest unavailability reasons, SVG download + clipboard share on the community page; never contains question content); deep-link plumbing waits on Tauri shells; ambassador codes wait on the owner program | runs 35803038827, 35948282800 |
 | CAREER-01 | Longitudinal learning portfolio | tested (portfolio entries: rotation/case_reflection/procedure_observation/certificate with list) | run 35467238410 |
 | PLAN-05 | Optional calendar read / write scopes | not-started | — |
 
