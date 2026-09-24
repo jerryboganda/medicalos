@@ -122,6 +122,9 @@ jobs:
       # CI-only fixture for offline-pack manifest signing; production uses the
       # VPS_PACK_SIGNING_KEY secret (docs/deployment/production.md).
       PACK_SIGNING_KEY: ci-only-pack-signing-key-0123456789abcdef
+      # Community statistics (and share cards) unlock at this sample size in
+      # browser tests; production keeps the 20-attempt default.
+      COMMUNITY_MIN_SAMPLE: "2"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
