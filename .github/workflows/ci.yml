@@ -83,6 +83,8 @@ jobs:
         run: npm install
       - name: Build client
         run: npm run build -w @medical-os/client
+      - name: TRUST-01 audit
+        run: node scripts/trust01-audit.mjs
 
   site:
     # Astro marketing site — holds no learner data (§31.1)
