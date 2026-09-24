@@ -11616,7 +11616,6 @@ async fn sim03_text_mode_transcript_uncertainty_supports_correction_and_evidence
     // segment without acknowledging the uncertainty.
     let assessment = |uncertain: bool| {
         let app = app.clone();
-        let run_id = run_id.clone();
         let examiner = examiner.clone();
         async move {
             call(
