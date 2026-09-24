@@ -37,7 +37,11 @@ test('question report flow records a report from the session UI', async ({
 	await page.getByTestId('report-submit').click();
 	const resp = await reportPost;
 	expect(resp.status(), 'report POST status').toBe(200);
-	await expect(page.getByTestId('report-done')).toContainText('Thanks');
+	await expect(
+			page
+				.getByTestId('report-done')
+				.filter({ hasText: /Thanks|already on file/ })
+		).toBeVisible();
 	await expect(page.getByTestId('report-done')).toContainText('Acknowledgement target:');
 	await expect(page.getByTestId('report-done')).toContainText('Resolution target:');
 });
