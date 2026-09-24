@@ -505,7 +505,7 @@ pub async fn record_assessment(
     .into_iter()
     .map(|index: i32| index as usize)
     .collect();
-    let uncertain_events: HashSet<i32> = run
+    let uncertain_events: HashSet<usize> = run
         .transcript
         .as_array()
         .map(|events| {
