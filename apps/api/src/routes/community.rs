@@ -876,7 +876,7 @@ pub async fn share_cards(
     // League: the learner's most recent competition entry, ranked by the same
     // ordering the leaderboard publishes (score desc, time asc).
     let entry = sqlx::query!(
-        r#"SELECT ce.competition_id, ce.handle, ce.score, c.title
+        r#"SELECT ce.competition_id, ce.handle, ce.score, ce.total_time_ms, c.title
            FROM competition_entries ce
            JOIN competitions c ON c.id = ce.competition_id
            WHERE ce.user_id = $1
