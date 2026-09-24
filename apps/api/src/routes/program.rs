@@ -1422,6 +1422,111 @@ pub(crate) fn scenario_events(machine: &serde_json::Value, state: Option<&str>) 
         .collect()
 }
 
+#[derive(Deserialize)]
+pub struct TranscriptCorrectionReq {
+    pub event_index: i32,
+    pub corrected_text: String,
+}
+
+/// SIM-03: correct an uncertain text-mode transcript event before final
+/// feedback. Append-only: the original transcript is never rewritten.
+pub async fn submit_transcript_correction(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(run_id): Path<Uuid>,
+    Json(req): Json<TranscriptCorrectionReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if req.event_index < 0 {
+        return Err(ApiError::unprocessable(
+            "invalid_event_index",
+            "event_index must be 0 or greater",
+        ));
+    }
+    let corrected_text = req.corrected_text.trim();
+    if corrected_text.is_empty() || corrected_text.chars().count() > 500 {
+        return Err(ApiError::unprocessable(
+            "invalid_correction",
+            "the corrected text must be 1-500 characters",
+        ));
+    }
+    let mut tx = state.pool.begin().await?;
+    let run = sqlx::query!(
+        "SELECT user_id, transcript FROM scenario_runs WHERE id = $1 FOR UPDATE",
+        run_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("run_not_found"))?;
+    let via_admin_token = {
+        let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
+        state.require_admin(provided).is_ok()
+    };
+    if run.user_id != user.user_id && !via_admin_token {
+        return Err(ApiError::forbidden(
+            "not_run_owner",
+            "only the run's learner or an operator may correct its transcript",
+        ));
+    }
+    let events = run.transcript.as_array().ok_or_else(ApiError::internal)?;
+    if req.event_index as usize >= events.len() {
+        return Err(ApiError::unprocessable(
+            "invalid_event_index",
+            "event_index points outside this run's transcript",
+        ));
+    }
+    let entry = &events[req.event_index as usize];
+    if entry.get("uncertain").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(ApiError::unprocessable(
+            "event_not_uncertain",
+            "only uncertain transcript events can be corrected",
+        ));
+    }
+    let already = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM scenario_transcript_corrections
+         WHERE run_id = $1 AND event_index = $2)",
+    )
+    .bind(run_id)
+    .bind(req.event_index)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already {
+        return Err(ApiError::conflict(
+            "event_already_corrected",
+            "this transcript event already has a correction",
+        ));
+    }
+    let original_event = entry
+        .get("on")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let id = Uuid::new_v4();
+    sqlx::query!(
+        "INSERT INTO scenario_transcript_corrections
+           (id, run_id, event_index, original_event, corrected_text, corrected_by)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+        id,
+        run_id,
+        req.event_index,
+        original_event,
+        corrected_text,
+        user.user_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "event_index": req.event_index,
+            "original_event": original_event,
+            "corrected_text": corrected_text,
+            "corrected_by": user.user_id,
+        })),
+    ))
+}
+
 pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<serde_json::Value> {
     transcript
         .as_array()
@@ -1650,12 +1755,31 @@ pub async fn scenario_event(
     })?;
     let mut transcript = run.transcript.clone();
     let events = transcript.as_array_mut().ok_or_else(ApiError::internal)?;
-    events.push(json!({
+    // SIM-03: text-mode transcript uncertainty is authored into the fixture
+    // (states marked transcript_uncertain) and labelled as the drill it is —
+    // never presented as real speech-recognition output.
+    let state_spec = run
+        .state_machine
+        .get("states")
+        .and_then(|states| states.get(&next));
+    let uncertain = state_spec
+        .and_then(|s| s.get("transcript_uncertain"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let mut entry = json!({
         "from": run.current_state.clone(),
         "on": event,
         "to": next.clone(),
         "actor_role": run.actor_role,
-    }));
+    });
+    if uncertain {
+        entry["uncertain"] = json!(true);
+        entry["uncertainty_reason"] = json!(state_spec
+            .and_then(|s| s.get("transcript_uncertainty_reason"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("authored text-mode uncertainty drill"));
+    }
+    events.push(entry);
     let finished = run
         .state_machine
         .get("terminal_states")

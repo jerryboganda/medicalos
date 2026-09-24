@@ -485,6 +485,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/scenarios/runs", post(routes::program::start_scenario))
         .route(
+            "/v1/scenarios/runs/{run_id}/transcript-corrections",
+            post(routes::program::submit_transcript_correction),
+        )
+        .route(
             "/v1/scenarios/runs/{run_id}",
             get(routes::program::get_scenario_run),
         )
@@ -1103,6 +1107,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/scenarios/runs",
             post(routes::program::start_scenario),
+        )
+        .route(
+            "/api/v1/scenarios/runs/{run_id}/transcript-corrections",
+            post(routes::program::submit_transcript_correction),
         )
         .route(
             "/api/v1/scenarios/runs/{run_id}",

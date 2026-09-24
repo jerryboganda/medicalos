@@ -11522,6 +11522,200 @@ async fn grow01_share_cards_are_honest_and_question_free() {
 }
 
 #[tokio::test]
+async fn sim03_text_mode_transcript_uncertainty_supports_correction_and_evidence() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let examiner = register_and_login(app.clone()).await;
+
+    // A station whose second state is an authored text-mode uncertainty drill.
+    let (status, scenario) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/scenarios",
+            Some(&examiner),
+            Some(serde_json::json!({
+                "slug": "sim03-uncertainty-station",
+                "title": "Uncertainty station",
+                "state_machine": {
+                    "initial": "start",
+                    "terminal_states": ["complete"],
+                    "states": {
+                        "asked_uncertain": {
+                            "transcript_uncertain": true,
+                            "transcript_uncertainty_reason":
+                                "audio quality degraded in this segment"
+                        }
+                    },
+                    "transitions": [
+                        {"from": "start", "on": "ask_symptom_onset", "to": "asked"},
+                        {"from": "asked", "on": "probe_history", "to": "asked_uncertain"},
+                        {"from": "asked_uncertain", "on": "finish", "to": "complete"}
+                    ]
+                },
+                "rubric": [
+                    {"criterion_key": "history_quality",
+                     "label": "Takes a focused history", "max_score": 2.0}
+                ]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{scenario}");
+
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/scenarios/runs",
+            Some(&learner),
+            Some(serde_json::json!({"scenario_slug": "sim03-uncertainty-station"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let run_id = started["run_id"].as_str().unwrap();
+
+    for event in ["ask_symptom_onset", "probe_history", "finish"] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/scenarios/runs/{run_id}/events"),
+                Some(&learner),
+                Some(serde_json::json!({ "event": event })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // The uncertain segment is visible, with its authored reason.
+    let (status, active) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{active}");
+    let uncertain_event = &active["timeline"].as_array().unwrap()[1];
+    assert_eq!(uncertain_event["uncertain"], true, "{active}");
+    assert_eq!(
+        uncertain_event["uncertainty_reason"],
+        "audio quality degraded in this segment"
+    );
+
+    // The examiner cannot record evidence citing the uncorrected uncertain
+    // segment without acknowledging the uncertainty.
+    let assessment = |uncertain: bool| {
+        let app = app.clone();
+        let run_id = run_id.clone();
+        let examiner = examiner.clone();
+        async move {
+            call(
+                app,
+                admin_req(
+                    "POST",
+                    &format!("/v1/admin/scenarios/runs/{run_id}/assessment"),
+                    Some(&examiner),
+                    Some(serde_json::json!({
+                        "criteria": [{
+                            "criterion_key": "history_quality",
+                            "assessment_status": "assessed",
+                            "score": 1.5,
+                            "evidence": "Probed the history through the degraded segment.",
+                            "transcript_event_indexes": [1],
+                            "transcript_uncertain": uncertain
+                        }]
+                    })),
+                ),
+            )
+            .await
+        }
+    };
+    let (status, denied) = assessment(false).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{denied}");
+    assert_eq!(denied["error"]["code"], "uncertain_transcript_evidence");
+
+    // The run owner corrects the uncertain event before feedback finalizes.
+    let correction_path = format!("/v1/scenarios/runs/{run_id}/transcript-corrections");
+    let (status, correction) = call(
+        app.clone(),
+        request(
+            "POST",
+            &correction_path,
+            Some(&learner),
+            Some(serde_json::json!({
+                "event_index": 1,
+                "corrected_text": "ask about symptom duration and severity"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{correction}");
+    assert_eq!(correction["original_event"], "probe_history");
+    let (status, duplicate) = call(
+        app.clone(),
+        request(
+            "POST",
+            &correction_path,
+            Some(&learner),
+            Some(serde_json::json!({
+                "event_index": 1,
+                "corrected_text": "second correction attempt"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+    let (status, not_uncertain) = call(
+        app.clone(),
+        request(
+            "POST",
+            &correction_path,
+            Some(&learner),
+            Some(serde_json::json!({
+                "event_index": 0,
+                "corrected_text": "this event was never uncertain"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{not_uncertain}");
+    assert_eq!(not_uncertain["error"]["code"], "event_not_uncertain");
+
+    // With the segment corrected, the examiner's evidence stands on its own.
+    let (status, recorded) = assessment(true).await;
+    assert_eq!(status, StatusCode::CREATED, "{recorded}");
+
+    // The debrief surfaces the correction alongside the timeline.
+    let (status, debrief) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}/debrief"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{debrief}");
+    let corrections = debrief["transcript_corrections"].as_array().unwrap();
+    assert_eq!(corrections.len(), 1);
+    assert_eq!(
+        corrections[0]["corrected_text"],
+        "ask about symptom duration and severity"
+    );
+}
+
+#[tokio::test]
 async fn core03_library_retrieval_allowance_gates_the_free_tier() {
     let _g = LOCK.lock().await;
     let state = setup().await;

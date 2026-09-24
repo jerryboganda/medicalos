@@ -60,6 +60,7 @@ migrations!(
     "0043_sim07_assessment_appeals",
     "0044_sim08_team_handover",
     "0045_img02_reviewed_annotations",
+    "0046_sim03_transcript_corrections",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

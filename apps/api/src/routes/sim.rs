@@ -147,6 +147,25 @@ pub async fn debrief(
         "final_state": run.current_state,
         "transcript": run.transcript,
         "timeline": crate::routes::program::transcript_timeline(&run.transcript),
+        "transcript_corrections": sqlx::query!(
+            r#"SELECT event_index, original_event, corrected_text, corrected_by, created_at
+               FROM scenario_transcript_corrections
+               WHERE run_id = $1 ORDER BY event_index"#,
+            run_id
+        )
+        .fetch_all(&state.pool)
+        .await?
+        .iter()
+        .map(|c| {
+            json!({
+                "event_index": c.event_index,
+                "original_event": c.original_event,
+                "corrected_text": c.corrected_text,
+                "corrected_by": c.corrected_by,
+                "created_at": c.created_at,
+            })
+        })
+        .collect::<Vec<_>>(),
         "available_actions": crate::routes::program::scenario_events(&run.state_machine, None),
         "started_at": run.started_at,
         "finished_at": run.finished_at,
@@ -475,6 +494,30 @@ pub async fn record_assessment(
         .iter()
         .map(|criterion| (criterion.criterion_key.as_str(), criterion.max_score))
         .collect();
+    // SIM-03: transcript events marked uncertain stay uncertain for evidence
+    // purposes until a correction covers them.
+    let corrected_indexes: HashSet<i32> = sqlx::query_scalar(
+        "SELECT event_index FROM scenario_transcript_corrections WHERE run_id = $1",
+    )
+    .bind(run_id)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+    let uncertain_events: HashSet<i32> = run
+        .transcript
+        .as_array()
+        .map(|events| {
+            events
+                .iter()
+                .enumerate()
+                .filter(|(_, event)| {
+                    event.get("uncertain").and_then(serde_json::Value::as_bool) == Some(true)
+                })
+                .map(|(index, _)| index as i32)
+                .collect()
+        })
+        .unwrap_or_default();
     let mut seen = HashSet::new();
     let transcript_len = run.transcript.as_array().map_or(0, Vec::len);
     for criterion in &req.criteria {
@@ -505,6 +548,16 @@ pub async fn record_assessment(
                     return Err(ApiError::unprocessable(
                         "score_out_of_range",
                         "assessed scores must be within the criterion's allowed range",
+                    ));
+                }
+                let cites_uncorrected_uncertain =
+                    criterion.transcript_event_indexes.iter().any(|index| {
+                        uncertain_events.contains(index) && !corrected_indexes.contains(index)
+                    });
+                if cites_uncorrected_uncertain && !criterion.transcript_uncertain {
+                    return Err(ApiError::unprocessable(
+                        "uncertain_transcript_evidence",
+                        "this judgment cites an uncorrected uncertain transcript segment — acknowledge the uncertainty",
                     ));
                 }
                 if criterion.transcript_event_indexes.is_empty()
