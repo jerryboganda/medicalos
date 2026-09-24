@@ -727,8 +727,28 @@ pub async fn list_image_cases(
             "body": a.body,
         }));
     }
+    // IMG-01: a case whose image rights are no longer active stops serving.
+    let active_refs: std::collections::HashSet<String> = sqlx::query!(
+        r#"SELECT ref_code FROM content_rights
+           WHERE revoked_at IS NULL
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             AND permitted_uses @> '["display"]'::jsonb"#
+    )
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .map(|r| r.ref_code)
+    .collect();
     let cases: Vec<serde_json::Value> = rows
         .iter()
+        .filter(|r| {
+            let images: Vec<ImageRef> =
+                serde_json::from_value(r.images.clone()).unwrap_or_default();
+            images
+                .iter()
+                .all(|img| active_refs.contains(&img.rights_ref))
+        })
         .map(|r| {
             json!({
                 "case_id": r.id,

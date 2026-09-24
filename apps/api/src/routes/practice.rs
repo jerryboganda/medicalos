@@ -848,7 +848,9 @@ pub async fn get_session(
             "exam_tip": null,
             "report_status": report_status,
             "corrected_version_id": it.corrected_version_id,
-            "corrected": it.current_corrected,
+            // corrected covers both directions: a source correction swapped this
+            // item's content, or the learner was served the replacement version.
+            "corrected": it.corrected || it.current_corrected,
             "correction_note": it.correction_note,
             "my_report": my_report,
         });

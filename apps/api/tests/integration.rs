@@ -845,9 +845,13 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         .unwrap()
         .parse()
         .unwrap();
-    let task_question_count = today["tasks"][0]["question_count"]
-        .as_i64()
-        .expect("cold-start task carries its question count");
+    // Size the task to this chapter's seeded pool (two eligible questions).
+    sqlx::query("UPDATE plan_tasks SET question_count = 2 WHERE task_key = $1")
+        .bind(task_key)
+        .execute(&state.pool)
+        .await
+        .expect("resize cold-start task");
+    let task_question_count = 2i64;
 
     // Tutor session launched from the cold-start plan task (AI-08 task
     // identity): completing it is what marks the task done. The session must
