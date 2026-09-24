@@ -11422,23 +11422,30 @@ async fn grow01_share_cards_are_honest_and_question_free() {
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
     let sid = session["session_id"].as_str().unwrap();
-    for (index, item) in session["items"].as_array().unwrap().iter().enumerate() {
-        let correct = item["correct_index"].as_i64().unwrap() as i16;
+    // The pre-answer items hide correct_index (§11.3) — answer blind; the
+    // card must report whatever the real accuracy turns out to be.
+    for index in 0..2 {
         let (status, _) = call(
             app.clone(),
             request(
                 "POST",
                 &format!("/v1/practice/sessions/{sid}/answers"),
                 Some(&token),
-                Some(
-                    serde_json::json!({"item_index": index, "chosen_index": correct,
-                                       "idempotency_key": format!("share-{index}")}),
-                ),
+                Some(serde_json::json!({"item_index": index, "chosen_index": 0,
+                                       "idempotency_key": format!("share-{index}")})),
             ),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
     }
+    let (answered_total, answered_correct): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN correct THEN 1 ELSE 0 END), 0)          FROM attempts WHERE user_id = $1 AND chosen_index IS NOT NULL            AND created_at >= now() - interval '30 days'",
+    )
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("attempt counts");
+    let expected_percent = (answered_correct * 100) / answered_total;
 
     // Consistency and league fixtures: a 5-day streak and one competition.
     sqlx::query(
@@ -11496,7 +11503,11 @@ async fn grow01_share_cards_are_honest_and_question_free() {
     assert!(kinds.contains(&"league".to_string()));
 
     let score_card = cards.iter().find(|c| c["kind"] == "score").unwrap();
-    assert_eq!(score_card["headline"], "100%");
+    assert_eq!(score_card["headline"], format!("{expected_percent}%"));
+    assert_eq!(
+        score_card["detail"],
+        format!("{answered_correct} of {answered_total} answered correctly")
+    );
     let consistency_card = cards.iter().find(|c| c["kind"] == "consistency").unwrap();
     assert_eq!(consistency_card["headline"], "5-day streak");
     let league_card = cards.iter().find(|c| c["kind"] == "league").unwrap();
