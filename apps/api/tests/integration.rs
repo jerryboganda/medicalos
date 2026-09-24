@@ -8975,7 +8975,7 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     assert_eq!(status, StatusCode::OK, "{restored}");
     assert_eq!(restored["tasks"].as_array().unwrap().len(), 1);
     assert_eq!(restored["tasks"][0]["status"], "pending");
-    assert_eq!(restored["tasks"][0]["question_count"], 10);
+    assert_eq!(restored["tasks"][0]["question_count"], seeded_count);
     assert_eq!(restored["tasks"][0]["estimated_minutes"], 15);
     assert_eq!(restored["tasks"][0]["task_key"], task_key);
 }
