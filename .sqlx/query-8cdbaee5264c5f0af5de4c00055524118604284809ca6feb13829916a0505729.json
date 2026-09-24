@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT adapter AS \"adapter!\", model AS \"model!\", COUNT(*) AS \"n!\"\n           FROM coach_turns WHERE created_at >= now() - interval '30 days'\n           GROUP BY adapter, model ORDER BY COUNT(*) DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "adapter!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "model!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "8cdbaee5264c5f0af5de4c00055524118604284809ca6feb13829916a0505729"
+}

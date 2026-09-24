@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM plan_tasks\n           WHERE plan_id = $1\n             AND task_key IN (SELECT task_key FROM plan_tasks WHERE id = ANY($2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2c784e7db3ffa1965cfbfa4a8612b7fdbaa00c6321595a8838836d0952fffaa"
+}

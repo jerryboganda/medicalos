@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id AS program_id, p.name,\n                  COALESCE(\n                      array_agg(m.chapter_id ORDER BY m.chapter_id)\n                          FILTER (WHERE m.chapter_id IS NOT NULL),\n                      ARRAY[]::UUID[]\n                  ) AS \"chapter_ids!\"\n           FROM institution_programs p\n           LEFT JOIN institution_program_curriculum m ON m.program_id = p.id\n           WHERE p.institution_id = $1\n           GROUP BY p.id\n           ORDER BY p.name, p.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "program_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "chapter_ids!",
+        "type_info": "UuidArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "945a951079703bbec8b874e41dcb5d7afb1fab510569b60cdd2a01fb783afa05"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS cohort_id, c.name, c.program_id AS \"program_id?\",\n                  COUNT(u.id)::BIGINT AS \"members!\"\n           FROM cohorts c\n           LEFT JOIN cohort_members cm ON cm.cohort_id = c.id\n           LEFT JOIN users u ON u.id = cm.user_id AND u.deleted_at IS NULL\n           WHERE c.institution_id = $1\n           GROUP BY c.id\n           ORDER BY c.name, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cohort_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "program_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "members!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "919a6ea55c03ecaa223a24143527daf8a5d78332dd8a1908e37c7cccef709412"
+}

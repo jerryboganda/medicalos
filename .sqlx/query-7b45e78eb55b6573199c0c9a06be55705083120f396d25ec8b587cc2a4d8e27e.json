@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO engagement_days (user_id, day, questions_answered, goal_met, streak_count)\n               VALUES ($1, CURRENT_DATE, $2, $3, 0)\n               ON CONFLICT (user_id, day) DO UPDATE\n                 SET questions_answered = EXCLUDED.questions_answered,\n                     goal_met = EXCLUDED.goal_met OR engagement_days.goal_met",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b45e78eb55b6573199c0c9a06be55705083120f396d25ec8b587cc2a4d8e27e"
+}

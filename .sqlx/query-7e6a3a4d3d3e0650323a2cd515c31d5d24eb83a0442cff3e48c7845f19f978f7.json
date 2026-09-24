@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM curriculum_node_concepts WHERE curriculum_node_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e6a3a4d3d3e0650323a2cd515c31d5d24eb83a0442cff3e48c7845f19f978f7"
+}

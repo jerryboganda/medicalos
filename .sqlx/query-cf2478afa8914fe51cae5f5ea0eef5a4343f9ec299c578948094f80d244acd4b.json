@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT 1 AS one FROM institution_members\n         WHERE institution_id = $1 AND user_id = $2\n           AND role IN ('admin', 'instructor')\n         FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cf2478afa8914fe51cae5f5ea0eef5a4343f9ec299c578948094f80d244acd4b"
+}

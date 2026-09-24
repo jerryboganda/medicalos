@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO practice_sessions (id, user_id, preset, chapter_id)\n             VALUES ($1, $2, 'duel', $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "83b73cd36a85362817e6e91c793cba876e9dae9ca7b27ff189c5e7e241919373"
+}

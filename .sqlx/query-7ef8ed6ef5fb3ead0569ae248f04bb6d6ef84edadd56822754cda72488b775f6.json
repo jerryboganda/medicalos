@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id FROM plan_revisions r JOIN plans p ON p.id = r.plan_id\n           WHERE p.user_id = $1 AND p.plan_date = CURRENT_DATE\n           ORDER BY r.to_version DESC, p.version DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ef8ed6ef5fb3ead0569ae248f04bb6d6ef84edadd56822754cda72488b775f6"
+}

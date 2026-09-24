@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, url, kind, duration_seconds AS \"duration_seconds?\",\n                  captions, chapters, rights_ref\n           FROM media_assets WHERE article_id = $1 ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "duration_seconds?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "captions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "chapters",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "rights_ref",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ec68b1e456b61eeaa8c897d2976e5ed30f0f40c3c158148347cd331ae78a48c"
+}

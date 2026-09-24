@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, intended_use, population, method, result, approved_by, approved_at\n           FROM validation_records\n           WHERE intended_use = 'readiness'\n           ORDER BY approved_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "intended_use",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "population",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "approved_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "approved_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ab8d8f0cf97a4d4072b59195d7fe0f37e5c8bb957f0d6516ec6074b908dd9d41"
+}

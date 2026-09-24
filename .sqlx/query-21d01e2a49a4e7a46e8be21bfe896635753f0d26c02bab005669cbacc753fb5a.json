@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE question_reports SET status = 'quarantined'\n             WHERE question_version_id = $1 AND status IN ('open', 'quarantined')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "21d01e2a49a4e7a46e8be21bfe896635753f0d26c02bab005669cbacc753fb5a"
+}

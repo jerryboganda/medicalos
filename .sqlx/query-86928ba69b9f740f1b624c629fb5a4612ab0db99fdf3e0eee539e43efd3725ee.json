@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.ai_allowed AS \"ai_allowed!\" FROM reserved_questions rq\n               JOIN assessment_forms f ON f.id = rq.form_id\n               WHERE rq.question_version_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ai_allowed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "86928ba69b9f740f1b624c629fb5a4612ab0db99fdf3e0eee539e43efd3725ee"
+}

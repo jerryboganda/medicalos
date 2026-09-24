@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE engagement_settings SET daily_goal_enabled = $2, updated_at = now()\n               WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e340b41c42c794815a974e90755d864911344d8bec604858d504dbf7dfe83cbb"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO institution_members (institution_id, user_id, role)\n         VALUES ($1, $2, 'learner')\n         ON CONFLICT (institution_id, user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf3e892310bf9cdec324717b28614ec4b210044ec8c59bacc1082233be898da2"
+}

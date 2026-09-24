@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO interoperability_receipts\n           (id, institution_id, standard, direction, external_id, payload, status, created_by)\n           VALUES ($1, $2, $3, $4, $5, $6, 'recorded', $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c09a74cb59a032aaf1bf88df2063c4f5bcf4c07eeabb73987510503deece50d"
+}

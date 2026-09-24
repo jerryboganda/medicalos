@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO intervention_outcomes\n           (id, user_id, intervention_type, concept_key, triggered_at)\n           VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf6da5331e83a63de35e4a3888e2bc0c31db341b1cc40260aa4e0c4a81783a74"
+}

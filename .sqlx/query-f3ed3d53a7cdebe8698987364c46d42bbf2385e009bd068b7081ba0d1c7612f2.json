@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\"\n           FROM question_reports\n           WHERE question_version_id = $1 AND status IN ('open', 'quarantined')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f3ed3d53a7cdebe8698987364c46d42bbf2385e009bd068b7081ba0d1c7612f2"
+}

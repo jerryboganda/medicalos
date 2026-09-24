@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.chosen_index, qv.correct_index\n           FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id\n           WHERE a.session_id = $1 AND a.item_index = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct_index",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1ce6e10e57c7d877dfbca2a9147236d5a36b4ed261329f58507fc9875962160a"
+}

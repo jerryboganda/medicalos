@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO concept_versions\n         (concept_id, version, display_name, definition, created_by)\n         VALUES ($1, 1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2053a8eacb61d5652a4e0f8b11fc23740d19d164de64bb726c92ae87f0c1443e"
+}

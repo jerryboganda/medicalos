@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.correct, qv.difficulty\n           FROM attempts a\n           JOIN question_versions qv ON qv.id = a.question_version_id\n           WHERE a.user_id = $1 AND qv.chapter_id = $2\n             AND a.chosen_index IS NOT NULL\n           ORDER BY a.created_at, a.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "correct",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "difficulty",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "fbee8d0c10714281b219865b77b01069c4358bd1fb224f8ff360bbfc861ba88f"
+}

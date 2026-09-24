@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id, d.status, d.question_count, d.winner AS \"winner?\",\n                  d.challenger = $1 AS \"mine_sent!\",\n                  ch.handle AS \"challenger_handle?\", oh.handle AS \"opponent_handle?\"\n           FROM duels d\n           LEFT JOIN community_profiles ch ON ch.user_id = d.challenger\n           LEFT JOIN community_profiles oh ON oh.user_id = d.opponent\n           WHERE d.challenger = $1 OR d.opponent = $1\n           ORDER BY d.created_at DESC LIMIT 50",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "question_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "winner?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "mine_sent!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "challenger_handle?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "opponent_handle?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "69a7a087246786c66161f3e50684f7983dc5f493a0fb544377fcc8112a7adf55"
+}

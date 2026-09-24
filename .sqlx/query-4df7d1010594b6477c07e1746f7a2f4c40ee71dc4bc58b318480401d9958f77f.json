@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, challenger, opponent, winner, question_count FROM duels WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "challenger",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "opponent",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "winner",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "question_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4df7d1010594b6477c07e1746f7a2f4c40ee71dc4bc58b318480401d9958f77f"
+}

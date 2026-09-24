@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO content_rights\n           (id, ref_code, licensor, territory, permitted_uses, valid_from, valid_to, notes, created_by,\n            contract_ref, contract_version, asset_refs, audiences, seat_limit, offline_terms,\n            quotation_limit_words, ai_terms, derivative_terms, attribution, royalty_terms)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Date",
+        "Date",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Int4",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0cfe3b67bc38d900ca0de5d8651c35de31d8f73cc6873c63c7094c0699c2684e"
+}

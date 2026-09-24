@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO question_marks (user_id, question_version_id)\n         VALUES ($1, $2)\n         ON CONFLICT (user_id, question_version_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e38f06b0b0df395ff650d731419ff78cdbaf19d99a5ea7408f951d57c411fcae"
+}

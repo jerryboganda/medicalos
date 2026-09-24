@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT chosen_index, COALESCE(COUNT(*), 0) AS \"picks!\"\n           FROM attempts\n           WHERE question_version_id = $1 AND chosen_index IS NOT NULL\n             AND assisted = FALSE\n           GROUP BY chosen_index ORDER BY chosen_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "picks!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "d9c73cfafcb7312e8a08e0f5c7dcf53b18ec8c1f65d48e71762a1946422407cc"
+}

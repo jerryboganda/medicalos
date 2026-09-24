@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, undone, reason_code, from_version,\n                receipt::text AS \"receipt_text!\"\n         FROM plan_revisions WHERE id = $1 AND plan_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "undone",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "from_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "receipt_text!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "ec9a90ed168c41187090d476537d021e8f8cd15d6f6212faeb0d773681d97652"
+}

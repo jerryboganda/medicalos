@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO exam_spec_versions\n           (id, exam_id, version, effective_from, effective_to, config)\n           VALUES ($1, $2, $3, $4, $5, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Date",
+        "Date",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f1b19d91a0e6df3c18668196d0e17bc6c3d5603efc5c268fca068e37e19f9429"
+}

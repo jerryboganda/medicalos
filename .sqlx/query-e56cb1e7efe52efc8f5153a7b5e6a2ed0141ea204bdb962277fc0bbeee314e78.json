@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM institution_program_curriculum WHERE program_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e56cb1e7efe52efc8f5153a7b5e6a2ed0141ea204bdb962277fc0bbeee314e78"
+}

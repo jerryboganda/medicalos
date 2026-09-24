@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT value->0 AS \"lo!\", value->1 AS \"hi!\" FROM app_settings\n           WHERE key = 'mastery_bands'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lo!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "hi!",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "8298bf54bb27ffefdca8ca43a03ad18426f903c0c97cf3dde5af682c47591ef7"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\"\n                   FROM attempts a\n                   JOIN practice_sessions s ON s.id = a.session_id\n                   WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE\n                     AND s.preset <> 'revision'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "18cb6efc1d2bff500b88a5e835ca73772b62b4f2fa4c2abebf097bc281d1ed7b"
+}

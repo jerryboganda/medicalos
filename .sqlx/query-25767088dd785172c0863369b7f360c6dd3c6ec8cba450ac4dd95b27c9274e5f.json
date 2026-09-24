@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM question_versions qv\n               WHERE qv.chapter_id = $1 AND qv.status = 'published'\n                 AND NOT EXISTS (\n                     SELECT 1 FROM question_reports r\n                     WHERE r.question_version_id = qv.id\n                       AND r.status IN ('open', 'quarantined'))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "25767088dd785172c0863369b7f360c6dd3c6ec8cba450ac4dd95b27c9274e5f"
+}

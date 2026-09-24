@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO article_reads (user_id, article_version_id)\n         VALUES ($1, $2) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c923bc95674acb940a2c3ef48d941b6510e4f7ef8cfb9fde81e2a3dd8d6f476d"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO exam_outcomes\n           (id, user_id, exam_id, sat_on, outcome, consented)\n           VALUES ($1, $2, $3, $4, $5, true)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Date",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "528d551cbc30fe03e17ca509e822baed3d14fe230de5b8527da86ae650aef43e"
+}

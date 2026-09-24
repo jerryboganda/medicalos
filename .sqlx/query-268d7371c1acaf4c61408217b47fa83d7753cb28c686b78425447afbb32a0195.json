@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due\n           FROM retest_cards rc\n           JOIN question_versions qv ON qv.id = rc.question_version_id\n           WHERE rc.user_id = $1 AND rc.due <= $2 AND qv.status = 'published'\n           ORDER BY rc.due",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "passes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "due",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "268d7371c1acaf4c61408217b47fa83d7753cb28c686b78425447afbb32a0195"
+}

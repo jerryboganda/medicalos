@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name AS chapter_name, lcs.ability AS \"ability?\",\n                  lcs.evidence_count AS \"evidence!\", lcs.independent_count AS \"independent!\"\n           FROM learner_concept_state lcs\n           JOIN curriculum_nodes c ON c.id = lcs.chapter_id\n           WHERE lcs.user_id = $1 ORDER BY lcs.ability ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "ability?",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 2,
+        "name": "evidence!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "independent!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7a210c0a816e9a5854ab2fd18d0e740b300eccb3b906cc422227698ba43b85bc"
+}

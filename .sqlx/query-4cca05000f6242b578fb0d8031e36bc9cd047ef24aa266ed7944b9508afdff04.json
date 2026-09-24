@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE engagement_days\n                   SET questions_answered = $2\n                   WHERE user_id = $1 AND day = CURRENT_DATE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4cca05000f6242b578fb0d8031e36bc9cd047ef24aa266ed7944b9508afdff04"
+}

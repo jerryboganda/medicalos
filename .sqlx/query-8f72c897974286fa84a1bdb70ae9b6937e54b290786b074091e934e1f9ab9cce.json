@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id, c.canonical_key, c.current_version,\n                  v.display_name, v.definition\n           FROM concepts c\n           JOIN concept_versions v\n             ON v.concept_id = c.id AND v.version = c.current_version\n           ORDER BY c.canonical_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "canonical_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "current_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "definition",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8f72c897974286fa84a1bdb70ae9b6937e54b290786b074091e934e1f9ab9cce"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reserved_questions (question_version_id, form_id)\n                 VALUES ($1, $2)\n                 ON CONFLICT (question_version_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eca253b7004d447b888b11c5ed47d7ef8cd8b1bf8ff645a7b972a2a848655b10"
+}

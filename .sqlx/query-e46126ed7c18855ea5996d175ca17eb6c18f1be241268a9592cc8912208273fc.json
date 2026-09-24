@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO plan_tasks\n                   (id, plan_id, kind, title, chapter_id, question_count, estimated_minutes)\n                 VALUES ($1, $2, 'practice', $3, $4, $5, 15)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e46126ed7c18855ea5996d175ca17eb6c18f1be241268a9592cc8912208273fc"
+}

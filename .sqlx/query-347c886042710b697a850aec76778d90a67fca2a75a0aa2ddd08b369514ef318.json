@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\"\n           FROM plan_revisions r JOIN plans p ON p.id = r.plan_id\n           WHERE p.user_id = $1 AND p.plan_date = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "347c886042710b697a850aec76778d90a67fca2a75a0aa2ddd08b369514ef318"
+}

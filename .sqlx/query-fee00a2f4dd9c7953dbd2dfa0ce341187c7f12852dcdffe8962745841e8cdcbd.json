@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE practice_sessions SET status = 'submitted', submitted_at = now()\n             WHERE id = $1 AND user_id = $2 AND status = 'open'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fee00a2f4dd9c7953dbd2dfa0ce341187c7f12852dcdffe8962745841e8cdcbd"
+}

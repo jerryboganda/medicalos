@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO practice_sessions (id, user_id, preset, form_id, ai_allowed)\n         VALUES ($1, $2, 'exam', $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa0e2df9ca3cdb1d6eb7499deb516297f6abc458501cde25dda9a1c0b90530c3"
+}

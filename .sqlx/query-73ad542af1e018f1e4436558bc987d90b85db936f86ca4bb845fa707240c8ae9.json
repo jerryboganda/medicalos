@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\" FROM practice_sessions\n           WHERE user_id = $1 AND status = 'submitted'\n             AND submitted_at >= now() - interval '7 days'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "73ad542af1e018f1e4436558bc987d90b85db936f86ca4bb845fa707240c8ae9"
+}

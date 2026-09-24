@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE duels SET status = 'declined'\n         WHERE id = $1 AND opponent = $2 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6fc026e461a861f97fc1e46d7a7a9ddcb8020e26624ff61c9569a3a6298c5698"
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT streak_count, (CURRENT_DATE - day - 1) AS \"gap_days!\"\n                   FROM engagement_days\n                   WHERE user_id = $1 AND day < CURRENT_DATE AND goal_met = true\n                   ORDER BY day DESC\n                   LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "streak_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "gap_days!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "c4395d60cb370f3873665bacd2cbfb6c334051b6df7f2b244705c199d6195985"
+}

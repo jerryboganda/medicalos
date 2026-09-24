@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rq.question_version_id\n           FROM reserved_questions rq\n           JOIN question_versions qv ON qv.id = rq.question_version_id\n           WHERE rq.form_id = $1 AND qv.status = 'published'\n           ORDER BY rq.question_version_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8f2b5ec7c6e9892ad92f772cb1521a11cd4ac142f6bc87eff5e0a186cd77a570"
+}

@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id, t.task_key, t.kind, t.title, t.chapter_id, t.source_session_id,\n                  t.question_count, t.estimated_minutes, t.protected,\n                  CASE t.kind\n                      WHEN 'practice' THEN (\n                          SELECT COUNT(*)\n                          FROM question_versions qv\n                          WHERE qv.status = 'published' AND qv.chapter_id = t.chapter_id\n                            AND NOT EXISTS (\n                                SELECT 1 FROM question_reports r\n                                WHERE r.question_version_id = qv.id AND r.status = 'quarantined'\n                            )\n                            AND NOT EXISTS (\n                                SELECT 1 FROM reserved_questions rq\n                                WHERE rq.question_version_id = qv.id\n                            )\n                      )\n                      WHEN 'revision' THEN (\n                          SELECT COUNT(DISTINCT qv.id)\n                          FROM question_versions qv\n                          WHERE qv.status = 'published' AND t.source_session_id IS NOT NULL\n                            AND EXISTS (\n                                SELECT 1 FROM practice_sessions source\n                                WHERE source.id = t.source_session_id\n                                  AND source.user_id = $1 AND source.status = 'submitted'\n                            )\n                            AND (\n                                EXISTS (\n                                    SELECT 1 FROM attempts a\n                                    WHERE a.session_id = t.source_session_id\n                                      AND a.question_version_id = qv.id\n                                      AND (a.correct = FALSE OR a.chosen_index IS NULL)\n                                )\n                                OR EXISTS (\n                                    SELECT 1 FROM session_items si\n                                    WHERE si.session_id = t.source_session_id\n                                      AND si.question_version_id = qv.id\n                                      AND NOT EXISTS (\n                                          SELECT 1 FROM attempts a\n                                          WHERE a.session_id = si.session_id\n                                            AND a.item_index = si.item_index\n                                      )\n                                )\n                            )\n                            AND NOT EXISTS (\n                                SELECT 1 FROM question_reports r\n                                WHERE r.question_version_id = qv.id AND r.status = 'quarantined'\n                            )\n                      )\n                      ELSE 0\n                  END AS \"eligible_question_count!\",\n                  COALESCE(evidence.independent_count, 0) AS \"independent_count!\",\n                  COALESCE(evidence.correct_count, 0) AS \"correct_count!\"\n           FROM plan_tasks t\n           LEFT JOIN LATERAL (\n               SELECT COUNT(*) AS independent_count,\n                      COUNT(*) FILTER (WHERE a.correct = TRUE) AS correct_count\n               FROM attempts a\n               JOIN question_versions qv ON qv.id = a.question_version_id\n               WHERE a.user_id = $1 AND qv.chapter_id = t.chapter_id\n                 AND a.assisted = FALSE AND a.correct IS NOT NULL\n           ) evidence ON TRUE\n           WHERE t.plan_id = $2 AND t.status = 'pending'\n           ORDER BY t.created_at, t.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_key",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "question_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "estimated_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "protected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "eligible_question_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "independent_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "correct_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6a1d0e7ea340e957b06fcffa8d45f13ba3c6f319fe52644ae90cccc8a0f0cfd6"
+}

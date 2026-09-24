@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO entitlement_usage (user_id, key, day, count)\n               VALUES ($1, 'analytics_drill', $2, 1)\n               ON CONFLICT (user_id, key, day) DO UPDATE\n                 SET count = entitlement_usage.count + 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "122483accacb5116d70edae29eae697369d33b2fab71299c341a7c244bf305b5"
+}

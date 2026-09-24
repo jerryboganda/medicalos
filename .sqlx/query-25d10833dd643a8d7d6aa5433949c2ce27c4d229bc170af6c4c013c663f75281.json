@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT chosen_index, COUNT(*) AS \"n!\"\n               FROM qotd_answers\n               WHERE question_version_id = $1 AND day = CURRENT_DATE\n               GROUP BY chosen_index ORDER BY chosen_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chosen_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "25d10833dd643a8d7d6aa5433949c2ce27c4d229bc170af6c4c013c663f75281"
+}

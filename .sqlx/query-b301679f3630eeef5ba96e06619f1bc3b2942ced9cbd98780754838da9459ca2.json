@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (user_id, question_version_id) DO UPDATE SET\n           passes = $3, due = $4, updated_at = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b301679f3630eeef5ba96e06619f1bc3b2942ced9cbd98780754838da9459ca2"
+}

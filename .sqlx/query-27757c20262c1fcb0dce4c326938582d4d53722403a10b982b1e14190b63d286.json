@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT exam_date, (exam_date < CURRENT_DATE) AS \"deadline_passed!\"\n           FROM goals\n           WHERE user_id = $1 AND NOT retired AND exam_date IS NOT NULL\n           ORDER BY created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exam_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 1,
+        "name": "deadline_passed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "27757c20262c1fcb0dce4c326938582d4d53722403a10b982b1e14190b63d286"
+}

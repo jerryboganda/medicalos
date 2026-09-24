@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.slug, a.title, av.id AS \"version_id!\", av.version, av.body, av.source_ref,\n                  av.jurisdiction AS \"jurisdiction?\", av.effective_from AS \"effective_from?\",\n                  av.effective_to AS \"effective_to?\"\n           FROM articles a\n           JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'\n           WHERE a.slug = $1\n             AND av.version = (\n                 SELECT MAX(version) FROM article_versions\n                 WHERE article_id = a.id AND status = 'published')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "version_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "jurisdiction?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "effective_from?",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 9,
+        "name": "effective_to?",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "53d4401efb58dedc5e5199e6b7aff64532206082761017eb15470b7f26720d99"
+}

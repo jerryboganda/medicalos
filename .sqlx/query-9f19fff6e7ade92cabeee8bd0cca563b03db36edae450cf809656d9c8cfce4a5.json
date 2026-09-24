@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n             COALESCE(COUNT(*), 0) AS \"attempts!\",\n             COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS \"correct!\"\n           FROM attempts\n           WHERE question_version_id = $1 AND chosen_index IS NOT NULL\n             AND assisted = FALSE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9f19fff6e7ade92cabeee8bd0cca563b03db36edae450cf809656d9c8cfce4a5"
+}

@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (SELECT COUNT(*) FROM institutions) AS \"institutions!\",\n               (SELECT COUNT(*) FROM users WHERE deleted_at IS NULL) AS \"users!\",\n               (SELECT COUNT(*) FROM question_versions WHERE status = 'published') AS \"published_questions!\",\n               (SELECT COUNT(*) FROM articles) AS \"articles!\",\n               (SELECT COUNT(*) FROM content_rights) AS \"rights_records!\",\n               (SELECT COUNT(*) FROM incidents WHERE status <> 'resolved') AS \"open_incidents!\",\n               (SELECT COUNT(*) FROM coach_turns WHERE created_at >= now() - interval '30 days') AS \"coach_turns_30d!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "institutions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "users!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "published_questions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "articles!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "rights_records!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "open_incidents!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "coach_turns_30d!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "006a9b059c9e51a380cfd44a15c64adb3e10be3a85e4afb2a4302e88b123e4e5"
+}

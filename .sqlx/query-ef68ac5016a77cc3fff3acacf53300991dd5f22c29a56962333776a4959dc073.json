@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO learner_concept_state\n             (user_id, chapter_id, ability, evidence_count, independent_count)\n           VALUES ($1, $2, $3, $4, $4)\n           ON CONFLICT (user_id, chapter_id) DO UPDATE\n             SET ability = $3, evidence_count = $4, independent_count = $4,\n                 updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Float4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef68ac5016a77cc3fff3acacf53300991dd5f22c29a56962333776a4959dc073"
+}

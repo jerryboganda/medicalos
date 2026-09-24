@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.chapter_id, c.name AS chapter_name,\n                  date_trunc('week', a.created_at)::date AS week_start,\n                  COUNT(*) FILTER (WHERE a.correct IS NOT NULL) AS \"answered!\",\n                  COUNT(*) FILTER (WHERE a.correct = TRUE) AS \"correct!\"\n           FROM attempts a\n           JOIN question_versions qv ON qv.id = a.question_version_id\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE a.user_id = $1 AND a.assisted = FALSE\n             AND a.correct IS NOT NULL AND a.created_at >= $2\n             AND ($3::uuid IS NULL OR qv.chapter_id = $3)\n           GROUP BY qv.chapter_id, c.name, week_start\n           ORDER BY c.name, week_start",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "week_start",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "answered!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b2e172eefd749ae1ce7953248f434d9b67d49b8a5dcc81769e105d2523bb9a3e"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO external_identities (institution_id, provider, subject, user_id)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT (institution_id, provider, subject) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9c29f9ba00febdf977660c4137d72c6c23f7f8a09bd9535158ed6549846e4ee8"
+}

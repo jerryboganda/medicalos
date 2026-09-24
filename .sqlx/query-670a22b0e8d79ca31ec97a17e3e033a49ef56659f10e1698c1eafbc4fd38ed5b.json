@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM question_marks\n         WHERE user_id = $1 AND question_version_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "670a22b0e8d79ca31ec97a17e3e033a49ef56659f10e1698c1eafbc4fd38ed5b"
+}

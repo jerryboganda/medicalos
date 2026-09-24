@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (SELECT COUNT(*) FROM attempts\n                   WHERE user_id = $1\n                     AND created_at::date = CURRENT_DATE\n                     AND chosen_index IS NOT NULL)\n              + (SELECT COUNT(*) FROM qotd_answers\n                   WHERE user_id = $1 AND day = CURRENT_DATE) AS \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f073be90d81c1203e06ef0fb0e4bf40e90b8b35415fc5a20ee2e0379f56ceed2"
+}

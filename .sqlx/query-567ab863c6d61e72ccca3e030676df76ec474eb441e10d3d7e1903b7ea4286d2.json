@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS concept_id, c.canonical_key, c.current_version AS version,\n                  v.display_name, v.definition\n           FROM curriculum_node_concepts m\n           JOIN concepts c ON c.id = m.concept_id\n           JOIN concept_versions v\n             ON v.concept_id = c.id AND v.version = c.current_version\n           WHERE m.curriculum_node_id = $1\n           ORDER BY c.canonical_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "concept_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "canonical_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "definition",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "567ab863c6d61e72ccca3e030676df76ec474eb441e10d3d7e1903b7ea4286d2"
+}

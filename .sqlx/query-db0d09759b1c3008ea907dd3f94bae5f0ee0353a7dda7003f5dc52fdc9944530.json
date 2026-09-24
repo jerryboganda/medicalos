@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.chapter_id,\n                      COUNT(*) FILTER (WHERE a.correct IS NOT NULL) AS \"answered!\",\n                      COUNT(*) FILTER (WHERE a.correct = TRUE) AS \"correct!\",\n                      COUNT(*) FILTER (WHERE a.correct = TRUE\n                             AND a.created_at >= $2) AS \"recent_correct!\"\n               FROM attempts a\n               JOIN question_versions qv ON qv.id = a.question_version_id\n               WHERE a.user_id = $1 AND a.assisted = FALSE\n                 AND ($3::text IS NULL OR qv.difficulty = $3)\n               GROUP BY qv.chapter_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "answered!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "recent_correct!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "db0d09759b1c3008ea907dd3f94bae5f0ee0353a7dda7003f5dc52fdc9944530"
+}

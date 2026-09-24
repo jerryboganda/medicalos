@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO scenario_versions (id, scenario_id, version, status, state_machine)\n         VALUES ($1, $2, 1, 'published', $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3cdbe36574c4edcedad3bdb2fe0496658bc759349bc6fe2ed308dce219fde61e"
+}

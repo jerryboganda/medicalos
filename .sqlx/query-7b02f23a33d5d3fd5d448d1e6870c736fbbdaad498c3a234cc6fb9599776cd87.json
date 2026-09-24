@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.body, p.status, p.created_at\n           FROM community_posts p\n           WHERE p.group_id = $1\n             AND NOT EXISTS (\n                 SELECT 1 FROM community_profiles cp WHERE cp.user_id = p.author)\n           ORDER BY p.created_at DESC LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7b02f23a33d5d3fd5d448d1e6870c736fbbdaad498c3a234cc6fb9599776cd87"
+}

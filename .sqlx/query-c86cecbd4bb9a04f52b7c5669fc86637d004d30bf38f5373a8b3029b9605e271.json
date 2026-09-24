@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT system.id AS system_id, system.name AS system_name,\n                  chapter.id AS chapter_id, chapter.name AS chapter_name,\n                  lcs.ability AS \"ability?\", lcs.evidence_count AS \"evidence_count?\"\n           FROM curriculum_nodes system\n           JOIN curriculum_nodes chapter ON chapter.parent_id = system.id\n           LEFT JOIN learner_concept_state lcs\n             ON lcs.chapter_id = chapter.id AND lcs.user_id = $1\n           WHERE system.kind = 'system'\n             AND ($2::uuid IS NULL OR system.id = $2)\n           ORDER BY system.display_order, chapter.display_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "system_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "system_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ability?",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 5,
+        "name": "evidence_count?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c86cecbd4bb9a04f52b7c5669fc86637d004d30bf38f5373a8b3029b9605e271"
+}

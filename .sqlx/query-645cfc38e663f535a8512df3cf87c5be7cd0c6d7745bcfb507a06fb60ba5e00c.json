@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE duel_sessions SET score = $3, total_ms = $4\n         WHERE duel_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "645cfc38e663f535a8512df3cf87c5be7cd0c6d7745bcfb507a06fb60ba5e00c"
+}

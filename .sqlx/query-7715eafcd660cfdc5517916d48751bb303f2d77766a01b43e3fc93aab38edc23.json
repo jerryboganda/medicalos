@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT r.id, r.to_version, r.reason_code, r.explanation, r.automatic, r.undone,\n                  r.receipt::text AS \"receipt_text!\"\n           FROM plan_revisions r JOIN plans p ON p.id = r.plan_id\n           WHERE p.user_id = $1 AND p.plan_date = CURRENT_DATE\n           ORDER BY r.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "to_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "reason_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "explanation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "automatic",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "undone",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "receipt_text!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "7715eafcd660cfdc5517916d48751bb303f2d77766a01b43e3fc93aab38edc23"
+}

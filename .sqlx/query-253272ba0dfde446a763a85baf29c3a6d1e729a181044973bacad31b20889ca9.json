@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO engagement_settings (user_id)\n           VALUES ($1)\n           ON CONFLICT (user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "253272ba0dfde446a763a85baf29c3a6d1e729a181044973bacad31b20889ca9"
+}

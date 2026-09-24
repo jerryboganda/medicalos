@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ref_code FROM content_rights\n           WHERE revoked_at IS NULL\n             AND valid_from <= CURRENT_DATE\n             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)\n             AND permitted_uses @> '[\"display\"]'::jsonb",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ref_code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "600e6c7ca5853e75e7ab4727776d729f0b02e989191656452ceb6988f071a7c9"
+}

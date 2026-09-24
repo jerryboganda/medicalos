@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE question_versions SET status = 'published', published_by = $2 WHERE id = $1 AND status = 'approved'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7fb3baaeb8668b945ed3d5f4920cd628c742ba88e8434223c9db7057d4176bb6"
+}

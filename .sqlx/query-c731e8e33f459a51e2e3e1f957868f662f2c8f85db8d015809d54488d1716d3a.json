@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO competition_entries\n           (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)\n         VALUES ($1, $2, $3, $4, $5, $6, $7,\n           (SELECT COALESCE(MAX(submitted_order), 0) + 1 FROM competition_entries\n            WHERE competition_id = $2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Float4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c731e8e33f459a51e2e3e1f957868f662f2c8f85db8d015809d54488d1716d3a"
+}

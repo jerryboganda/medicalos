@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO community_profiles (user_id, handle) VALUES ($1, $2)\n         ON CONFLICT (user_id) DO UPDATE SET handle = EXCLUDED.handle",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5227d2db7d6042e74515ad8d0c27061bb237e6aa15a72aa1e8cd6d74c212eaa5"
+}

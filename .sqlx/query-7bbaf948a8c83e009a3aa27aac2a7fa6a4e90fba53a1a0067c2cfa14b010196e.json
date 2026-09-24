@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.vignette, qv.options, qv.correct_index\n           FROM question_versions qv\n           WHERE qv.id = $1 AND qv.status = 'published'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "correct_index",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7bbaf948a8c83e009a3aa27aac2a7fa6a4e90fba53a1a0067c2cfa14b010196e"
+}

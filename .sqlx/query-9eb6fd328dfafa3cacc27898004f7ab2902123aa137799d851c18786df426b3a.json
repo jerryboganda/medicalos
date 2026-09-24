@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO image_case_annotation_reviews\n           (annotation_id, reviewer_id, decision, note)\n         VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9eb6fd328dfafa3cacc27898004f7ab2902123aa137799d851c18786df426b3a"
+}

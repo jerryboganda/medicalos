@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO curriculum_node_concepts\n             (curriculum_node_id, concept_id, created_by)\n             VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a73e666c05b9457af8430694be35143a0fa8de9c8f598b27c214b798960b3f8"
+}

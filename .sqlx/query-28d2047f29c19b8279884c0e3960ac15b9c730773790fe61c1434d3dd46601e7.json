@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, qotd_enabled, freeze_bank\n           FROM engagement_settings WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "daily_goal_questions",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_goal_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "streak_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "qotd_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "freeze_bank",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "28d2047f29c19b8279884c0e3960ac15b9c730773790fe61c1434d3dd46601e7"
+}

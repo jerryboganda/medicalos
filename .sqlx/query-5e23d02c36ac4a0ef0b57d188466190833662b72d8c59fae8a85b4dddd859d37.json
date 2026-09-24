@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name AS chapter_name,\n                  COALESCE(COUNT(DISTINCT a.user_id), 0) AS \"learners!\",\n                  COALESCE(COUNT(*), 0) AS \"attempts!\"\n           FROM institution_members im\n           JOIN cohorts coh ON coh.institution_id = im.institution_id\n           JOIN cohort_members cm ON cm.cohort_id = coh.id AND cm.user_id = im.user_id\n           LEFT JOIN attempts a ON a.user_id = im.user_id\n           LEFT JOIN question_versions qv ON qv.id = a.question_version_id\n           LEFT JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE im.institution_id = $1\n           GROUP BY c.name ORDER BY c.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "learners!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "attempts!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "5e23d02c36ac4a0ef0b57d188466190833662b72d8c59fae8a85b4dddd859d37"
+}

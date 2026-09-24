@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.question_version_id, a.chosen_index, a.correct, qv.correct_index, qv.options,\n                      qv.key_learning_point, qv.exam_tip, qv.status AS question_status\n               FROM attempts a JOIN question_versions qv ON qv.id = a.question_version_id\n               WHERE a.session_id = $1 AND a.idempotency_key = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "exam_tip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "question_status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "116a3f6eed7cab112b496488d5573a2214bb40ca0834aee931c28f506a194e0b"
+}

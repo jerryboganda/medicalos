@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.case_id, a.image_index, a.x_percent, a.y_percent, a.body,\n                  a.created_by, a.created_at,\n                  r.decision AS \"decision?\", r.reviewer_id AS \"reviewer_id?\",\n                  r.note AS \"note?\", r.created_at AS \"reviewed_at?\"\n           FROM image_case_annotations a\n           LEFT JOIN image_case_annotation_reviews r ON r.annotation_id = a.id\n           ORDER BY a.created_at DESC LIMIT 200",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "case_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "x_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "y_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "decision?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "reviewer_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "note?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "reviewed_at?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "e7839e553143a117eb79894e7a544ea899b6fbab370bd7ec275f87e93fb0da1b"
+}

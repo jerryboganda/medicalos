@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id, per_question_seconds AS \"per_question_seconds?\"\n         FROM practice_sessions\n         WHERE id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "preset",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "time_limit_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "deadline",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "mock_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "per_question_seconds?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "52338bc47f0c95b4b13de3757a0d9fceda5b2ba57ba781bdc10fd6edd6168e1d"
+}

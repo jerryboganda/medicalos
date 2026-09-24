@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE engagement_settings\n                       SET freeze_bank = LEAST(freeze_bank + 1, 2), updated_at = now()\n                       WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8994918dbb6f0dd591bb2d747145d17093945148a11398b63e2307eff3299a4e"
+}

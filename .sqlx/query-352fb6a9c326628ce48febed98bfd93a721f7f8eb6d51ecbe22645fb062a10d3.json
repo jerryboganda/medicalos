@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\",\n                  COALESCE(COUNT(*) FILTER (WHERE correct = TRUE), 0) AS \"c!\"\n           FROM attempts\n           WHERE user_id = $1 AND created_at >= now() - interval '7 days'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "c!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "352fb6a9c326628ce48febed98bfd93a721f7f8eb6d51ecbe22645fb062a10d3"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO recovery_drills (id, kind, result, evidence, ran_by)\n         VALUES ($1, 'manifest_signature', $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4ee72fd6ac473284ebf1386c038f1d796c82a938d99b38d80fe6eecfd4392c43"
+}

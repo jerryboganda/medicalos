@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"n!\"\n                               FROM attempts a\n                               JOIN practice_sessions s ON s.id = a.session_id\n                               WHERE a.user_id = $1 AND a.created_at::date = CURRENT_DATE\n                                 AND s.preset <> 'revision'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7ebf20d036364415b2062a1be82cf38da9b546b4d21e9accd69cfd532e2e9286"
+}

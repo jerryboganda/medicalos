@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO xp_ledger (id, user_id, points, reason)\n         VALUES ($1, $2, $3, 'session_correct')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a0bf214f114f019aada5f041a12a1de3dcdaa3d7bd5e9fc529fe9c6bdba1181c"
+}

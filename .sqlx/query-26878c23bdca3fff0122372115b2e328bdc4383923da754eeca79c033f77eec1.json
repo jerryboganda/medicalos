@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notification_preferences\n           (user_id, plan_reminders, mock_results, reports, content_updates,\n            quiet_hours_start, quiet_hours_end)\n         VALUES ($1,\n                 COALESCE($2, true), COALESCE($3, true), COALESCE($4, true),\n                 COALESCE($5, true), COALESCE($6, 22), COALESCE($7, 7))\n         ON CONFLICT (user_id) DO UPDATE SET\n           plan_reminders = COALESCE($2, notification_preferences.plan_reminders),\n           mock_results = COALESCE($3, notification_preferences.mock_results),\n           reports = COALESCE($4, notification_preferences.reports),\n           content_updates = COALESCE($5, notification_preferences.content_updates),\n           quiet_hours_start = COALESCE($6, notification_preferences.quiet_hours_start),\n           quiet_hours_end = COALESCE($7, notification_preferences.quiet_hours_end)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26878c23bdca3fff0122372115b2e328bdc4383923da754eeca79c033f77eec1"
+}

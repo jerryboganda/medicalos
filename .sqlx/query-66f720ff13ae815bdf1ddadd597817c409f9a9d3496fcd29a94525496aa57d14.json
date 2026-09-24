@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE competition_entries SET flagged = true\n             WHERE competition_id = $1 AND handle = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66f720ff13ae815bdf1ddadd597817c409f9a9d3496fcd29a94525496aa57d14"
+}

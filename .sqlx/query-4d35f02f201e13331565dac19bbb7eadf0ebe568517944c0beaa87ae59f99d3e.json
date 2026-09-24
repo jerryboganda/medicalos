@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE session_items SET hint_used = TRUE\n         WHERE session_id = $1 AND item_index = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4d35f02f201e13331565dac19bbb7eadf0ebe568517944c0beaa87ae59f99d3e"
+}

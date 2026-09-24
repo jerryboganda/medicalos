@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id FROM question_versions qv\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE qv.status = 'published'\n             AND c.exam_id = (SELECT exam_id FROM duels WHERE id = $1)\n             AND ($2::uuid IS NULL OR qv.chapter_id = $2)\n             AND NOT EXISTS (SELECT 1 FROM question_reports r\n                             WHERE r.question_version_id = qv.id AND r.status = 'quarantined')\n             AND NOT EXISTS (SELECT 1 FROM reserved_questions rq\n                             WHERE rq.question_version_id = qv.id)\n           ORDER BY random() LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d2459ce1a5a72a418f9163d4b170c30e0e244e24ee1e46692b11d415961564e7"
+}

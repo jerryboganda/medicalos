@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT goal_met FROM engagement_days\n           WHERE user_id = $1 AND day = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "goal_met",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e34ed0b4142ae866cebb08d0bc76afc32ca60d79be28280905ac6c33acc75b9a"
+}

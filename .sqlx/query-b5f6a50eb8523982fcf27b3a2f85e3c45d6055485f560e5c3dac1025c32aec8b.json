@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pregen_tutoring (id, question_version_id, prompt_type, content)\n             VALUES ($1, $2, $3, $4)\n             ON CONFLICT (question_version_id, prompt_type)\n             DO UPDATE SET content = EXCLUDED.content\n             WHERE pregen_tutoring.prompt_type IN ('why_wrong', 'test_me')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b5f6a50eb8523982fcf27b3a2f85e3c45d6055485f560e5c3dac1025c32aec8b"
+}

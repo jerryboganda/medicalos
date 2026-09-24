@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE engagement_settings SET qotd_enabled = $2, updated_at = now()\n               WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d7876a4cd46a2fdb1616a73e59b2e149cf62cd0836b4ee7c86daa36b597771e"
+}

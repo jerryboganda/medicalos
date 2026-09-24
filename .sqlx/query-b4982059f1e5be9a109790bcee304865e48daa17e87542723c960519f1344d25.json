@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT memory_key, value, updated_at\n           FROM coach_memory\n           WHERE user_id = $1\n           ORDER BY memory_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "memory_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b4982059f1e5be9a109790bcee304865e48daa17e87542723c960519f1344d25"
+}

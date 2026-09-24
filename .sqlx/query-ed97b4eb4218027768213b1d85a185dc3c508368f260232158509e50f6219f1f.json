@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"chapters!\", COUNT(DISTINCT exam_id) AS \"exams!\"\n                   FROM curriculum_nodes\n                   WHERE id = ANY($1) AND kind = 'chapter'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapters!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "exams!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "ed97b4eb4218027768213b1d85a185dc3c508368f260232158509e50f6219f1f"
+}

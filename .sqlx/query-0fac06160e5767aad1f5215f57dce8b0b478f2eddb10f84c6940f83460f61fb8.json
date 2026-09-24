@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ch.id AS chapter_id, ch.name AS chapter_name,\n                  sys.name AS system_name, sub.name AS subject_name,\n                  e.id AS exam_id, e.name AS exam_name,\n                  (SELECT COUNT(*) FROM question_versions qv\n                   WHERE qv.chapter_id = ch.id AND qv.status = 'published') AS \"published!\"\n           FROM curriculum_nodes ch\n           JOIN curriculum_nodes sys ON sys.id = ch.parent_id\n           JOIN curriculum_nodes sub ON sub.id = sys.parent_id\n           JOIN exams e ON e.id = ch.exam_id\n           WHERE ch.kind = 'chapter'\n           ORDER BY e.name, sub.display_order, sys.display_order, ch.display_order",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chapter_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "system_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "subject_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "exam_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "exam_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "published!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "0fac06160e5767aad1f5215f57dce8b0b478f2eddb10f84c6940f83460f61fb8"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT g.id, g.name,\n                  (SELECT COUNT(*) FROM community_group_members m\n                   WHERE m.group_id = g.id) AS \"members!\"\n           FROM community_groups g ORDER BY g.created_at DESC LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "members!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "a195439cfb6589941409870d7c1ad389a60c31866f226f8c019a66127f32f6df"
+}

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.vid,\n                  t.attempts AS \"attempts!\",\n                  t.correct AS \"correct!\",\n                  t.open_reports AS \"open_reports!\"\n           FROM (\n               SELECT qv.id AS vid,\n                      COUNT(a.id) AS attempts,\n                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS correct,\n                      (SELECT COUNT(*) FROM question_reports r\n                       WHERE r.question_version_id = qv.id\n                         AND r.status IN ('open','quarantined')) AS open_reports\n               FROM question_versions qv\n               JOIN curriculum_nodes ch ON ch.id = qv.chapter_id\n               JOIN curriculum_nodes sys ON sys.id = ch.parent_id\n               JOIN curriculum_nodes subj ON subj.id = sys.parent_id\n               LEFT JOIN attempts a\n                 ON a.question_version_id = qv.id AND a.chosen_index IS NOT NULL\n               WHERE qv.status = 'published' AND subj.exam_id = $1\n               GROUP BY qv.id\n           ) t\n           ORDER BY t.open_reports DESC, t.attempts ASC\n           LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "vid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "attempts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "correct!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "open_reports!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3049c366ad06ddbd153ee082db0479385d1a12f1d749477757b582704cb59a05"
+}

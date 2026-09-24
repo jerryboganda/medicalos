@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE plan_tasks SET protected = $3 WHERE id = $1 AND plan_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4ef54e8b647e3e3be18404d4a2c64c46fc5f22aa3e62cce34bf8e704a76087fc"
+}

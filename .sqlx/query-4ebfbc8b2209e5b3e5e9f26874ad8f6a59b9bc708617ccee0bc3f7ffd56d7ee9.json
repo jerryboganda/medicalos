@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(COUNT(*), 0) AS \"n!\" FROM cards\n           WHERE user_id = $1 AND suspended = false\n             AND (state->>'state')::int <> 0\n             AND (state->>'due')::timestamptz <= $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4ebfbc8b2209e5b3e5e9f26874ad8f6a59b9bc708617ccee0bc3f7ffd56d7ee9"
+}

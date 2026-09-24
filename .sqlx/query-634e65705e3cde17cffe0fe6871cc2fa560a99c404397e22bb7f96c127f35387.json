@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT prompt_type AS \"prompt_type!\", COUNT(*) AS \"n!\"\n           FROM coach_turns WHERE created_at >= now() - interval '30 days'\n           GROUP BY prompt_type ORDER BY COUNT(*) DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "prompt_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "634e65705e3cde17cffe0fe6871cc2fa560a99c404397e22bb7f96c127f35387"
+}

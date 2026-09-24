@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.case_id, a.id, a.image_index, a.x_percent, a.y_percent, a.body\n           FROM image_case_annotations a\n           JOIN image_case_annotation_reviews r ON r.annotation_id = a.id\n           WHERE r.decision = 'approved'\n           ORDER BY a.created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "case_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "image_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "x_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "y_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "body",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "05595487fdd336ff80f2f65b47daa9b27408b6b25949a0be9c31fa0d83069290"
+}

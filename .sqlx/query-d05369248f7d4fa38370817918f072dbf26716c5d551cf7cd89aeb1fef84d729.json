@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM coach_memory WHERE user_id = $1 AND memory_key = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d05369248f7d4fa38370817918f072dbf26716c5d551cf7cd89aeb1fef84d729"
+}
