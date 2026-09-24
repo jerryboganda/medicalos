@@ -152,6 +152,7 @@ async fn setup() -> Arc<AppState> {
         free_daily_questions: 10,
         free_mock_attempts: 3,
         free_analytics_drills: 2,
+        free_daily_library: 3,
         community_min_sample: 2,
         admin_token: Some("test-admin".into()),
         free_daily_coach_turns: 20,
@@ -2917,6 +2918,7 @@ async fn coach_daily_allowance_enforced() {
         free_daily_questions: 10,
         free_mock_attempts: 3,
         free_analytics_drills: 2,
+        free_daily_library: 3,
         community_min_sample: 2,
         admin_token: Some("test-admin".into()),
         free_daily_coach_turns: 1,
@@ -11346,6 +11348,82 @@ async fn library_media_and_image_cases_are_rights_checked() {
     );
 }
 
+#[tokio::test]
+async fn core03_library_retrieval_allowance_gates_the_free_tier() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // Three retrievals are free; the test AppState sets the allowance to 3.
+    for _ in 0..3 {
+        let (status, _) = call(
+            app.clone(),
+            request("GET", "/v1/library/search?q=fixture", Some(&token), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, denied) = call(
+        app.clone(),
+        request("GET", "/v1/library/search?q=fixture", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    assert_eq!(denied["error"]["code"], "library_allowance_reached");
+    assert_eq!(denied["error"]["details"]["allowance"]["limit"], 3);
+    assert_eq!(denied["error"]["details"]["allowance"]["used"], 3);
+    assert_eq!(denied["error"]["details"]["allowance"]["remaining"], 0);
+
+    // Article opens share the same allowance.
+    let (status, article) = call(
+        app.clone(),
+        request("GET", "/v1/library/articles/anything", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{article}");
+    assert_eq!(article["error"]["code"], "library_allowance_reached");
+
+    // Paid tiers are unmetered.
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("paid fixture");
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/library/search?q=fixture", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn exam_registry_serves_official_source_and_aliases() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let (status, registry) =
+        call(app.clone(), request("GET", "/v1/exams", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK, "{registry}");
+    let pilt = registry["exams"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|exam| exam["code"] == "PILT")
+        .expect("pilot fixture is registered");
+    assert_eq!(
+        pilt["official_source_url"],
+        "https://fixtures.example.test/pilot-blueprint"
+    );
+    let aliases = pilt["aliases"].as_array().unwrap();
+    assert!(aliases.contains(&serde_json::json!("PILT-DEMO")));
+    assert!(aliases.contains(&serde_json::json!("Fixture Licensing Exam")));
+}
 #[tokio::test]
 async fn img02_image_annotations_need_independent_review_and_hide_pending_work() {
     let _g = LOCK.lock().await;

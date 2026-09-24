@@ -20,6 +20,58 @@ const PRIVATE_IMPORT_MAX_BYTES: usize = 1024 * 1024;
 const PRIVATE_IMPORT_MAX_DOCUMENTS: i64 = 25;
 const PRIVATE_IMPORT_MAX_TOTAL_BYTES: i64 = 10 * 1024 * 1024;
 
+// ---- CORE-03: the free tier's library retrievals are metered ----------------
+// Search queries and article opens both consume one retrieval from the daily
+// free allowance; the honest 403 carries the counters (§26.1 — upgrade
+// prompts originate from entitlement checks, never from the Coach).
+
+async fn require_library_allowance(state: &AppState, user_id: Uuid) -> ApiResult<()> {
+    let tier: String = sqlx::query_scalar!("SELECT tier FROM users WHERE id = $1", user_id)
+        .fetch_one(&state.pool)
+        .await?;
+    if tier != "free" {
+        return Ok(());
+    }
+    let day = chrono::Utc::now().date_naive();
+    let used = sqlx::query!(
+        r#"SELECT count AS "count!" FROM entitlement_usage
+           WHERE user_id = $1 AND key = 'library_retrieval' AND day = $2"#,
+        user_id,
+        day
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .map(|r| r.count)
+    .unwrap_or(0);
+    if i64::from(used) >= state.free_daily_library {
+        return Err(ApiError::forbidden_with_details(
+            "library_allowance_reached",
+            format!(
+                "Daily free library allowance of {} retrievals reached — it resets tomorrow.",
+                state.free_daily_library
+            ),
+            serde_json::json!({
+                "allowance": {
+                    "limit": state.free_daily_library,
+                    "used": used,
+                    "remaining": state.free_daily_library.saturating_sub(i64::from(used)).max(0),
+                }
+            }),
+        ));
+    }
+    sqlx::query!(
+        r#"INSERT INTO entitlement_usage (user_id, key, day, count)
+           VALUES ($1, 'library_retrieval', $2, 1)
+           ON CONFLICT (user_id, key, day) DO UPDATE
+             SET count = entitlement_usage.count + 1"#,
+        user_id,
+        day
+    )
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn search(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -35,6 +87,7 @@ pub async fn search(
     if query.is_empty() {
         return Ok(Json(json!({ "results": [], "private_documents": [] })));
     }
+    require_library_allowance(&state, user.user_id).await?;
     let tokens: Vec<String> = query
         .split_whitespace()
         .filter(|t| t.len() >= 2)
@@ -173,6 +226,7 @@ pub async fn get_article(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("article_not_found"))?;
+    require_library_allowance(&state, _user.user_id).await?;
     sqlx::query!(
         "INSERT INTO article_reads (user_id, article_version_id)
          VALUES ($1, $2) ON CONFLICT DO NOTHING",

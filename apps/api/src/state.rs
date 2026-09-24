@@ -16,6 +16,9 @@ pub struct AppState {
     /// COM-01: free-tier daily chapter-analytics drill-downs (PROG-01
     /// difficulty/trend views); beyond this the upgrade trigger fires.
     pub free_analytics_drills: i64,
+    /// CORE-03: free-tier daily library retrievals (search queries plus
+    /// article opens); beyond this the upgrade trigger fires.
+    pub free_daily_library: i64,
     /// §23: when set, the OpenAI-compatible adapter routes complex turns.
     pub openai_api_key: Option<String>,
     pub openai_base_url: String,

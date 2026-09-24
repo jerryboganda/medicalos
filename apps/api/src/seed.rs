@@ -81,10 +81,13 @@ async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiErro
 pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
     let exam_id = Uuid::new_v4();
     sqlx::query!(
-        "INSERT INTO exams (id, code, name) VALUES ($1, $2, $3)",
+        "INSERT INTO exams (id, code, name, official_source_url, aliases)
+         VALUES ($1, $2, $3, $4, $5)",
         exam_id,
         "PILT",
-        "Pilot Exam (synthetic fixture)"
+        "Pilot Exam (synthetic fixture)",
+        "https://fixtures.example.test/pilot-blueprint",
+        serde_json::json!(["PILT-DEMO", "Fixture Licensing Exam"]),
     )
     .execute(pool)
     .await?;

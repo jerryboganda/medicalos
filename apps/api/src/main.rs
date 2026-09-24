@@ -30,10 +30,15 @@ async fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
+    let free_daily_library: i64 = std::env::var("FREE_DAILY_LIBRARY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
     let state = std::sync::Arc::new(api::state::AppState {
         pool,
         min_time_limit_seconds: min_time_limit,
         free_daily_questions,
+        free_daily_library,
         community_min_sample: std::env::var("COMMUNITY_MIN_SAMPLE")
             .ok()
             .and_then(|v| v.parse().ok())
