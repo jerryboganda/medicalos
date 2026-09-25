@@ -12478,7 +12478,7 @@ async fn library_media_and_image_cases_are_rights_checked() {
     assert_eq!(revoked["revoked"], true, "{revoked}");
 
     let (status, after_revoke) = call(
-        app,
+        app.clone(),
         request("GET", "/v1/me/image-cases", Some(&token), None),
     )
     .await;
