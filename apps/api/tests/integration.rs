@@ -12730,7 +12730,7 @@ async fn insert_test_question_rights(pool: &sqlx::PgPool, question_ids: &[Uuid])
     .fetch_all(pool)
     .await
     .expect("load synthetic question asset references");
-    let rights_ref = format!("AI04-TEST-{}", Uuid::new_v4().simple());
+    let rights_ref = format!("AI04-TEST-{}", Uuid::new_v4().simple()).to_ascii_uppercase();
     sqlx::query(
         "INSERT INTO content_rights
            (id, ref_code, licensor, permitted_uses, valid_from, asset_refs, audiences)
