@@ -219,6 +219,14 @@ pub async fn create_session(
     user: AuthUser,
     Json(req): Json<CreateSessionReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let free_daily_questions = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "free_daily_questions",
+        state.free_daily_questions,
+        0,
+        5000,
+    )
+    .await?;
     // COM-01: the free-tier daily allowance is an entitlement check (§26.1) —
     // upgrade prompts may originate only from here, never from the Coach.
     // # ponytail: revision sessions are exempt (they re-practice already-
@@ -239,8 +247,8 @@ pub async fn create_session(
             .fetch_one(&state.pool)
             .await?
             .n;
-            if used >= state.free_daily_questions {
-                return Err(free_allowance_reached(state.free_daily_questions, used));
+            if used >= free_daily_questions {
+                return Err(free_allowance_reached(free_daily_questions, used));
             }
         }
     }
@@ -321,9 +329,9 @@ pub async fn create_session(
                         .fetch_one(&state.pool)
                         .await?
                         .n;
-                        if used.saturating_add(i64::from(required)) > state.free_daily_questions {
+                        if used.saturating_add(i64::from(required)) > free_daily_questions {
                             return Err(free_allowance_insufficient(
-                                state.free_daily_questions,
+                                free_daily_questions,
                                 used,
                                 i64::from(required),
                             ));
@@ -1222,6 +1230,14 @@ pub async fn apply_answer(
             == "free"
     };
     let inserted = if free_tier {
+        let free_daily_questions = crate::routes::settings::current_bounded_i64(
+            &state.pool,
+            "free_daily_questions",
+            state.free_daily_questions,
+            0,
+            5000,
+        )
+        .await?;
         let mut tx = state.pool.begin().await?;
         let tier = sqlx::query_scalar::<_, String>(
             "SELECT tier FROM users WHERE id = $1 FOR NO KEY UPDATE",
@@ -1260,8 +1276,8 @@ pub async fn apply_answer(
             .bind(user_id)
             .fetch_one(&mut *tx)
             .await?;
-            if used >= state.free_daily_questions {
-                return Err(free_allowance_reached(state.free_daily_questions, used));
+            if used >= free_daily_questions {
+                return Err(free_allowance_reached(free_daily_questions, used));
             }
         }
         let inserted = insert.fetch_optional(&mut *tx).await?;
@@ -1562,8 +1578,15 @@ pub async fn submit(
     // QB-15: expected-score comparison for self-built sessions, computed
     // from community correct-rates of the exact questions served. Percentile
     // is reserved for fixed forms (mocks). Hidden below the min sample.
-    let expected_score =
-        expected_score_for_session(&state.pool, sid, state.community_min_sample).await?;
+    let community_min_sample = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "community_min_sample",
+        state.community_min_sample,
+        1,
+        1_000_000,
+    )
+    .await?;
+    let expected_score = expected_score_for_session(&state.pool, sid, community_min_sample).await?;
 
     // QB-17: time + answer-change analysis — per-item elapsed (only where
     // the client reported it) and mock answer changes; wall-clock duration
@@ -1651,7 +1674,7 @@ pub async fn submit(
         .fetch_one(&state.pool)
         .await?
         .n;
-        let percentile = if takers >= state.community_min_sample && takers > 1 {
+        let percentile = if takers >= community_min_sample && takers > 1 {
             Some((below * 100 / (takers - 1)) as i32)
         } else {
             None
@@ -1821,6 +1844,14 @@ pub async fn community_stats(
     _user: AuthUser,
     Path(vid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let community_min_sample = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "community_min_sample",
+        state.community_min_sample,
+        1,
+        1_000_000,
+    )
+    .await?;
     let totals = sqlx::query!(
         r#"SELECT
              COALESCE(COUNT(*), 0) AS "attempts!",
@@ -1842,14 +1873,14 @@ pub async fn community_stats(
     )
     .fetch_all(&state.pool)
     .await?;
-    let revealed = totals.attempts >= state.community_min_sample;
+    let revealed = totals.attempts >= community_min_sample;
     let correct_rate_percent = if revealed && totals.attempts > 0 {
         Some((totals.correct * 100 / totals.attempts) as i32)
     } else {
         None
     };
     Ok(Json(serde_json::json!({
-        "min_sample": state.community_min_sample,
+        "min_sample": community_min_sample,
         "attempts": totals.attempts,
         "revealed": revealed,
         "correct_rate_percent": correct_rate_percent,

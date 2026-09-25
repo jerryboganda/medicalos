@@ -19,8 +19,11 @@ decision), DICOM/anatomy content rights (IMG-03/04).
 
 ## Codex lane status at close
 
-Issue 16 (img02 stack viewer) is drafted but has **no implementation** —
-no commits, no working-tree edits. Nothing to validate. When its
-implementation lands and settles: run the full public-CI → merge main →
-deploy → production-verify → private loop on the merged tip, then re-run
-CI, and take the next disjoint slice from the ledger.
+Issue 16 (IMG-02 stack viewer) now has an implementation in the working tree
+on `codex/remaining-phases` at base commit `b945a157860543f22e99b84de9df18d7dfce607b`.
+It includes active display-rights rechecks, ordered stack navigation and
+zoom, structured findings, independently reviewed annotations, and API/browser
+regressions. The scoped two-axis review is complete, and its migration-registry
+finding is fixed. GitHub Actions acceptance is pending; no
+commit, push, deployment, or production verification has occurred in this
+continuation. The next ledger slice follows after that acceptance boundary.

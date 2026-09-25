@@ -1352,6 +1352,7 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
 
     // Rate the first new card Good: it leaves the queue, scheduled forward.
     let card1: Uuid = q["new"][0]["card_id"].as_str().unwrap().parse().unwrap();
+    let card2: Uuid = q["new"][1]["card_id"].as_str().unwrap().parse().unwrap();
     let (status, event) = call(
         app.clone(),
         request(
@@ -1415,6 +1416,38 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     assert_eq!(q["due"].as_array().unwrap().len(), 1, "due card surfaces");
     assert_eq!(q["new"].as_array().unwrap().len(), 2);
 
+    // Live admin caps affect the next queue request and preserve overflow.
+    sqlx::query(
+        "UPDATE cards SET state = jsonb_set(jsonb_set(state, '{state}', '1'::jsonb), '{due}', to_jsonb(now() - interval '1 hour')) WHERE id = $1",
+    )
+    .bind(card2)
+    .execute(&state.pool)
+    .await
+    .expect("make a second review due");
+    let (status, settings) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({
+                "max_reviews_per_day": 1,
+                "max_new_cards_per_day": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    let (status, q) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{q}");
+    assert_eq!(q["due"].as_array().unwrap().len(), 1, "daily due cap");
+    assert_eq!(q["backlog_remaining"], 1, "overflow remains visible");
+    assert_eq!(q["new"].as_array().unwrap().len(), 1, "remaining new-card capacity");
+
     // Another user's deck is invisible (tenant isolation sanity).
     let other_token = register_and_login(app.clone()).await;
     let (status, other_q) = call(
@@ -1425,6 +1458,383 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     assert_eq!(status, StatusCode::OK, "{other_q}");
     assert_eq!(other_q["new"].as_array().unwrap().len(), 0);
     assert_eq!(other_q["due"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn review_daily_caps_enforce_writes_and_allow_idempotent_replay() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&token),
+            Some(serde_json::json!({ "name": "Synthetic daily-cap fixture" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+    let mut cards = Vec::new();
+    for label in ["first", "second"] {
+        let (status, card) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/decks/{deck_id}/cards"),
+                Some(&token),
+                Some(serde_json::json!({
+                    "front": format!("Synthetic {label} prompt"),
+                    "back": format!("Synthetic {label} answer")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{card}");
+        cards.push(card["card_id"].as_str().unwrap().parse::<Uuid>().unwrap());
+    }
+    let (status, settings) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({
+                "max_reviews_per_day": 1,
+                "max_new_cards_per_day": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+
+    let review = |card_id, idempotency_key: &'static str| {
+        request(
+            "POST",
+            "/v1/reviews/events",
+            Some(&token),
+            Some(serde_json::json!({
+                "card_id": card_id,
+                "rating": "good",
+                "idempotency_key": idempotency_key
+            })),
+        )
+    };
+    let (left, right) = tokio::join!(
+        call(app.clone(), review(cards[0], "daily-cap-new-1")),
+        call(app.clone(), review(cards[1], "daily-cap-new-2")),
+    );
+    assert_ne!(
+        left.0.is_success(),
+        right.0.is_success(),
+        "one concurrent new-card review consumes the sole slot"
+    );
+    let (accepted_card, denied) = if left.0 == StatusCode::OK {
+        assert_eq!(right.0, StatusCode::CONFLICT, "{right:?}");
+        (cards[0], right.1)
+    } else {
+        assert_eq!(left.0, StatusCode::CONFLICT, "{left:?}");
+        assert_eq!(right.0, StatusCode::OK, "{right:?}");
+        (cards[1], left.1)
+    };
+    assert_eq!(denied["error"]["code"], "new_card_daily_cap_reached");
+    let (status, after_new_cap) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_new_cap}");
+    assert_eq!(after_new_cap["new"].as_array().unwrap().len(), 0);
+
+    sqlx::query(
+        "UPDATE cards SET state = jsonb_set(state, '{due}', to_jsonb(now() - interval '1 hour')) WHERE id = $1",
+    )
+    .bind(accepted_card)
+    .execute(&state.pool)
+    .await
+    .expect("make accepted card due for its second review");
+    let (status, first_due) = call(app.clone(), review(accepted_card, "daily-cap-due-1")).await;
+    assert_eq!(status, StatusCode::OK, "{first_due}");
+    let (status, replay) = call(app.clone(), review(accepted_card, "daily-cap-due-1")).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["already_recorded"], true);
+
+    sqlx::query(
+        "UPDATE cards SET state = jsonb_set(state, '{due}', to_jsonb(now() - interval '1 hour')) WHERE id = $1",
+    )
+    .bind(accepted_card)
+    .execute(&state.pool)
+    .await
+    .expect("make accepted card due again for the cap boundary");
+    let (status, after_review_cap) = call(
+        app.clone(),
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_review_cap}");
+    assert_eq!(after_review_cap["due"].as_array().unwrap().len(), 0);
+    assert_eq!(after_review_cap["backlog_remaining"], 1);
+    let (status, over_review_cap) = call(app, review(accepted_card, "daily-cap-due-2")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{over_review_cap}");
+    assert_eq!(over_review_cap["error"]["code"], "daily_review_cap_reached");
+}
+
+#[tokio::test]
+async fn review_daily_caps_use_utc_day_with_a_non_utc_database_timezone() {
+    use chrono::Timelike;
+
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let mut connections = Vec::new();
+    for _ in 0..4 {
+        connections.push(state.pool.acquire().await.expect("acquire pool connection"));
+    }
+    for conn in &mut connections {
+        sqlx::query("SET TIME ZONE 'Pacific/Kiritimati'")
+            .execute(&mut **conn)
+            .await
+            .expect("set non-UTC session timezone");
+    }
+    drop(connections);
+
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&token),
+            Some(serde_json::json!({ "name": "Synthetic UTC-boundary fixture" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+    let mut cards = Vec::new();
+    for label in ["first", "second"] {
+        let (status, card) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/decks/{deck_id}/cards"),
+                Some(&token),
+                Some(serde_json::json!({
+                    "front": format!("Synthetic {label} UTC prompt"),
+                    "back": format!("Synthetic {label} UTC answer")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{card}");
+        cards.push(card["card_id"].as_str().unwrap().parse::<Uuid>().unwrap());
+    }
+
+    let now = chrono::Utc::now();
+    let utc_hour = now.time().hour();
+    let utc_day_start = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .expect("valid UTC midnight")
+        .and_utc();
+    // UTC+14 changes its date at 10:00 UTC. Place the event on opposite sides
+    // of that boundary so a session-local CURRENT_DATE count would disagree.
+    let event_at = if utc_hour < 10 {
+        utc_day_start - chrono::Duration::hours(14)
+    } else {
+        utc_day_start
+    };
+    let token_hash = Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("authenticated user fixture");
+    sqlx::query(
+        "INSERT INTO review_events (id, card_id, user_id, rating, reviewed_at, idempotency_key, was_new)
+         VALUES ($1, $2, $3, 'good', $4, $5, true)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(cards[0])
+    .bind(user_id)
+    .bind(event_at)
+    .bind("utc-boundary-history")
+    .execute(&state.pool)
+    .await
+    .expect("insert UTC-boundary review evidence");
+
+    let (status, settings) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({ "max_new_cards_per_day": 1 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+
+    let (status, queue) = call(
+        app,
+        request("GET", "/v1/reviews/queue", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    let expected_new_cards = if utc_hour < 10 { 1 } else { 0 };
+    assert_eq!(
+        queue["new"].as_array().unwrap().len(),
+        expected_new_cards,
+        "only review events inside the UTC calendar day consume the allowance"
+    );
+}
+
+#[tokio::test]
+async fn admin06_review_event_kind_migration_serializes_concurrent_startup() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&token),
+            Some(serde_json::json!({ "name": "Synthetic migration fixture" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+    let mut cards = Vec::new();
+    for label in ["first", "second", "third"] {
+        let (status, card) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/decks/{deck_id}/cards"),
+                Some(&token),
+                Some(serde_json::json!({
+                    "front": format!("Synthetic {label} migration prompt"),
+                    "back": format!("Synthetic {label} migration answer")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{card}");
+        cards.push(card["card_id"].as_str().unwrap().parse::<Uuid>().unwrap());
+    }
+    let token_hash = Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("authenticated user fixture");
+
+    let url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/medos_ci".into());
+    let second_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .expect("second migration connection");
+    sqlx::query("ALTER TABLE review_events DROP COLUMN was_new")
+        .execute(&state.pool)
+        .await
+        .expect("simulate pre-migration schema");
+    let now = chrono::Utc::now();
+    for (card_id, hours_ago, key) in [
+        (cards[0], 48, "legacy-first-review"),
+        (cards[0], 36, "legacy-second-review"),
+        (cards[1], 24, "legacy-other-card-review"),
+    ] {
+        sqlx::query(
+            "INSERT INTO review_events (id, card_id, user_id, rating, reviewed_at, idempotency_key)
+             VALUES ($1, $2, $3, 'good', $4, $5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(card_id)
+        .bind(user_id)
+        .bind(now - chrono::Duration::hours(hours_ago))
+        .bind(key)
+        .execute(&state.pool)
+        .await
+        .expect("insert legacy review history");
+    }
+
+    let migration = *schema::UP_SQLS.last().expect("review-event-kind migration");
+    let (first, second) = tokio::join!(
+        sqlx::raw_sql(migration).execute(&state.pool),
+        sqlx::raw_sql(migration).execute(&second_pool),
+    );
+    first.expect("first startup migration");
+    second.expect("concurrent startup migration");
+    let column_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'review_events'
+              AND column_name = 'was_new'
+        )",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("check migrated review-event category");
+    assert!(column_exists);
+
+    for (card_id, key, expected) in [
+        (cards[0], "legacy-first-review", true),
+        (cards[0], "legacy-second-review", false),
+        (cards[1], "legacy-other-card-review", true),
+    ] {
+        let was_new: bool = sqlx::query_scalar(
+            "SELECT was_new FROM review_events WHERE card_id = $1 AND idempotency_key = $2",
+        )
+        .bind(card_id)
+        .bind(key)
+        .fetch_one(&state.pool)
+        .await
+        .expect("read migrated review category");
+        assert_eq!(was_new, expected, "legacy event {key}");
+    }
+
+    sqlx::query(
+        "INSERT INTO review_events (id, card_id, user_id, rating, reviewed_at, idempotency_key, was_new)
+         VALUES ($1, $2, $3, 'good', $4, $5, false)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(cards[2])
+    .bind(user_id)
+    .bind(now)
+    .bind("post-migration-existing-review")
+    .execute(&state.pool)
+    .await
+    .expect("insert post-migration event");
+    sqlx::raw_sql(migration)
+        .execute(&state.pool)
+        .await
+        .expect("replay startup migration");
+    let remains_existing: bool = sqlx::query_scalar(
+        "SELECT NOT was_new FROM review_events WHERE card_id = $1 AND idempotency_key = $2",
+    )
+    .bind(cards[2])
+    .bind("post-migration-existing-review")
+    .fetch_one(&state.pool)
+    .await
+    .expect("read post-migration event category");
+    assert!(remains_existing, "replay must not reclassify live history");
 }
 
 #[tokio::test]
@@ -2454,6 +2864,294 @@ fn admin_req(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) 
     builder
 }
 
+fn admin_file_req(uri: &str, token: &str, content_type: &str, bytes: Vec<u8>) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header("x-admin-token", "test-admin")
+        .body(Body::from(bytes))
+        .expect("file import request")
+}
+
+async fn create_question_import_rights(
+    app: Router,
+    token: &str,
+    ref_code: &str,
+    permitted_uses: &[&str],
+    asset_refs: &[&str],
+    valid_to: Option<&str>,
+) -> Uuid {
+    let (status, body) = call(
+        app,
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(token),
+            Some(serde_json::json!({
+                "ref_code": ref_code,
+                "licensor": "Synthetic import fixture",
+                "territory": "worldwide",
+                "permitted_uses": permitted_uses,
+                "valid_from": "2020-01-01",
+                "valid_to": valid_to,
+                "asset_refs": asset_refs
+            })),
+        ),
+    )
+    .await;
+    assert!(status.is_success(), "rights fixture {ref_code}: {body}");
+    body["rights_id"].as_str().unwrap().parse().unwrap()
+}
+
+#[tokio::test]
+async fn admin_question_import_accepts_csv_and_xlsx_templates() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+    let import_assets = [
+        "Synthetic fixture",
+        "source-a",
+        "source-b",
+        "media-a",
+        "media-b",
+        "Workbook synthetic source",
+        "book-source",
+        "page-2",
+        "figure://fixture-1",
+    ];
+    create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-BATCH-FIXTURE",
+        &["display", "derivatives"],
+        &import_assets,
+        None,
+    )
+    .await;
+    create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-DISPLAY-ONLY",
+        &["display"],
+        &import_assets,
+        None,
+    )
+    .await;
+    create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-OUTSIDE-SCOPE",
+        &["display", "derivatives"],
+        &["Synthetic fixture"],
+        None,
+    )
+    .await;
+    create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-EXPIRED",
+        &["display", "derivatives"],
+        &import_assets,
+        Some("2020-01-02"),
+    )
+    .await;
+    let revoked_id = create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-REVOKED",
+        &["display", "derivatives"],
+        &import_assets,
+        None,
+    )
+    .await;
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{revoked_id}/revoke"),
+            Some(&token),
+            Some(serde_json::json!({ "reason": "Synthetic integration fixture" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke fixture: {revoked}");
+
+    let csv = format!(
+        "chapter_id,difficulty,vignette,lead_in,option_1,rationale_1,option_2,rationale_2,correct_option,key_learning_point,source_ref,rights_ref,exam_tip,hint,high_yield,tags,references,media_refs\n{},medium,\"Fictional vignette, with comma\ncontinued\",Which option?,First,First rationale,Second,Second rationale,2,Learn the fictional rule.,Synthetic fixture,QUESTION-BATCH-FIXTURE,Read carefully,Use the hint,true,tag-a|tag-b,source-a|source-b,media-a|media-b\n",
+        ids.chapter1
+    );
+    let csv_uri = format!(
+        "/v1/admin/import-file?exam_id={}&dry_run=true",
+        ids.exam_id
+    );
+    let (status, preview) = call(
+        app.clone(),
+        admin_file_req(&csv_uri, &token, "text/csv", csv.as_bytes().to_vec()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "CSV preview: {preview}");
+    assert_eq!(preview["status"], "dry_run");
+    assert_eq!(preview["valid"], 1);
+    assert_eq!(preview["issues"].as_array().unwrap().len(), 0);
+
+    let malformed_header = csv.replacen("rights_ref", "unknown_column", 1);
+    let (status, bad_header) = call(
+        app.clone(),
+        admin_file_req(&csv_uri, &token, "text/csv", malformed_header.into_bytes()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad_header}");
+    assert!(
+        bad_header["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("row 1"),
+        "{bad_header}"
+    );
+
+    let invalid_csv = csv.replace(
+        ",Second rationale,2,Learn the fictional rule.",
+        ",Second rationale,3,Learn the fictional rule.",
+    );
+    let (status, invalid) = call(
+        app.clone(),
+        admin_file_req(&csv_uri, &token, "text/csv", invalid_csv.into_bytes()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invalid CSV preview: {invalid}");
+    assert_eq!(invalid["valid"], 0);
+    assert_eq!(invalid["issues"][0]["row"], 2);
+
+    for (rights_ref, expected_code) in [
+        ("QUESTION-DISPLAY-ONLY", "rights_use_not_permitted"),
+        ("QUESTION-OUTSIDE-SCOPE", "rights_asset_scope_incomplete"),
+        ("QUESTION-EXPIRED", "rights_unavailable"),
+        ("QUESTION-REVOKED", "rights_unavailable"),
+    ] {
+        let unauthorized_csv = csv.replace("QUESTION-BATCH-FIXTURE", rights_ref);
+        let (status, denied) = call(
+            app.clone(),
+            admin_file_req(&csv_uri, &token, "text/csv", unauthorized_csv.into_bytes()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "rights preview: {denied}");
+        assert_eq!(denied["valid"], 0, "{denied}");
+        assert_eq!(denied["issues"][0]["code"], expected_code, "{denied}");
+    }
+    let missing_rights_csv = csv.replace("QUESTION-BATCH-FIXTURE", "");
+    let (status, missing_rights) = call(
+        app.clone(),
+        admin_file_req(&csv_uri, &token, "text/csv", missing_rights_csv.into_bytes()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "missing rights preview: {missing_rights}");
+    assert_eq!(missing_rights["issues"][0]["code"], "rights_ref_required");
+
+    let csv_apply_uri = format!(
+        "/v1/admin/import-file?exam_id={}&dry_run=false",
+        ids.exam_id
+    );
+    let (status, applied) = call(
+        app.clone(),
+        admin_file_req(&csv_apply_uri, &token, "text/csv", csv.as_bytes().to_vec()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "CSV apply: {applied}");
+    assert_eq!(applied["status"], "applied");
+    let csv_batch: Uuid = applied["batch_id"].as_str().unwrap().parse().unwrap();
+    let csv_version: Uuid = applied["created"][0]["version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, question_list) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!(
+                "/v1/admin/questions?chapter_id={}&q=Fictional",
+                ids.chapter1
+            ),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "imported question list: {question_list}");
+    let imported = question_list["questions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|question| question["version_id"] == csv_version.to_string())
+        .expect("CSV question is visible through the admin API");
+    assert_eq!(imported["status"], "draft");
+    assert_eq!(
+        imported["vignette"],
+        "Fictional vignette, with comma\ncontinued"
+    );
+    assert_eq!(
+        imported["tags"],
+        serde_json::json!(["tag-a", "tag-b"])
+    );
+    assert_eq!(
+        imported["references"],
+        serde_json::json!(["Synthetic fixture", "source-a", "source-b"])
+    );
+    assert_eq!(
+        imported["media_refs"],
+        serde_json::json!(["media-a", "media-b"])
+    );
+    assert_eq!(imported["rights_ref"], "QUESTION-BATCH-FIXTURE");
+
+    let (status, rolled_back) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/import/{csv_batch}/rollback"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "CSV rollback: {rolled_back}");
+    assert_eq!(rolled_back["status"], "rolled_back");
+
+    // The fixture workbook uses this stable chapter UUID; attach it to this
+    // test's seeded exam so the same template can run with fresh database IDs.
+    let workbook_chapter = Uuid::from_u128(0x8a2c_5d77_3101_4b66_9d10_0000_0000_0042);
+    sqlx::query(
+        "INSERT INTO curriculum_nodes (id, exam_id, kind, name, display_order) VALUES ($1, $2, 'chapter', 'Workbook fixture', 99)",
+    )
+    .bind(workbook_chapter)
+    .bind(ids.exam_id)
+    .execute(&state.pool)
+    .await
+    .expect("workbook chapter");
+    let xlsx_uri = format!(
+        "/v1/admin/import-file?exam_id={}&dry_run=true",
+        ids.exam_id
+    );
+    let workbook = include_bytes!("fixtures/admin_question_import.xlsx").to_vec();
+    let (status, preview) = call(
+        app.clone(),
+        admin_file_req(
+            &xlsx_uri,
+            &token,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            workbook,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "XLSX preview: {preview}");
+    assert_eq!(preview["status"], "dry_run");
+    assert_eq!(preview["valid"], 1);
+    assert_eq!(preview["issues"].as_array().unwrap().len(), 0);
+}
+
 #[tokio::test]
 async fn admin_gate_blocks_without_token() {
     let _g = LOCK.lock().await;
@@ -2516,6 +3214,15 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(renamed["name"], "Imported Chapter II");
 
     // Bulk import: one valid row, one broken row; the dry run creates nothing.
+    create_question_import_rights(
+        app.clone(),
+        &token,
+        "QUESTION-JSON-FIXTURE",
+        &["display", "derivatives"],
+        &["Fixture import"],
+        None,
+    )
+    .await;
     let good_row = serde_json::json!({
         "chapter_id": node_id, "difficulty": "easy",
         "vignette": "Fictional import vignette about the gloopoid gland.",
@@ -2526,7 +3233,8 @@ async fn editorial_hierarchy_question_and_import_flow() {
         ],
         "correct_index": 0,
         "key_learning_point": "Imported fixtures validate like authored ones.",
-        "source_ref": "Fixture import"
+        "source_ref": "Fixture import",
+        "rights_ref": "QUESTION-JSON-FIXTURE"
     });
     let mut bad_row = good_row.clone();
     bad_row["options"] = serde_json::json!([{"text": "only one", "rationale": "x"}]);
@@ -4884,29 +5592,229 @@ async fn settings_admin_gate_and_update() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
-    // Update a settings key (admin-gated).
+    let (status, defaults) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/settings", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{defaults}");
+    assert_eq!(defaults["settings"]["offline_lease_days"], 14);
+    assert_eq!(defaults["settings"]["max_reviews_per_day"], 30);
+    assert_eq!(defaults["settings"]["max_new_cards_per_day"], 10);
+
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({"community_min_sample": 5})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+    assert_eq!(denied["error"]["code"], "admin_required", "{denied}");
+
+    // Update runtime settings in one admin-gated request.
     let (status, body) = call(
         app.clone(),
         admin_req(
             "PATCH",
             "/v1/admin/settings",
             Some(&token),
-            Some(serde_json::json!({"community_min_sample": 15})),
+            Some(serde_json::json!({
+                "mastery_bands": [1300, 1700],
+                "community_min_sample": 15,
+                "free_daily_questions": 0,
+                "free_daily_coach_turns": 2,
+                "retest_intervals_days": [2, 5, 9],
+                "offline_lease_days": 21,
+                "max_reviews_per_day": 20,
+                "max_new_cards_per_day": 4
+            })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    // Read back.
+    // Read effective values back immediately, without an application restart.
     let (status, got) = call(
         app.clone(),
         admin_req("GET", "/v1/admin/settings", Some(&token), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{got}");
+    assert_eq!(got["settings"]["mastery_bands"], serde_json::json!([1300, 1700]));
     assert_eq!(got["settings"]["community_min_sample"], 15);
+    assert_eq!(got["settings"]["free_daily_questions"], 0);
+    assert_eq!(got["settings"]["free_daily_coach_turns"], 2);
+    assert_eq!(got["settings"]["retest_intervals_days"], serde_json::json!([2, 5, 9]));
+    assert_eq!(got["settings"]["offline_lease_days"], 21);
+    assert_eq!(got["settings"]["max_reviews_per_day"], 20);
+    assert_eq!(got["settings"]["max_new_cards_per_day"], 4);
+
+    let (status, public) = call(
+        app.clone(),
+        request("GET", "/api/v1/me/settings-public", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{public}");
+    assert_eq!(public["free_daily_questions"], 0);
+    assert!(public.get("free_daily_coach_turns").is_none(), "{public}");
+    assert!(public.get("offline_lease_days").is_none(), "{public}");
+
+    let (status, stats) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/questions/versions/{}/community-stats", ids.question_versions[0]),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stats}");
+    assert_eq!(stats["min_sample"], 15, "{stats}");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&token),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": ids.chapter1, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{session}");
+    assert_eq!(session["error"]["code"], "free_allowance_reached", "{session}");
+    assert_eq!(session["error"]["details"]["allowance"]["limit"], 0, "{session}");
+
+    let (status, retest) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&token),
+            Some(serde_json::json!({
+                "question_version_id": ids.question_versions[1],
+                "correct": true,
+                "idempotency_key": "settings-retest-interval"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retest}");
+    let due = chrono::DateTime::parse_from_rfc3339(retest["due"].as_str().unwrap())
+        .expect("RFC3339 due date")
+        .with_timezone(&chrono::Utc);
+    let hours_until_due = (due - chrono::Utc::now()).num_hours();
+    assert!((47..=49).contains(&hours_until_due), "{retest}");
+
+    // Invalid multi-key input must not partially replace the valid settings.
+    let (status, invalid) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({
+                "community_min_sample": 30,
+                "free_daily_questions": -1,
+                "mastery_bands": [1700, 1300],
+                "offline_lease_days": 31,
+                "max_reviews_per_day": -1,
+                "max_new_cards_per_day": 1001
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    let (status, unchanged) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/settings", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged["settings"]["community_min_sample"], 15);
+    assert_eq!(unchanged["settings"]["free_daily_questions"], 0);
+    assert_eq!(unchanged["settings"]["offline_lease_days"], 21);
+    assert_eq!(unchanged["settings"]["max_reviews_per_day"], 20);
+    assert_eq!(unchanged["settings"]["max_new_cards_per_day"], 4);
+
+    let (status, invalid_lease) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({ "offline_lease_days": 0 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_lease}");
+    assert_eq!(invalid_lease["error"]["code"], "invalid_offline_lease_days");
+
+    let (status, updated) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({"community_min_sample": 16})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+
+    let (status, audit) = call(
+        app,
+        admin_req("GET", "/v1/admin/audit", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    let settings_event = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| {
+            event["action"] == "settings_updated"
+                && event["new_value"]["community_min_sample"] == 16
+        })
+        .expect("settings audit event");
+    assert_eq!(settings_event["entity"], "app_settings");
+    assert!(settings_event["actor"].as_str().is_some(), "{settings_event}");
+    assert_eq!(settings_event["old_value"]["community_min_sample"], 15);
+    assert_eq!(settings_event["new_value"]["community_min_sample"], 16);
+    let lease_event = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| {
+            event["action"] == "settings_updated"
+                && event["new_value"]["offline_lease_days"] == 21
+        })
+        .expect("offline lease setting audit event");
+    assert_eq!(lease_event["old_value"]["offline_lease_days"], 14);
+    assert_eq!(lease_event["new_value"]["offline_lease_days"], 21);
+    let review_caps_event = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| {
+            event["action"] == "settings_updated"
+                && event["new_value"]["max_reviews_per_day"] == 20
+        })
+        .expect("review cap settings audit event");
+    assert_eq!(review_caps_event["old_value"]["max_reviews_per_day"], 30);
+    assert_eq!(review_caps_event["new_value"]["max_reviews_per_day"], 20);
+    assert_eq!(review_caps_event["old_value"]["max_new_cards_per_day"], 10);
+    assert_eq!(review_caps_event["new_value"]["max_new_cards_per_day"], 4);
 }
 
 #[tokio::test]
@@ -5399,6 +6307,59 @@ async fn offline_leases_sync_conflicts_deckio() {
     let key1 = lease["pack_key"].as_str().expect("pack key").to_string();
     assert_eq!(key1.len(), 64, "32-byte hex key");
     let lease_id: Uuid = lease["lease_id"].as_str().unwrap().parse().unwrap();
+    let initial_expiry = chrono::DateTime::parse_from_rfc3339(lease["expires_at"].as_str().unwrap())
+        .expect("initial lease expiry")
+        .with_timezone(&chrono::Utc);
+    assert!((335..=337).contains(&(initial_expiry - chrono::Utc::now()).num_hours()));
+
+    // Changing the policy leaves issued leases intact and applies to renewals.
+    let (status, setting) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&learner),
+            Some(serde_json::json!({ "offline_lease_days": 21 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{setting}");
+    let (status, leases) = call(
+        app.clone(),
+        request("GET", "/v1/me/packs", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "existing leases: {leases}");
+    let existing_lease = leases["leases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lease| lease["lease_id"] == lease_id.to_string())
+        .expect("existing lease remains visible through the API");
+    let stored_expiry =
+        chrono::DateTime::parse_from_rfc3339(existing_lease["expires_at"].as_str().unwrap())
+            .expect("existing lease expiry")
+            .with_timezone(&chrono::Utc);
+    assert_eq!(stored_expiry, initial_expiry);
+
+    let (status, new_lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&learner),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id, "device_id": "device-b",
+                "chapters": [ids.chapter1]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{new_lease}");
+    let new_expiry = chrono::DateTime::parse_from_rfc3339(new_lease["expires_at"].as_str().unwrap())
+        .expect("new lease expiry")
+        .with_timezone(&chrono::Utc);
+    assert!((503..=505).contains(&(new_expiry - chrono::Utc::now()).num_hours()));
 
     // Renewal rotates the key.
     let (status, renewal) = call(
@@ -5416,6 +6377,10 @@ async fn offline_leases_sync_conflicts_deckio() {
     .await;
     assert_eq!(status, StatusCode::OK, "{renewal}");
     assert_ne!(renewal["pack_key"].as_str().unwrap(), key1, "key rotated");
+    let renewed_expiry = chrono::DateTime::parse_from_rfc3339(renewal["expires_at"].as_str().unwrap())
+        .expect("renewed lease expiry")
+        .with_timezone(&chrono::Utc);
+    assert!((503..=505).contains(&(renewed_expiry - chrono::Utc::now()).num_hours()));
 
     // Freshness disclosure + revocation.
     let (status, packs) = call(
@@ -5424,7 +6389,7 @@ async fn offline_leases_sync_conflicts_deckio() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{packs}");
-    assert_eq!(packs["leases"].as_array().unwrap().len(), 1);
+    assert_eq!(packs["leases"].as_array().unwrap().len(), 2);
     assert!(packs["leases"][0]["content_as_of"].is_string(), "{packs}");
     let (status, v) = call(
         app.clone(),
@@ -11263,13 +12228,107 @@ async fn library_media_and_image_cases_are_rights_checked() {
                     {"url": "https://cdn.example.test/slice-1.png", "rights_ref": "LIC-2026-015"},
                     {"url": "https://cdn.example.test/slice-2.png", "rights_ref": "LIC-2026-015"}
                 ],
-                "findings": "Fixture findings on the stack."
+                "findings": [
+                    {"section": "Impression", "text": "Fixture findings on the stack."},
+                    {"section": "Context", "text": "Synthetic educational example."}
+                ]
             })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{case}");
     assert_eq!(case["error"]["code"], "image_rights_unavailable", "{case}");
+
+    let no_display_ref = format!("IMG02-NODISPLAY-{}", Uuid::new_v4().simple());
+    let (status, no_display_rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&token),
+            Some(serde_json::json!({
+                "ref_code": no_display_ref,
+                "licensor": "Fixture image publisher",
+                "permitted_uses": ["offline"],
+                "valid_from": "2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_display_rights}");
+    let (status, no_display_case) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "No-display image", "kind": "still",
+                "images": [{"url": "https://cdn.example.test/no-display.png",
+                            "rights_ref": no_display_ref}],
+                "findings": "Fixture finding."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{no_display_case}");
+    assert_eq!(
+        no_display_case["error"]["code"],
+        "image_rights_unavailable",
+        "{no_display_case}"
+    );
+
+    let today = sqlx::query_scalar::<_, chrono::NaiveDate>("SELECT CURRENT_DATE")
+        .fetch_one(&state.pool)
+        .await
+        .expect("database date");
+    let future_date = (today + chrono::Duration::days(30)).to_string();
+    let expired_start = (today - chrono::Duration::days(90)).to_string();
+    let expired_end = (today - chrono::Duration::days(1)).to_string();
+    for (state, valid_from, valid_to) in [
+        ("future", future_date.as_str(), None),
+        ("expired", expired_start.as_str(), Some(expired_end.as_str())),
+    ] {
+        let rights_ref = format!("IMG02-{state}-{}", Uuid::new_v4().simple());
+        let (status, grant) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                "/v1/admin/content-rights",
+                Some(&token),
+                Some(serde_json::json!({
+                    "ref_code": rights_ref,
+                    "licensor": "Fixture image publisher",
+                    "permitted_uses": ["display"],
+                    "valid_from": valid_from,
+                    "valid_to": valid_to
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{grant}");
+        let (status, denied_case) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                "/v1/admin/image-cases",
+                Some(&token),
+                Some(serde_json::json!({
+                    "title": "Unavailable license fixture", "kind": "still",
+                    "images": [{"url": "https://cdn.example.test/unavailable.png",
+                                "rights_ref": rights_ref}],
+                    "findings": "Fixture finding."
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{denied_case}");
+        assert_eq!(
+            denied_case["error"]["code"],
+            "image_rights_unavailable",
+            "{denied_case}"
+        );
+    }
 
     let (status, image_rights) = call(
         app.clone(),
@@ -11288,6 +12347,41 @@ async fn library_media_and_image_cases_are_rights_checked() {
     .await;
     assert_eq!(status, StatusCode::OK, "{image_rights}");
 
+    let second_rights_ref = format!("IMG02-SECOND-{}", Uuid::new_v4().simple());
+    let (status, second_image_rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&token),
+            Some(serde_json::json!({
+                "ref_code": second_rights_ref,
+                "licensor": "Fixture image publisher",
+                "permitted_uses": ["display"],
+                "valid_from": "2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_image_rights}");
+
+    let (status, empty_findings) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Empty findings fixture", "kind": "still",
+                "images": [{"url": "https://cdn.example.test/empty.png", "rights_ref": "LIC-2026-015"}],
+                "findings": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{empty_findings}");
+    assert_eq!(empty_findings["error"]["code"], "invalid_findings", "{empty_findings}");
+
     let (status, case) = call(
         app.clone(),
         admin_req(
@@ -11298,7 +12392,7 @@ async fn library_media_and_image_cases_are_rights_checked() {
                 "title": "Chest series", "kind": "stack", "modality": "CT",
                 "images": [
                     {"url": "https://cdn.example.test/slice-1.png", "rights_ref": "LIC-2026-015"},
-                    {"url": "https://cdn.example.test/slice-2.png", "rights_ref": "LIC-2026-015"}
+                    {"url": "https://cdn.example.test/slice-2.png", "rights_ref": second_rights_ref}
                 ],
                 "findings": "Fixture findings on the stack."
             })),
@@ -11317,7 +12411,7 @@ async fn library_media_and_image_cases_are_rights_checked() {
     assert_eq!(cases.len(), 1, "{list}");
     assert_eq!(cases[0]["kind"], "stack", "{list}");
     assert_eq!(cases[0]["images"].as_array().unwrap().len(), 2, "{list}");
-    assert!(cases[0]["findings"].as_str().is_some(), "{list}");
+    assert!(cases[0].get("findings").is_none(), "{list}");
 
     // Detail on request reveals the findings.
     let case_id = cases[0]["case_id"].as_str().unwrap();
@@ -11332,10 +12426,10 @@ async fn library_media_and_image_cases_are_rights_checked() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{detail}");
-    assert_eq!(
-        detail["findings"], "Fixture findings on the stack.",
-        "{detail}"
-    );
+    assert_eq!(detail["findings"][0]["section"], "Impression", "{detail}");
+    assert_eq!(detail["findings"][0]["text"], "Fixture findings on the stack.", "{detail}");
+    assert_eq!(detail["findings"][1]["section"], "Context", "{detail}");
+    assert_eq!(detail["findings"][1]["text"], "Synthetic educational example.", "{detail}");
 
     let (status, revoked) = call(
         app.clone(),
@@ -11364,6 +12458,18 @@ async fn library_media_and_image_cases_are_rights_checked() {
         0,
         "{after_revoke}"
     );
+    let (status, unavailable_detail) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/me/image-cases/{case_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{unavailable_detail}");
+    assert_eq!(unavailable_detail["error"]["code"], "image_rights_unavailable");
 }
 
 #[tokio::test]
@@ -11874,6 +12980,56 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     assert_eq!(status, StatusCode::OK, "{case}");
     let case_id = case["case_id"].as_str().unwrap();
 
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/image-cases/{case_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["findings"][0]["section"], "Findings", "{detail}");
+    assert_eq!(detail["findings"][0]["text"], "Fixture finding.", "{detail}");
+
+    let (status, out_of_bounds) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/image-cases/{case_id}/annotations"),
+            Some(&author),
+            Some(serde_json::json!({
+                "image_index": 1,
+                "x_percent": 35.5,
+                "y_percent": 62.25,
+                "body": "This index is outside the single-image case."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{out_of_bounds}");
+    assert_eq!(out_of_bounds["error"]["code"], "invalid_image_index");
+
+    let (status, markup) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/image-cases/{case_id}/annotations"),
+            Some(&author),
+            Some(serde_json::json!({
+                "image_index": 0,
+                "x_percent": 35.5,
+                "y_percent": 62.25,
+                "body": "<script>alert('fixture')</script>"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{markup}");
+    assert_eq!(markup["error"]["code"], "invalid_annotation_body");
+
     let (status, annotation) = call(
         app.clone(),
         admin_req(
@@ -11884,7 +13040,7 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
                 "image_index": 0,
                 "x_percent": 35.5,
                 "y_percent": 62.25,
-                "body": "Fixture annotation text."
+                "body": "Fixture annotation text with a comparison: A < B."
             })),
         ),
     )
@@ -11921,6 +13077,35 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     );
 
     let review_path = format!("/v1/admin/image-annotations/{annotation_id}/review");
+    let (status, missing_note) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &review_path,
+            Some(&reviewer),
+            Some(serde_json::json!({"decision":"approved"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_note}");
+    assert_eq!(missing_note["error"]["code"], "invalid_review_note");
+
+    let (status, markup_note) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &review_path,
+            Some(&reviewer),
+            Some(serde_json::json!({
+                "decision":"approved",
+                "note":"<img src=x onerror=alert(1)>"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{markup_note}");
+    assert_eq!(markup_note["error"]["code"], "invalid_review_note");
+
     let (status, self_review) = call(
         app.clone(),
         admin_req(
@@ -11961,7 +13146,10 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     assert_eq!(visible[0]["image_index"], 0);
     assert_eq!(visible[0]["x_percent"], 35.5);
     assert_eq!(visible[0]["y_percent"], 62.25);
-    assert_eq!(visible[0]["body"], "Fixture annotation text.");
+    assert_eq!(
+        visible[0]["body"],
+        "Fixture annotation text with a comparison: A < B."
+    );
 
     let (status, duplicate) = call(
         app,
@@ -11975,6 +13163,68 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
     assert_eq!(duplicate["error"]["code"], "annotation_already_reviewed");
+}
+
+#[tokio::test]
+async fn img02_structured_findings_migration_replays_and_backfills() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let structured_case_id = Uuid::new_v4();
+    let structured_findings = serde_json::json!([
+        { "section": "Reviewed", "text": "Keep this structured note." }
+    ]);
+    sqlx::query(
+        "INSERT INTO image_cases (id, title, kind, images, findings, findings_structured)
+         VALUES ($1, 'Structured fixture', 'still', '[]', 'legacy text', $2)",
+    )
+    .bind(structured_case_id)
+    .bind(structured_findings.clone())
+    .execute(&state.pool)
+    .await
+    .expect("insert structured image case");
+
+    schema::apply_up(&state.pool)
+        .await
+        .expect("replay preserves structured findings");
+    let preserved: serde_json::Value = sqlx::query_scalar(
+        "SELECT findings_structured FROM image_cases WHERE id = $1",
+    )
+    .bind(structured_case_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read replayed structured findings");
+    assert_eq!(preserved, structured_findings);
+
+    sqlx::query("ALTER TABLE image_cases DROP COLUMN findings_structured")
+        .execute(&state.pool)
+        .await
+        .expect("simulate schema before structured findings migration");
+    let legacy_case_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO image_cases (id, title, kind, images, findings)
+         VALUES ($1, 'Legacy fixture', 'still', '[]', 'Backfilled legacy note')",
+    )
+    .bind(legacy_case_id)
+    .execute(&state.pool)
+    .await
+    .expect("insert legacy image case");
+
+    schema::apply_up(&state.pool)
+        .await
+        .expect("upgrade and replay structured findings migration");
+    let backfilled: serde_json::Value = sqlx::query_scalar(
+        "SELECT findings_structured FROM image_cases WHERE id = $1",
+    )
+    .bind(legacy_case_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read backfilled findings");
+    assert_eq!(
+        backfilled,
+        serde_json::json!([
+            { "section": "Findings", "text": "Backfilled legacy note" }
+        ])
+    );
 }
 
 #[tokio::test]
@@ -12743,6 +13993,12 @@ async fn variants_trends_drills_regression_and_qti() {
 
     // QB-02: author a second version on an existing family, through the gate.
     let original = ids.question_versions[0];
+    sqlx::query("UPDATE question_versions SET rights_ref = $2 WHERE id = $1")
+        .bind(original)
+        .bind("VARIANT-SOURCE-RIGHTS")
+        .execute(&state.pool)
+        .await
+        .expect("fixture rights provenance");
     let question_id: Uuid = sqlx::query!(
         "SELECT question_id AS \"qid!\" FROM question_versions WHERE id = $1",
         original
@@ -12796,6 +14052,24 @@ async fn variants_trends_drills_regression_and_qti() {
     .expect("original family")
     .fid;
     assert_eq!(family, original_family, "variant keeps the family identity");
+    let (status, question_list) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            "/v1/admin/questions?q=Variant",
+            Some(&author),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "variant question list: {question_list}");
+    let variant_question = question_list["questions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|question| question["version_id"] == variant_vid.to_string())
+        .expect("variant is visible through the admin API");
+    assert_eq!(variant_question["rights_ref"], "VARIANT-SOURCE-RIGHTS");
 
     // The v2 draft goes through the §19.3 gate like any item.
     let (status, wf) = call(

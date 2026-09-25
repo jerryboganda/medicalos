@@ -1,10 +1,12 @@
 <script lang="ts">
+	/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import {
 		Api,
 		ApiError,
 		adminToken,
+		type AdminSettings,
 		type AdminConcept,
 		type AdminContentRight,
 		type AdminExtractionReport,
@@ -18,7 +20,7 @@
 	import { goto } from '$app/navigation';
 
 	// ADMIN-06 baseline console: hierarchy management, question creation, and
-	// JSON bulk import with dry-run/rollback. Gated by the admin token —
+	// CSV/XLSX plus JSON bulk import with dry-run/rollback. Gated by the admin token —
 	// role-aware accounts (§18.1) replace this gate later.
 	let token = $state('');
 	let unlocked = $state(false);
@@ -88,6 +90,21 @@
 	let selectedAssessmentAppeal = $state<ScenarioAssessmentAppeal | null>(null);
 	let appealDecision = $state<'confirmed' | 'reassessment_required'>('confirmed');
 	let appealRationale = $state('');
+	let settingsDraft = $state({
+		masteryLow: 1400,
+		masteryHigh: 1600,
+		communityMinSample: 20,
+		freeDailyQuestions: 10,
+		freeDailyCoachTurns: 1,
+		offlineLeaseDays: 14,
+		maxReviewsPerDay: 30,
+		maxNewCardsPerDay: 10
+	});
+	let settingsIntervals = $state('1, 3, 7, 14');
+	let settingsLoaded = $state(false);
+	let settingsBusy = $state(false);
+	let settingsMessage = $state('');
+	let settingsError = $state('');
 	type ScenarioAssessmentDraft = {
 		status: 'assessed' | 'not_assessed';
 		score: string;
@@ -130,6 +147,8 @@
 
 	// import
 	let importJson = $state('');
+	let importFile = $state<File | null>(null);
+	let fileImportBusy = $state<'preview' | 'apply' | null>(null);
 	let importReport = $state('');
 	let lastBatch = $state('');
 
@@ -161,8 +180,69 @@
 				loadContentRights(),
 				loadExtractionReports(),
 				loadPendingAssessments(),
-				loadScenarioAssessmentAppeals()
+				loadScenarioAssessmentAppeals(),
+				loadRuntimeSettings()
 			]);
+		}
+	}
+
+	async function loadRuntimeSettings() {
+		settingsBusy = true;
+		settingsError = '';
+		try {
+			const { settings } = await Api.adminSettings();
+			settingsDraft = {
+				masteryLow: settings.mastery_bands[0],
+				masteryHigh: settings.mastery_bands[1],
+				communityMinSample: settings.community_min_sample,
+				freeDailyQuestions: settings.free_daily_questions,
+				freeDailyCoachTurns: settings.free_daily_coach_turns,
+				offlineLeaseDays: settings.offline_lease_days,
+				maxReviewsPerDay: settings.max_reviews_per_day,
+				maxNewCardsPerDay: settings.max_new_cards_per_day
+			};
+			settingsIntervals = settings.retest_intervals_days.join(', ');
+			settingsLoaded = true;
+		} catch (err) {
+			settingsError = err instanceof ApiError ? err.message : 'Runtime settings could not be loaded.';
+		} finally {
+			settingsBusy = false;
+		}
+	}
+
+	async function saveRuntimeSettings(event: Event) {
+		event.preventDefault();
+		if (settingsBusy || !settingsLoaded) return;
+		const intervals = settingsIntervals
+			.split(',')
+			.map((value) => value.trim())
+			.filter(Boolean)
+			.map(Number);
+		if (intervals.some((value) => !Number.isSafeInteger(value))) {
+			settingsError = 'Re-test intervals must be comma-separated whole numbers.';
+			return;
+		}
+		settingsBusy = true;
+		settingsError = '';
+		settingsMessage = '';
+		try {
+			const settings: AdminSettings = {
+				mastery_bands: [settingsDraft.masteryLow, settingsDraft.masteryHigh],
+				community_min_sample: settingsDraft.communityMinSample,
+				free_daily_questions: settingsDraft.freeDailyQuestions,
+				free_daily_coach_turns: settingsDraft.freeDailyCoachTurns,
+				retest_intervals_days: intervals,
+				offline_lease_days: settingsDraft.offlineLeaseDays,
+				max_reviews_per_day: settingsDraft.maxReviewsPerDay,
+				max_new_cards_per_day: settingsDraft.maxNewCardsPerDay
+			};
+			await Api.updateAdminSettings(settings);
+			settingsMessage = 'Runtime settings saved.';
+			await refreshAudit();
+		} catch (err) {
+			settingsError = err instanceof ApiError ? err.message : 'Runtime settings could not be saved.';
+		} finally {
+			settingsBusy = false;
 		}
 	}
 
@@ -752,7 +832,7 @@
 				dry_run: dryRun,
 				rows
 			});
-			lastBatch = res.batch_id;
+			lastBatch = res.status === 'applied' ? res.batch_id : '';
 			importReport = JSON.stringify(res, null, 2);
 			await refreshAudit();
 		} catch (err) {
@@ -761,6 +841,71 @@
 					? err.message
 					: 'Import failed — is the JSON valid?';
 		} finally {
+			busy = false;
+		}
+	}
+
+	function downloadQuestionTemplate() {
+		const optionColumns = Array.from({ length: 10 }, (_, index) => [
+			`option_${index + 1}`,
+			`rationale_${index + 1}`
+		]).flat();
+		const headers = [
+			'chapter_id',
+			'difficulty',
+			'vignette',
+			'lead_in',
+			...optionColumns,
+			'correct_option',
+			'key_learning_point',
+			'source_ref',
+			'rights_ref',
+			'exam_tip',
+			'hint',
+			'high_yield',
+			'tags',
+			'references',
+			'media_refs'
+		];
+		const blob = new Blob([`${headers.join(',')}\r\n`], { type: 'text/csv;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = 'questions-template.csv';
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
+	}
+
+	function selectImportFile(event: Event) {
+		const input = event.currentTarget;
+		if (input instanceof HTMLInputElement) importFile = input.files?.[0] ?? null;
+	}
+
+	async function runFileImport(dryRun: boolean) {
+		if (!importFile || !examId.trim() || busy || fileImportBusy) return;
+		const lowerName = importFile.name.toLowerCase();
+		const contentType = lowerName.endsWith('.csv')
+			? 'text/csv'
+			: lowerName.endsWith('.xlsx')
+				? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+				: '';
+		if (!contentType || importFile.size > 3 * 1024 * 1024) {
+			error = 'Choose a CSV or XLSX file no larger than 3 MiB.';
+			return;
+		}
+		busy = true;
+		fileImportBusy = dryRun ? 'preview' : 'apply';
+		error = '';
+		importReport = '';
+		try {
+			const res = await Api.importQuestionFile(examId.trim(), dryRun, importFile, contentType);
+			lastBatch = res.status === 'applied' ? res.batch_id : '';
+			importReport = JSON.stringify(res, null, 2);
+			await refreshAudit();
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'File import failed.';
+		} finally {
+			fileImportBusy = null;
 			busy = false;
 		}
 	}
@@ -833,6 +978,64 @@
 		</button>
 	</div>
 {:else}
+	<p><a class="btn" href={`${base}/admin/image-annotations`}>Image annotation review</a></p>
+	<section class="card" aria-labelledby="runtime-settings-heading" data-testid="runtime-settings">
+		<h2 id="runtime-settings-heading">Runtime settings</h2>
+		<p class="muted">
+			Changes apply to new requests immediately. Active offline leases keep their expiry; new and renewed
+			leases use this window. Review caps affect the next queue request; due overflow remains scheduled.
+			Community disclosure keeps a positive minimum sample; changes are audited.
+		</p>
+		{#if settingsError}<p class="error-text" role="alert">{settingsError}</p>{/if}
+		{#if !settingsLoaded}
+			<p class="muted" role="status">{settingsBusy ? 'Loading runtime settings…' : 'Runtime settings are unavailable.'}</p>
+		{:else}
+			<form onsubmit={saveRuntimeSettings}>
+				<div class="runtime-settings-fields">
+					<label class="field" for="settings-mastery-low">
+						<span>Lower mastery boundary</span>
+						<input id="settings-mastery-low" type="number" min="0" max="2999" step="1" bind:value={settingsDraft.masteryLow} required />
+					</label>
+					<label class="field" for="settings-mastery-high">
+						<span>Higher mastery boundary</span>
+						<input id="settings-mastery-high" type="number" min="1" max="3000" step="1" bind:value={settingsDraft.masteryHigh} required />
+					</label>
+					<label class="field" for="settings-community-sample">
+						<span>Minimum community sample</span>
+						<input id="settings-community-sample" aria-label="Minimum community sample" type="number" min="1" max="1000000" step="1" bind:value={settingsDraft.communityMinSample} required />
+					</label>
+					<label class="field" for="settings-free-questions">
+						<span>Daily free questions</span>
+						<input id="settings-free-questions" aria-label="Daily free questions" type="number" min="0" max="5000" step="1" bind:value={settingsDraft.freeDailyQuestions} required />
+					</label>
+					<label class="field" for="settings-free-coach-turns">
+						<span>Daily free Coach turns</span>
+						<input id="settings-free-coach-turns" aria-label="Daily free Coach turns" type="number" min="0" max="1000" step="1" bind:value={settingsDraft.freeDailyCoachTurns} required />
+					</label>
+					<label class="field" for="settings-retest-intervals">
+						<span>Re-test intervals in days</span>
+						<input id="settings-retest-intervals" aria-label="Re-test intervals in days" bind:value={settingsIntervals} maxlength="100" required />
+					</label>
+					<label class="field" for="settings-offline-lease-days">
+						<span>Offline lease length in days</span>
+						<input id="settings-offline-lease-days" type="number" min="1" max="30" step="1" bind:value={settingsDraft.offlineLeaseDays} required />
+					</label>
+					<label class="field" for="settings-due-review-cap">
+						<span>Daily due-review cap</span>
+						<input id="settings-due-review-cap" type="number" min="0" max="5000" step="1" bind:value={settingsDraft.maxReviewsPerDay} required />
+					</label>
+					<label class="field" for="settings-new-card-cap">
+						<span>Daily new-card cap</span>
+						<input id="settings-new-card-cap" type="number" min="0" max="1000" step="1" bind:value={settingsDraft.maxNewCardsPerDay} required />
+					</label>
+				</div>
+				<button class="btn primary" type="submit" disabled={settingsBusy} data-testid="settings-save">
+					{settingsBusy ? 'Saving…' : 'Save runtime settings'}
+				</button>
+			</form>
+		{/if}
+		{#if settingsMessage}<p class="muted" role="status" data-testid="settings-message">{settingsMessage}</p>{/if}
+	</section>
 	<div class="card">
 		<h2>Exam</h2>
 		<label class="field" for="exam-id">
@@ -1553,15 +1756,61 @@
 	</div>
 
 	<div class="card">
-		<h2>Bulk import (JSON rows)</h2>
+		<h2>Bulk question import</h2>
 		<p class="muted" style="font-size: var(--text-sm);">
-			Rows is a JSON array of objects, each with: chapter_id, difficulty
-			(easy/medium/hard), vignette, lead_in, options (text + rationale,
-			2-10 of them), correct_index, key_learning_point (40 words max),
-			and source_ref. Optional tutor hint is limited to 2,000 characters.
-			Dry run validates and creates nothing; rollback
-			refuses once learners have answered.
+			Import CSV or Excel .xlsx rows with 2-10 option/rationale pairs. Each row
+			needs an active rights_ref allowing display and derivatives, scoped to all
+			source and media references. correct_option is one-based; separate tags,
+			references, and media references with |. Dry run creates no questions. Applied rows start as
+			drafts and still require independent review before publication.
 		</p>
+		<button class="btn" type="button" onclick={downloadQuestionTemplate}>
+			Download CSV template
+		</button>
+		<label class="field" for="import-file">
+			<span>Question bank file</span>
+			<input
+				id="import-file"
+				type="file"
+				accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+				aria-describedby="import-file-help"
+				onchange={selectImportFile}
+			/>
+		</label>
+		<p id="import-file-help" class="muted" style="font-size: var(--text-sm);">
+			{importFile ? importFile.name : 'CSV must be UTF-8. XLSX formulas are not accepted. Maximum file size: 3 MiB.'}
+		</p>
+		<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:var(--space-lg);">
+			<button
+				class="btn"
+				type="button"
+				disabled={busy || !examId.trim() || !importFile}
+				data-loading={fileImportBusy === 'preview'}
+				data-testid="import-file-preview"
+				onclick={() => runFileImport(true)}
+			>
+				{fileImportBusy === 'preview' ? 'Previewing…' : 'Preview file'}
+			</button>
+			<button
+				class="btn primary"
+				type="button"
+				disabled={busy || !examId.trim() || !importFile}
+				data-loading={fileImportBusy === 'apply'}
+				data-testid="import-file-apply"
+				onclick={() => runFileImport(false)}
+			>
+				{fileImportBusy === 'apply' ? 'Applying…' : 'Apply file'}
+			</button>
+		</div>
+		<details>
+			<summary>Import JSON rows</summary>
+			<p class="muted" style="font-size: var(--text-sm);">
+				JSON rows use chapter_id, difficulty, vignette, lead_in, options with
+				text and rationale, correct_index (zero-based), key_learning_point,
+			and source_ref. Every row also needs an active rights_ref allowing
+			display and derivatives for its source and media assets. Optional tags,
+			source_refs, and media_refs are retained.
+			</p>
 		<label class="field" for="import-json">
 			<span>Rows JSON</span>
 			<textarea
@@ -1602,6 +1851,7 @@
 				</button>
 			{/if}
 		</div>
+		</details>
 		{#if importReport}
 			<pre
 				style="white-space:pre-wrap; font-size: var(--text-sm);"
@@ -1772,6 +2022,12 @@
 {/if}
 
 <style>
+	.runtime-settings-fields {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+		gap: var(--space-md);
+	}
+
 	.rights-record,
 	.extraction-report {
 		min-width: 0;

@@ -368,7 +368,7 @@ pub struct LeaseReq {
     pub chapters: Vec<Uuid>,
 }
 
-/// POST /v1/packs/lease — grant or renew a 14-day offline lease bound to one
+/// POST /v1/packs/lease — grant or renew the configured offline lease bound to one
 /// device. Entitlement-gated (CORE-03): free-tier learners get an honest
 /// refusal with the upgrade payload, never a degraded pack. The pack key is
 /// disclosed only in this response — the client encrypts the local pack
@@ -412,7 +412,15 @@ pub async fn create_lease(
     let mut key_bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key_bytes);
     let pack_key: String = key_bytes.iter().map(|b| format!("{b:02x}")).collect();
-    let expires = chrono::Utc::now() + chrono::Duration::days(14);
+    let lease_days = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "offline_lease_days",
+        crate::routes::settings::DEFAULT_OFFLINE_LEASE_DAYS,
+        1,
+        30,
+    )
+    .await?;
+    let expires = chrono::Utc::now() + chrono::Duration::days(lease_days);
 
     let row = sqlx::query!(
         r#"INSERT INTO pack_leases (id, user_id, device_id, exam_id, chapters, pack_key, expires_at)

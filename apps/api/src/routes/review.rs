@@ -8,6 +8,7 @@ use axum::Json;
 use scheduler::{build_queue, from_state, to_state, QueueCard, QueueLimits, Rating, Scheduler};
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::{PgConnection, Row};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -26,6 +27,26 @@ fn parse_rating(raw: &str) -> ApiResult<Rating> {
             format!("rating must be again|hard|good|easy, got {other}"),
         )),
     }
+}
+
+async fn daily_review_usage(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    at: chrono::DateTime<chrono::Utc>,
+) -> ApiResult<(i64, i64)> {
+    let row = sqlx::query(
+        r#"SELECT COUNT(*) FILTER (WHERE was_new) AS new_count,
+                  COUNT(*) FILTER (WHERE NOT was_new) AS review_count
+           FROM review_events
+           WHERE user_id = $1
+             AND reviewed_at >= (date_trunc('day', $2::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+             AND reviewed_at < ((date_trunc('day', $2::timestamptz AT TIME ZONE 'UTC') + interval '1 day') AT TIME ZONE 'UTC')"#,
+    )
+    .bind(user_id)
+    .bind(at)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok((row.try_get("new_count")?, row.try_get("review_count")?))
 }
 
 #[derive(Deserialize)]
@@ -266,7 +287,33 @@ pub async fn queue(
         })
         .collect::<ApiResult<Vec<_>>>()?;
 
-    let queue = build_queue(QueueLimits::default(), due_cards, new_cards);
+    let max_reviews = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "max_reviews_per_day",
+        crate::routes::settings::DEFAULT_MAX_REVIEWS_PER_DAY,
+        0,
+        5000,
+    )
+    .await?;
+    let max_new_cards = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "max_new_cards_per_day",
+        crate::routes::settings::DEFAULT_MAX_NEW_CARDS_PER_DAY,
+        0,
+        1000,
+    )
+    .await?;
+    let (used_new_cards, used_reviews) = {
+        let mut conn = state.pool.acquire().await?;
+        daily_review_usage(&mut conn, user.user_id, now).await?
+    };
+    let limits = QueueLimits {
+        max_reviews_per_day: usize::try_from(max_reviews.saturating_sub(used_reviews))
+            .map_err(|_| ApiError::internal())?,
+        max_new_per_day: usize::try_from(max_new_cards.saturating_sub(used_new_cards))
+            .map_err(|_| ApiError::internal())?,
+    };
+    let queue = build_queue(limits, due_cards, new_cards);
     let render = |cards: &[QueueCard]| -> Vec<serde_json::Value> {
         cards
             .iter()
@@ -317,81 +364,148 @@ pub async fn apply_review(
     req: ReviewEventReq,
 ) -> ApiResult<Json<serde_json::Value>> {
     let rating = parse_rating(&req.rating)?;
-    let reviewed_at = chrono::Utc::now();
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| ApiError::not_found("user_not_found"))?;
 
     // Idempotent replay: same key on the same card returns the stored outcome.
-    let replay = sqlx::query!(
+    let replay = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
         "SELECT reviewed_at FROM review_events
          WHERE card_id = $1 AND user_id = $2 AND idempotency_key = $3",
-        req.card_id,
-        user_id,
-        req.idempotency_key
     )
-    .fetch_optional(&state.pool)
+    .bind(req.card_id)
+    .bind(user_id)
+    .bind(&req.idempotency_key)
+    .fetch_optional(&mut *tx)
     .await?;
-    if let Some(event) = replay {
-        let card = sqlx::query!(
-            "SELECT state FROM cards WHERE id = $1 AND user_id = $2",
-            req.card_id,
-            user_id
-        )
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| ApiError::not_found("card_not_found"))?;
-        let cs: scheduler::CardState =
-            serde_json::from_value(card.state).map_err(|_| ApiError::internal())?;
+    if let Some(reviewed_at) = replay {
+        let card = sqlx::query("SELECT state FROM cards WHERE id = $1 AND user_id = $2")
+            .bind(req.card_id)
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| ApiError::not_found("card_not_found"))?;
+        let cs: scheduler::CardState = serde_json::from_value(card.try_get("state")?)
+            .map_err(|_| ApiError::internal())?;
+        tx.commit().await?;
         return Ok(Json(serde_json::json!({
             "already_recorded": true,
             "due": cs.due,
-            "reviewed_at": event.reviewed_at,
+            "reviewed_at": reviewed_at,
         })));
     }
 
-    let row = sqlx::query!(
-        "SELECT state FROM cards WHERE id = $1 AND user_id = $2 AND suspended = false",
-        req.card_id,
-        user_id
+    let row = sqlx::query(
+        "SELECT state FROM cards WHERE id = $1 AND user_id = $2 AND suspended = false FOR UPDATE",
     )
-    .fetch_optional(&state.pool)
+    .bind(req.card_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("card_not_found"))?;
-    let current: scheduler::CardState =
-        serde_json::from_value(row.state).map_err(|_| ApiError::internal())?;
+    let current: scheduler::CardState = serde_json::from_value(row.try_get("state")?)
+        .map_err(|_| ApiError::internal())?;
+    let was_new = current.state == 0;
+    let reviewed_at = chrono::Utc::now();
+
+    // Read both caps together inside the write transaction. The user-row lock
+    // above serializes this check with every other review for this learner.
+    let settings = sqlx::query(
+        "SELECT key, value FROM app_settings WHERE key IN ('max_reviews_per_day', 'max_new_cards_per_day')",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut max_reviews = crate::routes::settings::DEFAULT_MAX_REVIEWS_PER_DAY;
+    let mut max_new_cards = crate::routes::settings::DEFAULT_MAX_NEW_CARDS_PER_DAY;
+    for setting in settings {
+        let key: String = setting.try_get("key")?;
+        let value: serde_json::Value = setting.try_get("value")?;
+        if let Some(value) = value.as_i64() {
+            match key.as_str() {
+                "max_reviews_per_day" if (0..=5000).contains(&value) => max_reviews = value,
+                "max_new_cards_per_day" if (0..=1000).contains(&value) => max_new_cards = value,
+                _ => {}
+            }
+        }
+    }
+    let (used_new_cards, used_reviews) = daily_review_usage(&mut *tx, user_id, reviewed_at).await?;
+    let (used, cap, code, message) = if was_new {
+        (
+            used_new_cards,
+            max_new_cards,
+            "new_card_daily_cap_reached",
+            "the daily new-card allowance has been used",
+        )
+    } else {
+        (
+            used_reviews,
+            max_reviews,
+            "daily_review_cap_reached",
+            "the daily review allowance has been used",
+        )
+    };
+    if used >= cap {
+        return Err(ApiError::conflict(code, message));
+    }
 
     let scheduler = Scheduler::new();
     let next = scheduler.review(from_state(&current), rating, reviewed_at);
     let next_state = to_state(&next);
     let state_json = serde_json::to_value(&next_state).map_err(|_| ApiError::internal())?;
 
-    let inserted = sqlx::query!(
-        "INSERT INTO review_events (id, card_id, user_id, rating, reviewed_at, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6)
+    let inserted = sqlx::query(
+        "INSERT INTO review_events (id, card_id, user_id, rating, reviewed_at, idempotency_key, was_new)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT DO NOTHING
          RETURNING id",
-        Uuid::new_v4(),
-        req.card_id,
-        user_id,
-        req.rating,
-        reviewed_at,
-        req.idempotency_key
     )
-    .fetch_optional(&state.pool)
+    .bind(Uuid::new_v4())
+    .bind(req.card_id)
+    .bind(user_id)
+    .bind(&req.rating)
+    .bind(reviewed_at)
+    .bind(&req.idempotency_key)
+    .bind(was_new)
+    .fetch_optional(&mut *tx)
     .await?;
     if inserted.is_none() {
-        // Lost a race with the same key — treat as replay.
+        // A competing writer may have inserted the same idempotency key.
+        let replayed_at = sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+            "SELECT reviewed_at FROM review_events
+             WHERE card_id = $1 AND user_id = $2 AND idempotency_key = $3",
+        )
+        .bind(req.card_id)
+        .bind(user_id)
+        .bind(&req.idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(ApiError::internal)?;
+        let card = sqlx::query("SELECT state FROM cards WHERE id = $1 AND user_id = $2")
+            .bind(req.card_id)
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let card_state: scheduler::CardState = serde_json::from_value(card.try_get("state")?)
+            .map_err(|_| ApiError::internal())?;
+        tx.commit().await?;
         return Ok(Json(serde_json::json!({
             "already_recorded": true,
-            "due": next_state.due,
-            "reviewed_at": reviewed_at,
+            "due": card_state.due,
+            "reviewed_at": replayed_at,
         })));
     }
-    sqlx::query!(
-        "UPDATE cards SET state = $2 WHERE id = $1",
-        req.card_id,
-        state_json
-    )
-    .execute(&state.pool)
-    .await?;
+
+    sqlx::query("UPDATE cards SET state = $2 WHERE id = $1 AND user_id = $3")
+        .bind(req.card_id)
+        .bind(state_json)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
 
     Ok(Json(serde_json::json!({
         "already_recorded": false,

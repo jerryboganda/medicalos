@@ -130,14 +130,19 @@ pub async fn mastery_heatmap(
         .await?;
     }
     // Mastery bands: config override, else the §24 default quad-points.
-    let bands: Vec<i64> = sqlx::query!(
-        r#"SELECT value->0 AS "lo!", value->1 AS "hi!" FROM app_settings
-           WHERE key = 'mastery_bands'"#
+    let mut bands = crate::routes::settings::current_i64_list(
+        &state.pool,
+        "mastery_bands",
+        &[1400, 1600],
     )
-    .fetch_optional(&state.pool)
-    .await?
-    .map(|r| vec![r.lo.as_i64().unwrap_or(1400), r.hi.as_i64().unwrap_or(1600)])
-    .unwrap_or_else(|| vec![1400, 1600]);
+    .await?;
+    if bands.len() != 2
+        || !(0..=3000).contains(&bands[0])
+        || bands[0] >= bands[1]
+        || bands[1] > 3000
+    {
+        bands = vec![1400, 1600];
+    }
     let (weak_at, strong_at) = (bands[0] as f32, bands[1] as f32);
 
     let rows = sqlx::query!(

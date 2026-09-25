@@ -50,6 +50,9 @@
 			<a class="btn" href={`${base}/library`} data-testid="nav-library" onclick={() => (menuOpen = false)}
 				>Library</a
 			>
+			<a class="btn" href={`${base}/imaging`} data-testid="nav-imaging" onclick={() => (menuOpen = false)}
+				>Images</a
+			>
 			<a
 				class="btn"
 				href={`${base}/notifications`}

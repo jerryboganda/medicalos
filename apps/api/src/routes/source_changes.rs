@@ -947,6 +947,14 @@ pub async fn resolve_task(
             "a replacement version is required only for a corrected resolution",
         ));
     }
+    let community_min_sample = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "community_min_sample",
+        state.community_min_sample,
+        1,
+        1_000_000,
+    )
+    .await?;
     let mut tx = state.pool.begin().await?;
     let task = sqlx::query(
         r#"SELECT t.event_id, t.dependency_id, t.resource_kind, t.question_version_id,
@@ -1007,7 +1015,7 @@ pub async fn resolve_task(
             task_id,
             question_version_id.ok_or_else(ApiError::internal)?,
             req.corrected_version_id.ok_or_else(ApiError::internal)?,
-            state.community_min_sample,
+            community_min_sample,
         )
         .await?
     } else {

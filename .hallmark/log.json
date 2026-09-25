@@ -1,5 +1,13 @@
 [
   {
+    "date": "2026-09-25",
+    "macrostructure": "App Shell (existing Editorial Console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "validated live runtime controls including the offline lease window in a compact responsive console panel",
+    "brief": "ADMIN-06 live runtime settings and offline lease policy"
+  },
+  {
     "date": "2026-09-24",
     "macrostructure": "Narrative Workflow (landing) + Catalogue/Index-First/Long Document inner pages",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens — system-managed, shared with app)",
@@ -38,6 +46,14 @@
     "enrichment": "none",
     "variation": "free-allowance no-fit explanation inside the existing next-action result region",
     "brief": "AI-04 full-task eligibility against remaining daily questions"
+  },
+  {
+    "date": "2026-09-25",
+    "macrostructure": "App Shell (licensed image study viewer + editorial review workspace)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "native image pixels, keyboard sequence controls, approved location markers, and a separate editorial queue",
+    "brief": "IMG-02 rights-gated stack viewer and independent annotation review"
   },
   {
     "date": "2026-09-23",

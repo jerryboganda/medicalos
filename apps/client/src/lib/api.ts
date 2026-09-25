@@ -19,6 +19,10 @@ export class ApiError extends Error {
 	}
 }
 
+export function apiErrorMessage(value: unknown, fallback: string): string {
+	return value instanceof Error ? value.message : fallback;
+}
+
 export function adminToken(): string {
 	try {
 		return localStorage.getItem('mlos_admin') ?? '';
@@ -27,15 +31,25 @@ export function adminToken(): string {
 	}
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(
+	method: string,
+	path: string,
+	body?: unknown,
+	contentType = 'application/json'
+): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
 		method,
 		headers: {
-			'content-type': 'application/json',
+			'content-type': contentType,
 			'x-admin-token': adminToken(),
 			...(auth.token ? { authorization: `Bearer ${auth.token}` } : {})
 		},
-		body: body === undefined ? undefined : JSON.stringify(body)
+		body:
+			body === undefined
+				? undefined
+				: contentType === 'application/json'
+					? JSON.stringify(body)
+					: (body as BodyInit)
 	});
 	if (!res.ok) {
 		if (res.status === 401) {
@@ -53,6 +67,15 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 		throw new ApiError(res.status, code, message);
 	}
 	return (await res.json()) as T;
+}
+
+export interface AdminImportResult {
+	batch_id: string;
+	status: string;
+	rows: number;
+	valid?: number;
+	issues?: { row: number; code: string; message: string }[];
+	created?: unknown[];
 }
 
 export interface TodayTask {
@@ -525,13 +548,12 @@ export interface OidcProviderUpdate {
 	enabled: boolean;
 }
 
-export interface ImageCase {
+export interface ImageCaseSummary {
 	case_id: string;
 	title: string;
 	kind: 'still' | 'stack';
 	modality: string | null;
 	images: { url: string; rights_ref: string }[];
-	findings: string;
 	annotations: {
 		annotation_id: string;
 		image_index: number;
@@ -541,16 +563,36 @@ export interface ImageCase {
 	}[];
 }
 
+export interface ImageFinding {
+	section: string;
+	text: string;
+}
+
+export interface AdminSettings {
+	mastery_bands: number[];
+	community_min_sample: number;
+	free_daily_questions: number;
+	free_daily_coach_turns: number;
+	retest_intervals_days: number[];
+	offline_lease_days: number;
+	max_reviews_per_day: number;
+	max_new_cards_per_day: number;
+}
+
+export interface ImageCaseDetail extends ImageCaseSummary {
+	findings: ImageFinding[];
+}
+
 export interface AdminImageAnnotation {
 	annotation_id: string;
 	case_id: string;
+	case_title: string;
 	image_index: number;
 	x_percent: number;
 	y_percent: number;
 	body: string;
-	review_status: 'pending' | 'approved' | 'rejected';
-	decision: 'approved' | 'rejected' | null;
-	note: string | null;
+	created_at: string;
+	review_status: 'pending';
 }
 
 export const Api = {
@@ -637,9 +679,9 @@ export const Api = {
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
 	listScenarios: () => call<{ scenarios: ScenarioSummary[] }>('GET', '/v1/scenarios'),
-	imageCases: () => call<{ cases: ImageCase[] }>('GET', '/v1/me/image-cases'),
+	imageCases: () => call<{ cases: ImageCaseSummary[] }>('GET', '/v1/me/image-cases'),
 	imageCase: (caseId: string) =>
-		call<ImageCase>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
+		call<ImageCaseDetail>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
 	adminImageAnnotations: () =>
 		call<{ annotations: AdminImageAnnotation[] }>('GET', '/v1/admin/image-annotations'),
 	createImageAnnotation: (
@@ -654,7 +696,7 @@ export const Api = {
 	reviewImageAnnotation: (
 		annotationId: string,
 		decision: 'approved' | 'rejected',
-		note?: string
+		note: string
 	) =>
 		call<{ annotation_id: string; decision: 'approved' | 'rejected' }>(
 			'POST',
@@ -811,6 +853,9 @@ export const Api = {
 		),
 	adminReports: () =>
 		call<{ reports: AdminReport[] }>('GET', '/v1/admin/reports?limit=100'),
+	adminSettings: () => call<{ settings: AdminSettings }>('GET', '/v1/admin/settings'),
+	updateAdminSettings: (settings: AdminSettings) =>
+		call<{ updated: (keyof AdminSettings)[] }>('PATCH', '/v1/admin/settings', settings),
 	listContentRights: () =>
 		call<{ rights: AdminContentRight[] }>('GET', '/v1/admin/content-rights'),
 	listExtractionReports: () =>
@@ -1073,14 +1118,16 @@ export const Api = {
 		exam_id: string;
 		dry_run: boolean;
 		rows: unknown[];
-	}) =>
-		call<{
-			batch_id: string;
-			status: string;
-			valid?: number;
-			issues?: { row: number; code: string; message: string }[];
-			created?: unknown[];
-		}>('POST', '/v1/admin/import', body),
+	}) => call<AdminImportResult>('POST', '/v1/admin/import', body),
+	importQuestionFile: (examId: string, dryRun: boolean, file: File, contentType: string) => {
+		const query = new URLSearchParams({ exam_id: examId, dry_run: String(dryRun) });
+		return call<AdminImportResult>(
+			'POST',
+			`/v1/admin/import-file?${query.toString()}`,
+			file,
+			contentType
+		);
+	},
 	rollbackImport: (batchId: string) =>
 		call<{ removed_questions: number }>(
 			'POST',

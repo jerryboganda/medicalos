@@ -48,14 +48,22 @@ async fn check_daily_allowance(state: &AppState, user_id: Uuid) -> ApiResult<()>
     .fetch_one(&state.pool)
     .await?
     .n;
-    if used >= state.free_daily_coach_turns {
+    let free_daily_coach_turns = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "free_daily_coach_turns",
+        state.free_daily_coach_turns,
+        0,
+        1000,
+    )
+    .await?;
+    if used >= free_daily_coach_turns {
         return Err(ApiError::forbidden_with_details(
             "coach_allowance_reached",
             format!(
                 "Daily AI allowance of {} turns reached — it resets tomorrow. Every other feature keeps working.",
-                state.free_daily_coach_turns
+                free_daily_coach_turns
             ),
-            json!({ "allowance": { "limit": state.free_daily_coach_turns, "used": used } }),
+            json!({ "allowance": { "limit": free_daily_coach_turns, "used": used } }),
         ));
     }
     Ok(())

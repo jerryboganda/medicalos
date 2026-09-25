@@ -1,15 +1,18 @@
 //! ADMIN-06 baseline: hierarchy management, question CRUD, and bulk import
 //! with dry-run/rollback (§19.5). Every mutation writes an audit event
 //! (§19.5 audit log) and is admin-token gated until role-aware accounts
-//! (18.1) land. Import accepts JSON rows; the CSV/Excel parser of §19.5 is
-/// the next console iteration — the validation and rollback pipeline below
-/// is the part that must be right first.
+//! (18.1) land. JSON, CSV, and XLSX imports share one validation and rollback
+//! pipeline.
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use calamine::Reader;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{BTreeSet, HashSet};
+use sqlx::Row;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::io::Cursor;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -239,6 +242,40 @@ pub struct CreateQuestionReq {
     pub hint: Option<String>,
     pub high_yield: Option<bool>,
     pub source_ref: String,
+    #[serde(default)]
+    pub rights_ref: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub source_refs: Vec<String>,
+    #[serde(default)]
+    pub media_refs: Vec<String>,
+}
+
+fn validate_import_metadata(
+    tags: &[String],
+    source_refs: &[String],
+    media_refs: &[String],
+) -> ApiResult<()> {
+    for (values, name, limit, length) in [
+        (tags, "tags", 100, 100),
+        (source_refs, "references", 30, 500),
+        (media_refs, "media references", 30, 1000),
+    ] {
+        if values.len() > limit
+            || values.iter().any(|value| {
+                value.trim().is_empty()
+                    || value.chars().count() > length
+                    || value.chars().any(char::is_control)
+            })
+        {
+            return Err(ApiError::unprocessable(
+                "invalid_question_metadata",
+                format!("{name} must contain at most {limit} non-empty values of at most {length} characters"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_question(req: &CreateQuestionReq) -> ApiResult<()> {
@@ -268,6 +305,17 @@ fn validate_question(req: &CreateQuestionReq) -> ApiResult<()> {
             "every question carries a source reference (§11.1)",
         ));
     }
+    if req
+        .rights_ref
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty() || value.trim().len() > 60)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_ref",
+            "rights_ref must be 1-60 characters when supplied",
+        ));
+    }
+    validate_import_metadata(&req.tags, &req.source_refs, &req.media_refs)?;
     Ok(())
 }
 
@@ -293,6 +341,25 @@ async fn insert_question_version(
     let qid = Uuid::new_v4();
     let vid = Uuid::new_v4();
     let options = serde_json::to_value(&req.options).map_err(|_| ApiError::internal())?;
+    let tags: Vec<String> = req.tags.iter().map(|value| value.trim().to_string()).collect();
+    let source_refs: Vec<String> = if req.source_refs.is_empty() {
+        vec![req.source_ref.trim().to_string()]
+    } else {
+        req.source_refs
+            .iter()
+            .map(|value| value.trim().to_string())
+            .collect()
+    };
+    let media_refs: Vec<String> = req
+        .media_refs
+        .iter()
+        .map(|value| value.trim().to_string())
+        .collect();
+    let rights_ref = req
+        .rights_ref
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_uppercase);
     sqlx::query!("INSERT INTO questions (id, family_id) VALUES ($1, $1)", qid)
         .execute(&mut *pool)
         .await?;
@@ -300,9 +367,9 @@ async fn insert_question_version(
         r#"INSERT INTO question_versions
            (id, question_id, version, status, chapter_id, difficulty, vignette,
             lead_in, options, correct_index, key_learning_point, exam_tip,
-            hint, high_yield, source_ref, created_by)
-           VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10,
-                   $11, $12, $13, $14, $15)"#,
+             hint, high_yield, source_ref, created_by, tags, source_refs, media_refs, rights_ref)
+            VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19)"#,
         vid,
         qid,
         status,
@@ -318,6 +385,10 @@ async fn insert_question_version(
         req.high_yield.unwrap_or(false),
         req.source_ref,
         created_by,
+        tags,
+        source_refs,
+        media_refs,
+        rights_ref,
     )
     .execute(&mut *pool)
     .await?;
@@ -550,7 +621,8 @@ pub async fn search_questions(
     let status = q.get("status").map(String::as_str);
     let rows = sqlx::query!(
         r#"SELECT qv.question_id, qv.id AS version_id, qv.vignette, qv.status,
-                  qv.difficulty, c.name AS chapter_name
+                  qv.difficulty, qv.source_ref, qv.rights_ref, qv.tags, qv.source_refs,
+                  qv.media_refs, c.name AS chapter_name
            FROM question_versions qv
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE qv.status = COALESCE($2, qv.status)
@@ -574,6 +646,11 @@ pub async fn search_questions(
                 "status": r.status,
                 "difficulty": r.difficulty,
                 "chapter": r.chapter_name,
+                "source_ref": r.source_ref,
+                "rights_ref": r.rights_ref,
+                "tags": r.tags,
+                "references": r.source_refs,
+                "media_refs": r.media_refs,
             })
         })
         .collect();
@@ -596,6 +673,13 @@ fn default_filename() -> String {
     "inline".into()
 }
 
+#[derive(Deserialize)]
+pub struct ImportFileQuery {
+    pub exam_id: Uuid,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
 #[derive(Serialize)]
 struct RowIssue {
     row: usize,
@@ -603,47 +687,535 @@ struct RowIssue {
     message: String,
 }
 
+#[derive(Default)]
+struct ParsedImport {
+    rows: Vec<CreateQuestionReq>,
+    row_numbers: Vec<usize>,
+    issues: Vec<RowIssue>,
+    total_rows: usize,
+}
+
+const MAX_IMPORT_ROWS: usize = 500;
+const MAX_IMPORT_COLUMNS: usize = 40;
+
+fn import_file_error(message: impl Into<String>) -> ApiError {
+    ApiError::unprocessable("invalid_import_file", message)
+}
+
+fn is_import_header(header: &str) -> bool {
+    matches!(
+        header,
+        "chapter_id"
+            | "difficulty"
+            | "vignette"
+            | "lead_in"
+            | "correct_option"
+            | "key_learning_point"
+            | "source_ref"
+            | "rights_ref"
+            | "exam_tip"
+            | "hint"
+            | "high_yield"
+            | "tags"
+            | "references"
+            | "media_refs"
+    ) || ["option_", "rationale_"]
+        .iter()
+        .any(|prefix| {
+            header
+                .strip_prefix(prefix)
+                .and_then(|number| number.parse::<u8>().ok())
+                .is_some_and(|number| (1..=10).contains(&number))
+        })
+}
+
+fn split_import_list(value: &str) -> Vec<String> {
+    value
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn optional_import_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn import_cell<'a>(
+    headers: &HashMap<String, usize>,
+    values: &'a [String],
+    name: &str,
+) -> &'a str {
+    headers
+        .get(name)
+        .and_then(|index| values.get(*index))
+        .map(|value| value.trim())
+        .unwrap_or_default()
+}
+
+fn import_question(
+    headers: &HashMap<String, usize>,
+    values: &[String],
+    row_number: usize,
+) -> ApiResult<CreateQuestionReq> {
+    let chapter_id = Uuid::parse_str(import_cell(headers, values, "chapter_id"))
+        .map_err(|_| import_file_error(format!("row {row_number}: chapter_id must be a UUID")))?;
+    let mut options = Vec::new();
+    for index in 1..=10 {
+        let text = import_cell(headers, values, &format!("option_{index}"));
+        let rationale = import_cell(headers, values, &format!("rationale_{index}"));
+        if text.is_empty() && rationale.is_empty() {
+            continue;
+        }
+        if text.is_empty() || rationale.is_empty() {
+            return Err(import_file_error(format!(
+                "row {row_number}: option_{index} and rationale_{index} must both be filled"
+            )));
+        }
+        options.push(QuestionOption {
+            text: text.to_string(),
+            rationale: rationale.to_string(),
+        });
+    }
+    let correct_option = import_cell(headers, values, "correct_option")
+        .parse::<usize>()
+        .ok()
+        .filter(|selected| *selected > 0 && *selected <= options.len())
+        .ok_or_else(|| {
+            import_file_error(format!(
+                "row {row_number}: correct_option must select one of the {} populated options",
+                options.len()
+            ))
+        })?;
+    let high_yield_value = import_cell(headers, values, "high_yield").to_ascii_lowercase();
+    let high_yield = match high_yield_value.as_str() {
+        "" => None,
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => {
+            return Err(import_file_error(format!(
+                "row {row_number}: high_yield must be true or false"
+            )))
+        }
+    };
+    let source_ref = import_cell(headers, values, "source_ref").to_string();
+    let mut source_refs = vec![source_ref.clone()];
+    source_refs.extend(split_import_list(import_cell(headers, values, "references")));
+
+    Ok(CreateQuestionReq {
+        chapter_id,
+        difficulty: import_cell(headers, values, "difficulty").to_string(),
+        vignette: import_cell(headers, values, "vignette").to_string(),
+        lead_in: import_cell(headers, values, "lead_in").to_string(),
+        options,
+        correct_index: (correct_option - 1) as i16,
+        key_learning_point: import_cell(headers, values, "key_learning_point").to_string(),
+        exam_tip: optional_import_string(import_cell(headers, values, "exam_tip")),
+        hint: optional_import_string(import_cell(headers, values, "hint")),
+        high_yield,
+        source_ref,
+        rights_ref: optional_import_string(import_cell(headers, values, "rights_ref"))
+            .map(|value| value.to_ascii_uppercase()),
+        tags: split_import_list(import_cell(headers, values, "tags")),
+        source_refs,
+        media_refs: split_import_list(import_cell(headers, values, "media_refs")),
+    })
+}
+
+fn parse_import_table(
+    raw_headers: Vec<String>,
+    records: Vec<(usize, Vec<String>)>,
+) -> ApiResult<ParsedImport> {
+    if raw_headers.is_empty() || raw_headers.len() > MAX_IMPORT_COLUMNS {
+        return Err(import_file_error(
+            "row 1: header row is empty or has too many columns",
+        ));
+    }
+    let mut headers = HashMap::new();
+    for (index, raw) in raw_headers.iter().enumerate() {
+        let name = raw
+            .trim()
+            .trim_start_matches('\u{feff}')
+            .trim()
+            .to_ascii_lowercase();
+        if !is_import_header(&name) {
+            return Err(import_file_error(format!(
+                "row 1: unknown or empty column header: {name}"
+            )));
+        }
+        if headers.insert(name.clone(), index).is_some() {
+            return Err(import_file_error(format!(
+                "row 1: duplicate column header: {name}"
+            )));
+        }
+    }
+    for name in [
+        "chapter_id",
+        "difficulty",
+        "vignette",
+        "lead_in",
+        "option_1",
+        "rationale_1",
+        "option_2",
+        "rationale_2",
+        "correct_option",
+        "key_learning_point",
+        "source_ref",
+        "rights_ref",
+    ] {
+        if !headers.contains_key(name) {
+            return Err(import_file_error(format!(
+                "row 1: required column is missing: {name}"
+            )));
+        }
+    }
+
+    let header_count = raw_headers.len();
+    let mut parsed = ParsedImport::default();
+    for (row_number, values) in records {
+        if values.iter().all(|value| value.trim().is_empty()) {
+            continue;
+        }
+        parsed.total_rows += 1;
+        if parsed.total_rows > MAX_IMPORT_ROWS {
+            return Err(ApiError::unprocessable(
+                "invalid_row_count",
+                format!("import accepts 1-{MAX_IMPORT_ROWS} rows"),
+            ));
+        }
+        if values.len() > header_count {
+            parsed.issues.push(RowIssue {
+                row: row_number,
+                code: "too_many_cells",
+                message: "row has values beyond the last column header".into(),
+            });
+            continue;
+        }
+        match import_question(&headers, &values, row_number) {
+            Ok(row) => {
+                parsed.rows.push(row);
+                parsed.row_numbers.push(row_number);
+            }
+            Err(error) => parsed.issues.push(RowIssue {
+                row: row_number,
+                code: error.code,
+                message: error.message,
+            }),
+        }
+    }
+    Ok(parsed)
+}
+
+fn parse_csv_import(bytes: &[u8]) -> ApiResult<ParsedImport> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| import_file_error("CSV must use UTF-8 encoding"))?;
+    let mut reader = csv::ReaderBuilder::new()
+        .flexible(true)
+        .trim(csv::Trim::All)
+        .from_reader(text.as_bytes());
+    let headers = reader
+        .headers()
+        .map_err(|error| {
+            let row = error
+                .position()
+                .map(|position| position.record() as usize + 1)
+                .unwrap_or(1);
+            import_file_error(format!("row {row}: invalid CSV header: {error}"))
+        })?
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+    let mut records = Vec::new();
+    for (index, result) in reader.records().enumerate() {
+        let record = result.map_err(|error| {
+            let row = error
+                .position()
+                .map(|position| position.record() as usize + 1)
+                .unwrap_or(index + 2);
+            import_file_error(format!("row {row}: invalid CSV: {error}"))
+        })?;
+        let row_number = record
+            .position()
+            .map(|position| position.record() as usize + 1)
+            .unwrap_or(index + 2);
+        records.push((
+            row_number,
+            record.iter().map(|value| value.to_string()).collect(),
+        ));
+        if records.len() > MAX_IMPORT_ROWS {
+            return Err(ApiError::unprocessable(
+                "invalid_row_count",
+                format!("import accepts 1-{MAX_IMPORT_ROWS} rows"),
+            ));
+        }
+    }
+    parse_import_table(headers, records)
+}
+
+fn parse_xlsx_import(bytes: &[u8]) -> ApiResult<ParsedImport> {
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Err(import_file_error("file is not a valid .xlsx package"));
+    }
+    let mut workbook = calamine::open_workbook_auto_from_rs(Cursor::new(bytes))
+        .map_err(|_| import_file_error("file is not a readable .xlsx workbook"))?;
+    let sheet = workbook
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| import_file_error("workbook has no worksheets"))?;
+    let range = workbook
+        .worksheet_range(&sheet)
+        .map_err(|_| import_file_error("first worksheet could not be read"))?;
+    let (height, width) = range.get_size();
+    if height > MAX_IMPORT_ROWS + 1 || width > MAX_IMPORT_COLUMNS {
+        return Err(ApiError::unprocessable(
+            "invalid_row_count",
+            format!("worksheet must have at most {} rows and {} columns", MAX_IMPORT_ROWS + 1, MAX_IMPORT_COLUMNS),
+        ));
+    }
+    let formulas = workbook
+        .worksheet_formula(&sheet)
+        .map_err(|_| import_file_error("worksheet formulas could not be read"))?;
+    if let Some(row) = formulas.rows().enumerate().find_map(|(index, formulas)| {
+        formulas
+            .iter()
+            .any(|formula| !formula.trim().is_empty())
+            .then_some(index + 1)
+    }) {
+        return Err(import_file_error(format!(
+            "row {row}: worksheet formulas are not supported; replace them with values"
+        )));
+    }
+    let mut rows = range.rows();
+    let headers = rows
+        .next()
+        .ok_or_else(|| import_file_error("first worksheet is empty"))?
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let records = rows
+        .enumerate()
+        .map(|(index, row)| {
+            (
+                index + 2,
+                row.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    parse_import_table(headers, records)
+}
+
 /// Validate every row up front; report ALL issues, never just the first.
 async fn validate_rows(
-    pool: &sqlx::PgPool,
+    conn: &mut sqlx::postgres::PgConnection,
     exam_id: Uuid,
     rows: &[CreateQuestionReq],
+    row_numbers: &[usize],
 ) -> ApiResult<Vec<RowIssue>> {
     let mut issues = Vec::new();
+    let rights_refs: BTreeSet<String> = rows
+        .iter()
+        .filter_map(|row| row.rights_ref.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_uppercase)
+        .collect();
+    let mut active_rights = HashMap::new();
+    for rights_ref in rights_refs {
+        if let Some(rights) = sqlx::query(
+            "SELECT permitted_uses, asset_refs FROM content_rights
+             WHERE ref_code = $1 AND revoked_at IS NULL
+               AND valid_from <= CURRENT_DATE
+               AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+             FOR SHARE",
+        )
+        .bind(&rights_ref)
+        .fetch_optional(&mut *conn)
+        .await?
+        {
+            active_rights.insert(
+                rights_ref,
+                (
+                    rights.try_get::<serde_json::Value, _>("permitted_uses")?,
+                    rights.try_get::<serde_json::Value, _>("asset_refs")?,
+                ),
+            );
+        }
+    }
     for (i, row) in rows.iter().enumerate() {
+        let row_number = row_numbers.get(i).copied().unwrap_or(i + 1);
         let valid_chapter = sqlx::query!(
             "SELECT 1 AS one FROM curriculum_nodes
              WHERE id = $1 AND exam_id = $2 AND kind = 'chapter' AND status = 'active'",
             row.chapter_id,
             exam_id
         )
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await?
         .is_some();
         if !valid_chapter {
             issues.push(RowIssue {
-                row: i,
+                row: row_number,
                 code: "unknown_chapter",
                 message: "chapter_id is not an active chapter of this exam".into(),
             });
-            continue;
         }
-        if let Err(e) = validate_question(row) {
+        if let Err(error) = validate_question(row) {
             issues.push(RowIssue {
-                row: i,
-                code: e.code,
-                message: e.message,
+                row: row_number,
+                code: error.code,
+                message: error.message,
             });
         }
         if option_count(row.options.len()).is_err() {
             issues.push(RowIssue {
-                row: i,
+                row: row_number,
                 code: "invalid_option_count",
                 message: "questions need 2-10 options (QB-11)".into(),
             });
         }
+        if row.correct_index < 0 || row.correct_index as usize >= row.options.len() {
+            issues.push(RowIssue {
+                row: row_number,
+                code: "invalid_correct_index",
+                message: "correct option must select one populated option".into(),
+            });
+        }
+
+        let Some(rights_ref) = row
+            .rights_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            issues.push(RowIssue {
+                row: row_number,
+                code: "rights_ref_required",
+                message: "each imported question must name a content-rights record".into(),
+            });
+            continue;
+        };
+        let Some((permitted_uses, asset_refs)) = active_rights.get(&rights_ref.to_ascii_uppercase()) else {
+            issues.push(RowIssue {
+                row: row_number,
+                code: "rights_unavailable",
+                message: "rights_ref is missing, revoked, or outside its validity dates".into(),
+            });
+            continue;
+        };
+        let grants_use = |required: &str| {
+            permitted_uses
+                .as_array()
+                .is_some_and(|uses| uses.iter().any(|use_| use_.as_str() == Some(required)))
+        };
+        if !grants_use("display") || !grants_use("derivatives") {
+            issues.push(RowIssue {
+                row: row_number,
+                code: "rights_use_not_permitted",
+                message: "the rights record must permit both display and derivatives".into(),
+            });
+            continue;
+        }
+        let covers_asset = |required: &str| {
+            asset_refs.as_array().is_some_and(|assets| {
+                assets.iter().any(|asset| asset.as_str() == Some(required.trim()))
+            })
+        };
+        let source_refs = std::iter::once(row.source_ref.as_str())
+            .chain(row.source_refs.iter().map(String::as_str));
+        if source_refs.into_iter().any(|asset| !covers_asset(asset))
+            || row.media_refs.iter().any(|asset| !covers_asset(asset))
+        {
+            issues.push(RowIssue {
+                row: row_number,
+                code: "rights_asset_scope_incomplete",
+                message: "the rights record must cover the question source and every source/media reference".into(),
+            });
+        }
     }
     Ok(issues)
+}
+
+async fn import_rows(
+    state: Arc<AppState>,
+    user_id: Uuid,
+    exam_id: Uuid,
+    dry_run: bool,
+    mut parsed: ParsedImport,
+) -> ApiResult<Json<serde_json::Value>> {
+    if parsed.total_rows == 0 || parsed.total_rows > MAX_IMPORT_ROWS {
+        return Err(ApiError::unprocessable(
+            "invalid_row_count",
+            format!("import accepts 1-{MAX_IMPORT_ROWS} rows"),
+        ));
+    }
+    // Keep rights row locks through the batch write so revocation cannot race
+    // validation and leave a newly imported draft tied to an inactive grant.
+    let mut tx = state.pool.begin().await?;
+    parsed.issues.extend(
+        validate_rows(&mut *tx, exam_id, &parsed.rows, &parsed.row_numbers).await?,
+    );
+    let invalid_rows: HashSet<usize> = parsed.issues.iter().map(|issue| issue.row).collect();
+    let valid_count = parsed.total_rows.saturating_sub(invalid_rows.len());
+    let batch_id = Uuid::new_v4();
+
+    if dry_run || !parsed.issues.is_empty() {
+        let status = if dry_run { "dry_run" } else { "rejected" };
+        sqlx::query!(
+            "INSERT INTO import_batches (id, created_by, exam_id, status, summary)
+             VALUES ($1, $2, $3, $4, $5)",
+            batch_id,
+            user_id,
+            exam_id,
+            status,
+            json!({"rows": parsed.total_rows, "valid": valid_count, "issues": parsed.issues})
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Json(json!({
+            "batch_id": batch_id,
+            "status": status,
+            "rows": parsed.total_rows,
+            "valid": valid_count,
+            "issues": parsed.issues,
+        })));
+    }
+
+    let mut created: Vec<serde_json::Value> = Vec::new();
+    for row in &parsed.rows {
+        let (qid, vid) = insert_question_version(&mut tx, row, "draft", user_id).await?;
+        created.push(json!({"question_id": qid, "version_id": vid}));
+    }
+    sqlx::query!(
+        "INSERT INTO import_batches (id, created_by, exam_id, status, summary)
+         VALUES ($1, $2, $3, 'applied', $4)",
+        batch_id,
+        user_id,
+        exam_id,
+        json!({"rows": parsed.total_rows, "created": created})
+    )
+    .execute(&mut *tx)
+    .await?;
+    audit(
+        &mut *tx,
+        user_id,
+        "import_applied",
+        "import_batch",
+        batch_id,
+        json!({"rows": parsed.total_rows}),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "batch_id": batch_id,
+        "status": "applied",
+        "rows": parsed.total_rows,
+        "created": created,
+    })))
 }
 
 pub async fn import(
@@ -653,78 +1225,51 @@ pub async fn import(
     Json(req): Json<ImportReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
-    if req.rows.is_empty() || req.rows.len() > 500 {
-        return Err(ApiError::unprocessable(
-            "invalid_row_count",
-            "import accepts 1-500 rows",
-        ));
-    }
-    let issues = validate_rows(&state.pool, req.exam_id, &req.rows).await?;
-    let valid_count = req.rows.len() - issues.len();
-    let batch_id = Uuid::new_v4();
+    let ImportReq {
+        exam_id,
+        dry_run,
+        rows,
+        ..
+    } = req;
+    let total_rows = rows.len();
+    let row_numbers = (1..=total_rows).collect();
+    let parsed = ParsedImport {
+        rows,
+        row_numbers,
+        total_rows,
+        ..ParsedImport::default()
+    };
+    import_rows(state, user.user_id, exam_id, dry_run, parsed).await
+}
 
-    if req.dry_run || !issues.is_empty() {
-        // §19.5: dry run and failed validation create NOTHING — the batch is
-        // recorded as evidence either way.
-        let status = if req.dry_run { "dry_run" } else { "rejected" };
-        sqlx::query!(
-            "INSERT INTO import_batches (id, created_by, exam_id, status, summary)
-             VALUES ($1, $2, $3, $4, $5)",
-            batch_id,
-            user.user_id,
-            req.exam_id,
-            status,
-            json!({
-                "rows": req.rows.len(),
-                "valid": valid_count,
-                "issues": issues,
-            })
-        )
-        .execute(&state.pool)
-        .await?;
-        return Ok(Json(json!({
-            "batch_id": batch_id,
-            "status": status,
-            "rows": req.rows.len(),
-            "valid": valid_count,
-            "issues": issues,
-        })));
-    }
-
-    // Apply: every valid row in one transaction — all or nothing (§19.5).
-    let mut tx = state.pool.begin().await?;
-    let mut created: Vec<serde_json::Value> = Vec::new();
-    for row in &req.rows {
-        let (qid, vid) = insert_question_version(&mut tx, row, "draft", user.user_id).await?;
-        created.push(json!({"question_id": qid, "version_id": vid}));
-    }
-    sqlx::query!(
-        "INSERT INTO import_batches (id, created_by, exam_id, status, summary)
-         VALUES ($1, $2, $3, 'applied', $4)",
-        batch_id,
-        user.user_id,
-        req.exam_id,
-        json!({"rows": req.rows.len(), "created": created})
-    )
-    .execute(&mut *tx)
-    .await?;
-    audit(
-        &mut *tx,
-        user.user_id,
-        "import_applied",
-        "import_batch",
-        batch_id,
-        json!({"rows": req.rows.len()}),
-    )
-    .await?;
-    tx.commit().await?;
-
-    Ok(Json(json!({
-        "batch_id": batch_id,
-        "status": "applied",
-        "rows": req.rows.len(),
-        "created": created,
-    })))
+pub async fn import_file(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<ImportFileQuery>,
+    body: Bytes,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    let parsed = match content_type {
+        "text/csv" => parse_csv_import(&body)?,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+            parse_xlsx_import(&body)?
+        }
+        _ => {
+            return Err(import_file_error(
+                "use a UTF-8 .csv or .xlsx question template",
+            ))
+        }
+    };
+    import_rows(state, user.user_id, query.exam_id, query.dry_run, parsed).await
 }
 
 /// Rollback: removes the batch's questions. Refused honestly once any of
@@ -836,9 +1381,9 @@ pub async fn audit_log(
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
-    let rows = sqlx::query!(
-        r#"SELECT action, entity, entity_id, new_value, created_at
-           FROM audit_events ORDER BY created_at DESC LIMIT 50"#
+    let rows = sqlx::query(
+        "SELECT actor, action, entity, entity_id, old_value, new_value, created_at
+         FROM audit_events ORDER BY created_at DESC LIMIT 50",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -846,11 +1391,13 @@ pub async fn audit_log(
         .into_iter()
         .map(|r| {
             json!({
-                "action": r.action,
-                "entity": r.entity,
-                "entity_id": r.entity_id,
-                "new_value": r.new_value,
-                "at": r.created_at,
+                "actor": r.get::<Option<Uuid>, _>("actor"),
+                "action": r.get::<String, _>("action"),
+                "entity": r.get::<String, _>("entity"),
+                "entity_id": r.get::<Option<Uuid>, _>("entity_id"),
+                "old_value": r.get::<Option<serde_json::Value>, _>("old_value"),
+                "new_value": r.get::<Option<serde_json::Value>, _>("new_value"),
+                "at": r.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
             })
         })
         .collect();
@@ -1803,8 +2350,16 @@ pub async fn ai_admin(
     )
     .fetch_all(&state.pool)
     .await?;
+    let daily_allowance_per_learner = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "free_daily_coach_turns",
+        state.free_daily_coach_turns,
+        0,
+        1000,
+    )
+    .await?;
     Ok(Json(json!({
-        "daily_allowance_per_learner": state.free_daily_coach_turns,
+        "daily_allowance_per_learner": daily_allowance_per_learner,
         "turns_last_30_days": by_adapter.iter().map(|r| json!({
             "adapter": r.adapter, "model": r.model, "count": r.n
         })).collect::<Vec<_>>(),
@@ -1945,6 +2500,10 @@ pub struct VariantReq {
     pub hint: Option<String>,
     pub high_yield: Option<bool>,
     pub source_ref: String,
+    pub rights_ref: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub source_refs: Option<Vec<String>>,
+    pub media_refs: Option<Vec<String>>,
 }
 
 /// Author a NEW version of an existing question: same family identity, fresh
@@ -1958,6 +2517,21 @@ pub async fn create_variant(
 ) -> ApiResult<Json<serde_json::Value>> {
     state.require_admin(admin_headers(&headers))?;
     validate_hint_length(req.hint.as_deref())?;
+    if req
+        .rights_ref
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty() || value.trim().len() > 60)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_rights_ref",
+            "rights_ref must be 1-60 characters when supplied",
+        ));
+    }
+    validate_import_metadata(
+        req.tags.as_deref().unwrap_or_default(),
+        req.source_refs.as_deref().unwrap_or_default(),
+        req.media_refs.as_deref().unwrap_or_default(),
+    )?;
     let _family = sqlx::query!("SELECT family_id FROM questions WHERE id = $1", question_id)
         .fetch_optional(&state.pool)
         .await?
@@ -1974,15 +2548,18 @@ pub async fn create_variant(
     let options = serde_json::to_value(&req.options).map_err(|_| ApiError::internal())?;
     sqlx::query!(
         r#"INSERT INTO question_versions
-           (id, question_id, version, status, chapter_id, difficulty, vignette,
-            lead_in, options, correct_index, key_learning_point, exam_tip,
-            hint, high_yield, source_ref, created_by)
-           SELECT $1, q.id, $3, 'draft', qv.chapter_id, $4, $5, $6, $7, $8,
-                  $9, $10, $11, $12, $13, $14
-           FROM questions q
-           JOIN question_versions qv ON qv.question_id = q.id
-           WHERE q.id = $2
-           LIMIT 1"#,
+            (id, question_id, version, status, chapter_id, difficulty, vignette,
+             lead_in, options, correct_index, key_learning_point, exam_tip,
+              hint, high_yield, source_ref, created_by, tags, source_refs, media_refs, rights_ref)
+            SELECT $1, q.id, $3, 'draft', qv.chapter_id, $4, $5, $6, $7, $8,
+                   $9, $10, $11, $12, $13, $14,
+                    COALESCE($15, qv.tags), COALESCE($16, qv.source_refs), COALESCE($17, qv.media_refs),
+                    COALESCE($18, qv.rights_ref)
+            FROM questions q
+            JOIN question_versions qv ON qv.question_id = q.id
+            WHERE q.id = $2
+            ORDER BY qv.version DESC
+            LIMIT 1"#,
         vid,
         question_id,
         next_version,
@@ -1996,7 +2573,11 @@ pub async fn create_variant(
         req.hint,
         req.high_yield.unwrap_or(false),
         req.source_ref,
-        user.user_id
+        user.user_id,
+        req.tags,
+        req.source_refs,
+        req.media_refs,
+        req.rights_ref.map(|value| value.trim().to_ascii_uppercase())
     )
     .execute(&state.pool)
     .await?;

@@ -142,6 +142,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/admin/import", post(routes::admin::import))
         .route(
+            "/v1/admin/import-file",
+            post(routes::admin::import_file).layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route(
             "/v1/admin/import/{batch_id}/rollback",
             post(routes::admin::rollback_import),
         )
@@ -761,6 +765,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::admin::create_question).get(routes::admin::search_questions),
         )
         .route("/api/v1/admin/import", post(routes::admin::import))
+        .route(
+            "/api/v1/admin/import-file",
+            post(routes::admin::import_file).layer(DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
         .route(
             "/api/v1/admin/import/{batch_id}/rollback",
             post(routes::admin::rollback_import),

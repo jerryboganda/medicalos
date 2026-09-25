@@ -63,15 +63,17 @@ result. Do not mutate the plan, infer exam success, or create additional work.
 
 ## Remaining master-plan hard constraints
 
-The data model cannot establish whether each question's source license allows
-this learner's tier to use it: `content_rights` has no resource-version link,
-and `question_versions` has no rights reference. Offline leases prove server
-entitlement and device binding, but the client has no downloaded-pack receipt
-for this picker to verify. `learner_accommodations` has no shared capability
-vocabulary, so this slice accepts a per-request time adjustment; format and
-modality compatibility remain unverified. These are explicit platform gates,
-not inferred eligibility. AI-04 stays in progress until those links and their
-API/device acceptance are implemented.
+Question versions can now retain a `rights_ref`, and imports require an active
+display-and-derivatives grant whose asset scope covers all source and media
+references. The next-action candidate query does not yet recheck that grant or
+apply its audience and seat constraints, and legacy or manually authored
+versions may have no rights reference. Offline leases prove server entitlement
+and device binding, but the client has no downloaded-pack receipt for this
+picker to verify. `learner_accommodations` has no shared capability vocabulary,
+so this slice accepts a per-request time adjustment; format and modality
+compatibility remain unverified. These are explicit platform gates, not
+inferred eligibility. AI-04 stays in progress until runtime rights checks and
+the remaining API/device acceptance are implemented.
 
 ## Verification seam
 

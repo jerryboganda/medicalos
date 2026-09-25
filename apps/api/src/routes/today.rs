@@ -60,6 +60,14 @@ pub async fn next_action(
             "time_multiplier must be between 1 and 4",
         ));
     }
+    let free_daily_questions = crate::routes::settings::current_bounded_i64(
+        &state.pool,
+        "free_daily_questions",
+        state.free_daily_questions,
+        0,
+        5000,
+    )
+    .await?;
 
     let goal = sqlx::query!(
         r#"SELECT exam_date, (exam_date < CURRENT_DATE) AS "deadline_passed!"
@@ -223,8 +231,7 @@ pub async fn next_action(
         .filter(|(task, _)| task.kind == "practice")
         .map(|(task, _)| i64::from(task.question_count))
         .collect();
-    let remaining_free_questions = state
-        .free_daily_questions
+    let remaining_free_questions = free_daily_questions
         .saturating_sub(attempted_today)
         .max(0);
     let entitlement_blocked =
@@ -280,7 +287,7 @@ pub async fn next_action(
             },
             "allowance": if entitlement_blocked || allowance_insufficient {
                 Some(json!({
-                    "limit": state.free_daily_questions,
+                    "limit": free_daily_questions,
                     "used": attempted_today,
                     "remaining": remaining_free_questions,
                     "required": practice_question_counts.iter().min(),
