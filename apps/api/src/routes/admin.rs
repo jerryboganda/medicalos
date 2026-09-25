@@ -341,7 +341,11 @@ async fn insert_question_version(
     let qid = Uuid::new_v4();
     let vid = Uuid::new_v4();
     let options = serde_json::to_value(&req.options).map_err(|_| ApiError::internal())?;
-    let tags: Vec<String> = req.tags.iter().map(|value| value.trim().to_string()).collect();
+    let tags: Vec<String> = req
+        .tags
+        .iter()
+        .map(|value| value.trim().to_string())
+        .collect();
     let source_refs: Vec<String> = if req.source_refs.is_empty() {
         vec![req.source_ref.trim().to_string()]
     } else {
@@ -385,9 +389,9 @@ async fn insert_question_version(
         req.high_yield.unwrap_or(false),
         req.source_ref,
         created_by,
-        tags,
-        source_refs,
-        media_refs,
+        &tags,
+        &source_refs,
+        &media_refs,
         rights_ref,
     )
     .execute(&mut *pool)
@@ -719,14 +723,12 @@ fn is_import_header(header: &str) -> bool {
             | "tags"
             | "references"
             | "media_refs"
-    ) || ["option_", "rationale_"]
-        .iter()
-        .any(|prefix| {
-            header
-                .strip_prefix(prefix)
-                .and_then(|number| number.parse::<u8>().ok())
-                .is_some_and(|number| (1..=10).contains(&number))
-        })
+    ) || ["option_", "rationale_"].iter().any(|prefix| {
+        header
+            .strip_prefix(prefix)
+            .and_then(|number| number.parse::<u8>().ok())
+            .is_some_and(|number| (1..=10).contains(&number))
+    })
 }
 
 fn split_import_list(value: &str) -> Vec<String> {
@@ -743,11 +745,7 @@ fn optional_import_string(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn import_cell<'a>(
-    headers: &HashMap<String, usize>,
-    values: &'a [String],
-    name: &str,
-) -> &'a str {
+fn import_cell<'a>(headers: &HashMap<String, usize>, values: &'a [String], name: &str) -> &'a str {
     headers
         .get(name)
         .and_then(|index| values.get(*index))
@@ -802,7 +800,11 @@ fn import_question(
     };
     let source_ref = import_cell(headers, values, "source_ref").to_string();
     let mut source_refs = vec![source_ref.clone()];
-    source_refs.extend(split_import_list(import_cell(headers, values, "references")));
+    source_refs.extend(split_import_list(import_cell(
+        headers,
+        values,
+        "references",
+    )));
 
     Ok(CreateQuestionReq {
         chapter_id,
@@ -909,8 +911,8 @@ fn parse_import_table(
 }
 
 fn parse_csv_import(bytes: &[u8]) -> ApiResult<ParsedImport> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| import_file_error("CSV must use UTF-8 encoding"))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| import_file_error("CSV must use UTF-8 encoding"))?;
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::All)
@@ -972,7 +974,11 @@ fn parse_xlsx_import(bytes: &[u8]) -> ApiResult<ParsedImport> {
     if height > MAX_IMPORT_ROWS + 1 || width > MAX_IMPORT_COLUMNS {
         return Err(ApiError::unprocessable(
             "invalid_row_count",
-            format!("worksheet must have at most {} rows and {} columns", MAX_IMPORT_ROWS + 1, MAX_IMPORT_COLUMNS),
+            format!(
+                "worksheet must have at most {} rows and {} columns",
+                MAX_IMPORT_ROWS + 1,
+                MAX_IMPORT_COLUMNS
+            ),
         ));
     }
     let formulas = workbook
@@ -1097,7 +1103,9 @@ async fn validate_rows(
             });
             continue;
         };
-        let Some((permitted_uses, asset_refs)) = active_rights.get(&rights_ref.to_ascii_uppercase()) else {
+        let Some((permitted_uses, asset_refs)) =
+            active_rights.get(&rights_ref.to_ascii_uppercase())
+        else {
             issues.push(RowIssue {
                 row: row_number,
                 code: "rights_unavailable",
@@ -1120,7 +1128,9 @@ async fn validate_rows(
         }
         let covers_asset = |required: &str| {
             asset_refs.as_array().is_some_and(|assets| {
-                assets.iter().any(|asset| asset.as_str() == Some(required.trim()))
+                assets
+                    .iter()
+                    .any(|asset| asset.as_str() == Some(required.trim()))
             })
         };
         let source_refs = std::iter::once(row.source_ref.as_str())
@@ -1154,9 +1164,9 @@ async fn import_rows(
     // Keep rights row locks through the batch write so revocation cannot race
     // validation and leave a newly imported draft tied to an inactive grant.
     let mut tx = state.pool.begin().await?;
-    parsed.issues.extend(
-        validate_rows(&mut *tx, exam_id, &parsed.rows, &parsed.row_numbers).await?,
-    );
+    parsed
+        .issues
+        .extend(validate_rows(&mut *tx, exam_id, &parsed.rows, &parsed.row_numbers).await?);
     let invalid_rows: HashSet<usize> = parsed.issues.iter().map(|issue| issue.row).collect();
     let valid_count = parsed.total_rows.saturating_sub(invalid_rows.len());
     let batch_id = Uuid::new_v4();
@@ -2574,9 +2584,9 @@ pub async fn create_variant(
         req.high_yield.unwrap_or(false),
         req.source_ref,
         user.user_id,
-        req.tags,
-        req.source_refs,
-        req.media_refs,
+        &req.tags,
+        &req.source_refs,
+        &req.media_refs,
         req.rights_ref.map(|value| value.trim().to_ascii_uppercase())
     )
     .execute(&state.pool)
