@@ -2584,9 +2584,9 @@ pub async fn create_variant(
         req.high_yield.unwrap_or(false),
         req.source_ref,
         user.user_id,
-        &req.tags,
-        &req.source_refs,
-        &req.media_refs,
+        req.tags.as_deref(),
+        req.source_refs.as_deref(),
+        req.media_refs.as_deref(),
         req.rights_ref.map(|value| value.trim().to_ascii_uppercase())
     )
     .execute(&state.pool)
