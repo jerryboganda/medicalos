@@ -12418,7 +12418,10 @@ async fn library_media_and_image_cases_are_rights_checked() {
                     {"url": "https://cdn.example.test/slice-1.png", "rights_ref": "LIC-2026-015"},
                     {"url": "https://cdn.example.test/slice-2.png", "rights_ref": second_rights_ref}
                 ],
-                "findings": "Fixture findings on the stack."
+                "findings": [
+                    {"section": "Impression", "text": "Fixture findings on the stack."},
+                    {"section": "Context", "text": "Synthetic educational example."}
+                ]
             })),
         ),
     )
