@@ -201,9 +201,11 @@ async fn ensure_current_memberships(
         if !was_left {
             if let (Some(cohort_id), Some(previous_division)) = (prior_cohort_id, prior_division) {
                 division = previous_division;
-                if !movements_by_cohort.contains_key(&cohort_id) {
+                if let std::collections::hash_map::Entry::Vacant(entry) =
+                    movements_by_cohort.entry(cohort_id)
+                {
                     let movements = cohort_movements(tx, cohort_id, previous_week).await?;
-                    movements_by_cohort.insert(cohort_id, movements);
+                    entry.insert(movements);
                 }
                 if let Some(moved_division) = movements_by_cohort
                     .get(&cohort_id)

@@ -1220,7 +1220,7 @@ pub async fn start_competition_entry(
     let option_order: Vec<usize> = serde_json::from_value(attempt.try_get("option_order")?)
         .map_err(|_| ApiError::internal())?;
     let question = present_competition_question(
-        &mut *tx,
+        &mut tx,
         current_question_id,
         &option_order,
         position,
@@ -1514,7 +1514,7 @@ pub async fn answer_competition_question(
         let mut next_option_order: Vec<usize> = (0..next_option_count).collect();
         next_option_order.shuffle(&mut rand::thread_rng());
         let next_question = present_competition_question(
-            &mut *tx,
+            &mut tx,
             next_question_id,
             &next_option_order,
             next_position,
