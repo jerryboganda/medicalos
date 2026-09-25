@@ -804,7 +804,7 @@ pub async fn create_image_case(
         .join("\n\n");
     let findings_structured = serde_json::to_value(&findings).map_err(|_| ApiError::internal())?;
     let mut tx = state.pool.begin().await?;
-    require_display_rights(&mut *tx, &req.images).await?;
+    require_display_rights(&mut tx, &req.images).await?;
     let case_kind = req.kind.clone();
     let image_count = req.images.len();
     let id = Uuid::new_v4();
@@ -863,7 +863,7 @@ pub async fn list_image_cases(
     let mut tx = state.pool.begin().await?;
     // Hold shared locks until this response is fully read so a concurrent
     // license revocation cannot commit between the rights check and delivery.
-    let active_refs = active_display_refs(&mut *tx, None).await?;
+    let active_refs = active_display_refs(&mut tx, None).await?;
     let active_ref_list = active_refs.iter().cloned().collect::<Vec<_>>();
     let rows = sqlx::query_as::<_, ImageCaseRow>(
         r#"SELECT id, title, kind, images, findings_structured, modality
@@ -959,7 +959,7 @@ pub async fn get_image_case(
     if images.is_empty() {
         return Err(ApiError::not_found("image_case_not_found"));
     }
-    require_display_rights(&mut *tx, &images).await?;
+    require_display_rights(&mut tx, &images).await?;
     // IMG-02: only independently approved annotations reach learners.
     let annotations = sqlx::query_as::<_, ApprovedImageAnnotation>(
         r#"SELECT a.case_id, a.id, a.image_index, a.x_percent, a.y_percent, a.body
@@ -1056,7 +1056,7 @@ pub async fn create_image_annotation(
             "image_index must refer to an image in this case",
         ));
     }
-    require_display_rights(&mut *tx, &images).await?;
+    require_display_rights(&mut tx, &images).await?;
     let id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO image_case_annotations

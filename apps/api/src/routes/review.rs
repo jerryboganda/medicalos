@@ -431,7 +431,7 @@ pub async fn apply_review(
             }
         }
     }
-    let (used_new_cards, used_reviews) = daily_review_usage(&mut *tx, user_id, reviewed_at).await?;
+    let (used_new_cards, used_reviews) = daily_review_usage(&mut tx, user_id, reviewed_at).await?;
     let (used, cap, code, message) = if was_new {
         (
             used_new_cards,

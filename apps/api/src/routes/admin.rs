@@ -1166,7 +1166,7 @@ async fn import_rows(
     let mut tx = state.pool.begin().await?;
     parsed
         .issues
-        .extend(validate_rows(&mut *tx, exam_id, &parsed.rows, &parsed.row_numbers).await?);
+        .extend(validate_rows(&mut tx, exam_id, &parsed.rows, &parsed.row_numbers).await?);
     let invalid_rows: HashSet<usize> = parsed.issues.iter().map(|issue| issue.row).collect();
     let valid_count = parsed.total_rows.saturating_sub(invalid_rows.len());
     let batch_id = Uuid::new_v4();
