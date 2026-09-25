@@ -1186,7 +1186,7 @@ pub async fn review_image_annotation(
             "the annotation no longer points to an image in this case",
         ));
     }
-    require_display_rights(&mut *tx, &images).await?;
+    require_display_rights(&mut tx, &images).await?;
     let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO image_case_annotation_reviews
            (annotation_id, reviewer_id, decision, note)
