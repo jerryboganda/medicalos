@@ -993,6 +993,8 @@ pub struct AnswerCompetitionQuestionReq {
     pub question_version_id: Uuid,
     pub chosen_index: i64,
     pub idempotency_key: Uuid,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
 }
 
 #[derive(Deserialize, serde::Serialize)]
@@ -1242,6 +1244,12 @@ pub async fn answer_competition_question(
     Path(comp_id): Path<Uuid>,
     Json(req): Json<AnswerCompetitionQuestionReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    if req.elapsed_ms.is_some() {
+        return Err(ApiError::bad_request(
+            "client_timing_not_allowed",
+            "elapsed_ms is measured by the server",
+        ));
+    }
     let mut tx = state.pool.begin().await?;
     let attempt = sqlx::query(
         "SELECT attempt.id, attempt.handle, attempt.question_ids, attempt.current_index,

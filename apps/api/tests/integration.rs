@@ -6925,7 +6925,7 @@ async fn competition_scoring_snapshots_policy_and_scores_server_timed_answers() 
             .unwrap();
         let first_options = first_question["options"].as_array().unwrap().len();
         if competition_id == custom_id {
-            let extra_time = call(
+            let (extra_time_status, extra_time_error) = call(
                 app.clone(),
                 request(
                     "POST",
@@ -6941,9 +6941,13 @@ async fn competition_scoring_snapshots_policy_and_scores_server_timed_answers() 
             )
             .await;
             assert_eq!(
-                extra_time.0,
+                extra_time_status,
                 StatusCode::BAD_REQUEST,
                 "client time is rejected"
+            );
+            assert_eq!(
+                extra_time_error["error"]["code"],
+                "client_timing_not_allowed"
             );
 
             let other_question = qids
@@ -15933,6 +15937,14 @@ async fn variants_trends_drills_regression_and_qti() {
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
 
+    let (status, denied_search) = call(
+        app.clone(),
+        request("GET", "/v1/admin/questions?q=Variant", Some(&author), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_search}");
+    assert_eq!(denied_search["error"]["code"], "admin_required");
+
     // QB-02: author a second version on an existing family, through the gate.
     let original = ids.question_versions[0];
     sqlx::query("UPDATE question_versions SET rights_ref = $2 WHERE id = $1")
@@ -16011,6 +16023,23 @@ async fn variants_trends_drills_regression_and_qti() {
         .find(|question| question["version_id"] == variant_vid.to_string())
         .expect("variant is visible through the admin API");
     assert_eq!(variant_question["rights_ref"], "VARIANT-SOURCE-RIGHTS");
+
+    let (status, invalid_chapter) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            "/v1/admin/questions?chapter_id=not-a-uuid",
+            Some(&author),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_chapter}"
+    );
+    assert_eq!(invalid_chapter["error"]["code"], "invalid_chapter_id");
 
     // The v2 draft goes through the §19.3 gate like any item.
     let (status, wf) = call(

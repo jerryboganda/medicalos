@@ -618,10 +618,19 @@ pub async fn assessment_workflow(
 pub async fn search_questions(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
+    headers: axum::http::HeaderMap,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(admin_headers(&headers))?;
     let pattern = format!("%{}%", q.get("q").map(String::as_str).unwrap_or(""));
-    let chapter_id = q.get("chapter_id").and_then(|s| Uuid::parse_str(s).ok());
+    let chapter_id = q
+        .get("chapter_id")
+        .map(|value| {
+            Uuid::parse_str(value).map_err(|_| {
+                ApiError::unprocessable("invalid_chapter_id", "chapter_id must be a UUID")
+            })
+        })
+        .transpose()?;
     let status = q.get("status").map(String::as_str);
     let rows = sqlx::query!(
         r#"SELECT qv.question_id, qv.id AS version_id, qv.vignette, qv.status,
@@ -631,7 +640,7 @@ pub async fn search_questions(
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE qv.status = COALESCE($2, qv.status)
              AND qv.vignette ILIKE $1
-             AND qv.chapter_id IS NOT DISTINCT FROM $3
+             AND ($3::UUID IS NULL OR qv.chapter_id = $3)
            ORDER BY qv.question_id, qv.version
            LIMIT 50"#,
         pattern,
