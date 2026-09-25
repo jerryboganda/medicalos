@@ -231,9 +231,7 @@ pub async fn next_action(
         .filter(|(task, _)| task.kind == "practice")
         .map(|(task, _)| i64::from(task.question_count))
         .collect();
-    let remaining_free_questions = free_daily_questions
-        .saturating_sub(attempted_today)
-        .max(0);
+    let remaining_free_questions = free_daily_questions.saturating_sub(attempted_today).max(0);
     let entitlement_blocked =
         is_free_tier && remaining_free_questions == 0 && !practice_question_counts.is_empty();
     let allowance_insufficient = is_free_tier

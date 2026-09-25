@@ -811,7 +811,7 @@ pub async fn create_image_case(
     sqlx::query(
         "INSERT INTO image_cases
            (id, title, kind, images, findings, findings_structured, modality, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(id)
     .bind(title)
@@ -1008,8 +1008,7 @@ pub struct ImageAnnotationReq {
 
 fn contains_markup_tag(text: &str) -> bool {
     text.as_bytes().windows(2).any(|pair| {
-        pair[0] == b'<'
-            && (pair[1].is_ascii_alphabetic() || matches!(pair[1], b'/' | b'!' | b'?'))
+        pair[0] == b'<' && (pair[1].is_ascii_alphabetic() || matches!(pair[1], b'/' | b'!' | b'?'))
     })
 }
 

@@ -31,7 +31,10 @@ pub struct SettingsReq {
 }
 
 fn valid_mastery_bands(values: &[i32]) -> bool {
-    values.len() == 2 && (0..=3000).contains(&values[0]) && values[0] < values[1] && values[1] <= 3000
+    values.len() == 2
+        && (0..=3000).contains(&values[0])
+        && values[0] < values[1]
+        && values[1] <= 3000
 }
 
 fn valid_retest_intervals(values: &[i64]) -> bool {
@@ -219,7 +222,10 @@ pub async fn update_settings(
         ));
     }
 
-    let keys = pairs.iter().map(|(key, _)| (*key).to_string()).collect::<Vec<_>>();
+    let keys = pairs
+        .iter()
+        .map(|(key, _)| (*key).to_string())
+        .collect::<Vec<_>>();
     let mut tx = state.pool.begin().await?;
     // Keep the before-values and audit receipt consistent across concurrent admins.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('medical-os-admin-settings', 0))")
@@ -298,8 +304,11 @@ pub async fn get_settings(
     {
         mastery_bands = vec![1400, 1600];
     }
-    let mut retest_intervals =
-        stored_i64_list(&stored, "retest_intervals_days", &DEFAULT_RETEST_INTERVAL_DAYS);
+    let mut retest_intervals = stored_i64_list(
+        &stored,
+        "retest_intervals_days",
+        &DEFAULT_RETEST_INTERVAL_DAYS,
+    );
     if !valid_retest_intervals(&retest_intervals) {
         retest_intervals = DEFAULT_RETEST_INTERVAL_DAYS.to_vec();
     }
@@ -330,5 +339,7 @@ pub async fn public_settings(
         5000,
     )
     .await?;
-    Ok(Json(json!({ "free_daily_questions": free_daily_questions })))
+    Ok(Json(
+        json!({ "free_daily_questions": free_daily_questions }),
+    ))
 }

@@ -116,7 +116,7 @@ test('administrator downloads the question template and previews a CSV import', 
 		if (url.pathname.endsWith('/import-file')) {
 			upload = {
 				url: url.toString(),
-				contentType: route.request().headerValue('content-type') ?? undefined,
+				contentType: route.request().headers()['content-type'],
 				body: route.request().postData()
 			};
 			await route.fulfill({

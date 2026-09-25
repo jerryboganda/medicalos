@@ -388,8 +388,8 @@ pub async fn apply_review(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| ApiError::not_found("card_not_found"))?;
-        let cs: scheduler::CardState = serde_json::from_value(card.try_get("state")?)
-            .map_err(|_| ApiError::internal())?;
+        let cs: scheduler::CardState =
+            serde_json::from_value(card.try_get("state")?).map_err(|_| ApiError::internal())?;
         tx.commit().await?;
         return Ok(Json(serde_json::json!({
             "already_recorded": true,
@@ -406,8 +406,8 @@ pub async fn apply_review(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("card_not_found"))?;
-    let current: scheduler::CardState = serde_json::from_value(row.try_get("state")?)
-        .map_err(|_| ApiError::internal())?;
+    let current: scheduler::CardState =
+        serde_json::from_value(row.try_get("state")?).map_err(|_| ApiError::internal())?;
     let was_new = current.state == 0;
     let reviewed_at = chrono::Utc::now();
 
@@ -488,8 +488,8 @@ pub async fn apply_review(
             .bind(user_id)
             .fetch_one(&mut *tx)
             .await?;
-        let card_state: scheduler::CardState = serde_json::from_value(card.try_get("state")?)
-            .map_err(|_| ApiError::internal())?;
+        let card_state: scheduler::CardState =
+            serde_json::from_value(card.try_get("state")?).map_err(|_| ApiError::internal())?;
         tx.commit().await?;
         return Ok(Json(serde_json::json!({
             "already_recorded": true,

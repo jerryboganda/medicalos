@@ -130,12 +130,9 @@ pub async fn mastery_heatmap(
         .await?;
     }
     // Mastery bands: config override, else the §24 default quad-points.
-    let mut bands = crate::routes::settings::current_i64_list(
-        &state.pool,
-        "mastery_bands",
-        &[1400, 1600],
-    )
-    .await?;
+    let mut bands =
+        crate::routes::settings::current_i64_list(&state.pool, "mastery_bands", &[1400, 1600])
+            .await?;
     if bands.len() != 2
         || !(0..=3000).contains(&bands[0])
         || bands[0] >= bands[1]

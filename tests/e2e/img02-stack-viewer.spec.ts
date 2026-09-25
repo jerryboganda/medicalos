@@ -283,7 +283,7 @@ test('editor submits an annotation and a reviewer makes one final decision', asy
 	await page.getByLabel('Image number').fill('2');
 	await page.getByLabel('Horizontal position (%)').fill('30');
 	await page.getByLabel('Vertical position (%)').fill('64');
-	await page.getByLabel('Annotation').fill('A bounded editorial note.');
+	await page.getByRole('textbox', { name: 'Annotation' }).fill('A bounded editorial note.');
 	await page.getByRole('button', { name: 'Submit annotation for review' }).click();
 	await expect(page.getByTestId('image-annotation-created-annotation')).toContainText('A bounded editorial note.');
 	expect(createdAnnotation).toMatchObject({
