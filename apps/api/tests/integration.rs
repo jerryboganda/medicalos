@@ -10999,7 +10999,7 @@ async fn community_post_reports_are_private_and_moderator_resolutions_are_audite
         app.clone(),
         request(
             "GET",
-            &format!("/v1/community/me/reports"),
+            "/v1/community/me/reports",
             Some(&first_reporter),
             None,
         ),
