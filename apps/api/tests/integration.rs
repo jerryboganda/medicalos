@@ -12718,12 +12718,168 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
     assert_eq!(stale_body["error"]["code"], "stale_plan_version");
 }
 
+async fn insert_test_question_rights(pool: &sqlx::PgPool, question_ids: &[Uuid]) -> String {
+    let assets: Vec<String> = sqlx::query_scalar(
+        r#"SELECT DISTINCT refs.asset_ref
+           FROM question_versions qv
+           CROSS JOIN LATERAL unnest(ARRAY[qv.source_ref] || qv.source_refs || qv.media_refs)
+             AS refs(asset_ref)
+           WHERE qv.id = ANY($1)"#,
+    )
+    .bind(question_ids.to_vec())
+    .fetch_all(pool)
+    .await
+    .expect("load synthetic question asset references");
+    let rights_ref = format!("AI04-TEST-{}", Uuid::new_v4().simple());
+    sqlx::query(
+        "INSERT INTO content_rights
+           (id, ref_code, licensor, permitted_uses, valid_from, asset_refs, audiences)
+         VALUES ($1, $2, 'Synthetic test fixture', $3, CURRENT_DATE, $4, $5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(&rights_ref)
+    .bind(serde_json::json!(["display"]))
+    .bind(serde_json::json!(assets))
+    .bind(serde_json::json!(["learners"]))
+    .execute(pool)
+    .await
+    .expect("add active rights for synthetic questions");
+    sqlx::query("UPDATE question_versions SET rights_ref = $1 WHERE id = ANY($2)")
+        .bind(&rights_ref)
+        .bind(question_ids.to_vec())
+        .execute(pool)
+        .await
+        .expect("link synthetic questions to their test rights");
+    rights_ref
+}
+
+async fn assert_next_action_content_unavailable(app: Router, token: &str) {
+    let (status, response) = call(
+        app,
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=60&activity_preference=practice",
+            Some(token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["reason_code"], "content_unavailable", "{response}");
+    assert!(response["recommended_action"].is_null(), "{response}");
+}
+
+#[tokio::test]
+async fn ai04_next_action_rechecks_live_question_rights() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let rights_ref = insert_test_question_rights(&state.pool, &ids.question_versions).await;
+
+    let (status, today) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{today}");
+    let plan_id: Uuid = today["plan_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "UPDATE plan_tasks SET question_count = 1, estimated_minutes = 5
+         WHERE plan_id = $1 AND kind = 'practice' AND status = 'pending'",
+    )
+    .bind(plan_id)
+    .execute(&state.pool)
+    .await
+    .expect("make synthetic practice tasks fit the time budget");
+
+    let (status, eligible) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/me/plan/next-action?available_minutes=60&activity_preference=practice",
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{eligible}");
+    assert!(eligible["recommended_action"].is_object(), "{eligible}");
+
+    let asset_refs: Value =
+        sqlx::query_scalar("SELECT asset_refs FROM content_rights WHERE ref_code = $1")
+            .bind(&rights_ref)
+            .fetch_one(&state.pool)
+            .await
+            .expect("read test rights asset scope");
+
+    sqlx::query("UPDATE content_rights SET revoked_at = now() WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .execute(&state.pool)
+        .await
+        .expect("revoke test rights");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query("UPDATE content_rights SET revoked_at = NULL, audiences = $2 WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .bind(serde_json::json!(["instructors"]))
+        .execute(&state.pool)
+        .await
+        .expect("restrict rights to a different audience");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query("UPDATE content_rights SET audiences = $2, seat_limit = 1 WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .bind(serde_json::json!(["learners"]))
+        .execute(&state.pool)
+        .await
+        .expect("set a seat cap without a supported seat roster");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query(
+        "UPDATE content_rights SET seat_limit = NULL, asset_refs = '[]' WHERE ref_code = $1",
+    )
+    .bind(&rights_ref)
+    .execute(&state.pool)
+    .await
+    .expect("remove the question source from the rights scope");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query(
+        "UPDATE content_rights SET asset_refs = $2, permitted_uses = $3 WHERE ref_code = $1",
+    )
+    .bind(&rights_ref)
+    .bind(asset_refs)
+    .bind(serde_json::json!(["search"]))
+    .execute(&state.pool)
+    .await
+    .expect("remove display permission from the rights record");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query("UPDATE content_rights SET permitted_uses = $2, valid_to = CURRENT_DATE - 1 WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .bind(serde_json::json!(["display"]))
+        .execute(&state.pool)
+        .await
+        .expect("expire the test rights");
+    assert_next_action_content_unavailable(app.clone(), &learner).await;
+
+    sqlx::query("UPDATE question_versions SET rights_ref = NULL WHERE id = ANY($1)")
+        .bind(ids.question_versions.to_vec())
+        .execute(&state.pool)
+        .await
+        .expect("remove the question rights references");
+    assert_next_action_content_unavailable(app, &learner).await;
+}
+
 #[tokio::test]
 async fn ai04_free_allowance_is_atomic_at_answer_and_fits_full_tasks() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    seed::seed(&state.pool).await.expect("seed");
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    insert_test_question_rights(&state.pool, &ids.question_versions).await;
     let learner = register_and_login(app.clone()).await;
     let learner_token_hash = Sha256::digest(learner.as_bytes())
         .iter()
@@ -12987,6 +13143,7 @@ async fn ai04_next_action_respects_time_evidence_and_current_plan() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
     let learner = register_and_login(app.clone()).await;
+    insert_test_question_rights(&state.pool, &ids.question_versions).await;
     let learner_id: Uuid =
         sqlx::query_scalar("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")
             .fetch_one(&state.pool)

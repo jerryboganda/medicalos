@@ -1,9 +1,9 @@
 # AI-04 — Time-budgeted next action
 
-Status: ready-for-agent
+Status: in-progress
 Requirement IDs: AI-04, AI-02, AI-08, PLAN-02
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§8.4–8.8
-Implementation state: current-plan selection, protected work, activity/time preferences, free-tier caps and exam-date states are implemented; content rights, verified offline availability, broad accessibility metadata and CI remain.
+Implementation state: current-plan selection, protected work, activity/time preferences, free-tier caps, exam-date states, and active display-rights/audience checks are implemented; finite-seat grants fail closed until a seat-allocation lifecycle exists; verified offline availability, broad accessibility metadata, and final CI remain.
 
 ## Problem statement
 
@@ -31,9 +31,11 @@ result. Do not mutate the plan, infer exam success, or create additional work.
   session entitlement is currently available. A missing plan returns
   `no_current_plan` without creating plan rows.
 - A task is eligible only when the same published, quarantine and reserved-item
-  rules used at launch can supply the exact planned question count. If fitting
-  work exists but no task has enough available questions, return
-  `content_unavailable`.
+  rules used at launch can supply the exact planned question count, and its
+  question versions have active, unrevoked display rights covering every
+  source and media reference. A missing rights reference, unsupported audience,
+  or finite seat cap fails closed. If fitting work exists but no task has
+  enough eligible questions, return `content_unavailable`.
 - Fitting protected tasks outrank other candidates and report
   `protected_task`; an explicit activity preference filters other candidates.
 - The learner may apply a 1–4× time adjustment for reading or interaction
@@ -63,17 +65,20 @@ result. Do not mutate the plan, infer exam success, or create additional work.
 
 ## Remaining master-plan hard constraints
 
-Question versions can now retain a `rights_ref`, and imports require an active
+Question versions retain a `rights_ref`, and imports require an active
 display-and-derivatives grant whose asset scope covers all source and media
-references. The next-action candidate query does not yet recheck that grant or
-apply its audience and seat constraints, and legacy or manually authored
-versions may have no rights reference. Offline leases prove server entitlement
-and device binding, but the client has no downloaded-pack receipt for this
-picker to verify. `learner_accommodations` has no shared capability vocabulary,
-so this slice accepts a per-request time adjustment; format and modality
-compatibility remain unverified. These are explicit platform gates, not
-inferred eligibility. AI-04 stays in progress until runtime rights checks and
-the remaining API/device acceptance are implemented.
+references. The next-action candidate query now rechecks an active display
+grant, audience scope, and every source/media reference; missing references and
+unsupported scopes fail closed. Finite `seat_limit` grants are withheld until a
+durable seat-allocation and release policy exists, rather than estimating
+remaining seats. Legacy or manually authored versions without rights references
+are unavailable to this picker. Offline leases prove server entitlement and
+device binding, but the client has no downloaded-pack receipt for this picker
+to verify. `learner_accommodations` has no shared capability vocabulary, so
+this slice accepts a per-request time adjustment; format and modality
+compatibility remain unverified. Rights-contract authenticity, offline
+availability, accessibility compatibility, and device acceptance remain
+explicit gates. Final API/CI verification is still pending.
 
 ## Verification seam
 
@@ -95,6 +100,13 @@ generated artifacts; final GitHub Actions is the acceptance gate.
 - Pool counts mirror the linked session launch filters, so quarantined or
   reserved content and revision sources with too few eligible questions are
   not recommended.
+- Next-action pool counts now require a current, unrevoked display grant whose
+  asset scope covers the question's source and media references. Unrestricted
+  audiences and explicit `learners`/`all` audiences are eligible; missing or
+  unsupported audiences fail closed. Finite seat caps are withheld because the
+  platform has no durable seat-allocation and release policy to check safely.
+- API regressions cover active rights, revocation, audience, seat cap, source
+  scope, display permission, expiry, and missing rights references.
 - Only free-tier practice uses the free daily cap, and revision attempts are
   excluded from its usage count. Answer inserts serialize on the learner row
   and enforce the cap at the write boundary; next-action and linked task launch

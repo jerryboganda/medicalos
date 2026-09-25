@@ -127,26 +127,52 @@ pub async fn next_action(
     .fetch_one(&state.pool)
     .await?;
     let candidates = sqlx::query!(
-        r#"SELECT t.id, t.task_key, t.kind, t.title, t.chapter_id, t.source_session_id,
+        r#"WITH eligible_questions AS (
+               SELECT qv.id, qv.chapter_id
+               FROM question_versions qv
+               WHERE qv.status = 'published'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM question_reports r
+                     WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM reserved_questions rq
+                     WHERE rq.question_version_id = qv.id
+                 )
+                 AND EXISTS (
+                     SELECT 1 FROM content_rights rights
+                     WHERE rights.ref_code = UPPER(BTRIM(qv.rights_ref))
+                       AND rights.revoked_at IS NULL
+                       AND rights.valid_from <= CURRENT_DATE
+                       AND (rights.valid_to IS NULL OR rights.valid_to >= CURRENT_DATE)
+                       AND rights.permitted_uses @> '["display"]'::jsonb
+                       AND (rights.audiences = '[]'::jsonb OR EXISTS (
+                           SELECT 1
+                           FROM jsonb_array_elements_text(rights.audiences) AS audiences(audience)
+                           WHERE LOWER(BTRIM(audiences.audience)) IN ('learners', 'all')
+                       ))
+                       -- No seat-allocation ledger exists, so capped grants fail closed.
+                       AND rights.seat_limit IS NULL
+                       AND rights.asset_refs @> jsonb_build_array(qv.source_ref)
+                       AND NOT EXISTS (
+                           SELECT 1
+                           FROM unnest(qv.source_refs || qv.media_refs) AS refs(asset_ref)
+                           WHERE NOT (rights.asset_refs @> jsonb_build_array(refs.asset_ref))
+                       )
+                 )
+           )
+           SELECT t.id, t.task_key, t.kind, t.title, t.chapter_id, t.source_session_id,
                   t.question_count, t.estimated_minutes, t.protected,
                   CASE t.kind
                       WHEN 'practice' THEN (
                           SELECT COUNT(*)
-                          FROM question_versions qv
-                          WHERE qv.status = 'published' AND qv.chapter_id = t.chapter_id
-                            AND NOT EXISTS (
-                                SELECT 1 FROM question_reports r
-                                WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
-                            )
-                            AND NOT EXISTS (
-                                SELECT 1 FROM reserved_questions rq
-                                WHERE rq.question_version_id = qv.id
-                            )
+                          FROM eligible_questions qv
+                          WHERE qv.chapter_id = t.chapter_id
                       )
                       WHEN 'revision' THEN (
                           SELECT COUNT(DISTINCT qv.id)
-                          FROM question_versions qv
-                          WHERE qv.status = 'published' AND t.source_session_id IS NOT NULL
+                          FROM eligible_questions qv
+                          WHERE t.source_session_id IS NOT NULL
                             AND EXISTS (
                                 SELECT 1 FROM practice_sessions source
                                 WHERE source.id = t.source_session_id
@@ -169,10 +195,6 @@ pub async fn next_action(
                                             AND a.item_index = si.item_index
                                       )
                                 )
-                            )
-                            AND NOT EXISTS (
-                                SELECT 1 FROM question_reports r
-                                WHERE r.question_version_id = qv.id AND r.status = 'quarantined'
                             )
                       )
                       ELSE 0
