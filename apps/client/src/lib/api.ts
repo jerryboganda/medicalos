@@ -577,6 +577,79 @@ export interface AdminSettings {
 	offline_lease_days: number;
 	max_reviews_per_day: number;
 	max_new_cards_per_day: number;
+	competition_difficulty_points: number[];
+}
+
+export interface CompetitionSummary {
+	competition_id: string;
+	title: string;
+	exam_id: string;
+	exam: string;
+	cadence: 'one_off' | 'daily' | 'weekly' | 'monthly' | 'live';
+	series_id: string | null;
+	starts_at: string;
+	ends_at: string;
+	status: string;
+	entered: boolean;
+	attempt_status: 'in_progress' | 'submitted' | null;
+}
+
+export interface CompetitionLeagueStanding {
+	rank: number;
+	handle: string;
+	points: number;
+	accuracy: number;
+	total_time_ms: number;
+	is_me: boolean;
+}
+
+export type CompetitionLeagueState =
+	| { joined: false }
+	| {
+			joined: true;
+			exam_id: string;
+			cohort_id: string;
+			week_start: string;
+			week_end: string;
+			division: number;
+			cohort_number: number;
+			standings: CompetitionLeagueStanding[];
+	  };
+
+export interface CompetitionQuestion {
+	question_version_id: string;
+	question_number: number;
+	total_questions: number;
+	vignette: string;
+	lead_in: string;
+	options: { text: string }[];
+}
+
+export type CompetitionAttemptStep =
+	| { attempt_id: string; submitted: false; question: CompetitionQuestion }
+	| {
+			attempt_id: string;
+			submitted: true;
+			entry_id: string;
+			score: number;
+			questions: number;
+			total_time_ms: number;
+		};
+
+export interface CompetitionLeaderboard {
+	prize_reviewed: boolean;
+	status: string;
+	entries: {
+		rank: number;
+		handle: string;
+		score: number;
+		accuracy: number;
+		questions_attempted: number;
+		average_response_time_ms: number;
+		total_time_ms: number;
+		is_me: boolean;
+		prize_eligible: boolean;
+	}[];
 }
 
 export interface ImageCaseDetail extends ImageCaseSummary {
@@ -970,6 +1043,49 @@ export const Api = {
 			backlog_remaining: number;
 		}>('GET', '/v1/reviews/queue'),
 	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
+	listCompetitions: () =>
+		call<{ competitions: CompetitionSummary[] }>('GET', '/v1/competitions'),
+	competitionLeague: (examId: string) =>
+		call<CompetitionLeagueState>(
+			'GET',
+			`/v1/leagues/${encodeURIComponent(examId)}`
+		),
+	joinCompetitionLeague: (examId: string) =>
+		call<Extract<CompetitionLeagueState, { joined: true }>>(
+			'POST',
+			`/v1/leagues/${encodeURIComponent(examId)}/join`
+		),
+	leaveCompetitionLeague: (examId: string) =>
+		call<{ left: boolean }>(
+			'DELETE',
+			`/v1/leagues/${encodeURIComponent(examId)}/membership`
+		),
+	startCompetitionEntry: (competitionId: string, handle: string) =>
+		call<CompetitionAttemptStep>(
+			'POST',
+			`/v1/competitions/${encodeURIComponent(competitionId)}/entry`,
+			{ handle }
+		),
+	answerCompetitionQuestion: (
+		competitionId: string,
+		questionVersionId: string,
+		chosenIndex: number,
+		idempotencyKey: string
+	) =>
+		call<CompetitionAttemptStep>(
+			'POST',
+			`/v1/competitions/${encodeURIComponent(competitionId)}/entry/answer`,
+			{
+				question_version_id: questionVersionId,
+				chosen_index: chosenIndex,
+				idempotency_key: idempotencyKey
+			}
+		),
+	competitionLeaderboard: (competitionId: string) =>
+		call<CompetitionLeaderboard>(
+			'GET',
+			`/v1/competitions/${encodeURIComponent(competitionId)}/leaderboard`
+		),
 	startMock: (mockId: string) =>
 		call<{ session_id: string }>('POST', `/v1/mocks/${mockId}/start`),
 	answerableQuestions: () =>
@@ -1191,6 +1307,7 @@ export const Api = {
 				chapter_name: string;
 				system: string;
 				subject: string;
+				exam_id: string;
 				exam: string;
 				published_questions: number;
 			}[];
@@ -1354,7 +1471,16 @@ export const Api = {
 	joinGroup: (groupId: string) =>
 		call<{ joined: boolean }>('POST', `/v1/community/groups/${groupId}/join`),
 	listGroupPosts: (groupId: string) =>
-		call<{ posts: unknown[] }>(
+		call<{
+			posts: {
+				post_id: string;
+				body: string;
+				status: string;
+				handle: string;
+				at: string;
+			}[];
+			is_moderator: boolean;
+		}>(
 			'GET',
 			`/v1/community/groups/${groupId}/posts`
 		),
@@ -1368,6 +1494,51 @@ export const Api = {
 		call<{ removed: boolean }>(
 			'DELETE',
 			`/v1/community/groups/${groupId}/posts/${postId}`
+		),
+	reportGroupPost: (
+		groupId: string,
+		postId: string,
+		reason: 'spam' | 'harassment' | 'medical_misinformation' | 'other',
+		note: string
+	) =>
+		call<{ report_id: string; status: string; created_at: string }>(
+			'POST',
+			`/v1/community/groups/${groupId}/posts/${postId}/reports`,
+			{ reason, note: note.trim() || null }
+		),
+	myCommunityPostReports: () =>
+		call<{
+			reports: {
+				report_id: string;
+				group_id: string;
+				group_name: string;
+				post_id: string;
+				reason: string;
+				status: string;
+				created_at: string;
+			}[];
+		}>('GET', '/v1/community/me/reports'),
+	groupPostReportQueue: (groupId: string) =>
+		call<{
+			reports: {
+				report_id: string;
+				post_id: string;
+				reason: string;
+				note: string | null;
+				created_at: string;
+				post_body: string;
+				author_handle: string;
+			}[];
+		}>('GET', `/v1/community/groups/${groupId}/reports`),
+	resolveGroupPostReport: (
+		groupId: string,
+		reportId: string,
+		action: 'dismiss' | 'remove'
+	) =>
+		call<{ resolved_reports: number }>(
+			'POST',
+			`/v1/community/groups/${groupId}/reports/${reportId}/resolve`,
+			{ action }
 		),
 	listGroups: () =>
 		call<{

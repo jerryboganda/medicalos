@@ -16,6 +16,7 @@ pub const DEFAULT_RETEST_INTERVAL_DAYS: [i64; 4] = [1, 3, 7, 14];
 pub const DEFAULT_OFFLINE_LEASE_DAYS: i64 = 14;
 pub const DEFAULT_MAX_REVIEWS_PER_DAY: i64 = 30;
 pub const DEFAULT_MAX_NEW_CARDS_PER_DAY: i64 = 10;
+pub const DEFAULT_COMPETITION_DIFFICULTY_POINTS: [i64; 3] = [5, 10, 15];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +29,7 @@ pub struct SettingsReq {
     pub offline_lease_days: Option<i64>,
     pub max_reviews_per_day: Option<i64>,
     pub max_new_cards_per_day: Option<i64>,
+    pub competition_difficulty_points: Option<Vec<i64>>,
 }
 
 fn valid_mastery_bands(values: &[i32]) -> bool {
@@ -42,6 +44,20 @@ fn valid_retest_intervals(values: &[i64]) -> bool {
         && values.len() <= 20
         && values.iter().all(|days| (1..=3650).contains(days))
         && values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn valid_competition_difficulty_points(values: &[i64]) -> bool {
+    values.len() == 3
+        && values.iter().all(|points| (1..=1000).contains(points))
+        && values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+pub fn effective_competition_difficulty_points(values: Vec<i64>) -> [i64; 3] {
+    if valid_competition_difficulty_points(&values) {
+        [values[0], values[1], values[2]]
+    } else {
+        DEFAULT_COMPETITION_DIFFICULTY_POINTS
+    }
 }
 
 fn validate_settings(req: &SettingsReq) -> ApiResult<()> {
@@ -107,6 +123,16 @@ fn validate_settings(req: &SettingsReq) -> ApiResult<()> {
         return Err(ApiError::unprocessable(
             "invalid_max_new_cards_per_day",
             "max_new_cards_per_day must be between 0 and 1000",
+        ));
+    }
+    if req
+        .competition_difficulty_points
+        .as_deref()
+        .is_some_and(|values| !valid_competition_difficulty_points(values))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_difficulty_points",
+            "competition_difficulty_points must contain three increasing values from 1 to 1000",
         ));
     }
     if req
@@ -180,6 +206,17 @@ pub async fn current_i64_list(
     Ok(i64_list_or_default(value.as_ref(), default))
 }
 
+pub async fn current_competition_difficulty_points(pool: &sqlx::PgPool) -> ApiResult<[i64; 3]> {
+    Ok(effective_competition_difficulty_points(
+        current_i64_list(
+            pool,
+            "competition_difficulty_points",
+            &DEFAULT_COMPETITION_DIFFICULTY_POINTS,
+        )
+        .await?,
+    ))
+}
+
 pub async fn update_settings(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -215,6 +252,9 @@ pub async fn update_settings(
     if let Some(value) = req.max_new_cards_per_day {
         pairs.push(("max_new_cards_per_day", json!(value)));
     }
+    if let Some(value) = req.competition_difficulty_points {
+        pairs.push(("competition_difficulty_points", json!(value)));
+    }
     if pairs.is_empty() {
         return Err(ApiError::unprocessable(
             "empty_settings_update",
@@ -249,6 +289,14 @@ pub async fn update_settings(
                 .entry(key.to_string())
                 .or_insert_with(|| json!(default));
         }
+    }
+    if pairs
+        .iter()
+        .any(|(updated, _)| *updated == "competition_difficulty_points")
+    {
+        old_settings
+            .entry("competition_difficulty_points".to_string())
+            .or_insert_with(|| json!(DEFAULT_COMPETITION_DIFFICULTY_POINTS));
     }
     let new_settings = pairs
         .iter()
@@ -312,6 +360,11 @@ pub async fn get_settings(
     if !valid_retest_intervals(&retest_intervals) {
         retest_intervals = DEFAULT_RETEST_INTERVAL_DAYS.to_vec();
     }
+    let competition_difficulty_points = effective_competition_difficulty_points(stored_i64_list(
+        &stored,
+        "competition_difficulty_points",
+        &DEFAULT_COMPETITION_DIFFICULTY_POINTS,
+    ));
     Ok(Json(json!({
         "settings": {
             "mastery_bands": mastery_bands,
@@ -322,6 +375,7 @@ pub async fn get_settings(
             "offline_lease_days": bounded_i64(stored_i64(&stored, "offline_lease_days", DEFAULT_OFFLINE_LEASE_DAYS), DEFAULT_OFFLINE_LEASE_DAYS, 1, 30),
             "max_reviews_per_day": bounded_i64(stored_i64(&stored, "max_reviews_per_day", DEFAULT_MAX_REVIEWS_PER_DAY), DEFAULT_MAX_REVIEWS_PER_DAY, 0, 5000),
             "max_new_cards_per_day": bounded_i64(stored_i64(&stored, "max_new_cards_per_day", DEFAULT_MAX_NEW_CARDS_PER_DAY), DEFAULT_MAX_NEW_CARDS_PER_DAY, 0, 1000),
+            "competition_difficulty_points": competition_difficulty_points,
         }
     })))
 }

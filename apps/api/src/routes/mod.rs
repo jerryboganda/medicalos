@@ -15,6 +15,7 @@ pub mod guest;
 pub mod inbox;
 pub mod insights;
 pub mod integrity;
+pub mod leagues;
 pub mod library;
 pub mod marks;
 pub mod mock;

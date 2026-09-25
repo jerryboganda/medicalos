@@ -1,4 +1,5 @@
 <script lang="ts">
+	/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
@@ -20,10 +21,21 @@
 	>([]);
 	let examId = $state('');
 	let activeGroup = $state('');
-	let posts = $state<
-		{ post_id: string; body: string; status: string; handle: string }[]
-	>([]);
+	let isGroupMember = $state(false);
+	let isGroupModerator = $state(false);
+	let posts = $state<Awaited<ReturnType<typeof Api.listGroupPosts>>['posts']>([]);
 	let postBody = $state('');
+	type ReportReason = Parameters<typeof Api.reportGroupPost>[2];
+	let reportTarget = $state('');
+	let reportReason = $state<ReportReason>('spam');
+	let reportNote = $state('');
+	let myReports = $state<
+		Awaited<ReturnType<typeof Api.myCommunityPostReports>>['reports'] | null
+	>(null);
+	let reportQueue = $state<
+		Awaited<ReturnType<typeof Api.groupPostReportQueue>>['reports'] | null
+	>(null);
+	let reportQueueState = $state<'loading' | 'loaded' | 'failed'>('loading');
 
 	let duelHandle = $state('');
 	let duelCount = $state(5);
@@ -50,6 +62,15 @@
 	>([]);
 	let unavailableCards = $state<{ kind: string; reason: string }[]>([]);
 
+	async function refreshMyReports() {
+		myReports = null;
+		try {
+			myReports = (await Api.myCommunityPostReports()).reports;
+		} catch {
+			myReports = null;
+		}
+	}
+
 	async function refresh() {
 		try {
 			profile = await Api.communityProfile();
@@ -66,6 +87,7 @@
 		} catch {
 			groups = [];
 		}
+		await refreshMyReports();
 		try {
 			const chapters = (await Api.myCurriculum()).chapters;
 			examId = chapters[0]?.exam_id ?? '';
@@ -151,13 +173,40 @@
 
 	async function openGroup(id: string) {
 		activeGroup = id;
+		isGroupMember = false;
+		isGroupModerator = false;
+		posts = [];
+		reportQueue = null;
+		reportQueueState = 'loading';
+		reportTarget = '';
 		error = '';
+		let feed: Awaited<ReturnType<typeof Api.listGroupPosts>>;
 		try {
-			posts = (await Api.listGroupPosts(id)).posts as typeof posts;
+			feed = await Api.listGroupPosts(id);
 		} catch (err) {
-			posts = [];
-			if (!(err instanceof ApiError && err.message.includes('join'))) {
-				// join-required is expected; anything else stays silent-empty.
+			if (activeGroup !== id) return;
+			if (err instanceof ApiError && err.message.includes('join')) {
+				isGroupMember = false;
+			} else {
+				error = err instanceof ApiError ? err.message : 'Could not load this group.';
+			}
+			return;
+		}
+		if (activeGroup !== id) return;
+		posts = feed.posts;
+		isGroupMember = true;
+		isGroupModerator = feed.is_moderator;
+		if (feed.is_moderator) {
+			try {
+				const queue = await Api.groupPostReportQueue(id);
+				if (activeGroup !== id) return;
+				reportQueue = queue.reports;
+				reportQueueState = 'loaded';
+			} catch (err) {
+				if (activeGroup === id) {
+					reportQueueState = 'failed';
+					error = err instanceof ApiError ? err.message : 'Could not load moderator reports.';
+				}
 			}
 		}
 	}
@@ -168,6 +217,8 @@
 		try {
 			await Api.joinGroup(activeGroup);
 			await openGroup(activeGroup);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not join this group.';
 		} finally {
 			busy = false;
 		}
@@ -195,6 +246,43 @@
 		try {
 			await Api.removeGroupPost(activeGroup, postId);
 			await openGroup(activeGroup);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not remove the post.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function reportPost(e: Event) {
+		e.preventDefault();
+		if (!activeGroup || !reportTarget || busy) return;
+		busy = true;
+		error = '';
+		try {
+			await Api.reportGroupPost(activeGroup, reportTarget, reportReason, reportNote);
+			reportTarget = '';
+			reportNote = '';
+			message = 'Report sent to this group’s moderators.';
+			await refreshMyReports();
+			await openGroup(activeGroup);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not send the report.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function resolveReport(reportId: string, action: 'dismiss' | 'remove') {
+		if (!activeGroup || busy) return;
+		busy = true;
+		error = '';
+		try {
+			await Api.resolveGroupPostReport(activeGroup, reportId, action);
+			message = action === 'remove' ? 'Post removed and reports resolved.' : 'Report dismissed.';
+			await refreshMyReports();
+			await openGroup(activeGroup);
+		} catch (err) {
+			error = err instanceof ApiError ? err.message : 'Could not resolve the report.';
 		} finally {
 			busy = false;
 		}
@@ -276,7 +364,7 @@
 		{#if error}<p class="danger-text">{error}</p>{/if}
 	</div>
 {:else if profile}
-	{#if message}<p class="muted">{message}</p>{/if}
+	{#if message}<p class="muted" role="status" aria-live="polite">{message}</p>{/if}
 
 	<div class="card">
 		<h2>Duels</h2>
@@ -370,43 +458,152 @@
 		</div>
 		{#if activeGroup}
 			<h3>Group feed</h3>
-			<form onsubmit={post}>
-				<label class="field" for="post-body">
-					<span>Post to the group</span>
-					<textarea id="post-body" bind:value={postBody} rows="2"></textarea>
-				</label>
-				<button class="btn" type="submit" disabled={busy || !postBody}>
-					Post
-				</button>
-				<button class="btn" type="button" disabled={busy} onclick={joinGroup}>
+			{#if error}<p class="danger-text" role="alert">{error}</p>{/if}
+			{#if !isGroupMember}
+				<p class="muted">Join this group to read, post, and report content.</p>
+				<button class="btn primary" type="button" disabled={busy} onclick={joinGroup}>
 					Join this group
 				</button>
-			</form>
-			{#if posts.length === 0}
-				<p class="muted">No posts visible here yet.</p>
 			{:else}
-				<ul>
-					{#each posts as p (p.post_id)}
-						<li data-testid="community-post">
-							<strong>{p.handle}</strong>:
-							{p.status === 'removed'
-								? '(removed by a moderator)'
-								: p.body}
-							{#if p.status === 'visible'}
-								<button
+				<form onsubmit={post}>
+					<label class="field" for="post-body">
+						<span>Post to the group</span>
+						<textarea id="post-body" bind:value={postBody} rows="2"></textarea>
+					</label>
+					<button class="btn" type="submit" disabled={busy || !postBody}>
+						Post
+					</button>
+				</form>
+				{#if posts.length === 0}
+					<p class="muted">No posts visible here yet.</p>
+				{:else}
+					<ul>
+						{#each posts as p (p.post_id)}
+							<li data-testid="community-post">
+								<strong>{p.handle}</strong>:
+								{p.status === 'removed'
+									? '(removed by a moderator)'
+									: p.body}
+								{#if p.status === 'visible'}
+									{#if isGroupModerator}
+										<button
+										class="btn"
+										type="button"
+										disabled={busy}
+										onclick={() => moderate(p.post_id)}
+										data-testid="moderator-remove-post"
+									>
+										Remove post
+										</button>
+									{/if}
+									<button
 									class="btn"
 									type="button"
 									disabled={busy}
-									onclick={() => moderate(p.post_id)}
+									aria-expanded={reportTarget === p.post_id}
+									aria-controls={`report-form-${p.post_id}`}
+									onclick={() => {
+										reportTarget = p.post_id;
+										reportReason = 'spam';
+										reportNote = '';
+									}}
 								>
-									Remove
-								</button>
-							{/if}
+									Report
+									</button>
+								{/if}
+								{#if reportTarget === p.post_id}
+									<form id={`report-form-${p.post_id}`} onsubmit={reportPost}>
+										<fieldset>
+										<legend>Report this post to group moderators</legend>
+										<label class="field" for="report-reason">
+											<span>Reason</span>
+											<select id="report-reason" bind:value={reportReason}>
+												<option value="spam">Spam</option>
+												<option value="harassment">Harassment</option>
+												<option value="medical_misinformation">Medical misinformation</option>
+												<option value="other">Other</option>
+											</select>
+										</label>
+										<label class="field" for="report-note">
+											<span>Note (optional, up to 500 characters)</span>
+											<textarea
+												id="report-note"
+												bind:value={reportNote}
+												maxlength="500"
+												rows="3"
+											></textarea>
+										</label>
+										<button class="btn primary" type="submit" disabled={busy}>
+											Send report
+										</button>
+										<button class="btn" type="button" disabled={busy} onclick={() => (reportTarget = '')}>
+											Cancel
+										</button>
+									</fieldset>
+									</form>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			{/if}
+			{#if isGroupModerator}
+				<section aria-labelledby="report-queue-heading" data-testid="moderator-report-queue">
+					<h3 id="report-queue-heading">Open reports for this group</h3>
+					{#if reportQueueState === 'failed'}
+						<p class="muted">The report queue could not be loaded.</p>
+					{:else if reportQueueState === 'loading'}
+						<p class="muted">Loading reports…</p>
+					{:else if reportQueue?.length === 0}
+						<p class="muted">No reports need review.</p>
+					{:else}
+						<ul>
+							{#each reportQueue ?? [] as report (report.report_id)}
+								<li data-testid="moderation-report">
+									<strong>{report.reason.replaceAll('_', ' ')}</strong>
+									from {report.author_handle}: {report.post_body}
+									{#if report.note}<p>{report.note}</p>{/if}
+									<button
+									class="btn"
+									type="button"
+									disabled={busy}
+									onclick={() => resolveReport(report.report_id, 'dismiss')}
+								>
+									Dismiss report
+									</button>
+									<button
+									class="btn"
+									type="button"
+									disabled={busy}
+									onclick={() => resolveReport(report.report_id, 'remove')}
+								>
+									Remove post
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</section>
+			{/if}
+		{/if}
+		{#if error && !activeGroup}<p class="danger-text" role="alert">{error}</p>{/if}
+		<section aria-labelledby="my-reports-heading" data-testid="my-community-reports">
+			<h3 id="my-reports-heading">Your post reports</h3>
+			{#if myReports === null}
+				<p class="muted">Report status is temporarily unavailable.</p>
+			{:else if myReports.length === 0}
+				<p class="muted">You have not reported any posts.</p>
+			{:else}
+				<ul>
+					{#each myReports as report (report.report_id)}
+						<li>
+							{report.group_name} · {report.reason.replaceAll('_', ' ')} · {report.status.replaceAll('_', ' ')}
+							<time datetime={report.created_at}>{new Date(report.created_at).toLocaleString()}</time>
 						</li>
 					{/each}
 				</ul>
 			{/if}
-		{/if}
+		</section>
 	</div>
 {/if}
 

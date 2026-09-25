@@ -327,24 +327,11 @@ async fn xp_competitions_coverage_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, entry) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{comp_id}/entry"),
-            Some(&learner),
-            Some(serde_json::json!({
-                "handle": "fixture-1",
-                "total_time_ms": 42000,
-                "answers": qids.iter().map(|v| serde_json::json!({
-                    "question_version_id": v, "chosen_index": 0, "elapsed_ms": 5000
-                })).collect::<Vec<_>>()
-            })),
-        ),
-    )
-    .await;
+    let (status, entry) =
+        complete_competition_attempt(app.clone(), &learner, comp_id, "fixture-1").await;
     assert_eq!(status, StatusCode::OK, "{entry}");
-    assert!(entry["score"].as_f64().unwrap() != 0.0, "scored entry");
+    assert_eq!(entry["submitted"], true, "scored entry");
+    assert!(entry["score"].as_f64().is_some(), "recorded score");
 
     // Coverage endpoint responds for a staff member.
     let (status, cov) = call(
@@ -1774,7 +1761,7 @@ async fn admin06_review_event_kind_migration_serializes_concurrent_startup() {
         .expect("insert legacy review history");
     }
 
-    let migration = *schema::UP_SQLS.last().expect("review-event-kind migration");
+    let migration = include_str!("../migrations/0049_admin06_review_event_kind.up.sql");
     let (first, second) = tokio::join!(
         sqlx::raw_sql(migration).execute(&state.pool),
         sqlx::raw_sql(migration).execute(&second_pool),
@@ -1835,6 +1822,209 @@ async fn admin06_review_event_kind_migration_serializes_concurrent_startup() {
     .await
     .expect("read post-migration event category");
     assert!(remains_existing, "replay must not reclassify live history");
+}
+
+#[tokio::test]
+async fn comp02_scoring_migration_backfills_once_under_concurrent_startup() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let admin = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let qids: Vec<Uuid> = ids.question_versions.iter().take(3).copied().collect();
+    let now = chrono::Utc::now();
+    let (status, competition) = call(
+        app,
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": "Scoring migration fixture",
+                "exam_id": ids.exam_id,
+                "question_ids": qids,
+                "starts_at": now - chrono::Duration::minutes(1),
+                "ends_at": now + chrono::Duration::hours(1)
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{competition}");
+    let competition_id: Uuid = competition["competition_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let pool = state.pool.clone();
+    let token_user_id = |token: &str| {
+        let pool = pool.clone();
+        let token_hash = Sha256::digest(token.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        async move {
+            sqlx::query_scalar::<_, Uuid>("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+                .bind(token_hash)
+                .fetch_one(&pool)
+                .await
+                .expect("authenticated fixture user")
+        }
+    };
+    let admin_id = token_user_id(&admin).await;
+    let learner_id = token_user_id(&learner).await;
+    let mut answers = Vec::new();
+    for qid in &qids {
+        let correct_index: i16 =
+            sqlx::query_scalar("SELECT correct_index FROM question_versions WHERE id = $1")
+                .bind(qid)
+                .fetch_one(&state.pool)
+                .await
+                .expect("seeded answer key");
+        answers.push(serde_json::json!({
+            "question_version_id": qid,
+            "chosen_index": correct_index,
+            "elapsed_ms": 2_000
+        }));
+    }
+    let url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/medos_ci".into());
+    let second_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&url)
+        .await
+        .expect("second migration connection");
+    sqlx::query("DROP TABLE competition_attempts")
+        .execute(&state.pool)
+        .await
+        .expect("simulate pre-migration competition attempt schema");
+    sqlx::query("ALTER TABLE competitions DROP COLUMN difficulty_points")
+        .execute(&state.pool)
+        .await
+        .expect("simulate pre-migration schema");
+    sqlx::query(
+        "ALTER TABLE competition_entries
+             DROP COLUMN correct_count,
+             DROP COLUMN attempted_count,
+             DROP COLUMN average_response_time_ms",
+    )
+    .execute(&state.pool)
+    .await
+    .expect("drop pre-migration metrics");
+    let first_entry_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO competition_entries
+         (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
+         VALUES ($1, $2, $3, 'migration-admin', $4, 30, 6_000, 1)",
+    )
+    .bind(first_entry_id)
+    .bind(competition_id)
+    .bind(admin_id)
+    .bind(serde_json::Value::Array(answers.clone()))
+    .execute(&state.pool)
+    .await
+    .expect("insert legacy competition entry");
+    let second_entry_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO competition_entries
+         (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
+         VALUES ($1, $2, $3, 'migration-learner', $4, 20, 4_000, 2)",
+    )
+    .bind(second_entry_id)
+    .bind(competition_id)
+    .bind(learner_id)
+    .bind(serde_json::Value::Array(
+        answers.into_iter().take(2).collect(),
+    ))
+    .execute(&state.pool)
+    .await
+    .expect("insert second legacy competition entry");
+
+    let migration = include_str!("../migrations/0050_comp02_scoring_leaderboard.up.sql");
+    let (first, second) = tokio::join!(
+        sqlx::raw_sql(migration).execute(&state.pool),
+        sqlx::raw_sql(migration).execute(&second_pool),
+    );
+    first.expect("first scoring migration");
+    second.expect("concurrent scoring migration");
+
+    let first_stats = sqlx::query(
+        "SELECT correct_count, attempted_count, average_response_time_ms
+         FROM competition_entries WHERE id = $1",
+    )
+    .bind(first_entry_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read backfilled scoring metrics");
+    assert_eq!(first_stats.try_get::<i64, _>("correct_count").unwrap(), 3);
+    assert_eq!(first_stats.try_get::<i64, _>("attempted_count").unwrap(), 3);
+    assert_eq!(
+        first_stats
+            .try_get::<f64, _>("average_response_time_ms")
+            .unwrap(),
+        2_000.0
+    );
+    let second_stats = sqlx::query(
+        "SELECT correct_count, attempted_count
+         FROM competition_entries WHERE id = $1",
+    )
+    .bind(second_entry_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read second backfill");
+    assert_eq!(second_stats.try_get::<i64, _>("correct_count").unwrap(), 2);
+    assert_eq!(
+        second_stats.try_get::<i64, _>("attempted_count").unwrap(),
+        2
+    );
+
+    sqlx::query("UPDATE competitions SET difficulty_points = '[7, 14, 21]'::jsonb WHERE id = $1")
+        .bind(competition_id)
+        .execute(&state.pool)
+        .await
+        .expect("change a post-migration competition snapshot");
+    sqlx::query(
+        "UPDATE competition_entries
+         SET correct_count = 1, attempted_count = 3, average_response_time_ms = 1234.5
+         WHERE id = $1",
+    )
+    .bind(first_entry_id)
+    .execute(&state.pool)
+    .await
+    .expect("change post-migration entry metrics");
+    sqlx::raw_sql(migration)
+        .execute(&state.pool)
+        .await
+        .expect("replay scoring migration");
+    let points: serde_json::Value =
+        sqlx::query_scalar("SELECT difficulty_points FROM competitions WHERE id = $1")
+            .bind(competition_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("read preserved scoring snapshot");
+    assert_eq!(points, serde_json::json!([7, 14, 21]));
+    let replayed_stats = sqlx::query(
+        "SELECT correct_count, attempted_count, average_response_time_ms
+         FROM competition_entries WHERE id = $1",
+    )
+    .bind(first_entry_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read preserved metrics");
+    assert_eq!(
+        replayed_stats.try_get::<i64, _>("correct_count").unwrap(),
+        1
+    );
+    assert_eq!(
+        replayed_stats.try_get::<i64, _>("attempted_count").unwrap(),
+        3
+    );
+    assert_eq!(
+        replayed_stats
+            .try_get::<f64, _>("average_response_time_ms")
+            .unwrap(),
+        1234.5
+    );
 }
 
 #[tokio::test]
@@ -5608,6 +5798,10 @@ async fn settings_admin_gate_and_update() {
     assert_eq!(defaults["settings"]["offline_lease_days"], 14);
     assert_eq!(defaults["settings"]["max_reviews_per_day"], 30);
     assert_eq!(defaults["settings"]["max_new_cards_per_day"], 10);
+    assert_eq!(
+        defaults["settings"]["competition_difficulty_points"],
+        serde_json::json!([5, 10, 15])
+    );
 
     let (status, denied) = call(
         app.clone(),
@@ -5637,7 +5831,8 @@ async fn settings_admin_gate_and_update() {
                 "retest_intervals_days": [2, 5, 9],
                 "offline_lease_days": 21,
                 "max_reviews_per_day": 20,
-                "max_new_cards_per_day": 4
+                "max_new_cards_per_day": 4,
+                "competition_difficulty_points": [6, 12, 18]
             })),
         ),
     )
@@ -5665,6 +5860,10 @@ async fn settings_admin_gate_and_update() {
     assert_eq!(got["settings"]["offline_lease_days"], 21);
     assert_eq!(got["settings"]["max_reviews_per_day"], 20);
     assert_eq!(got["settings"]["max_new_cards_per_day"], 4);
+    assert_eq!(
+        got["settings"]["competition_difficulty_points"],
+        serde_json::json!([6, 12, 18])
+    );
 
     let (status, public) = call(
         app.clone(),
@@ -5748,7 +5947,8 @@ async fn settings_admin_gate_and_update() {
                 "mastery_bands": [1700, 1300],
                 "offline_lease_days": 31,
                 "max_reviews_per_day": -1,
-                "max_new_cards_per_day": 1001
+                "max_new_cards_per_day": 1001,
+                "competition_difficulty_points": [5, 15, 10]
             })),
         ),
     )
@@ -5765,6 +5965,10 @@ async fn settings_admin_gate_and_update() {
     assert_eq!(unchanged["settings"]["offline_lease_days"], 21);
     assert_eq!(unchanged["settings"]["max_reviews_per_day"], 20);
     assert_eq!(unchanged["settings"]["max_new_cards_per_day"], 4);
+    assert_eq!(
+        unchanged["settings"]["competition_difficulty_points"],
+        serde_json::json!([6, 12, 18])
+    );
 
     let (status, invalid_lease) = call(
         app.clone(),
@@ -5778,6 +5982,26 @@ async fn settings_admin_gate_and_update() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_lease}");
     assert_eq!(invalid_lease["error"]["code"], "invalid_offline_lease_days");
+
+    let (status, invalid_competition_points) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&token),
+            Some(serde_json::json!({ "competition_difficulty_points": [5, 5, 15] })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_competition_points}"
+    );
+    assert_eq!(
+        invalid_competition_points["error"]["code"],
+        "invalid_competition_difficulty_points"
+    );
 
     let (status, updated) = call(
         app.clone(),
@@ -5809,6 +6033,24 @@ async fn settings_admin_gate_and_update() {
     );
     assert_eq!(settings_event["old_value"]["community_min_sample"], 15);
     assert_eq!(settings_event["new_value"]["community_min_sample"], 16);
+    let scoring_settings_event = audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| {
+            event["action"] == "settings_updated"
+                && event["new_value"]["competition_difficulty_points"]
+                    == serde_json::json!([6, 12, 18])
+        })
+        .expect("competition scoring settings audit event");
+    assert_eq!(
+        scoring_settings_event["old_value"]["competition_difficulty_points"],
+        serde_json::json!([5, 10, 15])
+    );
+    assert_eq!(
+        scoring_settings_event["new_value"]["competition_difficulty_points"],
+        serde_json::json!([6, 12, 18])
+    );
     let lease_event = audit["events"]
         .as_array()
         .unwrap()
@@ -5831,6 +6073,1322 @@ async fn settings_admin_gate_and_update() {
     assert_eq!(review_caps_event["new_value"]["max_reviews_per_day"], 20);
     assert_eq!(review_caps_event["old_value"]["max_new_cards_per_day"], 10);
     assert_eq!(review_caps_event["new_value"]["max_new_cards_per_day"], 4);
+}
+
+#[tokio::test]
+async fn recurring_competition_series_materializes_idempotent_utc_events() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let admin = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let starts_at = chrono::Utc::now() - chrono::Duration::days(2) - chrono::Duration::hours(12);
+    let ends_at = starts_at + chrono::Duration::hours(1);
+    let pool = ids.question_versions.to_vec();
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": "Daily practice",
+                "exam_id": ids.exam_id,
+                "question_ids": pool,
+                "question_count": 3,
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+                "cadence": "daily"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let series_id: Uuid = created["series_id"].as_str().unwrap().parse().unwrap();
+
+    let ((first_status, listed), (second_status, _)) = tokio::join!(
+        call(
+            app.clone(),
+            request("GET", "/v1/competitions", Some(&learner), None),
+        ),
+        call(
+            app.clone(),
+            request("GET", "/v1/competitions", Some(&learner), None),
+        )
+    );
+    assert_eq!(first_status, StatusCode::OK, "{listed}");
+    assert_eq!(second_status, StatusCode::OK);
+    let listed_series = listed["competitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["series_id"] == series_id.to_string())
+        .expect("recurring series is visible");
+    assert_eq!(listed_series["cadence"], "daily");
+    assert_eq!(listed_series["exam_id"], ids.exam_id.to_string());
+
+    let event_rows = sqlx::query(
+        "SELECT id, starts_at, ends_at, question_ids, difficulty_points
+         FROM competitions WHERE series_id = $1 ORDER BY starts_at",
+    )
+    .bind(series_id)
+    .fetch_all(&state.pool)
+    .await
+    .expect("recurring occurrences");
+    assert!(event_rows.len() >= 3, "{event_rows:?}");
+    let mut occurrence_questions = Vec::new();
+    for row in &event_rows {
+        let question_ids: Vec<Uuid> =
+            serde_json::from_value(row.try_get("question_ids").unwrap()).unwrap();
+        assert_eq!(question_ids.len(), 3);
+        assert!(question_ids
+            .iter()
+            .all(|question_id| ids.question_versions.contains(question_id)));
+        occurrence_questions.push(question_ids);
+    }
+    for pair in event_rows.windows(2) {
+        let earlier: chrono::DateTime<chrono::Utc> = pair[0].try_get("starts_at").unwrap();
+        let later: chrono::DateTime<chrono::Utc> = pair[1].try_get("starts_at").unwrap();
+        assert_eq!((later - earlier).num_seconds(), 86_400);
+        assert_eq!(
+            pair[0]
+                .try_get::<serde_json::Value, _>("difficulty_points")
+                .unwrap(),
+            pair[1]
+                .try_get::<serde_json::Value, _>("difficulty_points")
+                .unwrap()
+        );
+    }
+    let repeat_count = occurrence_questions[0]
+        .iter()
+        .filter(|question_id| occurrence_questions[1].contains(question_id))
+        .count();
+    assert_eq!(
+        repeat_count, 1,
+        "the next event uses fresh pool items first"
+    );
+
+    let count_before_retry: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM competitions WHERE series_id = $1")
+            .bind(series_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/competitions", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let count_after_retry: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM competitions WHERE series_id = $1")
+            .bind(series_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(count_after_retry, count_before_retry);
+}
+
+#[tokio::test]
+async fn weekly_league_opt_in_groups_members_and_applies_promotion_and_relegation() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let mut members = Vec::new();
+    let mut cohort_id = None;
+    for index in 0..10 {
+        let token = register_and_login(app.clone()).await;
+        let handle = format!("league-{index:02}");
+        let (status, profile) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/community/profile",
+                Some(&token),
+                Some(serde_json::json!({ "handle": handle })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{profile}");
+        let (status, joined) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/leagues/{}/join", ids.exam_id),
+                Some(&token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+        assert_eq!(joined["joined"], true);
+        assert_eq!(joined["division"], 1);
+        let joined_cohort: Uuid = joined["cohort_id"].as_str().unwrap().parse().unwrap();
+        if let Some(expected) = cohort_id {
+            assert_eq!(joined_cohort, expected, "ten learners share one cohort");
+        } else {
+            cohort_id = Some(joined_cohort);
+        }
+        members.push((token, handle));
+    }
+
+    let cohort_id = cohort_id.unwrap();
+    let current_week: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT week_start FROM competition_league_cohorts WHERE id = $1")
+            .bind(cohort_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    let previous_week = current_week - chrono::Duration::days(7);
+    sqlx::query(
+        "UPDATE competition_league_cohorts SET week_start = $2, division = 2 WHERE id = $1",
+    )
+    .bind(cohort_id)
+    .bind(previous_week)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE competition_league_memberships SET week_start = $2 WHERE cohort_id = $1")
+        .bind(cohort_id)
+        .bind(previous_week)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE competition_league_players SET division = 2 WHERE exam_id = $1")
+        .bind(ids.exam_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let event_id = Uuid::new_v4();
+    let event_start = previous_week.and_hms_opt(1, 0, 0).unwrap().and_utc();
+    sqlx::query(
+        "INSERT INTO competitions
+           (id, title, exam_id, question_ids, starts_at, ends_at, status, cadence)
+         VALUES ($1, 'League week fixture', $2, $3, $4, $5, 'closed', 'weekly')",
+    )
+    .bind(event_id)
+    .bind(ids.exam_id)
+    .bind(serde_json::json!(&ids.question_versions[..3]))
+    .bind(event_start)
+    .bind(event_start + chrono::Duration::hours(1))
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    for (index, (_, handle)) in members.iter().enumerate() {
+        let user_id: Uuid =
+            sqlx::query_scalar("SELECT user_id FROM community_profiles WHERE handle = $1")
+                .bind(handle)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        let score: f32 = match index {
+            0 => 100.0,
+            1 => 90.0,
+            2 | 3 => 80.0,
+            4 => 70.0,
+            5 => 60.0,
+            6 | 7 => 30.0,
+            8 => 20.0,
+            _ => 10.0,
+        };
+        let correct_count: i64 = match index {
+            2 => 3,
+            3 => 1,
+            _ => 2,
+        };
+        let total_time_ms = if index == 2 {
+            120_000
+        } else if index == 3 || index == 6 || index == 7 {
+            1_000
+        } else {
+            10_000 + index as i64 * 1_000
+        };
+        sqlx::query(
+            "INSERT INTO competition_entries
+               (id, competition_id, user_id, handle, answers, score, total_time_ms,
+                submitted_order, correct_count, attempted_count, average_response_time_ms,
+                submitted_at)
+             VALUES ($1, $2, $3, $4, '[]'::jsonb, $5, $6, $7, $8, 3, 1000, $9)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(event_id)
+        .bind(user_id)
+        .bind(handle)
+        .bind(score)
+        .bind(total_time_ms)
+        .bind(index as i32 + 1)
+        .bind(correct_count)
+        .bind(event_start + chrono::Duration::hours(2))
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    }
+
+    let (status, promoted) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&members[0].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{promoted}");
+    assert_eq!(promoted["division"], 3);
+    assert!(promoted["standings"].as_array().unwrap().is_empty());
+    let current_week: chrono::NaiveDate = promoted["week_start"].as_str().unwrap().parse().unwrap();
+    let new_week_cohorts = sqlx::query(
+        "SELECT cohort.division, COUNT(*) AS size
+         FROM competition_league_memberships member
+         JOIN competition_league_cohorts cohort ON cohort.id = member.cohort_id
+         WHERE member.exam_id = $1 AND member.week_start = $2 AND member.left_at IS NULL
+         GROUP BY cohort.division ORDER BY cohort.division",
+    )
+    .bind(ids.exam_id)
+    .bind(current_week)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    let placements: Vec<(i32, i64)> = new_week_cohorts
+        .iter()
+        .map(|row| {
+            (
+                row.try_get("division").unwrap(),
+                row.try_get("size").unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(placements, vec![(1, 3), (2, 4), (3, 3)]);
+    let higher_accuracy_division: i32 = sqlx::query_scalar(
+        "SELECT division FROM competition_league_players
+         WHERE exam_id = $1 AND user_id =
+           (SELECT user_id FROM community_profiles WHERE handle = $2)",
+    )
+    .bind(ids.exam_id)
+    .bind(&members[2].1)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    let lower_accuracy_division: i32 = sqlx::query_scalar(
+        "SELECT division FROM competition_league_players
+         WHERE exam_id = $1 AND user_id =
+           (SELECT user_id FROM community_profiles WHERE handle = $2)",
+    )
+    .bind(ids.exam_id)
+    .bind(&members[3].1)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        higher_accuracy_division, 3,
+        "accuracy breaks equal points before time"
+    );
+    assert_eq!(lower_accuracy_division, 2);
+    let tied_handles = vec![members[6].1.clone(), members[7].1.clone()];
+    let tied_placements = sqlx::query(
+        "SELECT player.user_id, player.division
+         FROM competition_league_players player
+         JOIN community_profiles profile ON profile.user_id = player.user_id
+         WHERE player.exam_id = $1 AND profile.handle = ANY($2)
+         ORDER BY player.user_id",
+    )
+    .bind(ids.exam_id)
+    .bind(&tied_handles)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(tied_placements.len(), 2);
+    assert_eq!(tied_placements[0].try_get::<i32, _>("division").unwrap(), 2);
+    assert_eq!(tied_placements[1].try_get::<i32, _>("division").unwrap(), 1);
+
+    let current_event_id = Uuid::new_v4();
+    let current_event_start = (chrono::Utc::now() - chrono::Duration::hours(1))
+        .max(current_week.and_hms_opt(0, 0, 0).unwrap().and_utc());
+    sqlx::query(
+        "INSERT INTO competitions
+           (id, title, exam_id, question_ids, starts_at, ends_at, status)
+         VALUES ($1, 'Current league standings fixture', $2, $3, $4, $5, 'closed')",
+    )
+    .bind(current_event_id)
+    .bind(ids.exam_id)
+    .bind(serde_json::json!(&ids.question_versions[..3]))
+    .bind(current_event_start)
+    .bind(current_event_start + chrono::Duration::minutes(30))
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    for index in [0, 3] {
+        let user_id: Uuid =
+            sqlx::query_scalar("SELECT user_id FROM community_profiles WHERE handle = $1")
+                .bind(&members[index].1)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        sqlx::query(
+            "INSERT INTO competition_entries
+               (id, competition_id, user_id, handle, answers, score, total_time_ms,
+                submitted_order, correct_count, attempted_count, average_response_time_ms)
+             VALUES ($1, $2, $3, $4, '[]'::jsonb, 50, 5000, 1, 2, 3, 1000)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(current_event_id)
+        .bind(user_id)
+        .bind(&members[index].1)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    }
+    let (status, private_standings) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&members[0].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{private_standings}");
+    assert_eq!(private_standings["standings"].as_array().unwrap().len(), 1);
+    assert_eq!(private_standings["standings"][0]["handle"], members[0].1);
+    assert_eq!(private_standings["standings"][0]["is_me"], true);
+    assert!(private_standings["standings"][0].get("user_id").is_none());
+
+    let (status, retained) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&members[5].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retained}");
+    assert_eq!(retained["division"], 2);
+    let (status, relegated) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&members[9].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{relegated}");
+    assert_eq!(relegated["division"], 1, "Division 1 is the floor");
+
+    let outsider = register_and_login(app.clone()).await;
+    let (status, no_membership) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&outsider),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_membership}");
+    assert_eq!(no_membership["joined"], false);
+    assert!(no_membership.get("standings").is_none());
+    let (status, no_profile) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/leagues/{}/join", ids.exam_id),
+            Some(&outsider),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{no_profile}");
+    assert_eq!(no_profile["error"]["code"], "not_opted_in");
+
+    let (status, left) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/leagues/{}/membership", ids.exam_id),
+            Some(&members[0].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{left}");
+    let (status, after_leave) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&members[0].0),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_leave}");
+    assert_eq!(after_leave["joined"], false);
+}
+
+#[tokio::test]
+async fn weekly_league_cohorts_are_capped_at_thirty_members() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "league-owner" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, joined) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/leagues/{}/join", ids.exam_id),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+
+    let user_ids: Vec<Uuid> = (0..30).map(|_| Uuid::new_v4()).collect();
+    let handles: Vec<String> = (0..30)
+        .map(|index| format!("league-cap-{index:02}"))
+        .collect();
+    let emails: Vec<String> = (0..30)
+        .map(|index| format!("league-cap-{index}@example.test"))
+        .collect();
+    sqlx::query(
+        "INSERT INTO users (id, email, password_hash)
+         SELECT row.user_id, row.email, 'fixture'
+         FROM UNNEST($1::uuid[], $2::text[]) AS row(user_id, email)",
+    )
+    .bind(&user_ids)
+    .bind(&emails)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO community_profiles (user_id, handle)
+         SELECT row.user_id, row.handle
+         FROM UNNEST($1::uuid[], $2::text[]) AS row(user_id, handle)",
+    )
+    .bind(&user_ids)
+    .bind(&handles)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO competition_league_players (exam_id, user_id, handle, division)
+         SELECT $1, row.user_id, row.handle, 1
+         FROM UNNEST($2::uuid[], $3::text[]) AS row(user_id, handle)",
+    )
+    .bind(ids.exam_id)
+    .bind(&user_ids)
+    .bind(&handles)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let (status, state_response) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/leagues/{}", ids.exam_id),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state_response}");
+    let sizes = sqlx::query(
+        "SELECT COUNT(*) AS size
+         FROM competition_league_memberships
+         WHERE week_start = $1 AND left_at IS NULL
+         GROUP BY cohort_id ORDER BY size",
+    )
+    .bind(
+        state_response["week_start"]
+            .as_str()
+            .unwrap()
+            .parse::<chrono::NaiveDate>()
+            .unwrap(),
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(sizes.len(), 2, "31 opted-in learners use two cohorts");
+    let sizes: Vec<i64> = sizes
+        .iter()
+        .map(|row| row.try_get("size").unwrap())
+        .collect();
+    assert_eq!(sizes, vec![1, 30]);
+}
+
+async fn complete_competition_attempt(
+    app: Router,
+    token: &str,
+    competition_id: Uuid,
+    handle: &str,
+) -> (StatusCode, Value) {
+    let (mut status, mut step) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(token),
+            Some(serde_json::json!({ "handle": handle })),
+        ),
+    )
+    .await;
+    if status != StatusCode::OK {
+        return (status, step);
+    }
+
+    for _ in 0..1000 {
+        if step["submitted"] == true {
+            return (status, step);
+        }
+        let question = &step["question"];
+        let question_version_id = question["question_version_id"]
+            .as_str()
+            .expect("current competition question id");
+        let (next_status, next_step) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry/answer"),
+                Some(token),
+                Some(serde_json::json!({
+                    "question_version_id": question_version_id,
+                    "chosen_index": 0,
+                    "idempotency_key": Uuid::new_v4()
+                })),
+            ),
+        )
+        .await;
+        if next_status != StatusCode::OK {
+            return (next_status, next_step);
+        }
+        status = next_status;
+        step = next_step;
+    }
+    panic!("competition attempt exceeded the test safety bound");
+}
+
+#[tokio::test]
+async fn competition_scoring_snapshots_policy_and_scores_server_timed_answers() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let admin = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let qids: Vec<Uuid> = ids.question_versions.iter().take(3).copied().collect();
+    assert_eq!(qids.len(), 3);
+    let now = chrono::Utc::now();
+    let starts_at = (now - chrono::Duration::minutes(1)).to_rfc3339();
+    let ends_at = (now + chrono::Duration::hours(4)).to_rfc3339();
+    let (status, duplicate_questions) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": "Duplicate questions",
+                "exam_id": ids.exam_id,
+                "question_ids": [qids[0], qids[1], qids[0]],
+                "starts_at": starts_at,
+                "ends_at": ends_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{duplicate_questions}"
+    );
+    assert_eq!(
+        duplicate_questions["error"]["code"],
+        "invalid_competition_questions"
+    );
+
+    sqlx::query("UPDATE question_versions SET status = 'draft' WHERE id = $1")
+        .bind(qids[0])
+        .execute(&state.pool)
+        .await
+        .expect("temporarily unpublish seeded question");
+    let (status, unpublished_question) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": "Unpublished question",
+                "exam_id": ids.exam_id,
+                "question_ids": qids,
+                "starts_at": starts_at,
+                "ends_at": ends_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{unpublished_question}"
+    );
+    assert_eq!(
+        unpublished_question["error"]["code"],
+        "invalid_competition_questions"
+    );
+    sqlx::query("UPDATE question_versions SET status = 'published' WHERE id = $1")
+        .bind(qids[0])
+        .execute(&state.pool)
+        .await
+        .expect("restore seeded question");
+
+    let create_competition = |title: &str| {
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": title,
+                "exam_id": ids.exam_id,
+                "question_ids": qids,
+                "starts_at": starts_at,
+                "ends_at": ends_at
+            })),
+        )
+    };
+    let (status, default_competition) =
+        call(app.clone(), create_competition("Default scoring")).await;
+    assert_eq!(status, StatusCode::OK, "{default_competition}");
+    let default_id: Uuid = default_competition["competition_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, updated) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&admin),
+            Some(serde_json::json!({ "competition_difficulty_points": [6, 12, 18] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let (status, custom_competition) =
+        call(app.clone(), create_competition("Custom scoring")).await;
+    assert_eq!(status, StatusCode::OK, "{custom_competition}");
+    let custom_id: Uuid = custom_competition["competition_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, listed) = call(
+        app.clone(),
+        request("GET", "/v1/competitions", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert!(listed["competitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["competition_id"] == default_id.to_string()
+                && item["entered"] == false
+                && item["attempt_status"].is_null()
+        }));
+
+    let (status, not_opted_in) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{default_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "scoring-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{not_opted_in}");
+    assert_eq!(not_opted_in["error"]["code"], "not_opted_in");
+
+    let (status, profile) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "scoring-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{profile}");
+
+    let mut final_leaderboard = Value::Null;
+    for (competition_id, points) in [(default_id, [5_i64, 10, 15]), (custom_id, [6_i64, 12, 18])] {
+        let mut expected_score = 0.0;
+        let (status, start) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry"),
+                Some(&learner),
+                Some(serde_json::json!({ "handle": "scoring-learner" })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{start}");
+        assert!(start["question"]["correct_index"].is_null(), "{start}");
+        let first_question = &start["question"];
+        assert!(first_question["options"].as_array().is_some(), "{start}");
+        assert!(
+            first_question["options"][0]["rationale"].is_null(),
+            "{start}"
+        );
+
+        let attempt_id: Uuid = start["attempt_id"].as_str().unwrap().parse().unwrap();
+        let started_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT question_started_at FROM competition_attempts WHERE id = $1",
+        )
+        .bind(attempt_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("initial server-side question timer");
+        let (resume_status, resumed) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry"),
+                Some(&learner),
+                Some(serde_json::json!({ "handle": "scoring-learner" })),
+            ),
+        )
+        .await;
+        assert_eq!(resume_status, StatusCode::OK, "{resumed}");
+        assert_eq!(resumed["attempt_id"], start["attempt_id"]);
+        assert_eq!(resumed["question"], start["question"]);
+        let resumed_started_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+            "SELECT question_started_at FROM competition_attempts WHERE id = $1",
+        )
+        .bind(attempt_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("resumed server-side question timer");
+        assert_eq!(
+            resumed_started_at, started_at,
+            "resume preserves elapsed time"
+        );
+        let (status, in_progress) = call(
+            app.clone(),
+            request("GET", "/v1/competitions", Some(&learner), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{in_progress}");
+        assert!(in_progress["competitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item["competition_id"] == competition_id.to_string()
+                    && item["entered"] == false
+                    && item["attempt_status"] == "in_progress"
+            }));
+        let first_question_id: Uuid = first_question["question_version_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let first_options = first_question["options"].as_array().unwrap().len();
+        if competition_id == custom_id {
+            let extra_time = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry/answer"),
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "question_version_id": first_question_id,
+                        "chosen_index": 0,
+                        "idempotency_key": Uuid::new_v4(),
+                        "elapsed_ms": 0
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(
+                extra_time.0,
+                StatusCode::BAD_REQUEST,
+                "client time is rejected"
+            );
+
+            let other_question = qids
+                .iter()
+                .find(|question_id| **question_id != first_question_id)
+                .unwrap();
+            let (status, invalid_order) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry/answer"),
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "question_version_id": other_question,
+                        "chosen_index": 0,
+                        "idempotency_key": Uuid::new_v4()
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_order}");
+            assert_eq!(invalid_order["error"]["code"], "invalid_answer_order");
+
+            let (status, invalid_choice) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry/answer"),
+                    Some(&learner),
+                    Some(serde_json::json!({
+                        "question_version_id": first_question_id,
+                        "chosen_index": first_options,
+                        "idempotency_key": Uuid::new_v4()
+                    })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_choice}");
+            assert_eq!(invalid_choice["error"]["code"], "invalid_answer_choice");
+        }
+
+        let mut step = start;
+        let mut first_answer_receipt: Option<(Value, Value)> = None;
+        for answer_index in 0..qids.len() {
+            let question = &step["question"];
+            let question_id: Uuid = question["question_version_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let option_order_value: Value =
+                sqlx::query_scalar("SELECT option_order FROM competition_attempts WHERE id = $1")
+                    .bind(attempt_id)
+                    .fetch_one(&state.pool)
+                    .await
+                    .expect("server option order for test fixture");
+            let option_order: Vec<usize> =
+                serde_json::from_value(option_order_value).expect("stored displayed option order");
+            let (correct_index, difficulty): (i16, String) = sqlx::query_as(
+                "SELECT correct_index, difficulty FROM question_versions WHERE id = $1",
+            )
+            .bind(question_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("seeded question key");
+            let correct_display_index = option_order
+                .iter()
+                .position(|original_index| {
+                    *original_index == usize::try_from(correct_index).unwrap()
+                })
+                .expect("randomized option for answer key");
+            let chosen_index = if answer_index == 0 {
+                correct_display_index
+            } else {
+                (correct_display_index + 1) % option_order.len()
+            };
+            let item_points = match difficulty.as_str() {
+                "easy" => points[0],
+                "hard" => points[2],
+                _ => points[1],
+            };
+            expected_score += if answer_index == 0 {
+                item_points as f64
+            } else {
+                -(item_points as f64 * 0.25)
+            };
+            sqlx::query(
+                "UPDATE competition_attempts
+                 SET question_started_at = now() - INTERVAL '30 seconds'
+                 WHERE id = $1",
+            )
+            .bind(attempt_id)
+            .execute(&state.pool)
+            .await
+            .expect("age question timer for deterministic speed score");
+
+            let answer_body = serde_json::json!({
+                "question_version_id": question_id,
+                "chosen_index": chosen_index,
+                "idempotency_key": Uuid::new_v4()
+            });
+            let (status, next_step) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry/answer"),
+                    Some(&learner),
+                    Some(answer_body.clone()),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{next_step}");
+            if answer_index == 0 && competition_id == custom_id {
+                let (replay_status, replayed_step) = call(
+                    app.clone(),
+                    request(
+                        "POST",
+                        &format!("/v1/competitions/{competition_id}/entry/answer"),
+                        Some(&learner),
+                        Some(answer_body.clone()),
+                    ),
+                )
+                .await;
+                assert_eq!(replay_status, StatusCode::OK, "{replayed_step}");
+                assert_eq!(
+                    replayed_step, next_step,
+                    "replay returns the same next step"
+                );
+                let mut reused_key = answer_body.clone();
+                reused_key["chosen_index"] =
+                    serde_json::json!((chosen_index + 1) % option_order.len());
+                let (reuse_status, reused) = call(
+                    app.clone(),
+                    request(
+                        "POST",
+                        &format!("/v1/competitions/{competition_id}/entry/answer"),
+                        Some(&learner),
+                        Some(reused_key),
+                    ),
+                )
+                .await;
+                assert_eq!(reuse_status, StatusCode::CONFLICT, "{reused}");
+                assert_eq!(reused["error"]["code"], "idempotency_key_reused");
+                first_answer_receipt = Some((answer_body, next_step.clone()));
+            }
+            step = next_step;
+        }
+        assert_eq!(step["submitted"], true, "{step}");
+        assert!(
+            (step["score"].as_f64().unwrap() - expected_score).abs() < 0.02,
+            "competition scores from its difficulty-point snapshot: {step}"
+        );
+        if competition_id == custom_id {
+            let (first_body, first_response) =
+                first_answer_receipt.expect("first answer receipt is retained for delayed replay");
+            let (replay_status, replayed_step) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry/answer"),
+                    Some(&learner),
+                    Some(first_body),
+                ),
+            )
+            .await;
+            assert_eq!(replay_status, StatusCode::OK, "{replayed_step}");
+            assert_eq!(
+                replayed_step, first_response,
+                "delayed replay returns its original response"
+            );
+            let (status, submitted) = call(
+                app.clone(),
+                request("GET", "/v1/competitions", Some(&learner), None),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{submitted}");
+            assert!(submitted["competitions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| {
+                    item["competition_id"] == competition_id.to_string()
+                        && item["entered"] == true
+                        && item["attempt_status"] == "submitted"
+                }));
+            let (status, duplicate_start) = call(
+                app.clone(),
+                request(
+                    "POST",
+                    &format!("/v1/competitions/{competition_id}/entry"),
+                    Some(&learner),
+                    Some(serde_json::json!({ "handle": "scoring-learner" })),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT, "{duplicate_start}");
+            assert_eq!(duplicate_start["error"]["code"], "already_submitted");
+        }
+        if competition_id == custom_id {
+            let (status, leaderboard) = call(
+                app.clone(),
+                request(
+                    "GET",
+                    &format!("/v1/competitions/{competition_id}/leaderboard"),
+                    Some(&learner),
+                    None,
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{leaderboard}");
+            final_leaderboard = leaderboard;
+        }
+    }
+
+    let entry = &final_leaderboard["entries"][0];
+    assert_eq!(entry["is_me"], true, "{final_leaderboard}");
+    assert_eq!(entry["questions_attempted"], 3, "{final_leaderboard}");
+    assert_eq!(
+        entry["accuracy"],
+        serde_json::json!(1.0 / 3.0),
+        "{final_leaderboard}"
+    );
+    assert!(entry["average_response_time_ms"].as_f64().unwrap() >= 30_000.0);
+    assert!(entry["total_time_ms"].as_i64().unwrap() >= 90_000);
+}
+
+#[tokio::test]
+async fn competition_leaderboard_uses_full_tie_ladder_and_includes_own_row() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let admin = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let (status, profile) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "my-ranked-row" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{profile}");
+    let now = chrono::Utc::now();
+    let (status, competition) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&admin),
+            Some(serde_json::json!({
+                "title": "Leaderboard tie ladder",
+                "exam_id": ids.exam_id,
+                "question_ids": ids.question_versions,
+                "starts_at": now - chrono::Duration::minutes(1),
+                "ends_at": now + chrono::Duration::hours(1)
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{competition}");
+    let competition_id: Uuid = competition["competition_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let token_hash = Sha256::digest(learner.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let learner_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("learner id");
+    let mut submissions = vec![
+        (
+            "lower-accuracy",
+            20.0_f32,
+            8_i64,
+            10_i64,
+            1_000_i64,
+            -5_i64,
+            false,
+        ),
+        ("slower-equal", 20.0, 9, 10, 10_000, -4, false),
+        ("faster-earlier", 20.0, 9, 10, 9_000, -3, false),
+        ("faster-later", 20.0, 9, 10, 9_000, -2, false),
+    ];
+    for index in 0..46 {
+        submissions.push(("rank-lower", 10.0, 4, 10, 20_000 + index, index, false));
+    }
+
+    let mut entry_rows = Vec::new();
+    for (index, submission) in submissions.into_iter().enumerate() {
+        let user_id = Uuid::new_v4();
+        let handle = if submission.0 == "rank-lower" {
+            format!("rank-user-{index}")
+        } else {
+            submission.0.to_string()
+        };
+        sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, 'fixture')")
+            .bind(user_id)
+            .bind(format!("rank-user-{index}@example.test"))
+            .execute(&state.pool)
+            .await
+            .expect("insert leaderboard account");
+        sqlx::query("INSERT INTO community_profiles (user_id, handle) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(&handle)
+            .execute(&state.pool)
+            .await
+            .expect("insert leaderboard profile");
+        entry_rows.push((
+            user_id,
+            handle,
+            submission.1,
+            submission.2,
+            submission.3,
+            submission.4,
+            submission.5,
+            submission.6,
+        ));
+    }
+    entry_rows.push((
+        learner_id,
+        "my-ranked-row".to_string(),
+        0.0_f32,
+        0,
+        0,
+        90_000,
+        50,
+        false,
+    ));
+    let flagged_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, 'fixture')")
+        .bind(flagged_id)
+        .bind("rank-flagged@example.test")
+        .execute(&state.pool)
+        .await
+        .expect("insert flagged account");
+    sqlx::query("INSERT INTO community_profiles (user_id, handle) VALUES ($1, 'flagged-entry')")
+        .bind(flagged_id)
+        .execute(&state.pool)
+        .await
+        .expect("insert flagged profile");
+    entry_rows.push((
+        flagged_id,
+        "flagged-entry".to_string(),
+        99.0_f32,
+        10,
+        10,
+        1,
+        -6,
+        true,
+    ));
+
+    for (index, (user_id, handle, score, correct, attempted, total_time, minutes_ago, flagged)) in
+        entry_rows.into_iter().enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO competition_entries
+             (id, competition_id, user_id, handle, answers, score, total_time_ms,
+              submitted_order, submitted_at, correct_count, attempted_count,
+              average_response_time_ms, flagged)
+             VALUES ($1, $2, $3, $4, '[]'::jsonb, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(competition_id)
+        .bind(user_id)
+        .bind(handle)
+        .bind(score)
+        .bind(total_time)
+        .bind(index as i32 + 1)
+        .bind(now + chrono::Duration::minutes(minutes_ago))
+        .bind(correct)
+        .bind(attempted)
+        .bind(if attempted == 0 {
+            0.0
+        } else {
+            total_time as f64 / attempted as f64
+        })
+        .bind(flagged)
+        .execute(&state.pool)
+        .await
+        .expect("insert leaderboard result");
+    }
+
+    let (status, leaderboard) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/competitions/{competition_id}/leaderboard"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{leaderboard}");
+    let entries = leaderboard["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 51, "top 50 plus the learner's row");
+    assert_eq!(entries[0]["handle"], "faster-earlier", "{leaderboard}");
+    assert_eq!(entries[1]["handle"], "faster-later", "{leaderboard}");
+    assert_eq!(entries[2]["handle"], "slower-equal", "{leaderboard}");
+    assert_eq!(entries[3]["handle"], "lower-accuracy", "{leaderboard}");
+    assert_eq!(entries[0]["accuracy"], 0.9, "{leaderboard}");
+    assert_eq!(entries[0]["questions_attempted"], 10, "{leaderboard}");
+    assert_eq!(
+        entries[0]["average_response_time_ms"], 900.0,
+        "{leaderboard}"
+    );
+    assert_eq!(
+        entries[0]["prize_eligible"], false,
+        "open event is not prize eligible"
+    );
+    assert!(!entries
+        .iter()
+        .any(|entry| entry["handle"] == "flagged-entry"));
+    assert_eq!(entries[50]["rank"], 51, "{leaderboard}");
+    assert_eq!(entries[50]["is_me"], true, "{leaderboard}");
+
+    sqlx::query(
+        "UPDATE competitions
+         SET prize_reviewed = true, ends_at = now() - INTERVAL '1 minute'
+         WHERE id = $1",
+    )
+    .bind(competition_id)
+    .execute(&state.pool)
+    .await
+    .expect("close and review leaderboard fixture");
+    let (status, reviewed_board) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/competitions/{competition_id}/leaderboard"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reviewed_board}");
+    assert_eq!(reviewed_board["entries"][0]["prize_eligible"], true);
 }
 
 #[tokio::test]
@@ -9293,6 +10851,371 @@ async fn retest_serves_unattempted_family_variant() {
 }
 
 #[tokio::test]
+async fn community_post_reports_are_private_and_moderator_resolutions_are_audited() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let moderator = register_and_login(app.clone()).await;
+    let first_reporter = register_and_login(app.clone()).await;
+    let second_reporter = register_and_login(app.clone()).await;
+    let outsider = register_and_login(app.clone()).await;
+
+    let (status, group) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/groups",
+            Some(&moderator),
+            Some(serde_json::json!({ "name": "Safe study group" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{group}");
+    let group_id: Uuid = group["group_id"].as_str().unwrap().parse().unwrap();
+    for token in [&first_reporter, &second_reporter] {
+        let (status, joined) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/community/groups/{group_id}/join"),
+                Some(token),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{joined}");
+    }
+    let (status, post) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&moderator),
+            Some(serde_json::json!({ "body": "A post for moderator review" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{post}");
+    let post_id = post["post_id"].as_str().unwrap();
+
+    let (status, not_member) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&outsider),
+            Some(serde_json::json!({ "reason": "spam" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{not_member}");
+
+    let (status, invalid_reason) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&first_reporter),
+            Some(serde_json::json!({ "reason": "unsure" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_reason}");
+    let (status, long_note) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&first_reporter),
+            Some(serde_json::json!({ "reason": "spam", "note": "x".repeat(501) })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{long_note}");
+
+    let report_body = serde_json::json!({
+        "reason": "harassment",
+        "note": "private reporter note"
+    });
+    let (status, first_report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&first_reporter),
+            Some(report_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{first_report}");
+    assert_eq!(first_report["status"], "open");
+    let first_report_id: Uuid = first_report["report_id"].as_str().unwrap().parse().unwrap();
+    let (status, duplicate) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&first_reporter),
+            Some(serde_json::json!({ "reason": "other" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+    assert_eq!(duplicate["error"]["code"], "already_reported");
+
+    let (status, second_report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&second_reporter),
+            Some(serde_json::json!({ "reason": "other" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second_report}");
+    let second_report_id: Uuid = second_report["report_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, feed) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&first_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{feed}");
+    assert_eq!(feed["is_moderator"], false);
+    assert_eq!(feed["posts"][0]["status"], "visible");
+    assert!(!feed.to_string().contains("private reporter note"));
+
+    let (status, private_reports) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/me/reports"),
+            Some(&first_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{private_reports}");
+    let own_report = private_reports["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["report_id"] == first_report_id.to_string())
+        .unwrap();
+    assert_eq!(own_report["status"], "open");
+    assert!(own_report["note"].is_null());
+
+    let (status, forbidden_queue) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/reports"),
+            Some(&first_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden_queue}");
+    let (status, queue) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/reports"),
+            Some(&moderator),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    assert_eq!(queue["reports"].as_array().unwrap().len(), 2);
+    let queued = queue["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["report_id"] == first_report_id.to_string())
+        .unwrap();
+    assert_eq!(queued["note"], "private reporter note");
+    assert!(queued.get("reporter_id").is_none());
+
+    let (status, forbidden_resolution) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/reports/{first_report_id}/resolve"),
+            Some(&first_reporter),
+            Some(serde_json::json!({ "action": "dismiss" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden_resolution}");
+
+    let (status, removed) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/reports/{first_report_id}/resolve"),
+            Some(&moderator),
+            Some(serde_json::json!({ "action": "remove" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(removed["resolved_reports"], 2);
+    let (status, reports_after_remove) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/community/me/reports",
+            Some(&second_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reports_after_remove}");
+    assert_eq!(reports_after_remove["reports"][0]["status"], "post_removed");
+    assert_eq!(
+        reports_after_remove["reports"][0]["report_id"],
+        second_report_id.to_string()
+    );
+    let (status, removed_feed) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&second_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed_feed}");
+    assert_eq!(removed_feed["posts"][0]["status"], "removed");
+    let (status, removed_post_report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&outsider),
+            Some(serde_json::json!({ "reason": "spam" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{removed_post_report}");
+    let (status, removed_post_report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{post_id}/reports"),
+            Some(&second_reporter),
+            Some(serde_json::json!({ "reason": "spam" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{removed_post_report}");
+    let (status, repeated_resolution) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/reports/{first_report_id}/resolve"),
+            Some(&moderator),
+            Some(serde_json::json!({ "action": "dismiss" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{repeated_resolution}");
+
+    let (status, dismissible_post) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&moderator),
+            Some(serde_json::json!({ "body": "A post to dismiss" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dismissible_post}");
+    let dismissible_post_id = dismissible_post["post_id"].as_str().unwrap();
+    let (status, dismissible_report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/posts/{dismissible_post_id}/reports"),
+            Some(&first_reporter),
+            Some(serde_json::json!({ "reason": "spam" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{dismissible_report}");
+    let dismissible_report_id: Uuid = dismissible_report["report_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, dismissed) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/groups/{group_id}/reports/{dismissible_report_id}/resolve"),
+            Some(&moderator),
+            Some(serde_json::json!({ "action": "dismiss" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dismissed}");
+    assert_eq!(dismissed["status"], "dismissed");
+    let (status, reporter_status) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/community/me/reports",
+            Some(&first_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reporter_status}");
+    let dismissed_reporter_view = reporter_status["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["report_id"] == dismissible_report_id.to_string())
+        .unwrap();
+    assert_eq!(dismissed_reporter_view["status"], "dismissed");
+    let (status, dismissed_feed) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/community/groups/{group_id}/posts"),
+            Some(&first_reporter),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dismissed_feed}");
+    assert_eq!(dismissed_feed["posts"][0]["status"], "visible");
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&moderator), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit["events"].as_array().unwrap().iter().any(|event| {
+        event["action"] == "community_post_report_resolved"
+            && !event.to_string().contains("private reporter note")
+    }));
+}
+
+#[tokio::test]
 async fn community_groups_duels_and_integrity_gated_prizes() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -9643,9 +11566,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
             "POST",
             &format!("/v1/competitions/{comp_id}/entry"),
             Some(&carol),
-            Some(serde_json::json!({
-                "handle": "sneaky", "answers": [], "total_time_ms": 0
-            })),
+            Some(serde_json::json!({ "handle": "sneaky" })),
         ),
     )
     .await;
@@ -9659,27 +11580,14 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
             "POST",
             &format!("/v1/competitions/{comp_id}/entry"),
             Some(&bob),
-            Some(serde_json::json!({
-                "handle": "ace-1", "answers": [], "total_time_ms": 0
-            })),
+            Some(serde_json::json!({ "handle": "ace-1" })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["error"]["code"], "handle_mismatch", "{body}");
 
-    let (status, entry) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{comp_id}/entry"),
-            Some(&bob),
-            Some(serde_json::json!({
-                "handle": "bold-2", "answers": [], "total_time_ms": 1000
-            })),
-        ),
-    )
-    .await;
+    let (status, entry) = complete_competition_attempt(app.clone(), &bob, comp_id, "bold-2").await;
     assert_eq!(status, StatusCode::OK, "{entry}");
 
     // Claim before close: refused.
@@ -9739,7 +11647,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["error"]["code"], "entry_flagged", "{body}");
 
-    // The leaderboard names handles only and marks the flagged entry.
+    // Flagged entries stay hidden from ranked learners after review.
     let (status, board) = call(
         app.clone(),
         request(
@@ -9752,10 +11660,7 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
     .await;
     assert_eq!(status, StatusCode::OK, "{board}");
     assert_eq!(board["prize_reviewed"], true, "{board}");
-    let first = &board["entries"][0];
-    assert_eq!(first["handle"], "bold-2", "{board}");
-    assert_eq!(first["flagged"], true, "{board}");
-    assert_eq!(first["prize_eligible"], false, "{board}");
+    assert!(board["entries"].as_array().unwrap().is_empty(), "{board}");
 }
 
 #[tokio::test]

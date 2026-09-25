@@ -2,8 +2,9 @@
 
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §19.5
 
-This spec defines issue 01's five baseline settings. Offline lease duration is
-tracked in issue 02, and CSV/Excel question import is tracked in issue 03.
+This spec defines issue 01's five baseline settings. Offline lease duration,
+CSV/Excel question import, daily review caps, and competition scoring settings
+are tracked in issues 02–05.
 
 ## Problem statement
 
@@ -33,4 +34,7 @@ The admin settings endpoint stores JSON overrides, but some request handlers con
 
 ## Scope boundaries
 
-Competition scoring, integrity policies, and role-aware operator permissions remain separate ADMIN-06 work. Issues 02, 03, and 04 cover offline lease duration, rights-checked CSV/Excel question import, and adjustable daily review caps; this settings slice does not claim the complete §19.5 settings catalog.
+Integrity policies and role-aware operator permissions remain separate ADMIN-06
+work. Issues 02–05 cover offline lease duration, rights-checked CSV/Excel
+question import, adjustable daily review caps, and competition scoring controls;
+this settings slice does not claim the complete §19.5 settings catalog.

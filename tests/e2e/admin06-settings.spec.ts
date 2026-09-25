@@ -41,7 +41,8 @@ test('administrator loads and saves live runtime settings', async ({ page }) => 
 						retest_intervals_days: [1, 3, 7, 14],
 						offline_lease_days: 14,
 						max_reviews_per_day: 30,
-						max_new_cards_per_day: 10
+						max_new_cards_per_day: 10,
+						competition_difficulty_points: [5, 10, 15]
 					}
 				})
 			});
@@ -60,6 +61,9 @@ test('administrator loads and saves live runtime settings', async ({ page }) => 
 	await expect(page.getByLabel('Offline lease length in days')).toHaveValue('14');
 	await expect(page.getByLabel('Daily due-review cap')).toHaveValue('30');
 	await expect(page.getByLabel('Daily new-card cap')).toHaveValue('10');
+	await expect(page.getByLabel('Easy competition points')).toHaveValue('5');
+	await expect(page.getByLabel('Medium competition points')).toHaveValue('10');
+	await expect(page.getByLabel('Hard competition points')).toHaveValue('15');
 	await page.getByLabel('Lower mastery boundary').fill('1350');
 	await page.getByLabel('Higher mastery boundary').fill('1650');
 	await page.getByLabel('Minimum community sample').fill('25');
@@ -69,6 +73,9 @@ test('administrator loads and saves live runtime settings', async ({ page }) => 
 	await page.getByLabel('Offline lease length in days').fill('21');
 	await page.getByLabel('Daily due-review cap').fill('24');
 	await page.getByLabel('Daily new-card cap').fill('6');
+	await page.getByLabel('Easy competition points').fill('6');
+	await page.getByLabel('Medium competition points').fill('12');
+	await page.getByLabel('Hard competition points').fill('18');
 	await page.getByRole('button', { name: 'Save runtime settings' }).click();
 	await expect(page.getByRole('alert')).toContainText('Mastery boundaries must be increasing.');
 	await page.getByRole('button', { name: 'Save runtime settings' }).click();
@@ -81,7 +88,8 @@ test('administrator loads and saves live runtime settings', async ({ page }) => 
 		retest_intervals_days: [1, 4, 9, 16],
 		offline_lease_days: 21,
 		max_reviews_per_day: 24,
-		max_new_cards_per_day: 6
+		max_new_cards_per_day: 6,
+		competition_difficulty_points: [6, 12, 18]
 	});
 	await expect(page.getByTestId('settings-message')).toContainText('Runtime settings saved.');
 });
@@ -107,7 +115,8 @@ test('administrator downloads the question template and previews a CSV import', 
 						retest_intervals_days: [1, 3, 7, 14],
 						offline_lease_days: 14,
 						max_reviews_per_day: 30,
-						max_new_cards_per_day: 10
+						max_new_cards_per_day: 10,
+						competition_difficulty_points: [5, 10, 15]
 					}
 				})
 			});

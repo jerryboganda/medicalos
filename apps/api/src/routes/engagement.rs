@@ -4,14 +4,19 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use competition_scoring::{AnswerRecord, Difficulty, ScoringConfig};
+use chrono::Datelike;
+use competition_scoring::{rank, AnswerRecord, Difficulty, Entry, ScoringConfig};
+use rand::seq::SliceRandom;
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::Row;
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::seed::QuestionOption;
 use crate::state::AppState;
 
 // ---- ENG-01: daily goal, streak with freezes, question of the day -----------
@@ -585,6 +590,65 @@ pub struct CreateCompetitionReq {
     pub ends_at: chrono::DateTime<chrono::Utc>,
     /// COMP-01: one_off | daily | weekly | monthly | live.
     pub cadence: Option<String>,
+    /// Optional number of questions chosen from the recurring series pool.
+    pub question_count: Option<usize>,
+}
+
+fn next_competition_start(
+    cadence: &str,
+    start: chrono::DateTime<chrono::Utc>,
+    monthly_anchor_day: u32,
+    monthly_anchor_end: bool,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    match cadence {
+        "daily" => start.checked_add_signed(chrono::Duration::days(1)),
+        "weekly" => start.checked_add_signed(chrono::Duration::days(7)),
+        "monthly" => {
+            let next_month = start
+                .date_naive()
+                .with_day(1)?
+                .checked_add_months(chrono::Months::new(1))?;
+            let last_day = next_month
+                .checked_add_months(chrono::Months::new(1))?
+                .pred_opt()?
+                .day();
+            let target_day = if monthly_anchor_end {
+                last_day
+            } else {
+                monthly_anchor_day.min(last_day)
+            };
+            Some(
+                chrono::NaiveDateTime::new(next_month.with_day(target_day)?, start.time())
+                    .and_utc(),
+            )
+        }
+        _ => None,
+    }
+}
+
+fn choose_competition_questions(
+    pool: &[Uuid],
+    previous: &HashSet<Uuid>,
+    count: usize,
+) -> Vec<Uuid> {
+    let mut fresh: Vec<Uuid> = pool
+        .iter()
+        .copied()
+        .filter(|question_id| !previous.contains(question_id))
+        .collect();
+    fresh.shuffle(&mut rand::thread_rng());
+    if fresh.len() < count {
+        let selected: HashSet<Uuid> = fresh.iter().copied().collect();
+        let mut fill: Vec<Uuid> = pool
+            .iter()
+            .copied()
+            .filter(|question_id| !selected.contains(question_id))
+            .collect();
+        fill.shuffle(&mut rand::thread_rng());
+        fresh.extend(fill);
+    }
+    fresh.truncate(count);
+    fresh
 }
 
 pub async fn create_competition(
@@ -595,10 +659,31 @@ pub async fn create_competition(
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
-    if req.title.trim().is_empty() || req.question_ids.len() < 3 {
+    if req.title.trim().is_empty() || req.question_ids.len() < 3 || req.question_ids.len() > 500 {
         return Err(ApiError::unprocessable(
             "invalid_competition",
-            "title required and at least 3 questions",
+            "title required and question pool must contain 3-500 questions",
+        ));
+    }
+    if req.question_ids.iter().collect::<HashSet<_>>().len() != req.question_ids.len() {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_questions",
+            "competition questions must be unique",
+        ));
+    }
+    let valid_question_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM question_versions qv
+         JOIN curriculum_nodes node ON node.id = qv.chapter_id
+         WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'",
+    )
+    .bind(&req.question_ids)
+    .bind(req.exam_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if valid_question_count != req.question_ids.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_questions",
+            "all competition questions must be published and belong to its exam",
         ));
     }
     if req.ends_at <= req.starts_at {
@@ -617,87 +702,376 @@ pub async fn create_competition(
             "cadence must be one_off, daily, weekly, monthly, or live",
         ));
     }
+    let recurring = matches!(cadence.as_str(), "daily" | "weekly" | "monthly");
+    let question_count = req.question_count.unwrap_or(req.question_ids.len());
+    if (recurring && (question_count < 3 || question_count > req.question_ids.len()))
+        || (!recurring && req.question_count.is_some())
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_question_count",
+            "recurring question_count must be at least 3 and no larger than its pool; one-off and live events use their full question list",
+        ));
+    }
+    let duration = req.ends_at.signed_duration_since(req.starts_at);
+    let monthly_anchor_day = req.starts_at.day();
+    let monthly_anchor_end = req
+        .starts_at
+        .date_naive()
+        .succ_opt()
+        .map(|next_day| next_day.month() != req.starts_at.month())
+        .unwrap_or(true);
+    let recurrence = if recurring {
+        next_competition_start(
+            &cadence,
+            req.starts_at,
+            monthly_anchor_day,
+            monthly_anchor_end,
+        )
+        .ok_or_else(ApiError::internal)?
+    } else {
+        req.starts_at
+    };
+    if recurring && duration > recurrence.signed_duration_since(req.starts_at) {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_window",
+            "a recurring event must finish before its next occurrence",
+        ));
+    }
+    if recurring && duration.num_seconds() < 1 {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_window",
+            "a recurring event must last at least one second",
+        ));
+    }
+    if cadence == "monthly" && duration > chrono::Duration::days(28) {
+        return Err(ApiError::unprocessable(
+            "invalid_competition_window",
+            "monthly events must last no longer than 28 days",
+        ));
+    }
     let id = Uuid::new_v4();
-    sqlx::query!(
-        "INSERT INTO competitions (id, title, exam_id, question_ids, starts_at, ends_at, created_by, cadence)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        id,
-        req.title.trim(),
-        req.exam_id,
-        serde_json::to_value(&req.question_ids).map_err(|_| ApiError::internal())?,
-        req.starts_at,
-        req.ends_at,
-        user.user_id,
-        cadence
+    let series_id = recurring.then(Uuid::new_v4);
+    let difficulty_points =
+        crate::routes::settings::current_competition_difficulty_points(&state.pool).await?;
+    let first_questions = if recurring {
+        choose_competition_questions(&req.question_ids, &HashSet::new(), question_count)
+    } else {
+        req.question_ids.clone()
+    };
+    let mut tx = state.pool.begin().await?;
+    if let Some(series_id) = series_id {
+        sqlx::query(
+            "INSERT INTO competition_series
+               (id, title, exam_id, question_pool, question_count, cadence,
+                monthly_anchor_day, monthly_anchor_end, next_start_at, duration_seconds,
+                created_by, difficulty_points)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(series_id)
+        .bind(req.title.trim())
+        .bind(req.exam_id)
+        .bind(json!(req.question_ids))
+        .bind(i32::try_from(question_count).map_err(|_| ApiError::internal())?)
+        .bind(&cadence)
+        .bind(i16::try_from(monthly_anchor_day).map_err(|_| ApiError::internal())?)
+        .bind(monthly_anchor_end)
+        .bind(recurrence)
+        .bind(duration.num_seconds())
+        .bind(user.user_id)
+        .bind(json!(difficulty_points))
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO competitions
+         (id, title, exam_id, question_ids, starts_at, ends_at, created_by, cadence, difficulty_points, series_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
-    .execute(&state.pool)
+    .bind(id)
+    .bind(req.title.trim())
+    .bind(req.exam_id)
+    .bind(serde_json::to_value(&first_questions).map_err(|_| ApiError::internal())?)
+    .bind(req.starts_at)
+    .bind(req.ends_at)
+    .bind(user.user_id)
+    .bind(cadence)
+    .bind(json!(difficulty_points))
+    .bind(series_id)
+    .execute(&mut *tx)
     .await?;
-    Ok(Json(json!({ "competition_id": id })))
+    tx.commit().await?;
+    Ok(Json(
+        json!({ "competition_id": id, "series_id": series_id }),
+    ))
+}
+
+/// Materialize a bounded horizon under per-series row locks. One list request
+/// processes at most ten series and three occurrences per series.
+async fn materialize_competition_series(state: &AppState) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let series_rows = sqlx::query(
+        "SELECT id, title, exam_id, question_pool, question_count, cadence,
+                monthly_anchor_day, monthly_anchor_end, next_start_at, duration_seconds,
+                created_by, difficulty_points
+         FROM competition_series
+         WHERE active = true AND next_start_at <= now() + interval '31 days'
+         ORDER BY next_start_at
+         LIMIT 10
+         FOR UPDATE SKIP LOCKED",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let now = chrono::Utc::now();
+    for series in series_rows {
+        let series_id: Uuid = series.try_get("id")?;
+        let title: String = series.try_get("title")?;
+        let exam_id: Uuid = series.try_get("exam_id")?;
+        let question_pool: Vec<Uuid> = serde_json::from_value(series.try_get("question_pool")?)
+            .map_err(|_| ApiError::internal())?;
+        let requested_count: i32 = series.try_get("question_count")?;
+        let cadence: String = series.try_get("cadence")?;
+        let monthly_anchor_day: i16 = series.try_get("monthly_anchor_day")?;
+        let monthly_anchor_end: bool = series.try_get("monthly_anchor_end")?;
+        let mut next_start: chrono::DateTime<chrono::Utc> = series.try_get("next_start_at")?;
+        let duration_seconds: i64 = series.try_get("duration_seconds")?;
+        let created_by: Option<Uuid> = series.try_get("created_by")?;
+        let difficulty_points: serde_json::Value = series.try_get("difficulty_points")?;
+        let available: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT qv.id
+             FROM question_versions qv
+             JOIN curriculum_nodes node ON node.id = qv.chapter_id
+             WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'
+             ORDER BY array_position($1::uuid[], qv.id)",
+        )
+        .bind(&question_pool)
+        .bind(exam_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let horizon = next_competition_start(
+            &cadence,
+            now,
+            u32::try_from(monthly_anchor_day).map_err(|_| ApiError::internal())?,
+            monthly_anchor_end,
+        )
+        .unwrap_or(now);
+        for _ in 0..3 {
+            if next_start > horizon {
+                break;
+            }
+            if available.len() >= 3 {
+                let previous: Option<serde_json::Value> = sqlx::query_scalar(
+                    "SELECT question_ids FROM competitions
+                     WHERE series_id = $1 ORDER BY starts_at DESC LIMIT 1",
+                )
+                .bind(series_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+                let previous: HashSet<Uuid> = previous
+                    .map(serde_json::from_value::<Vec<Uuid>>)
+                    .transpose()
+                    .map_err(|_| ApiError::internal())?
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                let count = usize::try_from(requested_count)
+                    .map_err(|_| ApiError::internal())?
+                    .min(available.len());
+                let selected = choose_competition_questions(&available, &previous, count);
+                if selected.len() >= 3 {
+                    let event_id = Uuid::new_v4();
+                    let end_at = next_start
+                        .checked_add_signed(chrono::Duration::seconds(duration_seconds))
+                        .ok_or_else(ApiError::internal)?;
+                    sqlx::query(
+                        "INSERT INTO competitions
+                           (id, title, exam_id, question_ids, starts_at, ends_at, created_by,
+                            cadence, difficulty_points, series_id)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                         ON CONFLICT (series_id, starts_at) WHERE series_id IS NOT NULL DO NOTHING",
+                    )
+                    .bind(event_id)
+                    .bind(&title)
+                    .bind(exam_id)
+                    .bind(json!(selected))
+                    .bind(next_start)
+                    .bind(end_at)
+                    .bind(created_by)
+                    .bind(&cadence)
+                    .bind(&difficulty_points)
+                    .bind(series_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+            }
+            let Some(following) = next_competition_start(
+                &cadence,
+                next_start,
+                u32::try_from(monthly_anchor_day).map_err(|_| ApiError::internal())?,
+                monthly_anchor_end,
+            ) else {
+                sqlx::query("UPDATE competition_series SET active = false WHERE id = $1")
+                    .bind(series_id)
+                    .execute(&mut *tx)
+                    .await?;
+                break;
+            };
+            next_start = following;
+        }
+        sqlx::query("UPDATE competition_series SET next_start_at = $2 WHERE id = $1")
+            .bind(series_id)
+            .bind(next_start)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn list_competitions(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let rows = sqlx::query!(
-        r#"SELECT c.id, c.title, c.starts_at, c.ends_at, c.status,
-                  (SELECT COUNT(*) FROM competition_entries ce
-                   WHERE ce.competition_id = c.id AND ce.user_id = $1) AS "entered!"
-           FROM competitions c ORDER BY c.starts_at"#,
-        user.user_id
+    materialize_competition_series(&state).await?;
+    let rows = sqlx::query(
+        r#"SELECT c.id, c.title, c.exam_id, e.name AS exam, c.cadence, c.series_id,
+                  c.starts_at, c.ends_at, c.status,
+                  EXISTS (
+                      SELECT 1 FROM competition_entries ce
+                      WHERE ce.competition_id = c.id AND ce.user_id = $1
+                  ) AS entered,
+                  CASE WHEN EXISTS (
+                      SELECT 1 FROM competition_entries ce
+                      WHERE ce.competition_id = c.id AND ce.user_id = $1
+                  ) THEN 'submitted' ELSE attempt.status END AS attempt_status
+           FROM competitions c
+           JOIN exams e ON e.id = c.exam_id
+           LEFT JOIN competition_attempts attempt
+             ON attempt.competition_id = c.id AND attempt.user_id = $1
+           WHERE c.ends_at >= now() - interval '30 days'
+              OR EXISTS (SELECT 1 FROM competition_entries ce
+                         WHERE ce.competition_id = c.id AND ce.user_id = $1)
+           ORDER BY (c.ends_at < now()), c.starts_at ASC
+           LIMIT 100"#,
     )
+    .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
     let comps: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|r| {
-            json!({
-                "competition_id": r.id, "title": r.title, "starts_at": r.starts_at,
-                "ends_at": r.ends_at, "status": r.status, "entered": r.entered,
-            })
+        .iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id")?;
+            let title: String = row.try_get("title")?;
+            let exam_id: Uuid = row.try_get("exam_id")?;
+            let exam: String = row.try_get("exam")?;
+            let cadence: String = row.try_get("cadence")?;
+            let series_id: Option<Uuid> = row.try_get("series_id")?;
+            let starts_at: chrono::DateTime<chrono::Utc> = row.try_get("starts_at")?;
+            let ends_at: chrono::DateTime<chrono::Utc> = row.try_get("ends_at")?;
+            let status: String = row.try_get("status")?;
+            let entered: bool = row.try_get("entered")?;
+            let attempt_status: Option<String> = row.try_get("attempt_status")?;
+            Ok(json!({
+                "competition_id": id, "title": title, "starts_at": starts_at,
+                "exam_id": exam_id, "exam": exam, "cadence": cadence, "series_id": series_id,
+                "ends_at": ends_at, "status": status, "entered": entered,
+                "attempt_status": attempt_status,
+            }))
         })
-        .collect();
+        .collect::<Result<_, sqlx::Error>>()?;
     Ok(Json(json!({ "competitions": comps })))
 }
 
 #[derive(Deserialize)]
-pub struct SubmitEntryReq {
-    /// Ordered answers aligned with the competition's question_ids:
-    /// [{question_version_id, chosen_index, elapsed_ms}]
-    pub answers: Vec<serde_json::Value>,
+#[serde(deny_unknown_fields)]
+pub struct StartCompetitionEntryReq {
     pub handle: String,
-    pub total_time_ms: i64,
 }
 
-/// Score one entry with the shared scoring crate and rank it against the
-/// competition's entries (COMP-02: guess penalty, capped speed bonus,
-/// tie-break ladder). Integrity review (COMP-04) gates prize claims later.
-pub async fn submit_competition_entry(
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerCompetitionQuestionReq {
+    pub question_version_id: Uuid,
+    pub chosen_index: i64,
+    pub idempotency_key: Uuid,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+struct ScoredCompetitionAnswer {
+    question_version_id: Uuid,
+    chosen_index: i64,
+    elapsed_ms: i64,
+    correct: bool,
+    difficulty: String,
+    #[serde(default)]
+    idempotency_key: Option<Uuid>,
+    #[serde(default)]
+    request_body: Option<serde_json::Value>,
+    #[serde(default)]
+    response: Option<serde_json::Value>,
+}
+
+fn competition_difficulty(value: &str) -> ApiResult<Difficulty> {
+    match value {
+        "easy" => Ok(Difficulty::Easy),
+        "medium" => Ok(Difficulty::Medium),
+        "hard" => Ok(Difficulty::Hard),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+async fn present_competition_question(
+    connection: &mut sqlx::PgConnection,
+    question_version_id: Uuid,
+    option_order: &[usize],
+    position: usize,
+    total_questions: usize,
+) -> ApiResult<serde_json::Value> {
+    let row = sqlx::query(
+        "SELECT vignette, lead_in, options, status
+         FROM question_versions WHERE id = $1",
+    )
+    .bind(question_version_id)
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    let status: String = row.try_get("status")?;
+    if status != "published" {
+        return Err(ApiError::conflict(
+            "question_unavailable",
+            "this competition question is no longer available",
+        ));
+    }
+    let options: Vec<QuestionOption> =
+        serde_json::from_value(row.try_get("options")?).map_err(|_| ApiError::internal())?;
+    let unique_options: HashSet<usize> = option_order.iter().copied().collect();
+    if options.len() < 2
+        || options.len() != option_order.len()
+        || unique_options.len() != options.len()
+        || option_order.iter().any(|index| *index >= options.len())
+    {
+        return Err(ApiError::internal());
+    }
+    let displayed_options: Vec<serde_json::Value> = option_order
+        .iter()
+        .map(|index| json!({ "text": options[*index].text.clone() }))
+        .collect();
+    Ok(json!({
+        "question_version_id": question_version_id,
+        "question_number": position + 1,
+        "total_questions": total_questions,
+        "vignette": row.try_get::<String, _>("vignette")?,
+        "lead_in": row.try_get::<String, _>("lead_in")?,
+        "options": displayed_options,
+    }))
+}
+
+/// Start or resume one server-timed competition attempt.
+pub async fn start_competition_entry(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(comp_id): Path<Uuid>,
-    Json(req): Json<SubmitEntryReq>,
+    Json(req): Json<StartCompetitionEntryReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let comp = sqlx::query!(
-        "SELECT starts_at, ends_at, status FROM competitions WHERE id = $1",
-        comp_id
-    )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("competition_not_found"))?;
-    let now = chrono::Utc::now();
-    if now < comp.starts_at {
-        return Err(ApiError::conflict(
-            "not_started",
-            "competition has not started",
-        ));
-    }
-    if now > comp.ends_at {
-        return Err(ApiError::conflict(
-            "already_closed",
-            "competition window has closed",
-        ));
-    }
     let handle = req.handle.trim();
     if handle.is_empty() || handle.len() > 40 {
         return Err(ApiError::unprocessable(
@@ -725,81 +1099,450 @@ pub async fn submit_competition_entry(
             "entries must use your own community handle",
         ));
     }
-
-    // Score with the shared crate: one AnswerRecord per question.
-    let cfg = ScoringConfig::default();
-    let mut records = Vec::with_capacity(req.answers.len());
-    let mut total_time = 0i64;
-    for a in &req.answers {
-        let vid = a
-            .get("question_version_id")
-            .and_then(|v| v.as_str())
-            .and_then(|s| Uuid::parse_str(s).ok())
-            .ok_or_else(|| {
-                ApiError::unprocessable("invalid_answer", "missing question_version_id")
-            })?;
-        let chosen = a
-            .get("chosen_index")
-            .and_then(|v| v.as_i64())
-            .map(|v| v as i16)
-            .ok_or_else(|| ApiError::unprocessable("invalid_answer", "missing chosen_index"))?;
-        let elapsed = a
-            .get("elapsed_ms")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| ApiError::unprocessable("invalid_answer", "missing elapsed_ms"))?;
-        // Look up the reviewed key + difficulty for this version.
-        let qv = sqlx::query!(
-            "SELECT correct_index, difficulty FROM question_versions WHERE id = $1",
-            vid
-        )
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(|| ApiError::not_found("question_not_found"))?;
-        let difficulty = match qv.difficulty.as_str() {
-            "easy" => Difficulty::Easy,
-            "hard" => Difficulty::Hard,
-            _ => Difficulty::Medium,
-        };
-        records.push((vid, difficulty, chosen == qv.correct_index, elapsed));
-        total_time += elapsed;
+    let mut tx = state.pool.begin().await?;
+    let competition = sqlx::query(
+        "SELECT starts_at, ends_at, question_ids, status
+         FROM competitions WHERE id = $1 FOR SHARE",
+    )
+    .bind(comp_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("competition_not_found"))?;
+    let starts_at: chrono::DateTime<chrono::Utc> = competition.try_get("starts_at")?;
+    let ends_at: chrono::DateTime<chrono::Utc> = competition.try_get("ends_at")?;
+    let competition_status: String = competition.try_get("status")?;
+    let now = chrono::Utc::now();
+    if competition_status == "closed" {
+        return Err(ApiError::conflict(
+            "already_closed",
+            "competition is closed",
+        ));
+    }
+    if now < starts_at {
+        return Err(ApiError::conflict(
+            "not_started",
+            "competition has not started",
+        ));
+    }
+    if now > ends_at {
+        return Err(ApiError::conflict(
+            "already_closed",
+            "competition window has closed",
+        ));
+    }
+    let question_ids: Vec<Uuid> = serde_json::from_value(competition.try_get("question_ids")?)
+        .map_err(|_| ApiError::internal())?;
+    if question_ids.len() < 3 {
+        return Err(ApiError::internal());
+    }
+    let has_entry: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM competition_entries WHERE competition_id = $1 AND user_id = $2
+        )",
+    )
+    .bind(comp_id)
+    .bind(user.user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if has_entry {
+        return Err(ApiError::conflict(
+            "already_submitted",
+            "one competition entry is allowed per learner",
+        ));
     }
 
-    // Score via the crate and persist the entry (§31.1: scoring lives in
-    // the shared crate, never re-implemented here).
-    let answer_records: Vec<AnswerRecord> = records
-        .iter()
-        .map(|(_, difficulty, correct, elapsed)| AnswerRecord {
-            difficulty: *difficulty,
-            correct: *correct,
-            elapsed_ms: *elapsed,
-        })
-        .collect();
-    let score: f64 = answer_records.iter().map(|r| cfg.item_score(r)).sum();
-
-    let entry_id = Uuid::new_v4();
-    let score_f32 = score as f32;
-    sqlx::query!(
-        "INSERT INTO competition_entries
-           (id, competition_id, user_id, handle, answers, score, total_time_ms, submitted_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $7,
-           (SELECT COALESCE(MAX(submitted_order), 0) + 1 FROM competition_entries
-            WHERE competition_id = $2))",
-        entry_id,
-        comp_id,
-        user.user_id,
-        handle,
-        serde_json::to_value(&req.answers).map_err(|_| ApiError::internal())?,
-        score_f32,
-        total_time
+    let mut randomized_questions = question_ids;
+    randomized_questions.shuffle(&mut rand::thread_rng());
+    let first_question_id = randomized_questions[0];
+    let option_count: i64 = sqlx::query_scalar(
+        "SELECT jsonb_array_length(options)::BIGINT FROM question_versions
+         WHERE id = $1 AND status = 'published'",
     )
-    .execute(&state.pool)
+    .bind(first_question_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        ApiError::conflict("question_unavailable", "competition question unavailable")
+    })?;
+    let option_count = usize::try_from(option_count).map_err(|_| ApiError::internal())?;
+    if option_count < 2 {
+        return Err(ApiError::internal());
+    }
+    let mut first_option_order: Vec<usize> = (0..option_count).collect();
+    first_option_order.shuffle(&mut rand::thread_rng());
+    sqlx::query(
+        "INSERT INTO competition_attempts
+           (id, competition_id, user_id, handle, question_ids, option_order,
+            question_started_at)
+         VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
+         ON CONFLICT (competition_id, user_id) DO NOTHING",
+    )
+    .bind(Uuid::new_v4())
+    .bind(comp_id)
+    .bind(user.user_id)
+    .bind(&p.handle)
+    .bind(json!(randomized_questions))
+    .bind(json!(first_option_order))
+    .execute(&mut *tx)
     .await?;
-
+    let attempt = sqlx::query(
+        "SELECT id, handle, question_ids, current_index, option_order, status
+         FROM competition_attempts
+         WHERE competition_id = $1 AND user_id = $2 FOR UPDATE",
+    )
+    .bind(comp_id)
+    .bind(user.user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let status: String = attempt.try_get("status")?;
+    if status != "in_progress" {
+        return Err(ApiError::conflict(
+            "already_submitted",
+            "one competition entry is allowed per learner",
+        ));
+    }
+    let attempt_id: Uuid = attempt.try_get("id")?;
+    let saved_handle: String = attempt.try_get("handle")?;
+    if saved_handle != p.handle {
+        sqlx::query("UPDATE competition_attempts SET handle = $2 WHERE id = $1")
+            .bind(attempt_id)
+            .bind(&p.handle)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let randomized_questions: Vec<Uuid> = serde_json::from_value(attempt.try_get("question_ids")?)
+        .map_err(|_| ApiError::internal())?;
+    let current_index: i32 = attempt.try_get("current_index")?;
+    let position = usize::try_from(current_index).map_err(|_| ApiError::internal())?;
+    let current_question_id = *randomized_questions
+        .get(position)
+        .ok_or_else(ApiError::internal)?;
+    let option_order: Vec<usize> = serde_json::from_value(attempt.try_get("option_order")?)
+        .map_err(|_| ApiError::internal())?;
+    let question = present_competition_question(
+        &mut *tx,
+        current_question_id,
+        &option_order,
+        position,
+        randomized_questions.len(),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Json(json!({
-        "entry_id": entry_id,
-        "score": score,
-        "questions": records.len(),
+        "attempt_id": attempt_id,
+        "submitted": false,
+        "question": question,
     })))
+}
+
+/// Submit one displayed option; elapsed time and scoring are server-owned.
+pub async fn answer_competition_question(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(comp_id): Path<Uuid>,
+    Json(req): Json<AnswerCompetitionQuestionReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    let attempt = sqlx::query(
+        "SELECT attempt.id, attempt.handle, attempt.question_ids, attempt.current_index,
+                attempt.option_order, attempt.answers, attempt.question_started_at,
+                attempt.status, competition.starts_at, competition.ends_at,
+                competition.difficulty_points, competition.status AS competition_status
+         FROM competition_attempts attempt
+         JOIN competitions competition ON competition.id = attempt.competition_id
+         WHERE attempt.competition_id = $1 AND attempt.user_id = $2
+         FOR UPDATE OF attempt",
+    )
+    .bind(comp_id)
+    .bind(user.user_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("competition_attempt_not_found"))?;
+    let attempt_id: Uuid = attempt.try_get("id")?;
+    let request_body = json!({
+        "question_version_id": req.question_version_id,
+        "chosen_index": req.chosen_index,
+    });
+    let mut answers: Vec<ScoredCompetitionAnswer> =
+        serde_json::from_value(attempt.try_get("answers")?).map_err(|_| ApiError::internal())?;
+    if let Some(previous) = answers
+        .iter()
+        .find(|answer| answer.idempotency_key == Some(req.idempotency_key))
+    {
+        if previous.request_body.as_ref() != Some(&request_body) {
+            return Err(ApiError::conflict(
+                "idempotency_key_reused",
+                "this answer key was already used for a different response",
+            ));
+        }
+        return previous
+            .response
+            .clone()
+            .map(Json)
+            .ok_or_else(ApiError::internal);
+    }
+    let attempt_status: String = attempt.try_get("status")?;
+    if attempt_status == "submitted" {
+        return answers
+            .last()
+            .and_then(|answer| answer.response.clone())
+            .map(Json)
+            .ok_or_else(ApiError::internal);
+    }
+    let starts_at: chrono::DateTime<chrono::Utc> = attempt.try_get("starts_at")?;
+    let ends_at: chrono::DateTime<chrono::Utc> = attempt.try_get("ends_at")?;
+    let competition_status: String = attempt.try_get("competition_status")?;
+    let now = chrono::Utc::now();
+    if competition_status == "closed" {
+        return Err(ApiError::conflict(
+            "already_closed",
+            "competition is closed",
+        ));
+    }
+    if now < starts_at {
+        return Err(ApiError::conflict(
+            "not_started",
+            "competition has not started",
+        ));
+    }
+    if now > ends_at {
+        return Err(ApiError::conflict(
+            "already_closed",
+            "competition window has closed",
+        ));
+    }
+    let randomized_questions: Vec<Uuid> = serde_json::from_value(attempt.try_get("question_ids")?)
+        .map_err(|_| ApiError::internal())?;
+    let current_index: i32 = attempt.try_get("current_index")?;
+    let position = usize::try_from(current_index).map_err(|_| ApiError::internal())?;
+    if randomized_questions.get(position) != Some(&req.question_version_id) {
+        return Err(ApiError::unprocessable(
+            "invalid_answer_order",
+            "answer the current competition question",
+        ));
+    }
+    let option_order: Vec<usize> = serde_json::from_value(attempt.try_get("option_order")?)
+        .map_err(|_| ApiError::internal())?;
+    let question = sqlx::query(
+        "SELECT correct_index, difficulty, options, status
+         FROM question_versions WHERE id = $1",
+    )
+    .bind(req.question_version_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    let question_status: String = question.try_get("status")?;
+    if question_status != "published" {
+        return Err(ApiError::conflict(
+            "question_unavailable",
+            "this competition question is no longer available",
+        ));
+    }
+    let options: Vec<QuestionOption> =
+        serde_json::from_value(question.try_get("options")?).map_err(|_| ApiError::internal())?;
+    let unique_options: HashSet<usize> = option_order.iter().copied().collect();
+    if options.len() != option_order.len()
+        || unique_options.len() != options.len()
+        || option_order.iter().any(|index| *index >= options.len())
+    {
+        return Err(ApiError::internal());
+    }
+    if req.chosen_index < 0 || req.chosen_index >= option_order.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_answer_choice",
+            "chosen_index must identify a displayed option",
+        ));
+    }
+    let chosen_position = usize::try_from(req.chosen_index).map_err(|_| ApiError::internal())?;
+    let chosen_index =
+        i64::try_from(option_order[chosen_position]).map_err(|_| ApiError::internal())?;
+    let correct_index: i16 = question.try_get("correct_index")?;
+    let correct_index = usize::try_from(correct_index).map_err(|_| ApiError::internal())?;
+    if correct_index >= options.len() {
+        return Err(ApiError::internal());
+    }
+    let difficulty: String = question.try_get("difficulty")?;
+    let correct = usize::try_from(chosen_index).map_err(|_| ApiError::internal())? == correct_index;
+    let question_started_at: chrono::DateTime<chrono::Utc> =
+        attempt.try_get("question_started_at")?;
+    let _ = competition_difficulty(&difficulty)?;
+    let elapsed_ms: i64 = sqlx::query_scalar(
+        "SELECT GREATEST(
+            0,
+            FLOOR(EXTRACT(EPOCH FROM (clock_timestamp() - $1)) * 1000)
+        )::BIGINT",
+    )
+    .bind(question_started_at)
+    .fetch_one(&mut *tx)
+    .await?;
+    answers.push(ScoredCompetitionAnswer {
+        question_version_id: req.question_version_id,
+        chosen_index,
+        elapsed_ms,
+        correct,
+        difficulty,
+        idempotency_key: Some(req.idempotency_key),
+        request_body: Some(request_body.clone()),
+        response: None,
+    });
+    let next_position = position.checked_add(1).ok_or_else(ApiError::internal)?;
+    let is_final = next_position == randomized_questions.len();
+    let response = if is_final {
+        let point_values: Vec<i64> =
+            serde_json::from_value(attempt.try_get("difficulty_points")?).unwrap_or_default();
+        let points = crate::routes::settings::effective_competition_difficulty_points(point_values);
+        let config = ScoringConfig {
+            easy_points: points[0],
+            medium_points: points[1],
+            hard_points: points[2],
+            ..ScoringConfig::default()
+        };
+        let answer_records: Vec<AnswerRecord> = answers
+            .iter()
+            .map(|answer| {
+                Ok(AnswerRecord {
+                    difficulty: competition_difficulty(&answer.difficulty)?,
+                    correct: answer.correct,
+                    elapsed_ms: answer.elapsed_ms,
+                })
+            })
+            .collect::<ApiResult<_>>()?;
+        let total_time_ms = answer_records
+            .iter()
+            .try_fold(0_i64, |total, answer| total.checked_add(answer.elapsed_ms))
+            .ok_or_else(|| ApiError::unprocessable("invalid_answer_time", "total time overflow"))?;
+        let window_ms = ends_at
+            .signed_duration_since(starts_at)
+            .num_milliseconds()
+            .max(0);
+        if total_time_ms > window_ms {
+            return Err(ApiError::unprocessable(
+                "invalid_answer_time",
+                "combined answer time must fit within the competition window",
+            ));
+        }
+        let score = rank(
+            &config,
+            &[Entry {
+                participant_id: user.user_id.to_string(),
+                answers: answer_records,
+                total_time_ms,
+                submitted_order: 0,
+            }],
+        )
+        .first()
+        .ok_or_else(ApiError::internal)?
+        .score;
+        let correct_count =
+            i64::try_from(answers.iter().filter(|answer| answer.correct).count())
+                .map_err(|_| ApiError::unprocessable("invalid_answer_count", "too many answers"))?;
+        let attempted_count = i64::try_from(answers.len())
+            .map_err(|_| ApiError::unprocessable("invalid_answer_count", "too many answers"))?;
+        let average_response_time_ms = total_time_ms as f64 / attempted_count as f64;
+        let stored_answers = answers
+            .iter()
+            .map(|answer| {
+                json!({
+                    "question_version_id": answer.question_version_id,
+                    "chosen_index": answer.chosen_index,
+                    "elapsed_ms": answer.elapsed_ms,
+                })
+            })
+            .collect::<Vec<_>>();
+        let entry_id = Uuid::new_v4();
+        let handle: String = attempt.try_get("handle")?;
+        let inserted = sqlx::query(
+            "INSERT INTO competition_entries
+               (id, competition_id, user_id, handle, answers, score, total_time_ms,
+                submitted_order, correct_count, attempted_count, average_response_time_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, $7,
+               (SELECT COALESCE(MAX(submitted_order), 0) + 1 FROM competition_entries
+                WHERE competition_id = $2), $8, $9, $10)
+             ON CONFLICT (competition_id, user_id) DO NOTHING",
+        )
+        .bind(entry_id)
+        .bind(comp_id)
+        .bind(user.user_id)
+        .bind(handle)
+        .bind(json!(stored_answers))
+        .bind(score as f32)
+        .bind(total_time_ms)
+        .bind(correct_count)
+        .bind(attempted_count)
+        .bind(average_response_time_ms)
+        .execute(&mut *tx)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            return Err(ApiError::conflict(
+                "already_submitted",
+                "one competition entry is allowed per learner",
+            ));
+        }
+        let response = json!({
+            "attempt_id": attempt_id,
+            "submitted": true,
+            "entry_id": entry_id,
+            "score": score,
+            "questions": attempted_count,
+            "total_time_ms": total_time_ms,
+        });
+        answers.last_mut().ok_or_else(ApiError::internal)?.response = Some(response.clone());
+        sqlx::query(
+            "UPDATE competition_attempts
+             SET answers = $2, status = 'submitted', submitted_at = clock_timestamp()
+             WHERE id = $1",
+        )
+        .bind(attempt_id)
+        .bind(json!(answers))
+        .execute(&mut *tx)
+        .await?;
+        response
+    } else {
+        let next_question_id = randomized_questions[next_position];
+        let next_option_count: i64 = sqlx::query_scalar(
+            "SELECT jsonb_array_length(options)::BIGINT FROM question_versions
+             WHERE id = $1 AND status = 'published'",
+        )
+        .bind(next_question_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            ApiError::conflict("question_unavailable", "competition question unavailable")
+        })?;
+        let next_option_count =
+            usize::try_from(next_option_count).map_err(|_| ApiError::internal())?;
+        let mut next_option_order: Vec<usize> = (0..next_option_count).collect();
+        next_option_order.shuffle(&mut rand::thread_rng());
+        let next_question = present_competition_question(
+            &mut *tx,
+            next_question_id,
+            &next_option_order,
+            next_position,
+            randomized_questions.len(),
+        )
+        .await?;
+        let response = json!({
+            "attempt_id": attempt_id,
+            "submitted": false,
+            "question": next_question,
+        });
+        answers.last_mut().ok_or_else(ApiError::internal)?.response = Some(response.clone());
+        sqlx::query(
+            "UPDATE competition_attempts
+             SET current_index = $2, option_order = $3, answers = $4,
+                 question_started_at = clock_timestamp()
+             WHERE id = $1",
+        )
+        .bind(attempt_id)
+        .bind(i32::try_from(next_position).map_err(|_| ApiError::internal())?)
+        .bind(json!(next_option_order))
+        .bind(json!(answers))
+        .execute(&mut *tx)
+        .await?;
+        response
+    };
+    tx.commit().await?;
+    Ok(Json(response))
 }
 
 /// Simple XP award called from the practice submit handler, with the
@@ -894,4 +1637,44 @@ pub async fn weekly_recap(
         "questions_correct": attempts.c,
         "reviews_done": reviews,
     })))
+}
+
+#[cfg(test)]
+mod competition_schedule_tests {
+    use super::next_competition_start;
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    #[test]
+    fn monthly_series_preserve_day_or_end_of_month_anchor() {
+        let jan_31 = Utc
+            .with_ymd_and_hms(2024, 1, 31, 15, 30, 0)
+            .single()
+            .unwrap();
+        let feb_29 = next_competition_start("monthly", jan_31, 31, true).unwrap();
+        let mar_31 = next_competition_start("monthly", feb_29, 31, true).unwrap();
+        assert_eq!(
+            feb_29.date_naive(),
+            NaiveDate::from_ymd_opt(2024, 2, 29).unwrap()
+        );
+        assert_eq!(
+            mar_31.date_naive(),
+            NaiveDate::from_ymd_opt(2024, 3, 31).unwrap()
+        );
+        assert_eq!(mar_31.time(), jan_31.time());
+
+        let jan_30 = Utc
+            .with_ymd_and_hms(2024, 1, 30, 15, 30, 0)
+            .single()
+            .unwrap();
+        let feb_29 = next_competition_start("monthly", jan_30, 30, false).unwrap();
+        let mar_30 = next_competition_start("monthly", feb_29, 30, false).unwrap();
+        assert_eq!(
+            feb_29.date_naive(),
+            NaiveDate::from_ymd_opt(2024, 2, 29).unwrap()
+        );
+        assert_eq!(
+            mar_30.date_naive(),
+            NaiveDate::from_ymd_opt(2024, 3, 30).unwrap()
+        );
+    }
 }

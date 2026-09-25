@@ -64,6 +64,9 @@ migrations!(
     "0047_img02_structured_findings",
     "0048_admin06_import_metadata",
     "0049_admin06_review_event_kind",
+    "0050_comp02_scoring_leaderboard",
+    "0051_community_post_reports",
+    "0052_competition_series_leagues",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

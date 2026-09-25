@@ -165,6 +165,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/community/me", get(routes::community::my_profile))
         .route(
+            "/v1/community/me/reports",
+            get(routes::community::my_post_reports),
+        )
+        .route(
             "/v1/community/groups",
             post(routes::community::create_group).get(routes::community::list_groups),
         )
@@ -179,6 +183,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/v1/community/groups/{group_id}/posts/{post_id}",
             axum::routing::delete(routes::community::remove_post),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/posts/{post_id}/reports",
+            post(routes::community::report_post),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/reports",
+            get(routes::community::group_report_queue),
+        )
+        .route(
+            "/v1/community/groups/{group_id}/reports/{report_id}/resolve",
+            post(routes::community::resolve_post_report),
         )
         .route("/v1/community/duels", post(routes::community::create_duel))
         .route(
@@ -616,7 +632,17 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route(
             "/v1/competitions/{comp_id}/entry",
-            post(routes::engagement::submit_competition_entry),
+            post(routes::engagement::start_competition_entry),
+        )
+        .route(
+            "/v1/competitions/{comp_id}/entry/answer",
+            post(routes::engagement::answer_competition_question),
+        )
+        .route("/v1/leagues/{exam_id}", get(routes::leagues::state))
+        .route("/v1/leagues/{exam_id}/join", post(routes::leagues::join))
+        .route(
+            "/v1/leagues/{exam_id}/membership",
+            delete(routes::leagues::leave),
         )
         .route(
             "/v1/institutions/{inst_id}/coverage",
@@ -789,6 +815,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/api/v1/community/me", get(routes::community::my_profile))
         .route(
+            "/api/v1/community/me/reports",
+            get(routes::community::my_post_reports),
+        )
+        .route(
             "/api/v1/community/groups",
             post(routes::community::create_group).get(routes::community::list_groups),
         )
@@ -803,6 +833,18 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/community/groups/{group_id}/posts/{post_id}",
             axum::routing::delete(routes::community::remove_post),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/posts/{post_id}/reports",
+            post(routes::community::report_post),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/reports",
+            get(routes::community::group_report_queue),
+        )
+        .route(
+            "/api/v1/community/groups/{group_id}/reports/{report_id}/resolve",
+            post(routes::community::resolve_post_report),
         )
         .route(
             "/api/v1/community/duels",
@@ -1257,7 +1299,20 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route(
             "/api/v1/competitions/{comp_id}/entry",
-            post(routes::engagement::submit_competition_entry),
+            post(routes::engagement::start_competition_entry),
+        )
+        .route(
+            "/api/v1/competitions/{comp_id}/entry/answer",
+            post(routes::engagement::answer_competition_question),
+        )
+        .route("/api/v1/leagues/{exam_id}", get(routes::leagues::state))
+        .route(
+            "/api/v1/leagues/{exam_id}/join",
+            post(routes::leagues::join),
+        )
+        .route(
+            "/api/v1/leagues/{exam_id}/membership",
+            delete(routes::leagues::leave),
         )
         .route(
             "/api/v1/institutions/{inst_id}/coverage",

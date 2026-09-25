@@ -1,5 +1,5 @@
 <script lang="ts">
-	/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
+	/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 */
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import {
@@ -98,7 +98,10 @@
 		freeDailyCoachTurns: 1,
 		offlineLeaseDays: 14,
 		maxReviewsPerDay: 30,
-		maxNewCardsPerDay: 10
+		maxNewCardsPerDay: 10,
+		competitionEasyPoints: 5,
+		competitionMediumPoints: 10,
+		competitionHardPoints: 15
 	});
 	let settingsIntervals = $state('1, 3, 7, 14');
 	let settingsLoaded = $state(false);
@@ -199,7 +202,10 @@
 				freeDailyCoachTurns: settings.free_daily_coach_turns,
 				offlineLeaseDays: settings.offline_lease_days,
 				maxReviewsPerDay: settings.max_reviews_per_day,
-				maxNewCardsPerDay: settings.max_new_cards_per_day
+				maxNewCardsPerDay: settings.max_new_cards_per_day,
+				competitionEasyPoints: settings.competition_difficulty_points[0],
+				competitionMediumPoints: settings.competition_difficulty_points[1],
+				competitionHardPoints: settings.competition_difficulty_points[2]
 			};
 			settingsIntervals = settings.retest_intervals_days.join(', ');
 			settingsLoaded = true;
@@ -234,7 +240,12 @@
 				retest_intervals_days: intervals,
 				offline_lease_days: settingsDraft.offlineLeaseDays,
 				max_reviews_per_day: settingsDraft.maxReviewsPerDay,
-				max_new_cards_per_day: settingsDraft.maxNewCardsPerDay
+				max_new_cards_per_day: settingsDraft.maxNewCardsPerDay,
+				competition_difficulty_points: [
+					settingsDraft.competitionEasyPoints,
+					settingsDraft.competitionMediumPoints,
+					settingsDraft.competitionHardPoints
+				]
 			};
 			await Api.updateAdminSettings(settings);
 			settingsMessage = 'Runtime settings saved.';
@@ -984,7 +995,8 @@
 		<p class="muted">
 			Changes apply to new requests immediately. Active offline leases keep their expiry; new and renewed
 			leases use this window. Review caps affect the next queue request; due overflow remains scheduled.
-			Community disclosure keeps a positive minimum sample; changes are audited.
+			Community disclosure keeps a positive minimum sample; changes are audited. Competition points apply
+			to newly created competitions; ties use accuracy, total time, then submission time.
 		</p>
 		{#if settingsError}<p class="error-text" role="alert">{settingsError}</p>{/if}
 		{#if !settingsLoaded}
@@ -1027,6 +1039,18 @@
 					<label class="field" for="settings-new-card-cap">
 						<span>Daily new-card cap</span>
 						<input id="settings-new-card-cap" type="number" min="0" max="1000" step="1" bind:value={settingsDraft.maxNewCardsPerDay} required />
+					</label>
+					<label class="field" for="settings-competition-easy-points">
+						<span>Easy competition points</span>
+						<input id="settings-competition-easy-points" type="number" min="1" max="1000" step="1" bind:value={settingsDraft.competitionEasyPoints} required />
+					</label>
+					<label class="field" for="settings-competition-medium-points">
+						<span>Medium competition points</span>
+						<input id="settings-competition-medium-points" type="number" min="2" max="1000" step="1" bind:value={settingsDraft.competitionMediumPoints} required />
+					</label>
+					<label class="field" for="settings-competition-hard-points">
+						<span>Hard competition points</span>
+						<input id="settings-competition-hard-points" type="number" min="3" max="1000" step="1" bind:value={settingsDraft.competitionHardPoints} required />
 					</label>
 				</div>
 				<button class="btn primary" type="submit" disabled={settingsBusy} data-testid="settings-save">

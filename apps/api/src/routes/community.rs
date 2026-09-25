@@ -4,10 +4,12 @@
 //! with the group's own moderators.
 
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::Json;
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -196,6 +198,7 @@ pub async fn list_posts(
     Path(group_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     require_member(&state, group_id, user.user_id).await?;
+    let is_moderator = is_group_moderator(&state, group_id, user.user_id).await?;
     let rows = sqlx::query!(
         r#"SELECT p.id, p.body, p.status, p.created_at, cp.handle AS "handle!"
            FROM community_posts p
@@ -234,7 +237,278 @@ pub async fn list_posts(
             "handle": "member", "at": r.created_at,
         })
     }));
-    Ok(Json(json!({ "posts": posts })))
+    Ok(Json(
+        json!({ "posts": posts, "is_moderator": is_moderator }),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportPostReq {
+    pub reason: String,
+    pub note: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvePostReportReq {
+    pub action: String,
+}
+
+pub async fn report_post(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((group_id, post_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<ReportPostReq>,
+) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    require_member(&state, group_id, user.user_id).await?;
+    if !matches!(
+        req.reason.as_str(),
+        "spam" | "harassment" | "medical_misinformation" | "other"
+    ) {
+        return Err(ApiError::unprocessable(
+            "invalid_reason",
+            "choose a listed report reason",
+        ));
+    }
+    let note = req
+        .note
+        .map(|note| note.trim().to_owned())
+        .filter(|note| !note.is_empty());
+    if note.as_ref().is_some_and(|note| note.chars().count() > 500) {
+        return Err(ApiError::unprocessable(
+            "note_too_long",
+            "report notes must be at most 500 characters",
+        ));
+    }
+    let mut tx = state.pool.begin().await?;
+    let post_status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM community_posts WHERE id = $1 AND group_id = $2 FOR UPDATE",
+    )
+    .bind(post_id)
+    .bind(group_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("post_not_found"))?;
+    if post_status != "visible" {
+        return Err(ApiError::conflict(
+            "post_not_reportable",
+            "only visible posts can be reported",
+        ));
+    }
+
+    let row = sqlx::query(
+        "INSERT INTO community_post_reports (id, group_id, post_id, reporter_id, reason, note)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (post_id, reporter_id) DO NOTHING
+         RETURNING id, status, created_at",
+    )
+    .bind(Uuid::new_v4())
+    .bind(group_id)
+    .bind(post_id)
+    .bind(user.user_id)
+    .bind(req.reason)
+    .bind(note)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::conflict("already_reported", "you already reported this post"))?;
+    tx.commit().await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "report_id": row.try_get::<Uuid, _>("id")?,
+            "status": row.try_get::<String, _>("status")?,
+            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+        })),
+    ))
+}
+
+/// A reporter can see their own report state, without their private note or
+/// any other member's identity or report details.
+pub async fn my_post_reports(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let rows = sqlx::query(
+        "SELECT r.id, r.group_id, g.name AS group_name, r.post_id, r.reason,
+                r.status, r.created_at
+         FROM community_post_reports r
+         JOIN community_groups g ON g.id = r.group_id
+         WHERE r.reporter_id = $1
+         ORDER BY r.created_at DESC LIMIT 100",
+    )
+    .bind(user.user_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let reports = rows
+        .iter()
+        .map(|row| {
+            Ok(json!({
+                "report_id": row.try_get::<Uuid, _>("id")?,
+                "group_id": row.try_get::<Uuid, _>("group_id")?,
+                "group_name": row.try_get::<String, _>("group_name")?,
+                "post_id": row.try_get::<Uuid, _>("post_id")?,
+                "reason": row.try_get::<String, _>("reason")?,
+                "status": row.try_get::<String, _>("status")?,
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+            }))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(Json(json!({ "reports": reports })))
+}
+
+pub async fn group_report_queue(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(group_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_moderator(&state, group_id, user.user_id).await?;
+    let rows = sqlx::query(
+        "SELECT r.id, r.post_id, r.reason, r.note, r.created_at, p.body,
+                COALESCE(cp.handle, 'member') AS author_handle
+         FROM community_post_reports r
+         JOIN community_posts p ON p.id = r.post_id AND p.group_id = r.group_id
+         LEFT JOIN community_profiles cp ON cp.user_id = p.author
+         WHERE r.group_id = $1 AND r.status = 'open' AND p.status = 'visible'
+         ORDER BY r.created_at ASC LIMIT 100",
+    )
+    .bind(group_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let reports = rows
+        .iter()
+        .map(|row| {
+            Ok(json!({
+                "report_id": row.try_get::<Uuid, _>("id")?,
+                "post_id": row.try_get::<Uuid, _>("post_id")?,
+                "reason": row.try_get::<String, _>("reason")?,
+                "note": row.try_get::<Option<String>, _>("note")?,
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+                "post_body": row.try_get::<String, _>("body")?,
+                "author_handle": row.try_get::<String, _>("author_handle")?,
+            }))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(Json(json!({ "reports": reports })))
+}
+
+async fn is_group_moderator(state: &AppState, group_id: Uuid, user_id: Uuid) -> ApiResult<bool> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM community_group_members
+         WHERE group_id = $1 AND user_id = $2 AND role = 'moderator')",
+    )
+    .bind(group_id)
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?)
+}
+
+async fn require_moderator(state: &AppState, group_id: Uuid, user_id: Uuid) -> ApiResult<()> {
+    if !is_group_moderator(state, group_id, user_id).await? {
+        return Err(ApiError::forbidden(
+            "moderator_required",
+            "only group moderators can review reports",
+        ));
+    }
+    Ok(())
+}
+
+async fn tombstone_post_and_resolve_reports(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    group_id: Uuid,
+    post_id: Uuid,
+    moderator_id: Uuid,
+) -> ApiResult<u64> {
+    sqlx::query(
+        "UPDATE community_posts SET status = 'removed', removed_reason = 'moderator_removed'
+         WHERE id = $1 AND group_id = $2",
+    )
+    .bind(post_id)
+    .bind(group_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(sqlx::query(
+        "UPDATE community_post_reports
+         SET status = 'post_removed', resolved_by = $3, resolved_at = now()
+         WHERE post_id = $1 AND group_id = $2 AND status = 'open'",
+    )
+    .bind(post_id)
+    .bind(group_id)
+    .bind(moderator_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected())
+}
+
+pub async fn resolve_post_report(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((group_id, report_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<ResolvePostReportReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    require_moderator(&state, group_id, user.user_id).await?;
+    if !matches!(req.action.as_str(), "dismiss" | "remove") {
+        return Err(ApiError::unprocessable(
+            "invalid_action",
+            "action must be dismiss or remove",
+        ));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let report = sqlx::query(
+        "SELECT r.post_id, r.status FROM community_post_reports r
+         JOIN community_posts p ON p.id = r.post_id AND p.group_id = r.group_id
+         WHERE r.id = $1 AND r.group_id = $2
+         FOR UPDATE OF r, p",
+    )
+    .bind(report_id)
+    .bind(group_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("report_not_found"))?;
+    let post_id: Uuid = report.try_get("post_id")?;
+    let status: String = report.try_get("status")?;
+    if status != "open" {
+        return Err(ApiError::conflict(
+            "report_resolved",
+            "this report is already resolved",
+        ));
+    }
+
+    let resolved_reports = if req.action == "remove" {
+        tombstone_post_and_resolve_reports(&mut tx, group_id, post_id, user.user_id).await?
+    } else {
+        sqlx::query(
+            "UPDATE community_post_reports
+             SET status = 'dismissed', resolved_by = $3, resolved_at = now()
+             WHERE id = $1 AND group_id = $2 AND status = 'open'",
+        )
+        .bind(report_id)
+        .bind(group_id)
+        .bind(user.user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+    };
+    sqlx::query(
+        "INSERT INTO audit_events (id, actor, action, entity, entity_id, new_value)
+         VALUES ($1, $2, 'community_post_report_resolved', 'community_post_report', $3, $4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user.user_id)
+    .bind(report_id)
+    .bind(json!({
+        "decision": req.action.as_str(),
+        "post_id": post_id,
+        "resolved_reports": resolved_reports,
+    }))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({
+        "resolved_reports": resolved_reports,
+        "status": if req.action == "remove" { "post_removed" } else { "dismissed" },
+    })))
 }
 
 pub async fn remove_post(
@@ -242,29 +516,31 @@ pub async fn remove_post(
     user: AuthUser,
     Path((group_id, post_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let moderator = sqlx::query!(
-        "SELECT 1 AS one FROM community_group_members
-         WHERE group_id = $1 AND user_id = $2 AND role = 'moderator'",
-        group_id,
-        user.user_id
+    require_moderator(&state, group_id, user.user_id).await?;
+    let mut tx = state.pool.begin().await?;
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM community_posts WHERE id = $1 AND group_id = $2 FOR UPDATE",
     )
-    .fetch_optional(&state.pool)
+    .bind(post_id)
+    .bind(group_id)
+    .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| {
-        ApiError::forbidden("moderator_required", "only group moderators remove posts")
-    })?;
-    let _ = moderator;
-    let updated = sqlx::query!(
-        "UPDATE community_posts SET status = 'removed', removed_reason = 'moderator_removed'
-         WHERE id = $1 AND group_id = $2",
-        post_id,
-        group_id
-    )
-    .execute(&state.pool)
-    .await?;
-    if updated.rows_affected() == 0 {
-        return Err(ApiError::not_found("post_not_found"));
+    .ok_or_else(|| ApiError::not_found("post_not_found"))?;
+    if status == "visible" {
+        let resolved =
+            tombstone_post_and_resolve_reports(&mut tx, group_id, post_id, user.user_id).await?;
+        sqlx::query(
+            "INSERT INTO audit_events (id, actor, action, entity, entity_id, new_value)
+             VALUES ($1, $2, 'community_post_removed', 'community_post', $3, $4)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(user.user_id)
+        .bind(post_id)
+        .bind(json!({ "group_id": group_id, "resolved_reports": resolved }))
+        .execute(&mut *tx)
+        .await?;
     }
+    tx.commit().await?;
     Ok(Json(json!({ "removed": true })))
 }
 
@@ -589,46 +865,83 @@ pub async fn decline_duel(
 // ---- COMP-01/04: competition leaderboard + integrity-gated prizes -----------
 
 /// Ranked entries for one competition. Only opted-in handles are named;
-/// flagged entries stay listed but marked — honesty over cosmetics.
+/// flagged entries stay hidden pending review.
 pub async fn competition_leaderboard(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(comp_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let comp = sqlx::query!(
-        "SELECT prize_reviewed, status FROM competitions WHERE id = $1",
-        comp_id
+    let comp =
+        sqlx::query("SELECT prize_reviewed, status, ends_at FROM competitions WHERE id = $1")
+            .bind(comp_id)
+            .fetch_optional(&state.pool)
+            .await?
+            .ok_or_else(|| ApiError::not_found("competition_not_found"))?;
+    let prize_reviewed: bool = comp.try_get("prize_reviewed")?;
+    let competition_status: String = comp.try_get("status")?;
+    let ends_at: chrono::DateTime<chrono::Utc> = comp.try_get("ends_at")?;
+    let prize_window_closed = competition_status == "closed" || chrono::Utc::now() >= ends_at;
+    let rows = sqlx::query(
+        r#"WITH ranked AS (
+               SELECT ce.id, ce.user_id, ce.handle, ce.score, ce.total_time_ms,
+                      ce.correct_count, ce.attempted_count,
+                      ce.average_response_time_ms,
+                      ROW_NUMBER() OVER (
+                          ORDER BY ce.score DESC,
+                              COALESCE(
+                                  ce.correct_count::NUMERIC / NULLIF(ce.attempted_count, 0),
+                                  0::NUMERIC
+                              ) DESC,
+                              ce.total_time_ms ASC,
+                              ce.submitted_at ASC,
+                              ce.id ASC
+                      ) AS leaderboard_rank
+               FROM competition_entries ce
+               WHERE ce.competition_id = $1 AND ce.flagged = false
+           )
+           SELECT id, user_id, handle, score, total_time_ms,
+                  correct_count, attempted_count, average_response_time_ms,
+                  leaderboard_rank
+           FROM ranked
+           WHERE leaderboard_rank <= 50 OR user_id = $2
+           ORDER BY leaderboard_rank"#,
     )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("competition_not_found"))?;
-    let rows = sqlx::query!(
-        r#"SELECT ce.handle, ce.score, ce.total_time_ms, ce.flagged
-           FROM competition_entries ce
-           WHERE ce.competition_id = $1
-           ORDER BY ce.score DESC, ce.total_time_ms ASC
-           LIMIT 50"#,
-        comp_id
-    )
+    .bind(comp_id)
+    .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
     let entries: Vec<serde_json::Value> = rows
         .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            json!({
-                "rank": i + 1,
-                "handle": r.handle,
-                "score": r.score,
-                "total_time_ms": r.total_time_ms,
-                "flagged": r.flagged,
-                "prize_eligible": comp.prize_reviewed && !r.flagged,
-            })
+        .map(|row| {
+            let user_id: Uuid = row.try_get("user_id")?;
+            let correct_count: i64 = row.try_get("correct_count")?;
+            let attempted_count: i64 = row.try_get("attempted_count")?;
+            let accuracy = if attempted_count == 0 {
+                0.0
+            } else {
+                correct_count as f64 / attempted_count as f64
+            };
+            let leaderboard_rank: i64 = row.try_get("leaderboard_rank")?;
+            let handle: String = row.try_get("handle")?;
+            let score: f32 = row.try_get("score")?;
+            let total_time_ms: i64 = row.try_get("total_time_ms")?;
+            let average_response_time_ms: f64 = row.try_get("average_response_time_ms")?;
+            Ok(json!({
+                "rank": leaderboard_rank,
+                "handle": handle,
+                "score": score,
+                "accuracy": accuracy,
+                "questions_attempted": attempted_count,
+                "average_response_time_ms": average_response_time_ms,
+                "total_time_ms": total_time_ms,
+                "is_me": user_id == user.user_id,
+                "prize_eligible": prize_reviewed && prize_window_closed,
+            }))
         })
-        .collect();
+        .collect::<Result<_, sqlx::Error>>()?;
     Ok(Json(json!({
-        "prize_reviewed": comp.prize_reviewed,
-        "status": comp.status,
+        "prize_reviewed": prize_reviewed,
+        "status": competition_status,
         "entries": entries,
     })))
 }

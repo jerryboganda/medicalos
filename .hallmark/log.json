@@ -1,6 +1,22 @@
 [
   {
     "date": "2026-09-25",
+    "macrostructure": "App Shell (existing Community page)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "member report form, private status list, and moderator review queue integrated into the existing group feed",
+    "brief": "COMMUNITY-01 post reporting and moderation"
+  },
+  {
+    "date": "2026-09-25",
+    "macrostructure": "App Shell (existing Editorial Console)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "three difficulty-point controls and policy timing guidance added to the existing responsive runtime settings panel",
+    "brief": "ADMIN-06 competition scoring controls"
+  },
+  {
+    "date": "2026-09-25",
     "macrostructure": "App Shell (existing Editorial Console)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
     "enrichment": "none",
@@ -157,5 +173,13 @@
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens: dark paper · violet accent · sans display)",
     "enrichment": "none (typography only)",
     "brief": "Medical Learning OS learner app: login, Today plan, session workspace"
+  },
+  {
+    "date": "2026-09-25",
+    "macrostructure": "App Shell (existing Practice page)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "opt-in recurring event cards lead into one server-timed question at a time; exam-scoped weekly cohorts show private standings and one-click opt-in",
+    "brief": "COMP-01/02/03 recurring competition series and weekly leagues"
   }
 ]
