@@ -3,7 +3,7 @@
 Status: ready-for-human
 Requirement IDs: QB-13, QB-04, QB-06, NOTE-01, OFF-02, EX-08
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§7.5, 8.3, 11.2–11.6
-Implementation state: complete; final API/browser and wasm CI acceptance is deferred.
+Implementation state: API/browser and shared WASM CI acceptance passed in run 36159484978.
 
 ## Scope
 
@@ -41,7 +41,7 @@ session API.
 
 ## Verification boundary
 
-Author API integration and Playwright coverage. Do not run local builds, test
-suites, screenshots, or generated artifacts; final GitHub Actions is the
-acceptance gate. Offline writes remain pending and visibly unsynced until the
-existing server sync seam confirms them; never show an invented score.
+API integration and Playwright coverage passed in GitHub Actions run
+[36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
+Offline writes remain pending and visibly unsynced until the existing server
+sync seam confirms them; never show an invented score.

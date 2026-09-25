@@ -3,7 +3,7 @@
 Status: in-progress
 Requirement IDs: AI-04, AI-02, AI-08, PLAN-02
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§8.4–8.8
-Implementation state: current-plan selection, protected work, activity/time preferences, free-tier caps, exam-date states, and active display-rights/audience checks are implemented; finite-seat grants fail closed until a seat-allocation lifecycle exists; verified offline availability, broad accessibility metadata, and final CI remain.
+Implementation state: current-plan selection, protected work, activity/time preferences, free-tier caps, exam-date states, and active display-rights/audience/asset-scope checks are implemented and CI-verified in run 36159484978; finite-seat grants fail closed until a seat-allocation lifecycle exists; offline receipt verification and broad accessibility metadata remain open.
 
 ## Problem statement
 
@@ -78,7 +78,8 @@ to verify. `learner_accommodations` has no shared capability vocabulary, so
 this slice accepts a per-request time adjustment; format and modality
 compatibility remain unverified. Rights-contract authenticity, offline
 availability, accessibility compatibility, and device acceptance remain
-explicit gates. Final API/CI verification is still pending.
+explicit gates. API/browser acceptance passed in GitHub Actions run
+[36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
 
 ## Verification seam
 
@@ -106,9 +107,10 @@ generated artifacts; final GitHub Actions is the acceptance gate.
   unsupported audiences fail closed. Finite seat caps are withheld because the
   platform has no durable seat-allocation and release policy to check safely.
 - API regressions cover active rights, revocation, audience, seat cap, source
-  scope, display permission, expiry, and missing rights references.
+  scope, display permission, expiry, and missing rights references; all passed
+  in GitHub Actions run 36159484978.
 - Only free-tier practice uses the free daily cap, and revision attempts are
   excluded from its usage count. Answer inserts serialize on the learner row
   and enforce the cap at the write boundary; next-action and linked task launch
   check that the complete planned count fits. API integration and browser
-  regression cases are authored; final GitHub Actions verification is pending.
+  regression cases passed in GitHub Actions run 36159484978.

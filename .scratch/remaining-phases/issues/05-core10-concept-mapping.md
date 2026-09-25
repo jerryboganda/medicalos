@@ -3,7 +3,7 @@
 Status: ready-for-human
 Requirement IDs: CORE-10, QB-12, ADMIN-06
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§2.1, 5.5, 11.1
-Implementation state: complete; final API/browser CI acceptance is deferred.
+Implementation state: API/browser CI acceptance passed in run 36159484978.
 
 ## Domain rule
 
@@ -40,5 +40,5 @@ tests, or screenshots; final GitHub Actions is the acceptance gate.
   audit records commit together.
 - Added responsive editorial controls for concept creation, versioning, and
   node mapping, with API and mobile browser coverage authored.
-- Verification remains pending in GitHub Actions; no local build or test was
-  run under the continuation's verification boundary.
+- API/browser coverage and the shared WASM build passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).

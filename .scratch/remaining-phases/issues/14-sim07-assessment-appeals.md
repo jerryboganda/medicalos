@@ -34,7 +34,7 @@ Allow the run owner to submit one reasoned appeal after examiner results exist. 
 
 - API integration cases cover ownership, finished/assessed preconditions, duplicate submission, separate reviewer identity, queue lifecycle, appeal-state disclosure, and database immutability.
 - Playwright covers learner submission and independent admin resolution.
-- Build and test execution remain deferred to the final GitHub Actions pass.
+- Build and test checks passed in GitHub Actions run 36159484978.
 
 ## Out of Scope
 
@@ -48,4 +48,4 @@ Allow the run owner to submit one reasoned appeal after examiner results exist. 
 - Added append-only appeal/review tables and database mutation guards. Audit entries include IDs and decision codes but omit appeal and rationale text.
 - The learner debrief exposes the appeal state and `consequential_use_status`; reassessment-required preserves the original score and explicitly blocks consequential use pending a new independent assessment.
 - Added API integration coverage for unfinished/unassessed runs, ownership, duplicate appeals, appellant/examiner exclusion, queue lifecycle, unchanged original scores, audit privacy, and row immutability; added learner and admin Playwright flows.
-- No builds or tests have been run. Clinical policy approval and current GitHub Actions remain separate acceptance gates.
+- API/browser checks passed in GitHub Actions run 36159484978. Clinical policy approval remains a separate acceptance gate.

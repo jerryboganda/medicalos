@@ -46,9 +46,10 @@ existing review history and scheduling state are unchanged.
 
 ## Verification boundary
 
-Use authenticated API and existing admin-page browser seams. Keep formatting,
-build, tests, and migration rollback verification in the final GitHub Actions
-batch; do not run local builds or test suites.
+Use authenticated API and existing admin-page browser seams. Formatting,
+build, tests, and migration/query checks passed in GitHub Actions run
+36159484978; do not run heavy builds or test suites on local or production
+hosts.
 
 ## Out of scope
 

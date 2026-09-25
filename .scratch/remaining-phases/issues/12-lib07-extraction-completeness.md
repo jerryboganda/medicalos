@@ -67,7 +67,8 @@ critical or uncertain region.
   approval/rejection, immutability, and audit privacy.
 - Exercise the existing admin surface through Playwright for report entry and
   status review, including a narrow mobile viewport.
-- Keep builds and test execution deferred to the final GitHub Actions pass.
+- Build and test checks passed in GitHub Actions run 36159484978; do not run
+  heavy jobs on local or production hosts.
 - The API tests assert user-visible responses and durable restrictions only
   where needed to prove append-only behavior; no parser internals are mocked.
 
@@ -93,5 +94,6 @@ the extraction grant matches the actual contract.
   versions; missing regions and status are derived by the API.
 - Added a separate-review requirement for critical or uncertain regions,
   append-only report/review storage, and audit events that omit reviewer notes.
-- Added API and mobile browser regression cases. Tests and builds remain
-  deferred to the final GitHub Actions pass.
+- Added API and mobile browser regression cases; tests and builds passed in
+  GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).

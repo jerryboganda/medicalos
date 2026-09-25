@@ -58,9 +58,9 @@ content reads while preserving the learner's metadata and delete control.
 - Do not expose imports to Coach, other users, institutions, or offline packs.
   PDF/DOCX extraction, OCR, table/image completeness, AI processing, and offline
   copies remain separate requirements and must use their own rights checks.
-- Test the public API contract with integration requests, the operator rights
-  form, and the learner Library route with Playwright. Keep all execution
-  deferred to final GitHub Actions acceptance.
+- The public API contract, operator rights form, and learner Library route
+  passed integration and Playwright checks in GitHub Actions run 36159484978.
+  Local build/test execution was intentionally avoided.
 
 ## Testing Decisions
 
@@ -97,8 +97,8 @@ are satisfied.
   current documents, and keeps expired/revoked metadata deletable.
 - The admin console records grants and shows their status; a required reason
   accompanies rights revocation and the refreshed audit trail.
-- API and mobile browser regression cases are authored. No tests or builds
-  have been run; GitHub Actions remains the acceptance gate.
+- API and mobile browser regression cases passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
 - Rights records retain contract/version, asset and audience scope, seat,
   offline, quotation, AI, derivative, attribution, and royalty terms. This
   records the operator's grant details; it does not verify the external license.

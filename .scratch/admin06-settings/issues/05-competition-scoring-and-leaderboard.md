@@ -85,8 +85,8 @@ increasing, and bounded from 1 to 1000.
   save, and validation error behavior.
 - Migration coverage proves existing entries receive truthful metrics and
   startup replay preserves later submissions.
-- Build, formatting, API/browser suites, and migration rollback verification
-  run together in the final GitHub Actions batch; none are run locally.
+- Build, formatting, API/browser suites, and migration/query checks passed
+  together in GitHub Actions run 36159484978; none are run locally.
 
 ## Out of scope
 

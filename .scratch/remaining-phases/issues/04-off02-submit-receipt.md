@@ -3,7 +3,7 @@
 Status: ready-for-human
 Requirement IDs: OFF-02, QB-13, EX-08
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§8.3, 11.6, 11.8
-Implementation state: complete; final API CI acceptance is deferred.
+Implementation state: API CI acceptance passed in run 36159484978.
 
 ## Problem
 
@@ -25,6 +25,6 @@ server, but the client cannot recover the score and summary.
 
 ## Verification boundary
 
-Integration coverage is authored for concurrent replay and stored result
-equality. Do not run local builds or tests; final GitHub Actions is the
-acceptance gate.
+Integration coverage for concurrent replay and stored result equality passed
+in GitHub Actions run
+[36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).

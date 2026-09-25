@@ -31,7 +31,7 @@ Expose an indexed timeline derived from the immutable run transcript and a read-
 ## Testing Decisions
 
 - Add HTTP integration cases for successful alternate replay, invalid transitions, terminal-state handling, version pinning, and proof that the durable run transcript is unchanged.
-- Keep builds and tests deferred to the final GitHub Actions pass.
+- GitHub Actions run 36159484978 passed the API/browser and build checks.
 
 ## Out of Scope
 
@@ -40,4 +40,4 @@ Expose an indexed timeline derived from the immutable run transcript and a read-
 
 ## Implementation Record
 
-- Added a published-station list, learner-owned run view, indexed debrief timeline, and a read-only alternate-path form. Replay is pinned to the run version and leaves the original evidence unchanged. API and browser regression cases are authored; clinical path validation and current CI remain pending. No tests or builds have been run.
+- Added a published-station list, learner-owned run view, indexed debrief timeline, and a read-only alternate-path form. Replay is pinned to the run version and leaves the original evidence unchanged. API/browser checks passed in GitHub Actions run 36159484978; clinical path validation remains external.

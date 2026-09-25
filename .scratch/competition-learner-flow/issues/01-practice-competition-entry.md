@@ -24,8 +24,8 @@ trust client answer times, allowing speed-bonus manipulation.
 - Final results feed the existing ranked leaderboard, including accuracy,
   attempt count, average response time, own-row pinning, and closed/reviewed
   prize eligibility.
-- API integration and Practice browser coverage are authored; final Actions
-  verification remains deferred until the implementation batch is complete.
+- API integration and Practice browser coverage passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
 
 ## Implementation notes
 

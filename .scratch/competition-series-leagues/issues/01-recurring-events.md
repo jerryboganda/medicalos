@@ -6,8 +6,8 @@ Requirement IDs: COMP-01, COMP-02
 
 Implement the schedule behavior in `../spec.md` using the existing
 admin-authenticated competition creation and learner list endpoints. Keep the
-series window, approved question pool, and scoring snapshot durable. Add API
-integration coverage; do not run the deferred final verification batch.
+series window, approved question pool, and scoring snapshot durable. API, unit,
+and browser coverage is verified by the final GitHub Actions batch.
 
 ## Acceptance checklist
 
@@ -17,7 +17,7 @@ integration coverage; do not run the deferred final verification batch.
 - [x] Preserve monthly day/end-of-month anchors and rotate fresh questions first.
 - [x] Bound catch-up, lock each series row, and enforce unique occurrence starts.
 - [x] Author concurrent/idempotent API coverage and monthly calendar unit coverage.
-- [ ] Run the final formatter, API/client checks, Playwright suite, and GitHub Actions batch.
+- [x] Run the final formatter, API/client checks, Playwright suite, and GitHub Actions batch (run 36159484978).
 
 ## Implementation record
 
@@ -25,5 +25,6 @@ Added migration `0052_competition_series_leagues`, series creation in
 `routes/engagement.rs`, and bounded occurrence materialization on the
 authenticated competition list. Each event receives a separate ID and copies
 the series scoring snapshot. Practice now displays cadence and UTC windows.
-Integration and unit coverage is authored but intentionally unrun until the
-final implementation batch.
+GitHub Actions run [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978)
+passed the integration and unit suites, WASM build, client/site builds, and
+browser suite on source commit `a885734c5b28344254a68e6881c13bdee29fce6e`.

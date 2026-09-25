@@ -114,8 +114,9 @@ and score-recalculation policies based on the change type.
 - `question_versions.source_ref` and `article_versions.source_ref` are currently
   free text. They remain display citations; only explicit dependency links
   participate in the change graph.
-- API and browser regression cases are authored. GitHub Actions formatting,
-  builds, tests, and migration rollback verification remain pending.
+- API and browser regression cases, formatting, builds, tests, and migration
+  verification passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
 - Result actions and due retests now exclude quarantined or archived question
   versions; the retest queue cannot fall back to unsafe stored content.
 - Open sessions retain their pinned key after quarantine. Answer replay avoids

@@ -1,6 +1,6 @@
 # 01 — QB-08 report API + quarantine exclusion (backend)
 
-Status: implemented; current working-tree API verification pending
+Status: implemented; API/browser behavior CI-verified in run 36159484978
 Requirement IDs: QB-08 (report intake, quarantine, grouped resolution, private
 reporter feedback, public correction history, and SLA fields; see the QB-16
 addendum for full acceptance boundaries).
@@ -20,6 +20,6 @@ Wire into `router()` in lib.rs. Quarantine predicate in the pool queries in
 routes/practice.rs (tutor/timed + revision); `report_status` on get_session
 items. Same `ApiError` shape ({error:{code,message}}).
 
-Earlier API CI covered only the report intake/quarantine baseline. It does not
-validate the current working tree. The resolution, correction-history, and SLA
-behavior need the deferred final Actions and browser run.
+GitHub Actions run [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978)
+passed the full API integration and browser suites for report intake,
+quarantine, grouped resolution, correction history, privacy, and SLA behavior.

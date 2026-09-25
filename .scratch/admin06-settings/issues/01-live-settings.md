@@ -24,6 +24,6 @@ Spec: `.scratch/admin06-settings/spec.md`
   exposes only the learner-safe question allowance.
 - The Editorial Console has a responsive settings form with server error and
   save states. API integration and Playwright regressions are authored.
-- The two-axis review found no gaps in this scoped settings slice. Final GitHub
-  Actions verification is deferred; CSV/Excel imports and the other §19.5
-  controls remain out of scope.
+- The two-axis review found no gaps in this scoped settings slice. API/browser
+  and build checks passed in GitHub Actions run 36159484978; CSV/Excel imports
+  and the other §19.5 controls are tracked in their companion issues.

@@ -1,8 +1,8 @@
 # Spec — QB-08: Question issue reporting + quarantined-item exclusion
 
 Requirement IDs: QB-08 (learner reporting, pool exclusion, grouped editorial
-resolution, reporter feedback, correction history, and SLA display; current
-working-tree API/browser verification is pending).
+resolution, reporter feedback, correction history, and SLA display; API/browser
+behavior passed in GitHub Actions run 36159484978).
 Source: master plan §11.2 (immediate issue reporting), §19.4 (issue reports +
 quarantine). Triage: `ready-for-agent`.
 

@@ -3,8 +3,7 @@
 Status: ready-for-agent
 Requirement IDs: AI-18, OFF-01, EX-06
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§9.5, 19.4, 22
-Implementation state: complete; final API/browser/pack CI acceptance and the
-production signing-secret setup are pending.
+Implementation state: API/browser/pack CI acceptance passed in run 36159484978; production signing-secret setup and clinical reviewer sampling remain external.
 
 ## Domain rule
 
@@ -53,8 +52,8 @@ sampling remains pending until real reviewer evidence is recorded.
   timed sessions and AI-restricted reserved questions do not expose them.
 - The signed pack manifest contains the cards and hashes their exact content.
 - The session UI offers the five one-tap actions and keeps received cards in
-  the local session draft. API and browser coverage are authored; final CI is
-  pending, and medical reviewer sampling remains an external gate.
+  the local session draft. API/browser/pack coverage passed in GitHub Actions
+  run 36159484978; medical reviewer sampling remains an external gate.
 - The v1 metadata-only contract is preserved. The v2 manifest is lease-,
   device-, and answered-tutor-scoped, and its regression test recomputes the
   exact item hash and HMAC.

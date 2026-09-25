@@ -3,7 +3,7 @@
 Status: ready-for-human
 Requirement IDs: ADMIN-06, ADMIN-02, TRUST-07
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §19.5
-Implementation state: scoped CSV/XLSX import, active rights checks, metadata persistence, and API/browser regressions are authored; final GitHub Actions verification and external contract evidence remain.
+Implementation state: scoped CSV/XLSX import, active rights checks, metadata persistence, and API/browser regressions passed in GitHub Actions run 36159484978; external contract evidence remains.
 
 ## Problem
 
@@ -76,8 +76,8 @@ it cannot establish that external contract evidence is genuine or sufficient.
 - A replay-safe migration adds question metadata and the rights-reference
   field. The console offers a CSV template, file preview/apply actions, and
   retains the existing JSON importer.
-- HTTP integration and Playwright coverage are authored, including rights
-  permission and asset-scope failures. No build or test has run locally; final
-  GitHub Actions verification is deferred until the full implementation batch.
+- HTTP integration and Playwright coverage passed, including rights permission
+  and asset-scope failures, in GitHub Actions run 36159484978. No local build or
+  test suite was run.
 - Imported values remain drafts. External rights evidence and the remaining
   ADMIN-06 policy settings still require separate work or owner decisions.

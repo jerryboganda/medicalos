@@ -7,8 +7,7 @@ Requirement IDs: COMP-01, COMP-03, COMMUNITY-03
 Implement the weekly exam leagues in `../spec.md` through the authenticated
 API and Practice page. Keep membership explicit, cohorts capped, standings
 private to participants, and promotion/relegation tied to completed events.
-Add API and browser coverage; do not run the deferred final verification
-batch.
+API and browser coverage is verified by the final GitHub Actions batch.
 
 ## Acceptance checklist
 
@@ -19,12 +18,14 @@ batch.
 - [x] Return handles and standings for the caller's cohort only.
 - [x] Author API coverage for opt-in, rollover, division movement, privacy, and capacity.
 - [x] Author Practice browser coverage for cadence, join, standings, and leave.
-- [ ] Run the final formatter, API/client checks, Playwright suite, and GitHub Actions batch.
+- [x] Run the final formatter, API/client checks, Playwright suite, and GitHub Actions batch (run 36159484978).
 
 ## Implementation record
 
 Added authenticated league state/join/leave routes. Missing current-week roster
 memberships materialize in bounded exam-locked batches, prioritize the
 requesting learner, and carry previous cohorts through score-based movement.
-Practice now offers exam-scoped opt-in and private weekly standings. Coverage is
-authored and intentionally unrun pending the final verification batch.
+Practice now offers exam-scoped opt-in and private weekly standings. GitHub
+Actions run [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978)
+passed API integration, browser, and shared WASM checks on source commit
+`a885734c5b28344254a68e6881c13bdee29fce6e`.

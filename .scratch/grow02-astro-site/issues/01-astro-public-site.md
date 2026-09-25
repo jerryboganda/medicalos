@@ -3,10 +3,9 @@
 Status: ready-for-human
 Requirement IDs: GROW-02, TRUST-01, CORE-09, EX-01
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §6, §26.1, §28.1, §31.1
-Implementation state: complete — 12 static pages, deep-link endpoints, and the
-Playwright seam (14 specs) pass locally against `astro build` + `astro preview`;
-final CI validation joins the end-of-stretch batch run. Site deployment origin
-and the real Tauri app identifiers remain owner inputs (see Out of scope).
+Implementation state: complete — 12 static pages, deep-link endpoints, and
+site/browser checks passed in GitHub Actions run 36159484978. Site deployment
+origin and real Tauri app identifiers remain owner inputs (see Out of scope).
 
 ## Problem
 

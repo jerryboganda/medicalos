@@ -67,8 +67,8 @@ moderators.
   feed or a reporter's own report list.
 - The Community page lets members report and moderators review, dismiss, or
   remove. Existing non-moderator controls no longer expose removal actions.
-- API integration and browser coverage are authored; final Actions verification
-  remains deferred until all implementation slices are complete.
+- API integration and browser coverage passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
 
 ## Out of scope
 

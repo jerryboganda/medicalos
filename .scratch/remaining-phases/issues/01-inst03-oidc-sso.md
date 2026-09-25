@@ -1,6 +1,6 @@
 Status: ready-for-human
 Requirements: INST-03, CORE-01, CORE-07
-Implementation state: complete; final CI and browser verification pending.
+Implementation state: API/browser CI verified in run 36159484978; provider certification and production secret provisioning remain external.
 
 # Institution OIDC sign-in and scoped enrollment
 

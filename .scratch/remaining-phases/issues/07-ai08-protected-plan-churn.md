@@ -3,7 +3,7 @@
 Status: ready-for-agent
 Requirement IDs: AI-08, AI-07, PLAN-01, PLAN-02
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§8.5–8.6, 9.3–9.4
-Implementation state: implementation and regressions drafted; fresh review and API/browser/rollback CI pending.
+Implementation state: implementation, review, API/browser regressions, and migration/query checks passed in GitHub Actions run 36159484978.
 
 ## Problem statement
 
@@ -105,4 +105,5 @@ artifacts; final GitHub Actions remains the acceptance gate.
   use, submit/replan interleavings, the revision cap/undo boundary, count
   mismatches and eligible-pool shortfall. Browser coverage uses a protected
   six-minute task plus a fifteen-minute optional task under a ten-minute budget.
-- Final API/browser/rollback acceptance remains pending in GitHub Actions.
+- API/browser/rollback acceptance passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).

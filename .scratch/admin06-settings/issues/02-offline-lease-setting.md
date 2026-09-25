@@ -35,8 +35,8 @@ expiry; the setting affects newly created or renewed leases only.
 ## Verification boundary
 
 Author API and Playwright regressions. Run formatting, builds, tests, and
-rollback verification together in the final GitHub Actions batch. Do not run
-local builds or test suites.
+rollback verification passed in GitHub Actions run 36159484978. Do not run
+heavy builds or test suites on local or production hosts.
 
 ## Out of scope
 
@@ -51,5 +51,5 @@ verification, and changing already-issued lease expiries.
 - New leases and renewals read the current override; existing lease expiries
   stay unchanged. Public learner config continues to expose only the free
   question allowance.
-- API integration and Playwright regressions are authored. Final GitHub Actions
-  verification is deferred to the end-of-scope batch.
+- API integration and Playwright regressions passed in GitHub Actions run
+  [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).

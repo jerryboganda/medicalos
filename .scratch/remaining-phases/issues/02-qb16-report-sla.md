@@ -1,6 +1,6 @@
 Status: ready-for-human
 Requirements: QB-08, QB-16, ADMIN-06
-Implementation state: complete; final CI and browser verification pending.
+Implementation state: API/browser CI verified in run 36159484978.
 
 # Report resolution, visible SLAs, and reporter feedback
 

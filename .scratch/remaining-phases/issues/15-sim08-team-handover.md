@@ -40,7 +40,7 @@ Let the run owner invite a small team into an active fictional case. Record the 
 
 - Use the authenticated HTTP integration seam to cover owner/team access, single-use invitations, role restrictions, attributed actions, handover recipient scope, acknowledgements, finished-run refusal, and private narratives in audit output.
 - Use Playwright to cover the invite/join path, shared run state, observer behavior, one structured handover, and narrow viewport overflow.
-- Follow the existing scenario integration and Playwright flows. Keep build and test execution deferred to the final GitHub Actions pass.
+- The scenario integration, Playwright, build, and test checks passed in GitHub Actions run 36159484978.
 
 ## Out of Scope
 
@@ -56,4 +56,4 @@ The transcript and handovers are simulation learning records. They do not establ
 - Added run-scoped team membership, single-use hashed invitations, four explicit roles, role-attributed transcript events, and shared owner/member access to the pinned case and debrief.
 - Added structured SBAR handovers with recipient-only one-time acknowledgement. Team memberships, handovers, and acknowledgements are immutable; invite acceptance is a one-time database transition.
 - Added the team panel and invite-code join page with observer action limits, narrow-screen coverage, and clear simulation-only language.
-- Added API integration and Playwright coverage for invitation, access, role, action, handover, acknowledgement, and audit-privacy behavior. No builds or tests have been run; final GitHub Actions acceptance remains pending.
+- Added API integration and Playwright coverage for invitation, access, role, action, handover, acknowledgement, and audit-privacy behavior. Checks passed in GitHub Actions run 36159484978; clinical validation remains external.

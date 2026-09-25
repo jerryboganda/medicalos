@@ -29,7 +29,7 @@ Pin each authored rubric criterion to a scenario version. Mark configured termin
 - Keep AI out of authoring and scoring. Only an authenticated admin examiner can write results.
 - Return absent assessment rows as explicit not_assessed with a null score and no evidence.
 - Provide an admin queue for finished unassessed stations and a browser examiner form that cites transcript events or records an explicit not-assessed reason.
-- Regression seams: authenticated HTTP API and the existing admin browser route. Integration cases cover rubric creation/version pinning, terminal completion, evidence bounds, score bounds, explicit not-assessed, queue lifecycle, immutable one-time assessment, self-assessment rejection, audit privacy, and owner isolation. Playwright covers the examiner's transcript citation flow. Test/build execution remains deferred to the final GitHub Actions pass.
+- Regression seams: authenticated HTTP API and the existing admin browser route. Integration cases cover rubric creation/version pinning, terminal completion, evidence bounds, score bounds, explicit not-assessed, queue lifecycle, immutable one-time assessment, self-assessment rejection, audit privacy, and owner isolation. Playwright covers the examiner's transcript citation flow. These checks passed in GitHub Actions run 36159484978.
 
 ## Out of Scope
 
@@ -38,4 +38,4 @@ Pin each authored rubric criterion to a scenario version. Mark configured termin
 
 ## Implementation Record
 
-- Added version-pinned rubric criteria, successor version creation, configured terminal-state completion, a pending-run queue, admin examiner GET/POST routes, insert-only criterion results, owner-visible debrief evidence, and a browser examiner flow with transcript event selection. API and browser regression cases are authored; no tests or builds have been run.
+- Added version-pinned rubric criteria, successor version creation, configured terminal-state completion, a pending-run queue, admin examiner GET/POST routes, insert-only criterion results, owner-visible debrief evidence, and a browser examiner flow with transcript event selection. API/browser checks passed in GitHub Actions run 36159484978; clinical validation remains external.
