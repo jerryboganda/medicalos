@@ -5,6 +5,8 @@ import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnot
 import type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
 import type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
 import type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
+import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 import type { Today } from './generated/today/Today';
 
 // Keep transport and authentication here. Data contracts are exported from
@@ -32,6 +34,9 @@ export type { ImageCaseSummary } from './generated/image/ImageCaseSummary';
 export type { ImageFinding } from './generated/image/ImageFinding';
 export type { ImageRef } from './generated/image/ImageRef';
 export type { PendingImageAnnotationStatus } from './generated/image/PendingImageAnnotationStatus';
+export type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
+export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -299,12 +304,6 @@ export interface ScenarioTimelineEvent {
 	to: string;
 	actor_role?: ScenarioTeamRole | null;
 	terminal?: boolean;
-}
-
-export interface ScenarioSummary {
-	slug: string;
-	title: string;
-	version: number;
 }
 
 export interface ScenarioRun {
@@ -719,7 +718,7 @@ export const Api = {
 		plan_task_key?: string;
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
-	listScenarios: () => call<{ scenarios: ScenarioSummary[] }>('GET', '/v1/scenarios'),
+	listScenarios: () => call<ScenarioListResponse>('GET', '/v1/scenarios'),
 	imageCases: () => call<ImageCaseListResponse>('GET', '/v1/me/image-cases'),
 	imageCase: (caseId: string) =>
 		call<ImageCaseDetail>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
@@ -756,15 +755,7 @@ export const Api = {
 			{ decision, note }
 		),
 	startScenario: (scenarioSlug: string) =>
-		call<{
-			run_id: string;
-			scenario: string;
-			scenario_slug: string;
-			scenario_version: number;
-			current_state: string;
-			available_actions: string[];
-			finished: false;
-		}>('POST', '/v1/scenarios/runs', { scenario_slug: scenarioSlug }),
+		call<ScenarioStartResponse>('POST', '/v1/scenarios/runs', { scenario_slug: scenarioSlug }),
 	getScenarioRun: (runId: string) =>
 		call<ScenarioRun>('GET', `/v1/scenarios/runs/${encodeURIComponent(runId)}`),
 	getScenarioTeam: (runId: string) =>

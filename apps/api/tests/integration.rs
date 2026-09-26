@@ -19263,11 +19263,20 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{published}");
-    assert!(published["scenarios"]
+    let listed = published["scenarios"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|item| item["slug"] == "sim04-evidence-test" && item["version"] == 1));
+        .find(|item| item["slug"] == "sim04-evidence-test")
+        .unwrap();
+    assert_eq!(
+        listed,
+        &serde_json::json!({
+            "slug": "sim04-evidence-test",
+            "title": "Evidence test station",
+            "version": 1
+        })
+    );
 
     let (status, started) = call(
         app.clone(),
@@ -19281,7 +19290,12 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     .await;
     assert_eq!(status, StatusCode::OK, "{started}");
     let run_id = started["run_id"].as_str().unwrap();
+    assert_eq!(started["scenario_slug"], "sim04-evidence-test");
+    assert_eq!(started["scenario"], "Evidence test station");
     assert_eq!(started["scenario_version"], 1);
+    assert_eq!(started["current_state"], "start");
+    assert_eq!(started["finished"], false);
+    assert_eq!(started.as_object().unwrap().len(), 7);
     assert!(started["available_actions"]
         .as_array()
         .unwrap()

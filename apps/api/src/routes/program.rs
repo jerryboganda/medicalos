@@ -1550,18 +1550,62 @@ pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<serde_j
         .collect()
 }
 
-#[derive(sqlx::FromRow)]
-struct PublishedScenario {
+#[derive(sqlx::FromRow, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioSummary.ts",
+        rename = "ScenarioSummary"
+    )
+)]
+pub struct ScenarioSummary {
     slug: String,
     title: String,
     version: i32,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioListResponse.ts",
+        rename = "ScenarioListResponse"
+    )
+)]
+pub struct ScenarioListResponse {
+    scenarios: Vec<ScenarioSummary>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioStartResponse.ts",
+        rename = "ScenarioStartResponse"
+    )
+)]
+pub struct ScenarioStartResponse {
+    run_id: Uuid,
+    scenario_slug: String,
+    scenario: String,
+    scenario_version: i32,
+    current_state: String,
+    available_actions: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "false"))]
+    finished: bool,
+}
+
 pub async fn list_scenarios(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
-    let scenarios = sqlx::query_as::<_, PublishedScenario>(
+) -> ApiResult<Json<ScenarioListResponse>> {
+    let scenarios = sqlx::query_as::<_, ScenarioSummary>(
         r#"SELECT DISTINCT ON (scenario.id) scenario.slug, scenario.title, version.version
 		   FROM scenarios scenario
 		   JOIN scenario_versions version ON version.scenario_id = scenario.id
@@ -1571,13 +1615,7 @@ pub async fn list_scenarios(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "scenarios": scenarios.into_iter().map(|scenario| json!({
-            "slug": scenario.slug,
-            "title": scenario.title,
-            "version": scenario.version,
-        })).collect::<Vec<_>>()
-    })))
+    Ok(Json(ScenarioListResponse { scenarios }))
 }
 
 #[derive(Deserialize)]
@@ -1599,7 +1637,7 @@ pub async fn start_scenario(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<StartScenarioReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioStartResponse>> {
     let scenario = sqlx::query_as::<_, ScenarioStartRow>(
         r#"SELECT s.id, s.slug, s.title, sv.id AS scenario_version_id,
                   sv.version, sv.state_machine
@@ -1640,15 +1678,16 @@ pub async fn start_scenario(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "run_id": run_id,
-        "scenario_slug": scenario.slug,
-        "scenario": scenario.title,
-        "scenario_version": scenario.version,
-        "current_state": initial,
-        "available_actions": scenario_events(&scenario.state_machine, Some(&initial)),
-        "finished": false
-    })))
+    let available_actions = scenario_events(&scenario.state_machine, Some(&initial));
+    Ok(Json(ScenarioStartResponse {
+        run_id,
+        scenario_slug: scenario.slug,
+        scenario: scenario.title,
+        scenario_version: scenario.version,
+        current_state: initial,
+        available_actions,
+        finished: false,
+    }))
 }
 
 #[derive(sqlx::FromRow)]
