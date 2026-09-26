@@ -1042,6 +1042,106 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     .await
     .expect("load seeded session questions");
     assert_eq!(fixture_questions.len(), 2);
+
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_json_keys(
+        &detail,
+        &[
+            "session_id",
+            "preset",
+            "chapter_id",
+            "source_session_id",
+            "status",
+            "mock_id",
+            "time_limit_seconds",
+            "per_question_seconds",
+            "deadline",
+            "server_now",
+            "items",
+        ],
+    );
+    assert_eq!(detail["session_id"], serde_json::json!(sid));
+    assert_eq!(detail["preset"], "tutor");
+    assert_eq!(detail["chapter_id"], serde_json::json!(chapter1));
+    assert_eq!(detail["status"], "open");
+    assert!(detail["server_now"].as_str().is_some());
+    let detail_items = detail["items"].as_array().expect("session detail items");
+    assert_eq!(detail_items.len(), session_items.len());
+    for (index, item) in detail_items.iter().enumerate() {
+        assert_json_keys(
+            item,
+            &[
+                "item_index",
+                "question_version_id",
+                "vignette",
+                "lead_in",
+                "difficulty",
+                "hint_available",
+                "hint_used",
+                "options",
+                "answered",
+                "chosen_index",
+                "correct",
+                "correct_index",
+                "key_learning_point",
+                "exam_tip",
+                "report_status",
+                "corrected_version_id",
+                "corrected",
+                "correction_note",
+                "my_report",
+            ],
+        );
+        assert_eq!(item["item_index"], serde_json::json!(index));
+        let question_version_id: Uuid = item["question_version_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let fixture = fixture_questions
+            .iter()
+            .find(|row| row.get::<Uuid, _>("id") == question_version_id)
+            .expect("detail item matches a seeded question");
+        assert_eq!(
+            item["vignette"].as_str(),
+            Some(fixture.get::<&str, _>("vignette"))
+        );
+        assert_eq!(
+            item["lead_in"].as_str(),
+            Some(fixture.get::<&str, _>("lead_in"))
+        );
+        assert_eq!(
+            item["difficulty"].as_str(),
+            Some(fixture.get::<&str, _>("difficulty"))
+        );
+        assert_eq!(item["answered"], false);
+        assert_eq!(item["chosen_index"], Value::Null);
+        assert_eq!(item["correct"], Value::Null);
+        assert_eq!(item["correct_index"], Value::Null);
+        assert_eq!(item["key_learning_point"], Value::Null);
+        assert_eq!(item["exam_tip"], Value::Null);
+        assert_eq!(item["report_status"], Value::Null);
+        assert_eq!(item["my_report"], Value::Null);
+        let options = item["options"].as_array().expect("unanswered options");
+        let expected_options = fixture.get::<Value, _>("options");
+        let expected_options = expected_options.as_array().expect("seeded options");
+        assert_eq!(options.len(), expected_options.len());
+        for (option, expected) in options.iter().zip(expected_options) {
+            assert_json_keys(option, &["text"]);
+            assert_eq!(option["text"], expected["text"]);
+        }
+    }
+
     let served_ids: Vec<Uuid> = session_items
         .iter()
         .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
@@ -1144,6 +1244,51 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         serde_json::json!(answered_fixture.get::<Option<String>, _>("exam_tip"))
     );
     assert!(ans["tutoring_cards"].as_array().is_some());
+
+    let (status, answered_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answered_detail}");
+    let answered_item = &answered_detail["items"][0];
+    assert_json_keys(
+        answered_item,
+        &[
+            "item_index",
+            "question_version_id",
+            "vignette",
+            "lead_in",
+            "difficulty",
+            "hint_available",
+            "hint_used",
+            "options",
+            "answered",
+            "chosen_index",
+            "correct",
+            "correct_index",
+            "key_learning_point",
+            "exam_tip",
+            "report_status",
+            "corrected_version_id",
+            "corrected",
+            "correction_note",
+            "my_report",
+            "tutoring_cards",
+        ],
+    );
+    assert_eq!(answered_item["answered"], true);
+    assert_eq!(answered_item["correct"], ans["correct"]);
+    assert_eq!(answered_item["correct_index"], ans["correct_index"]);
+    assert_eq!(answered_item["options"], ans["options"]);
+    assert_eq!(answered_item["key_learning_point"], ans["key_learning_point"]);
+    assert_eq!(answered_item["exam_tip"], ans["exam_tip"]);
+    assert!(answered_item["tutoring_cards"].as_array().is_some());
 
     // Replay the same key: same answer, no duplicate attempt.
     let (status, replay) = call(app.clone(), answer_req("key-1", 0)).await;
@@ -1461,6 +1606,46 @@ async fn timed_session_expires_server_side() {
     assert!(detail["deadline"].is_string(), "server issues the deadline");
     assert!(detail["server_now"].is_string());
     assert_eq!(detail["time_limit_seconds"], 30);
+    assert_eq!(detail["items"][0]["correct"], Value::Null);
+    assert_eq!(detail["items"][0]["correct_index"], Value::Null);
+
+    let (status, recorded) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "timed-open-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recorded}");
+    assert!(recorded.get("correct").is_none());
+
+    let (status, answered_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answered_detail}");
+    let answered_item = &answered_detail["items"][0];
+    assert_eq!(answered_item["answered"], true);
+    assert_eq!(answered_item["correct"], Value::Null);
+    assert_eq!(answered_item["correct_index"], Value::Null);
+    assert_eq!(answered_item["key_learning_point"], Value::Null);
+    assert_eq!(answered_item["exam_tip"], Value::Null);
+    for option in answered_item["options"].as_array().expect("timed options") {
+        assert_json_keys(option, &["text"]);
+    }
 
     // A timed session without time_limit_seconds is rejected outright.
     let (status, body) = call(
@@ -1480,7 +1665,9 @@ async fn timed_session_expires_server_side() {
     assert_eq!(body["error"]["code"], "time_limit_required");
 
     // Force expiry server-side (the client cannot extend its timer: EX-08).
-    sqlx::query("UPDATE practice_sessions SET deadline = now() - interval '1 second'")
+    sqlx::query(
+        "UPDATE practice_sessions SET deadline = now() - interval '1 second' WHERE id = $1",
+    )
         .bind(sid)
         .execute(&state.pool)
         .await
@@ -1493,7 +1680,7 @@ async fn timed_session_expires_server_side() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
+            Some(serde_json::json!({"item_index": 1, "chosen_index": 0,
                                    "idempotency_key": "expired-key"})),
         ),
     )
@@ -1513,7 +1700,7 @@ async fn timed_session_expires_server_side() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
-    assert_eq!(result["skipped"], 2, "unanswered items count as skipped");
+    assert_eq!(result["skipped"], 1, "the unanswered item counts as skipped");
 }
 
 #[tokio::test]
@@ -3025,23 +3212,69 @@ async fn qb08_session_detail_carries_report_status() {
         "unflagged item carries null report_status"
     );
 
-    // Two more learners report the same version → still open, detail says so.
-    for t in [
-        register_and_login(app.clone()).await,
-        register_and_login(app.clone()).await,
-    ] {
-        let (status, r) = call(
-            app.clone(),
-            request(
-                "POST",
-                &format!("/v1/questions/versions/{qv}/reports"),
-                Some(&t),
-                Some(serde_json::json!({"category": "typo"})),
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{r}");
-    }
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&token),
+            Some(serde_json::json!({"category": "typo", "note": "A learner report."})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let own_report = detail["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["question_version_id"].as_str().unwrap() == qv)
+        .expect("reported item remains in session");
+    assert_eq!(own_report["report_status"], "open");
+    assert_json_keys(
+        &own_report["my_report"],
+        &[
+            "status",
+            "resolution_note",
+            "correction_note",
+            "resolved_at",
+            "corrected_version_id",
+            "corrected_version_number",
+            "acknowledged_at",
+            "acknowledgement_due_at",
+            "resolution_due_at",
+            "resolution_overdue",
+        ],
+    );
+    assert_eq!(own_report["my_report"]["status"], "open");
+    assert!(own_report["my_report"]["acknowledged_at"].is_string());
+    assert!(own_report["my_report"]["acknowledgement_due_at"].is_string());
+    assert!(own_report["my_report"]["resolution_due_at"].is_string());
+    assert_eq!(own_report["my_report"]["resolution_overdue"], false);
+
+    // A second learner report leaves the question open and visible in detail.
+    let other_learner = register_and_login(app.clone()).await;
+    let (status, report) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/versions/{qv}/reports"),
+            Some(&other_learner),
+            Some(serde_json::json!({"category": "typo"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
     let (status, detail) = call(
         app.clone(),
         request(
@@ -3128,6 +3361,28 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
         "no explanation leak"
     );
 
+    let (status, open_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_detail}");
+    let open_item = &open_detail["items"][0];
+    assert_eq!(open_item["answered"], true);
+    assert_eq!(open_item["correct"], Value::Null);
+    assert_eq!(open_item["correct_index"], Value::Null);
+    assert_eq!(open_item["key_learning_point"], Value::Null);
+    assert_eq!(open_item["exam_tip"], Value::Null);
+    for option in open_item["options"].as_array().expect("open mock options") {
+        assert_json_keys(option, &["text"]);
+    }
+    assert!(open_item.get("tutoring_cards").is_none());
+
     // Replay is still idempotent.
     let (status, replay) = call(
         app.clone(),
@@ -3191,6 +3446,28 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["score"], 50);
     assert_eq!(result["correct"], 1);
+    let (status, submitted_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submitted_detail}");
+    assert_eq!(submitted_detail["status"], "submitted");
+    let submitted_item = &submitted_detail["items"][0];
+    assert_eq!(submitted_item["correct"], true);
+    assert!(submitted_item["correct_index"].is_i64());
+    assert!(submitted_item["key_learning_point"].is_string());
+    for option in submitted_item["options"]
+        .as_array()
+        .expect("submitted mock options")
+    {
+        assert_json_keys(option, &["text", "rationale"]);
+    }
     let question_version_id: Uuid = sqlx::query_scalar(
         "SELECT question_version_id FROM session_items WHERE session_id = $1 AND item_index = 0",
     )

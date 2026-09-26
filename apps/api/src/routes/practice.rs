@@ -123,6 +123,129 @@ pub struct CreateSessionResponse {
     per_question_seconds: Option<i32>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionDetailOption.ts",
+        rename = "SessionDetailOption"
+    )
+)]
+pub struct SessionDetailOption {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    rationale: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionReportStatus.ts",
+        rename = "SessionReportStatus"
+    )
+)]
+pub enum SessionReportStatus {
+    Open,
+    Quarantined,
+    ResolvedFixed,
+    ResolvedRejected,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionReportReceipt.ts",
+        rename = "SessionReportReceipt"
+    )
+)]
+pub struct SessionReportReceipt {
+    status: String,
+    resolution_note: Option<String>,
+    correction_note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    corrected_version_id: Option<Uuid>,
+    corrected_version_number: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    acknowledged_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    resolution_due_at: chrono::DateTime<chrono::Utc>,
+    resolution_overdue: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionItem.ts",
+        rename = "SessionItem"
+    )
+)]
+pub struct SessionDetailItem {
+    item_index: i16,
+    question_version_id: Uuid,
+    vignette: String,
+    lead_in: String,
+    difficulty: String,
+    hint_available: bool,
+    hint_used: bool,
+    options: Vec<SessionDetailOption>,
+    answered: bool,
+    chosen_index: Option<i16>,
+    correct: Option<bool>,
+    correct_index: Option<i16>,
+    key_learning_point: Option<String>,
+    exam_tip: Option<String>,
+    report_status: Option<SessionReportStatus>,
+    corrected_version_id: Option<Uuid>,
+    corrected: bool,
+    correction_note: Option<String>,
+    my_report: Option<SessionReportReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    tutoring_cards: Option<Vec<crate::routes::program::TutoringCard>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/PracticeSession.ts",
+        rename = "PracticeSession"
+    )
+)]
+pub struct PracticeSessionResponse {
+    session_id: Uuid,
+    preset: String,
+    chapter_id: Option<Uuid>,
+    source_session_id: Option<Uuid>,
+    status: String,
+    mock_id: Option<Uuid>,
+    time_limit_seconds: Option<i32>,
+    per_question_seconds: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    server_now: chrono::DateTime<chrono::Utc>,
+    items: Vec<SessionDetailItem>,
+}
+
 pub(crate) struct PoolQuestion {
     pub id: Uuid,
     pub vignette: String,
@@ -773,13 +896,13 @@ pub async fn create_session(
 }
 
 /// Session detail for the client: full item list for the navigator, with
-/// answer keys and rationales revealed only for already-answered items
-/// (§11.3 — nothing unreleased reaches the client).
+/// tutor feedback released per answer and exam-mode feedback held until submit
+/// (§11.2–11.3 — nothing unreleased reaches the client).
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(sid): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PracticeSessionResponse>> {
     let session = sqlx::query!(
         "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id, per_question_seconds AS \"per_question_seconds?\"
          FROM practice_sessions
@@ -879,21 +1002,31 @@ pub async fn get_session(
             serde_json::from_value(it.options.unwrap_or_else(|| serde_json::json!([])))
                 .map_err(|_| ApiError::internal())?;
         let answered = it.attempt_id.is_some();
-        let public_opts: Vec<serde_json::Value> = opts
-            .iter()
-            .map(|o| serde_json::json!({"text": o.text}))
+        let feedback_released = answered
+            && (!matches!(session.preset.as_str(), "mock" | "timed")
+                || session.status == "submitted");
+        let public_opts = opts
+            .into_iter()
+            .map(|o| SessionDetailOption {
+                text: o.text,
+                rationale: if feedback_released {
+                    Some(o.rationale)
+                } else {
+                    None
+                },
+            })
             .collect();
         // QB-08: honest flag state so the UI can label affected items.
         let report_status = if it.corrected {
-            serde_json::Value::String("resolved_fixed".into())
+            Some(SessionReportStatus::ResolvedFixed)
         } else if it.quarantined || it.question_status == "quarantined" {
-            serde_json::Value::String("quarantined".into())
+            Some(SessionReportStatus::Quarantined)
         } else if it.flagged {
-            serde_json::Value::String("open".into())
+            Some(SessionReportStatus::Open)
         } else if it.reviewed_rejected {
-            serde_json::Value::String("resolved_rejected".into())
+            Some(SessionReportStatus::ResolvedRejected)
         } else {
-            serde_json::Value::Null
+            None
         };
         let my_report = match (
             it.my_report_status,
@@ -902,75 +1035,87 @@ pub async fn get_session(
         ) {
             (Some(status), Some(created_at), Some(acknowledged_at)) => {
                 let resolution_due_at = created_at + chrono::Duration::hours(72);
-                Some(serde_json::json!({
-                    "status": status,
-                    "resolution_note": it.my_resolution_note,
-                    "correction_note": it.my_correction_note,
-                    "resolved_at": it.my_report_resolved_at,
-                    "corrected_version_id": it.my_corrected_version_id,
-                    "corrected_version_number": it.my_corrected_version_number,
-                    "acknowledged_at": acknowledged_at,
-                    "acknowledgement_due_at": created_at + chrono::Duration::hours(24),
-                    "resolution_due_at": resolution_due_at,
-                    "resolution_overdue": it.my_report_resolved_at.is_none()
-                        && chrono::Utc::now() > resolution_due_at,
-                }))
+                let acknowledgement_due_at = created_at + chrono::Duration::hours(24);
+                let resolution_overdue = it.my_report_resolved_at.is_none()
+                    && chrono::Utc::now() > resolution_due_at;
+                Some(SessionReportReceipt {
+                    status,
+                    resolution_note: it.my_resolution_note,
+                    correction_note: it.my_correction_note,
+                    resolved_at: it.my_report_resolved_at,
+                    corrected_version_id: it.my_corrected_version_id,
+                    corrected_version_number: it.my_corrected_version_number,
+                    acknowledged_at,
+                    acknowledgement_due_at,
+                    resolution_due_at,
+                    resolution_overdue,
+                })
             }
             _ => None,
         };
-        let mut item = serde_json::json!({
-            "item_index": it.item_index,
-            "question_version_id": it.question_version_id,
-            "vignette": it.vignette,
-            "lead_in": it.lead_in,
-            "difficulty": it.difficulty,
-            "hint_available": session.preset == "tutor" && it.hint_available,
-            "hint_used": it.hint_used,
-            "options": public_opts,
-            "answered": answered,
-            "chosen_index": it.chosen_index,
-            "correct": it.correct,
-            "correct_index": null,
-            "key_learning_point": null,
-            "exam_tip": null,
-            "report_status": report_status,
-            "corrected_version_id": it.corrected_version_id,
+        let tutoring_cards = if feedback_released
+            && session.preset == "tutor"
+            && it.question_status == "published"
+        {
+            Some(
+                crate::routes::program::ensure_pregen(&state.pool, it.question_version_id).await?,
+            )
+        } else {
+            None
+        };
+        out.push(SessionDetailItem {
+            item_index: it.item_index,
+            question_version_id: it.question_version_id,
+            vignette: it.vignette,
+            lead_in: it.lead_in,
+            difficulty: it.difficulty,
+            hint_available: session.preset == "tutor" && it.hint_available,
+            hint_used: it.hint_used,
+            options: public_opts,
+            answered,
+            chosen_index: it.chosen_index,
+            correct: if feedback_released { it.correct } else { None },
+            correct_index: if feedback_released {
+                Some(it.correct_index)
+            } else {
+                None
+            },
+            key_learning_point: if feedback_released {
+                Some(it.key_learning_point)
+            } else {
+                None
+            },
+            exam_tip: if feedback_released {
+                it.exam_tip
+            } else {
+                None
+            },
+            report_status,
+            corrected_version_id: it.corrected_version_id,
             // corrected covers both directions: a source correction swapped this
             // item's content, or the learner was served the replacement version.
-            "corrected": it.corrected || it.current_corrected,
-            "correction_note": it.correction_note,
-            "my_report": my_report,
+            corrected: it.corrected || it.current_corrected,
+            correction_note: it.correction_note,
+            my_report,
+            tutoring_cards,
         });
-        if answered {
-            item["correct_index"] = serde_json::json!(it.correct_index);
-            item["options"] = serde_json::json!(opts);
-            item["key_learning_point"] = serde_json::json!(it.key_learning_point);
-            item["exam_tip"] = serde_json::json!(it.exam_tip);
-            if session.preset == "tutor" && it.question_status == "published" {
-                item["tutoring_cards"] = serde_json::json!(
-                    crate::routes::program::ensure_pregen(&state.pool, it.question_version_id)
-                        .await?
-                );
-            }
-        }
-        out.push(item);
     }
 
-    Ok(Json(serde_json::json!({
-        "session_id": sid,
-        "preset": session.preset,
-        "chapter_id": session.chapter_id,
-        "source_session_id": session.source_session_id,
-        "status": session.status,
-        "mock_id": session.mock_id,
-        "time_limit_seconds": session.time_limit_seconds,
-        "per_question_seconds": session.per_question_seconds,
+    Ok(Json(PracticeSessionResponse {
+        session_id: sid,
+        preset: session.preset,
+        chapter_id: session.chapter_id,
+        source_session_id: session.source_session_id,
+        status: session.status,
+        mock_id: session.mock_id,
+        time_limit_seconds: session.time_limit_seconds,
+        per_question_seconds: session.per_question_seconds,
         // EX-08: the client derives its countdown from these two values, so
         // changing the device clock never extends the timer.
-        "deadline": session.deadline,
-        "server_now": chrono::Utc::now(),
-        "items": out,
-    })))
+        deadline: session.deadline,
+        server_now: chrono::Utc::now(),
+        items: out,
+    }))
 }
 
 /// Return an authored hint only after explicit learner action in a tutor run.

@@ -8,6 +8,7 @@ import type { CreateSessionResponse } from './generated/practice/CreateSessionRe
 import type { CreateSessionRequest } from './generated/practice/CreateSessionRequest';
 import type { AnswerRequest } from './generated/practice/AnswerRequest';
 import type { AnswerResponse } from './generated/practice/AnswerResponse';
+import type { PracticeSession } from './generated/practice/PracticeSession';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -56,7 +57,6 @@ import type { PackManifest } from './generated/packs/PackManifest';
 import type { PackQuestionResource } from './generated/packs/PackQuestionResource';
 import type { PackResourcesRequest } from './generated/packs/PackResourcesRequest';
 import type { PackResourcesResponse } from './generated/packs/PackResourcesResponse';
-import type { TutoringCard } from './generated/packs/TutoringCard';
 
 // Keep transport and authentication here. Data contracts are exported from
 // Rust DTOs incrementally as ARCH-02 bindings are generated.
@@ -169,6 +169,11 @@ export type { AnswerRequest } from './generated/practice/AnswerRequest';
 export type { AnswerFeedbackResponse } from './generated/practice/AnswerFeedbackResponse';
 export type { AnswerRecordedResponse } from './generated/practice/AnswerRecordedResponse';
 export type { AnswerResponse } from './generated/practice/AnswerResponse';
+export type { PracticeSession } from './generated/practice/PracticeSession';
+export type { SessionDetailOption } from './generated/practice/SessionDetailOption';
+export type { SessionItem } from './generated/practice/SessionItem';
+export type { SessionReportReceipt } from './generated/practice/SessionReportReceipt';
+export type { SessionReportStatus } from './generated/practice/SessionReportStatus';
 export type { SessionOption } from './generated/practice/SessionOption';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
@@ -243,41 +248,6 @@ export interface AdminImportResult {
 	valid?: number;
 	issues?: { row: number; code: string; message: string }[];
 	created?: unknown[];
-}
-
-export interface SessionItem {
-	item_index: number;
-	question_version_id: string;
-	vignette: string;
-	lead_in: string;
-	difficulty: string;
-	options: { text: string; rationale?: string }[];
-	answered: boolean;
-	chosen_index: number | null;
-	correct: boolean | null;
-	correct_index: number | null;
-	key_learning_point: string | null;
-	exam_tip: string | null;
-	hint_available?: boolean;
-	/** QB-08: honest flag state — null when unflagged. */
-	report_status: 'open' | 'quarantined' | 'resolved_fixed' | 'resolved_rejected' | null;
-	corrected_version_id?: string | null;
-	/** This is a newly published version created to correct an earlier report. */
-	corrected?: boolean;
-	correction_note?: string | null;
-	my_report?: {
-		status: string;
-		resolution_note: string | null;
-		correction_note: string | null;
-		resolved_at: string | null;
-		corrected_version_id: string | null;
-		corrected_version_number: number | null;
-		acknowledged_at: string;
-		acknowledgement_due_at: string;
-		resolution_due_at: string;
-		resolution_overdue: boolean;
-	} | null;
-	tutoring_cards?: TutoringCard[];
 }
 
 export interface RecommendedAction {
@@ -420,17 +390,6 @@ export interface AdminReport {
 	acknowledgements_on_time: boolean;
 	resolution_overdue: boolean;
 	quarantined: boolean;
-}
-
-export interface PracticeSession {
-	session_id: string;
-	preset: string;
-	status: string;
-	time_limit_seconds: number | null;
-	/** EX-08: server-issued; the countdown derives from deadline − server_now. */
-	deadline: string | null;
-	server_now: string | null;
-	items: SessionItem[];
 }
 
 export interface Note {
