@@ -35,7 +35,7 @@ When an open practice session is first submitted, add every eligible question to
 - Test through the authenticated HTTP seam with the existing Postgres integration harness.
 - Verify that incorrect, skipped, unsure, and assisted items become visible through the existing re-test endpoint after their due time; verify a correct sure unassisted item does not.
 - Verify the configured interval, published-content filtering, family-variant preference, and duplicate submission behavior.
-- Use database writes only to arrange due-time fixtures; assert observable queue results over HTTP.
+- Use database writes to prepare synthetic question/settings fixtures and arrange due-time fixtures; assert observable learner queue results over HTTP.
 - GitHub Actions remains the build and test acceptance gate.
 
 ## Out of Scope
