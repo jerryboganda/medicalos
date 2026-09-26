@@ -3,7 +3,7 @@
 
 use axum::extract::State;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -12,21 +12,60 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "auth/RegisterRequest.ts",
+        rename = "RegisterRequest"
+    )
+)]
 pub struct RegisterReq {
     pub email: String,
     pub password: String,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "auth/LoginRequest.ts", rename = "LoginRequest")
+)]
 pub struct LoginReq {
     pub email: String,
     pub password: String,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "auth/RegisterResponse.ts",
+        rename = "RegisterResponse"
+    )
+)]
+pub struct RegisterResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    user_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "auth/LoginResponse.ts", rename = "LoginResponse")
+)]
+pub struct LoginResponse {
+    token: String,
+}
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<RegisterResponse>> {
     let email = req.email.trim().to_lowercase();
     if !email.contains('@') || email.len() < 3 || email.len() > 254 {
         return Err(ApiError::unprocessable(
@@ -59,13 +98,13 @@ pub async fn register(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(serde_json::json!({"user_id": user_id})))
+    Ok(Json(RegisterResponse { user_id }))
 }
 
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<LoginResponse>> {
     let email = req.email.trim().to_lowercase();
     let user = sqlx::query!(
         "SELECT id, password_hash FROM users
@@ -79,5 +118,5 @@ pub async fn login(
         return Err(ApiError::unauthorized());
     }
     let token = issue_session(&state.pool, user.id).await?;
-    Ok(Json(serde_json::json!({"token": token})))
+    Ok(Json(LoginResponse { token }))
 }

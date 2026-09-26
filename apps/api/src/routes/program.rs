@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -224,7 +224,150 @@ pub async fn set_flag(
 
 // ---- INST-01/02/04: institutions, cohorts, assignments ----------------------
 
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionMembership.ts", rename = "InstitutionMembership"))]
+pub struct InstitutionMembership {
+    pub institution_id: Uuid,
+    pub name: String,
+    pub role: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/MyInstitutionsResponse.ts", rename = "MyInstitutionsResponse"))]
+pub struct MyInstitutionsResponse {
+    pub memberships: Vec<InstitutionMembership>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateInstitutionResponse.ts", rename = "CreateInstitutionResponse"))]
+pub struct CreateInstitutionResponse {
+    pub institution_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/AddInstitutionMemberResponse.ts", rename = "AddInstitutionMemberResponse"))]
+pub struct AddInstitutionMemberResponse {
+    pub member: Uuid,
+    pub role: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CohortSummary.ts", rename = "CohortSummary"))]
+pub struct CohortSummary {
+    pub cohort_id: Uuid,
+    pub name: String,
+    pub program_id: Option<Uuid>,
+    pub members: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionCohortsResponse.ts", rename = "InstitutionCohortsResponse"))]
+pub struct InstitutionCohortsResponse {
+    pub cohorts: Vec<CohortSummary>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateCohortResponse.ts", rename = "CreateCohortResponse"))]
+pub struct CreateCohortResponse {
+    pub cohort_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateAssignmentResponse.ts", rename = "CreateAssignmentResponse"))]
+pub struct CreateAssignmentResponse {
+    pub assignment_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateProgramResponse.ts", rename = "CreateProgramResponse"))]
+pub struct CreateProgramResponse {
+    pub program_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionProgram.ts", rename = "InstitutionProgram"))]
+pub struct InstitutionProgram {
+    pub program_id: Uuid,
+    pub name: String,
+    pub chapter_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionProgramsResponse.ts", rename = "InstitutionProgramsResponse"))]
+pub struct InstitutionProgramsResponse {
+    pub programs: Vec<InstitutionProgram>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/SetProgramCurriculumResponse.ts", rename = "SetProgramCurriculumResponse"))]
+pub struct SetProgramCurriculumResponse {
+    pub program_id: Uuid,
+    pub chapter_ids: Vec<Uuid>,
+    pub chapter_count: usize,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/ProgramCurriculumCoverageChapter.ts", rename = "ProgramCurriculumCoverageChapter"))]
+pub struct ProgramCurriculumCoverageChapter {
+    pub chapter_id: Uuid,
+    pub chapter: String,
+    pub learners_with_evidence: Option<i64>,
+    pub attempts: Option<i64>,
+    pub coverage_percent: Option<f64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/ProgramCurriculumCoverageResponse.ts", rename = "ProgramCurriculumCoverageResponse"))]
+pub struct ProgramCurriculumCoverageResponse {
+    pub program_id: Uuid,
+    pub cohort_size: i64,
+    pub minimum_group_size: i64,
+    pub suppressed: bool,
+    pub chapters: Vec<ProgramCurriculumCoverageChapter>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAuditEvent.ts", rename = "InstitutionAuditEvent"))]
+pub struct InstitutionAuditEvent {
+    pub action: String,
+    pub entity: String,
+    pub entity_id: Uuid,
+    pub new_value: serde_json::Value,
+    pub at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAuditResponse.ts", rename = "InstitutionAuditResponse"))]
+pub struct InstitutionAuditResponse {
+    pub events: Vec<InstitutionAuditEvent>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsChapter.ts", rename = "InstitutionAnalyticsChapter"))]
+pub struct InstitutionAnalyticsChapter {
+    pub chapter: Option<String>,
+    pub attempts: i64,
+    pub correct: i64,
+    pub accuracy: f64,
+    pub learners: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsResponse.ts", rename = "InstitutionAnalyticsResponse"))]
+pub struct InstitutionAnalyticsResponse {
+    pub cohort_id: Uuid,
+    pub cohort_size: i64,
+    pub suppressed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<Vec<InstitutionAnalyticsChapter>>,
+}
+
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateInstitutionRequest.ts", rename = "CreateInstitutionRequest"))]
 pub struct CreateInstitutionReq {
     pub name: String,
 }
@@ -233,7 +376,7 @@ pub async fn create_institution(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CreateInstitutionReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateInstitutionResponse>> {
     let name = req.name.trim();
     if name.is_empty() || name.len() > 200 {
         return Err(ApiError::unprocessable(
@@ -258,10 +401,13 @@ pub async fn create_institution(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "institution_id": id })))
+    Ok(Json(CreateInstitutionResponse {
+        institution_id: id,
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/AddInstitutionMemberRequest.ts", rename = "AddInstitutionMemberRequest"))]
 pub struct JoinReq {
     pub user_id: Uuid,
     pub role: Option<String>,
@@ -273,7 +419,7 @@ pub async fn add_member(
     headers: axum::http::HeaderMap,
     Path(institution_id): Path<Uuid>,
     Json(req): Json<JoinReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AddInstitutionMemberResponse>> {
     // Tenant-scoped authority (CORE-04): institution admins manage their own
     // membership; the global admin token stays valid for operator tooling.
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
@@ -329,7 +475,10 @@ pub async fn add_member(
         json!({ "role": role }),
     )
     .await?;
-    Ok(Json(json!({ "member": req.user_id, "role": role })))
+    Ok(Json(AddInstitutionMemberResponse {
+        member: req.user_id,
+        role,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -506,6 +655,7 @@ pub async fn bind_external_enrollment(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateCohortRequest.ts", rename = "CreateCohortRequest"))]
 pub struct CreateCohortReq {
     pub name: String,
     pub member_ids: Option<Vec<Uuid>>,
@@ -516,7 +666,7 @@ pub async fn list_cohorts(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<InstitutionCohortsResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let rows = sqlx::query!(
         r#"SELECT c.id AS cohort_id, c.name, c.program_id AS "program_id?",
@@ -531,18 +681,16 @@ pub async fn list_cohorts(
     )
     .fetch_all(&state.pool)
     .await?;
-    let cohorts: Vec<serde_json::Value> = rows
+    let cohorts = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "cohort_id": row.cohort_id,
-                "name": row.name,
-                "program_id": row.program_id,
-                "members": row.members
-            })
+        .map(|row| CohortSummary {
+            cohort_id: row.cohort_id,
+            name: row.name,
+            program_id: row.program_id,
+            members: row.members,
         })
         .collect();
-    Ok(Json(json!({ "cohorts": cohorts })))
+    Ok(Json(InstitutionCohortsResponse { cohorts }))
 }
 
 pub async fn create_cohort(
@@ -550,7 +698,7 @@ pub async fn create_cohort(
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
     Json(req): Json<CreateCohortReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateCohortResponse>> {
     let name = req.name.trim();
     if name.is_empty() || name.len() > 200 {
         return Err(ApiError::unprocessable(
@@ -669,10 +817,11 @@ pub async fn create_cohort(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "cohort_id": cohort_id })))
+    Ok(Json(CreateCohortResponse { cohort_id }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateAssignmentRequest.ts", rename = "CreateAssignmentRequest"))]
 pub struct AssignmentReq {
     pub title: String,
     pub due_at: Option<DateTime<Utc>>,
@@ -683,7 +832,7 @@ pub async fn create_assignment(
     user: AuthUser,
     Path(cohort_id): Path<Uuid>,
     Json(req): Json<AssignmentReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateAssignmentResponse>> {
     let title = req.title.trim();
     if title.is_empty() || title.len() > 300 {
         return Err(ApiError::unprocessable(
@@ -719,10 +868,11 @@ pub async fn create_assignment(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "assignment_id": id })))
+    Ok(Json(CreateAssignmentResponse { assignment_id: id }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateProgramRequest.ts", rename = "CreateProgramRequest"))]
 pub struct CreateProgramReq {
     pub name: String,
 }
@@ -755,7 +905,7 @@ pub async fn create_program(
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
     Json(req): Json<CreateProgramReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateProgramResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let name = req.name.trim();
     if name.is_empty() || name.len() > 200 {
@@ -785,14 +935,14 @@ pub async fn create_program(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "program_id": id })))
+    Ok(Json(CreateProgramResponse { program_id: id }))
 }
 
 pub async fn list_programs(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<InstitutionProgramsResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let rows = sqlx::query!(
         r#"SELECT p.id AS program_id, p.name,
@@ -810,20 +960,19 @@ pub async fn list_programs(
     )
     .fetch_all(&state.pool)
     .await?;
-    let programs: Vec<serde_json::Value> = rows
+    let programs = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "program_id": row.program_id,
-                "name": row.name,
-                "chapter_ids": row.chapter_ids
-            })
+        .map(|row| InstitutionProgram {
+            program_id: row.program_id,
+            name: row.name,
+            chapter_ids: row.chapter_ids,
         })
         .collect();
-    Ok(Json(json!({ "programs": programs })))
+    Ok(Json(InstitutionProgramsResponse { programs }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/SetProgramCurriculumRequest.ts", rename = "SetProgramCurriculumRequest"))]
 pub struct SetProgramCurriculumReq {
     pub chapter_ids: Vec<Uuid>,
 }
@@ -833,7 +982,7 @@ pub async fn set_program_curriculum(
     user: AuthUser,
     Path((institution_id, program_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<SetProgramCurriculumReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<SetProgramCurriculumResponse>> {
     let mut tx = state.pool.begin().await?;
     let staff = sqlx::query!(
         "SELECT 1 AS one FROM institution_members
@@ -916,18 +1065,18 @@ pub async fn set_program_curriculum(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
-        "program_id": program_id,
-        "chapter_ids": chapter_ids,
-        "chapter_count": chapter_ids.len()
-    })))
+    Ok(Json(SetProgramCurriculumResponse {
+        program_id,
+        chapter_count: chapter_ids.len(),
+        chapter_ids,
+    }))
 }
 
 pub async fn program_curriculum_coverage(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path((institution_id, program_id)): Path<(Uuid, Uuid)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ProgramCurriculumCoverageResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let program = sqlx::query!(
         "SELECT 1 AS one FROM institution_programs
@@ -982,41 +1131,30 @@ pub async fn program_curriculum_coverage(
     .fetch_all(&state.pool)
     .await?;
     let suppressed = cohort_size < 5;
-    let chapters: Vec<serde_json::Value> = rows
+    let chapters = rows
         .into_iter()
         .map(|row| {
-            let learners_with_evidence = if suppressed {
-                serde_json::Value::Null
-            } else {
-                json!(row.learners_with_evidence)
-            };
-            let attempts = if suppressed {
-                serde_json::Value::Null
-            } else {
-                json!(row.attempts)
-            };
-            let coverage_percent = if suppressed || cohort_size == 0 {
-                serde_json::Value::Null
-            } else {
-                json!(row.learners_with_evidence as f64 / cohort_size as f64 * 100.0)
-            };
-            json!({
-                "chapter_id": row.chapter_id,
-                "chapter": row.chapter_name,
-                "learners_with_evidence": learners_with_evidence,
-                "attempts": attempts,
-                "coverage_percent": coverage_percent
-            })
+            ProgramCurriculumCoverageChapter {
+                chapter_id: row.chapter_id,
+                chapter: row.chapter_name,
+                learners_with_evidence: (!suppressed).then_some(row.learners_with_evidence),
+                attempts: (!suppressed).then_some(row.attempts),
+                coverage_percent: if suppressed || cohort_size == 0 {
+                    None
+                } else {
+                    Some(row.learners_with_evidence as f64 / cohort_size as f64 * 100.0)
+                },
+            }
         })
         .collect();
 
-    Ok(Json(json!({
-        "program_id": program_id,
-        "cohort_size": cohort_size,
-        "minimum_group_size": 5,
-        "suppressed": suppressed,
-        "chapters": chapters
-    })))
+    Ok(Json(ProgramCurriculumCoverageResponse {
+        program_id,
+        cohort_size,
+        minimum_group_size: 5,
+        suppressed,
+        chapters,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1067,19 +1205,96 @@ pub async fn record_interop(
 // ---- CAREER-01 portfolio + CAREER-03 CE --------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/PortfolioCreateRequest.ts",
+        rename = "PortfolioCreateRequest"
+    )
+)]
 pub struct PortfolioReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"rotation\" | \"case_reflection\" | \"procedure_observation\" | \"certificate\""
+        )
+    )]
     pub kind: String,
     pub title: String,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub detail: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "string", optional = nullable)
+    )]
     pub occurred_on: Option<chrono::NaiveDate>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/PortfolioCreateResponse.ts",
+        rename = "PortfolioCreateResponse"
+    )
+)]
+pub struct PortfolioCreateResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    entry_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/PortfolioEntry.ts",
+        rename = "PortfolioEntry"
+    )
+)]
+pub struct PortfolioEntry {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    entry_id: Uuid,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"rotation\" | \"case_reflection\" | \"procedure_observation\" | \"certificate\""
+        )
+    )]
+    kind: String,
+    title: String,
+    detail: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    occurred_on: Option<chrono::NaiveDate>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/PortfolioListResponse.ts",
+        rename = "PortfolioListResponse"
+    )
+)]
+pub struct PortfolioListResponse {
+    entries: Vec<PortfolioEntry>,
 }
 
 pub async fn add_portfolio_entry(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<PortfolioReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PortfolioCreateResponse>> {
     if !matches!(
         req.kind.as_str(),
         "rotation" | "case_reflection" | "procedure_observation" | "certificate"
@@ -1102,13 +1317,13 @@ pub async fn add_portfolio_entry(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "entry_id": id })))
+    Ok(Json(PortfolioCreateResponse { entry_id: id }))
 }
 
 pub async fn list_portfolio(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PortfolioListResponse>> {
     let rows = sqlx::query!(
         r#"SELECT id, kind, title, detail, occurred_on, created_at
            FROM portfolio_entries WHERE user_id = $1 ORDER BY created_at DESC"#,
@@ -1116,30 +1331,56 @@ pub async fn list_portfolio(
     )
     .fetch_all(&state.pool)
     .await?;
-    let entries: Vec<serde_json::Value> = rows
+    let entries = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "entry_id": r.id, "kind": r.kind, "title": r.title,
-                "detail": r.detail, "occurred_on": r.occurred_on,
-                "created_at": r.created_at,
-            })
+        .map(|r| PortfolioEntry {
+            entry_id: r.id,
+            kind: r.kind,
+            title: r.title,
+            detail: r.detail,
+            occurred_on: r.occurred_on,
+            created_at: r.created_at,
         })
         .collect();
-    Ok(Json(json!({ "entries": entries })))
+    Ok(Json(PortfolioListResponse { entries }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/CeActivityRequest.ts",
+        rename = "CeActivityRequest"
+    )
+)]
 pub struct CeActivityReq {
     pub activity: String,
     pub hours: f64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "career/CeActivityResponse.ts",
+        rename = "CeActivityResponse"
+    )
+)]
+pub struct CeActivityResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    activity_id: Uuid,
+    note: String,
 }
 
 pub async fn add_ce_activity(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CeActivityReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CeActivityResponse>> {
     if !(0.0..=100.0).contains(&req.hours) {
         return Err(ApiError::unprocessable(
             "invalid_hours",
@@ -1157,10 +1398,10 @@ pub async fn add_ce_activity(
     .execute(&state.pool)
     .await?;
     // §16: records only — never labelled accredited until accreditation exists.
-    Ok(Json(json!({
-        "activity_id": id,
-        "note": "Recorded as activity. Not an accredited credit."
-    })))
+    Ok(Json(CeActivityResponse {
+        activity_id: id,
+        note: "Recorded as activity. Not an accredited credit.".to_owned(),
+    }))
 }
 
 // ---- SIM-01/02/05: deterministic scenario engine -----------------------------
@@ -1955,7 +2196,7 @@ pub async fn institution_audit(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<InstitutionAuditResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let rows = sqlx::query!(
         r#"SELECT action, entity, entity_id, new_value, created_at
@@ -1965,19 +2206,17 @@ pub async fn institution_audit(
     )
     .fetch_all(&state.pool)
     .await?;
-    let events: Vec<serde_json::Value> = rows
+    let events = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "action": r.action,
-                "entity": r.entity,
-                "entity_id": r.entity_id,
-                "new_value": r.new_value,
-                "at": r.created_at,
-            })
+        .map(|r| InstitutionAuditEvent {
+            action: r.action,
+            entity: r.entity,
+            entity_id: r.entity_id,
+            new_value: r.new_value,
+            at: r.created_at,
         })
         .collect();
-    Ok(Json(json!({ "events": events })))
+    Ok(Json(InstitutionAuditResponse { events }))
 }
 
 // ---- INST-07: privacy-preserving cohort analytics (§18.3) -------------------
@@ -1995,7 +2234,7 @@ pub async fn institution_analytics(
     user: AuthUser,
     Path(institution_id): Path<Uuid>,
     axum::extract::Query(q): axum::extract::Query<AnalyticsQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<InstitutionAnalyticsResponse>> {
     require_institution_staff(&state, institution_id, user.user_id).await?;
     let cohort_id = q.cohort_id.ok_or_else(|| {
         ApiError::unprocessable("cohort_required", "cohort_id query parameter is required")
@@ -2018,13 +2257,14 @@ pub async fn institution_analytics(
     .await?
     .n;
     if size < MIN_COHORT_SIZE {
-        return Ok(Json(json!({
-            "cohort_id": cohort_id,
-            "cohort_size": size,
-            "suppressed": true,
-            "reason": "minimum_group_size",
-            "minimum": MIN_COHORT_SIZE,
-        })));
+        return Ok(Json(InstitutionAnalyticsResponse {
+            cohort_id,
+            cohort_size: size,
+            suppressed: true,
+            reason: Some("minimum_group_size".into()),
+            minimum: Some(MIN_COHORT_SIZE),
+            chapters: None,
+        }));
     }
     let rows = sqlx::query!(
         r#"SELECT c.name AS chapter,
@@ -2040,7 +2280,7 @@ pub async fn institution_analytics(
     )
     .fetch_all(&state.pool)
     .await?;
-    let chapters: Vec<serde_json::Value> = rows
+    let chapters = rows
         .into_iter()
         .map(|r| {
             let accuracy = if r.attempts > 0 {
@@ -2048,24 +2288,27 @@ pub async fn institution_analytics(
             } else {
                 0.0
             };
-            json!({
-                "chapter": r.chapter,
-                "attempts": r.attempts,
-                "correct": r.correct,
-                "accuracy": accuracy,
-                "learners": r.learners,
-            })
+            InstitutionAnalyticsChapter {
+                chapter: r.chapter,
+                attempts: r.attempts,
+                correct: r.correct,
+                accuracy,
+                learners: r.learners,
+            }
         })
         .collect();
-    Ok(Json(json!({
-        "cohort_id": cohort_id,
-        "cohort_size": size,
-        "suppressed": false,
-        "chapters": chapters,
-    })))
+    Ok(Json(InstitutionAnalyticsResponse {
+        cohort_id,
+        cohort_size: size,
+        suppressed: false,
+        reason: None,
+        minimum: None,
+        chapters: Some(chapters),
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsQuery.ts", rename = "InstitutionAnalyticsQuery"))]
 pub struct AnalyticsQuery {
     pub cohort_id: Option<Uuid>,
 }
@@ -2073,11 +2316,77 @@ pub struct AnalyticsQuery {
 // ---- PLAN-02: capacity-driven replanning (§8.6) -----------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/ReplanRequest.ts", rename = "ReplanRequest")
+)]
 pub struct ReplanReq {
     /// The learner's real daily budget in minutes (5-480).
     pub daily_minutes: i32,
     /// The version shown to the learner when they requested the replan.
     pub expected_version: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/ReplanWithinCapacityResponse.ts",
+        rename = "ReplanWithinCapacityResponse"
+    )
+)]
+pub struct ReplanWithinCapacityResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "false"))]
+    replanned: bool,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"within_capacity\"")
+    )]
+    reason: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    committed_minutes: i64,
+    daily_minutes: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    plan_id: Uuid,
+    version: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/ReplanAppliedResponse.ts",
+        rename = "ReplanAppliedResponse"
+    )
+)]
+pub struct ReplanAppliedResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    replanned: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    plan_id: Uuid,
+    version: i32,
+    kept_tasks: usize,
+    deferred_tasks: usize,
+    deferred: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string[]"))]
+    deferred_task_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/ReplanResponse.ts", rename = "ReplanResponse")
+)]
+pub enum ReplanResponse {
+    WithinCapacity(ReplanWithinCapacityResponse),
+    Applied(ReplanAppliedResponse),
 }
 
 /// The learner sets a new daily budget; today's plan is forked only if the
@@ -2087,7 +2396,7 @@ pub async fn replan_plan(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<ReplanReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ReplanResponse>> {
     if !(5..=480).contains(&req.daily_minutes) {
         return Err(ApiError::unprocessable(
             "invalid_capacity",
@@ -2131,14 +2440,16 @@ pub async fn replan_plan(
         .sum();
     if committed <= i64::from(req.daily_minutes) {
         tx.commit().await?;
-        return Ok(Json(json!({
-            "replanned": false,
-            "reason": "within_capacity",
-            "committed_minutes": committed,
-            "daily_minutes": req.daily_minutes,
-            "plan_id": current.id,
-            "version": current.version,
-        })));
+        return Ok(Json(ReplanResponse::WithinCapacity(
+            ReplanWithinCapacityResponse {
+                replanned: false,
+                reason: "within_capacity".to_owned(),
+                committed_minutes: committed,
+                daily_minutes: req.daily_minutes,
+                plan_id: current.id,
+                version: current.version,
+            },
+        )));
     }
     if crate::agent::count_today_revisions_on(&mut tx, user.user_id).await?
         >= i64::from(crate::agent::MAX_PLAN_REVISIONS_PER_DAY)
@@ -2224,14 +2535,14 @@ pub async fn replan_plan(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "replanned": true,
-        "plan_id": new_plan_id,
-        "version": to_version,
-        "kept_tasks": kept.len(),
-        "deferred_tasks": deferred.len(),
-        "deferred": deferred,
-        "deferred_task_ids": deferred_ids,
+    Ok(Json(ReplanResponse::Applied(ReplanAppliedResponse {
+        replanned: true,
+        plan_id: new_plan_id,
+        version: to_version,
+        kept_tasks: kept.len(),
+        deferred_tasks: deferred.len(),
+        deferred,
+        deferred_task_ids: deferred_ids,
     })))
 }
 
@@ -2291,13 +2602,64 @@ pub async fn exam_switch_gap_report(
 
 // ---- AI-17: transparent selection policy disclosure (§8.5) ------------------
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "program/SelectionPolicyEstimator.ts",
+        rename = "SelectionPolicyEstimator"
+    )
+)]
+pub struct SelectionPolicyEstimator {
+    pub model: String,
+    pub base: f32,
+    pub difficulty_anchors: BTreeMap<String, f32>,
+    pub k_rule: String,
+    pub counted_evidence: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "program/SelectionPolicyChapter.ts",
+        rename = "SelectionPolicyChapter"
+    )
+)]
+pub struct SelectionPolicyChapter {
+    pub chapter: String,
+    pub ability: Option<f32>,
+    pub current_k: f32,
+    pub evidence_count: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "program/SelectionPolicyResponse.ts",
+        rename = "SelectionPolicyResponse"
+    )
+)]
+pub struct SelectionPolicyResponse {
+    pub estimator: SelectionPolicyEstimator,
+    pub selection_rules: Vec<String>,
+    pub your_chapters: Vec<SelectionPolicyChapter>,
+}
+
 /// The estimator is deterministic and disclosed: per-chapter ability from
 /// real attempts with a shrinking K, difficulty anchors, and the selection
 /// rules that turn those numbers into tasks. Nothing here is invented.
 pub async fn selection_policy(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<SelectionPolicyResponse>> {
     let rows = sqlx::query!(
         r#"SELECT c.name AS chapter_name, lcs.ability AS "ability?",
                   lcs.evidence_count AS "evidence!", lcs.independent_count AS "independent!"
@@ -2309,33 +2671,38 @@ pub async fn selection_policy(
     .fetch_all(&state.pool)
     .await?;
     let k_of = |independent: i32| (32.0 - 2.0 * independent as f32).max(8.0);
-    let chapters: Vec<serde_json::Value> = rows
+    let chapters = rows
         .iter()
         .map(|r| {
-            json!({
-                "chapter": r.chapter_name,
-                "ability": r.ability,
-                "current_k": k_of(r.independent),
-                "evidence_count": r.evidence,
-            })
+            SelectionPolicyChapter {
+                chapter: r.chapter_name.clone(),
+                ability: r.ability,
+                current_k: k_of(r.independent),
+                evidence_count: r.evidence,
+            }
         })
         .collect();
-    Ok(Json(json!({
-        "estimator": {
-            "model": "elo_baseline",
-            "base": 1500.0,
-            "difficulty_anchors": {"easy": 1350.0, "medium": 1500.0, "hard": 1650.0},
-            "k_rule": "max(8, 32 - 2 x independent_count) — shrinks as evidence grows",
-            "counted_evidence": "independent, answered attempts only (skips and assisted answers excluded)",
+    Ok(Json(SelectionPolicyResponse {
+        estimator: SelectionPolicyEstimator {
+            model: "elo_baseline".into(),
+            base: 1500.0,
+            difficulty_anchors: BTreeMap::from([
+                ("easy".into(), 1350.0),
+                ("medium".into(), 1500.0),
+                ("hard".into(), 1650.0),
+            ]),
+            k_rule: "max(8, 32 - 2 x independent_count) — shrinks as evidence grows".into(),
+            counted_evidence:
+                "independent, answered attempts only (skips and assisted answers excluded)".into(),
         },
-        "selection_rules": [
-            "cold start: one modest practice task on the first chapter",
-            "revision-on-missed: a capped re-practice task after missed questions",
-            "re-test queue: deterministic intervals 1/3/7/14 days, family variant preferred",
-            "review queue: due cards first (most at risk), then new cards under daily caps",
+        selection_rules: vec![
+            "cold start: one modest practice task on the first chapter".into(),
+            "revision-on-missed: a capped re-practice task after missed questions".into(),
+            "re-test queue: deterministic intervals 1/3/7/14 days, family variant preferred".into(),
+            "review queue: due cards first (most at risk), then new cards under daily caps".into(),
         ],
-        "your_chapters": chapters,
-    })))
+        your_chapters: chapters,
+    }))
 }
 
 // ---- INST-02: the learner's own institution memberships ---------------------
@@ -2344,7 +2711,7 @@ pub async fn selection_policy(
 pub async fn my_institutions(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MyInstitutionsResponse>> {
     let rows = sqlx::query!(
         r#"SELECT i.id, i.name, im.role
            FROM institution_members im
@@ -2354,9 +2721,13 @@ pub async fn my_institutions(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "memberships": rows.iter().map(|r| json!({
-        "institution_id": r.id,
-        "name": r.name,
-        "role": r.role,
-    })).collect::<Vec<_>>() })))
+    let memberships = rows
+        .into_iter()
+        .map(|row| InstitutionMembership {
+            institution_id: row.id,
+            name: row.name,
+            role: row.role,
+        })
+        .collect();
+    Ok(Json(MyInstitutionsResponse { memberships }))
 }

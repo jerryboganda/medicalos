@@ -2,7 +2,7 @@
 
 use axum::extract::State;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::Row;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ pub const DEFAULT_MAX_NEW_CARDS_PER_DAY: i64 = 10;
 pub const DEFAULT_COMPETITION_DIFFICULTY_POINTS: [i64; 3] = [5, 10, 15];
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsUpdateRequest.ts", rename = "AdminSettingsUpdateRequest"))]
 #[serde(deny_unknown_fields)]
 pub struct SettingsReq {
     pub mastery_bands: Option<Vec<i32>>,
@@ -30,6 +31,32 @@ pub struct SettingsReq {
     pub max_reviews_per_day: Option<i64>,
     pub max_new_cards_per_day: Option<i64>,
     pub competition_difficulty_points: Option<Vec<i64>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettings.ts", rename = "AdminSettings"))]
+pub struct AdminSettings {
+    pub mastery_bands: Vec<i64>,
+    pub community_min_sample: i64,
+    pub free_daily_questions: i64,
+    pub free_daily_coach_turns: i64,
+    pub retest_intervals_days: Vec<i64>,
+    pub offline_lease_days: i64,
+    pub max_reviews_per_day: i64,
+    pub max_new_cards_per_day: i64,
+    pub competition_difficulty_points: [i64; 3],
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsResponse.ts", rename = "AdminSettingsResponse"))]
+pub struct AdminSettingsResponse {
+    pub settings: AdminSettings,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsUpdateResponse.ts", rename = "AdminSettingsUpdateResponse"))]
+pub struct AdminSettingsUpdateResponse {
+    pub updated: Vec<String>,
 }
 
 fn valid_mastery_bands(values: &[i32]) -> bool {
@@ -230,7 +257,7 @@ pub async fn update_settings(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<SettingsReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<AdminSettingsUpdateResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     validate_settings(&req)?;
@@ -334,14 +361,14 @@ pub async fn update_settings(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({ "updated": keys })))
+    Ok(Json(AdminSettingsUpdateResponse { updated: keys }))
 }
 
 pub async fn get_settings(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<AdminSettingsResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let rows = sqlx::query("SELECT key, value FROM app_settings")
@@ -373,19 +400,49 @@ pub async fn get_settings(
         "competition_difficulty_points",
         &DEFAULT_COMPETITION_DIFFICULTY_POINTS,
     ));
-    Ok(Json(json!({
-        "settings": {
-            "mastery_bands": mastery_bands,
-            "community_min_sample": bounded_i64(stored_i64(&stored, "community_min_sample", state.community_min_sample), state.community_min_sample, 1, 1_000_000),
-            "free_daily_questions": bounded_i64(stored_i64(&stored, "free_daily_questions", state.free_daily_questions), state.free_daily_questions, 0, 5000),
-            "free_daily_coach_turns": bounded_i64(stored_i64(&stored, "free_daily_coach_turns", state.free_daily_coach_turns), state.free_daily_coach_turns, 0, 1000),
-            "retest_intervals_days": retest_intervals,
-            "offline_lease_days": bounded_i64(stored_i64(&stored, "offline_lease_days", DEFAULT_OFFLINE_LEASE_DAYS), DEFAULT_OFFLINE_LEASE_DAYS, 1, 30),
-            "max_reviews_per_day": bounded_i64(stored_i64(&stored, "max_reviews_per_day", DEFAULT_MAX_REVIEWS_PER_DAY), DEFAULT_MAX_REVIEWS_PER_DAY, 0, 5000),
-            "max_new_cards_per_day": bounded_i64(stored_i64(&stored, "max_new_cards_per_day", DEFAULT_MAX_NEW_CARDS_PER_DAY), DEFAULT_MAX_NEW_CARDS_PER_DAY, 0, 1000),
-            "competition_difficulty_points": competition_difficulty_points,
-        }
-    })))
+    Ok(Json(AdminSettingsResponse {
+        settings: AdminSettings {
+            mastery_bands,
+            community_min_sample: bounded_i64(
+                stored_i64(&stored, "community_min_sample", state.community_min_sample),
+                state.community_min_sample,
+                1,
+                1_000_000,
+            ),
+            free_daily_questions: bounded_i64(
+                stored_i64(&stored, "free_daily_questions", state.free_daily_questions),
+                state.free_daily_questions,
+                0,
+                5000,
+            ),
+            free_daily_coach_turns: bounded_i64(
+                stored_i64(&stored, "free_daily_coach_turns", state.free_daily_coach_turns),
+                state.free_daily_coach_turns,
+                0,
+                1000,
+            ),
+            retest_intervals_days: retest_intervals,
+            offline_lease_days: bounded_i64(
+                stored_i64(&stored, "offline_lease_days", DEFAULT_OFFLINE_LEASE_DAYS),
+                DEFAULT_OFFLINE_LEASE_DAYS,
+                1,
+                30,
+            ),
+            max_reviews_per_day: bounded_i64(
+                stored_i64(&stored, "max_reviews_per_day", DEFAULT_MAX_REVIEWS_PER_DAY),
+                DEFAULT_MAX_REVIEWS_PER_DAY,
+                0,
+                5000,
+            ),
+            max_new_cards_per_day: bounded_i64(
+                stored_i64(&stored, "max_new_cards_per_day", DEFAULT_MAX_NEW_CARDS_PER_DAY),
+                DEFAULT_MAX_NEW_CARDS_PER_DAY,
+                0,
+                1000,
+            ),
+            competition_difficulty_points,
+        },
+    }))
 }
 
 /// Learner-safe config: only non-sensitive runtime settings.

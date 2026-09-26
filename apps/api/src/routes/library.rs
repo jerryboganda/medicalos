@@ -1163,8 +1163,9 @@ pub async fn get_article(
     }))
 }
 
-#[derive(sqlx::FromRow)]
-struct PrivateImportRight {
+#[derive(Serialize, sqlx::FromRow)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportRight.ts", rename = "PrivateImportRight"))]
+pub struct PrivateImportRight {
     rights_id: Uuid,
     ref_code: String,
     licensor: String,
@@ -1173,14 +1174,49 @@ struct PrivateImportRight {
 }
 
 #[derive(sqlx::FromRow)]
-struct PrivateDocumentSummary {
+#[derive(Serialize, sqlx::FromRow)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportSummary.ts", rename = "PrivateImportSummary"))]
+pub struct PrivateDocumentSummary {
     document_id: Uuid,
     title: String,
+    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
     media_type: String,
     rights_ref: String,
     sha256: String,
     created_at: chrono::DateTime<chrono::Utc>,
     available: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportRightsResponse.ts", rename = "PrivateImportRightsResponse"))]
+pub struct PrivateImportRightsResponse {
+    pub rights: Vec<PrivateImportRight>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportListResponse.ts", rename = "PrivateImportListResponse"))]
+pub struct PrivateImportListResponse {
+    pub documents: Vec<PrivateDocumentSummary>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportResponse.ts", rename = "PrivateImportResponse"))]
+pub struct PrivateImportResponse {
+    pub document_id: Uuid,
+    pub title: String,
+    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
+    pub media_type: String,
+    pub rights_ref: String,
+    pub sha256: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub available: bool,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportDeletedResponse.ts", rename = "PrivateImportDeletedResponse"))]
+pub struct PrivateImportDeletedResponse {
+    pub deleted: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1190,8 +1226,10 @@ struct PrivateImportQuota {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/CreatePrivateImportRequest.ts", rename = "CreatePrivateImportRequest"))]
 pub struct CreatePrivateImportReq {
     pub title: String,
+    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
     pub media_type: String,
     pub content: String,
     pub rights_ref: String,
@@ -1200,7 +1238,7 @@ pub struct CreatePrivateImportReq {
 pub async fn private_import_rights(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PrivateImportRightsResponse>> {
     let rights = sqlx::query_as::<_, PrivateImportRight>(
         r#"SELECT id AS rights_id, ref_code, licensor, valid_to,
                   permitted_uses @> '["search"]'::jsonb AS search_allowed
@@ -1213,19 +1251,13 @@ pub async fn private_import_rights(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "rights": rights.iter().map(|right| json!({
-        "rights_id": right.rights_id,
-        "ref_code": right.ref_code,
-        "licensor": right.licensor,
-        "valid_to": right.valid_to,
-        "search_allowed": right.search_allowed,
-    })).collect::<Vec<_>>() })))
+    Ok(Json(PrivateImportRightsResponse { rights }))
 }
 
 pub async fn list_private_imports(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PrivateImportListResponse>> {
     let documents = sqlx::query_as::<_, PrivateDocumentSummary>(
         r#"SELECT d.id AS document_id, d.title, d.media_type, r.ref_code AS rights_ref,
                   d.sha256, d.created_at,
@@ -1241,24 +1273,14 @@ pub async fn list_private_imports(
     .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(
-        json!({ "documents": documents.iter().map(|document| json!({
-        "document_id": document.document_id,
-        "title": document.title,
-        "media_type": document.media_type,
-        "rights_ref": document.rights_ref,
-        "sha256": document.sha256,
-        "created_at": document.created_at,
-        "available": document.available,
-    })).collect::<Vec<_>>() }),
-    ))
+    Ok(Json(PrivateImportListResponse { documents }))
 }
 
 pub async fn create_private_import(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CreatePrivateImportReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<PrivateDocumentSummary>)> {
     let title = req.title.trim();
     if title.is_empty() || title.chars().count() > 200 {
         return Err(ApiError::unprocessable(
@@ -1360,15 +1382,15 @@ pub async fn create_private_import(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "document_id": document_id,
-            "title": title,
-            "media_type": media_type,
-            "rights_ref": rights_ref,
-            "sha256": sha256,
-            "created_at": created_at,
-            "available": true,
-        })),
+        Json(PrivateDocumentSummary {
+            document_id,
+            title: title.into(),
+            media_type,
+            rights_ref,
+            sha256,
+            created_at,
+            available: true,
+        }),
     ))
 }
 
@@ -1376,7 +1398,7 @@ pub async fn get_private_import(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(document_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PrivateImportResponse>> {
     let mut tx = state.pool.begin().await?;
     let metadata = sqlx::query_as::<_, PrivateDocumentSummary>(
         r#"SELECT d.id AS document_id, d.title, d.media_type, r.ref_code AS rights_ref,
@@ -1421,23 +1443,23 @@ pub async fn get_private_import(
         )
     })?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "document_id": metadata.document_id,
-        "title": metadata.title,
-        "media_type": metadata.media_type,
-        "rights_ref": metadata.rights_ref,
-        "sha256": metadata.sha256,
-        "created_at": metadata.created_at,
-        "available": metadata.available,
-        "content": content,
-    })))
+    Ok(Json(PrivateImportResponse {
+        document_id: metadata.document_id,
+        title: metadata.title,
+        media_type: metadata.media_type,
+        rights_ref: metadata.rights_ref,
+        sha256: metadata.sha256,
+        created_at: metadata.created_at,
+        available: metadata.available,
+        content,
+    }))
 }
 
 pub async fn delete_private_import(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(document_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PrivateImportDeletedResponse>> {
     let deleted = sqlx::query_scalar::<_, Uuid>(
         "DELETE FROM private_documents WHERE id = $1 AND user_id = $2 RETURNING id",
     )
@@ -1449,7 +1471,7 @@ pub async fn delete_private_import(
     if !deleted {
         return Err(ApiError::not_found("private_import_not_found"));
     }
-    Ok(Json(json!({ "deleted": true })))
+    Ok(Json(PrivateImportDeletedResponse { deleted: true }))
 }
 
 // ---- LIB-08: media with captions and chapters (rights reference required) ----
@@ -1635,6 +1657,7 @@ pub struct ImageCaseReq {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageCaseConceptsRequest.ts", rename = "ImageCaseConceptsRequest"))]
 pub struct SetImageCaseConceptsReq {
     pub concept_ids: Vec<Uuid>,
 }
@@ -2383,6 +2406,7 @@ pub async fn set_admin_image_case_concepts(
 // learners only ever see approved ones.
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageAnnotationRequest.ts", rename = "ImageAnnotationRequest"))]
 pub struct ImageAnnotationReq {
     pub image_index: i32,
     pub x_percent: f64,
@@ -2513,9 +2537,12 @@ pub async fn list_image_annotations(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageAnnotationReviewRequest.ts", rename = "ImageAnnotationReviewRequest"))]
 pub struct ImageAnnotationReviewReq {
+    #[cfg_attr(feature = "type-export", ts(type = "\"approved\" | \"rejected\""))]
     pub decision: String,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub note: String,
 }
 

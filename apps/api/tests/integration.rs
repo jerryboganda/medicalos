@@ -917,6 +917,7 @@ async fn auth_register_login_and_reject_bad_credentials() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
+    assert_json_keys(&v, &["user_id"]);
 
     let (status, _) = call(
         app.clone(),
@@ -960,6 +961,7 @@ async fn auth_register_login_and_reject_bad_credentials() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_json_keys(&v, &["token"]);
     assert!(v["token"].as_str().is_some());
 }
 
@@ -1784,9 +1786,10 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{deck}");
+    assert_json_keys(&deck, &["deck_id"]);
     let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
     for n in 0..3 {
-        let (status, _) = call(
+        let (status, card) = call(
             app.clone(),
             request(
                 "POST",
@@ -1797,7 +1800,12 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
             ),
         )
         .await;
-        assert_eq!(status, StatusCode::OK);
+        assert_eq!(status, StatusCode::OK, "{card}");
+        assert_json_keys(&card, &["card_id", "due", "state", "card_type", "trust"]);
+        assert_eq!(card["due"], Value::Null);
+        assert_eq!(card["state"], "new");
+        assert_eq!(card["card_type"], "basic");
+        assert_eq!(card["trust"], "editorial");
     }
 
     // Queue: all three arrive as new, none as due.
@@ -1807,8 +1815,15 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{q}");
+    assert_json_keys(&q, &["due", "new", "backlog_remaining"]);
     assert_eq!(q["new"].as_array().unwrap().len(), 3);
     assert_eq!(q["due"].as_array().unwrap().len(), 0);
+    for item in q["new"].as_array().unwrap() {
+        assert_json_keys(
+            item,
+            &["card_id", "front", "back", "card_type", "cloze", "trust", "ai_draft"],
+        );
+    }
 
     // Rate the first new card Good: it leaves the queue, scheduled forward.
     let card1: Uuid = q["new"][0]["card_id"].as_str().unwrap().parse().unwrap();
@@ -1825,8 +1840,10 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{event}");
+    assert_json_keys(&event, &["already_recorded", "due", "reviewed_at"]);
     assert_eq!(event["already_recorded"], false);
     assert!(event["due"].is_string());
+    assert!(event["reviewed_at"].is_string());
     let due: chrono::DateTime<chrono::Utc> = event["due"].as_str().unwrap().parse().unwrap();
     assert!(due > chrono::Utc::now(), "a Good review schedules forward");
 
@@ -1843,6 +1860,7 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_json_keys(&replay, &["already_recorded", "due", "reviewed_at"]);
     assert_eq!(replay["already_recorded"], true);
     let events = sqlx::query("SELECT COUNT(*) AS n FROM review_events WHERE card_id = $1")
         .bind(card1)
@@ -3824,7 +3842,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
         .unwrap()
         .parse()
         .unwrap();
-    let (status, _) = call(
+    let (status, background) = call(
         app.clone(),
         request(
             "POST",
@@ -3837,7 +3855,11 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{background}");
+    assert_json_keys(&background, &["recorded", "event_id", "action"]);
+    assert_eq!(background["recorded"], true);
+    assert_eq!(background["action"], "none");
+    assert!(background["event_id"].is_string());
     sqlx::query(
         "UPDATE practice_sessions SET away_since = now() - interval '30 seconds' WHERE id = $1",
     )
@@ -3860,6 +3882,12 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{warning}");
+    assert_json_keys(
+        &warning,
+        &["recorded", "event_id", "action", "away_seconds"],
+    );
+    assert_eq!(warning["recorded"], true);
+    assert!(warning["event_id"].is_string());
     assert_eq!(warning["action"], "warn");
     assert!(warning["away_seconds"].as_i64().unwrap() >= 15);
 
@@ -3877,6 +3905,10 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{duplicate_return}");
+    assert_json_keys(
+        &duplicate_return,
+        &["recorded", "event_id", "action"],
+    );
     assert_eq!(duplicate_return["action"], "none");
     let warn_status: String =
         sqlx::query_scalar("SELECT status FROM practice_sessions WHERE id = $1")
@@ -4035,6 +4067,23 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_json_keys(
+        &resumed,
+        &["recorded", "event_id", "action", "receipt"],
+    );
+    assert_json_keys(
+        &resumed["receipt"],
+        &[
+            "total",
+            "correct",
+            "incorrect",
+            "skipped",
+            "score",
+            "expected_score",
+            "mock",
+            "time",
+        ],
+    );
     assert_eq!(resumed["action"], "auto_submitted");
     assert_eq!(resumed["receipt"]["total"], 2);
 }
@@ -4513,6 +4562,27 @@ async fn editorial_hierarchy_question_and_import_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{node}");
     let node_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+    let (status, hierarchy) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/hierarchy?exam_id={}", ids.exam_id),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hierarchy}");
+    let created_node = hierarchy["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == node_id.to_string())
+        .expect("created hierarchy node");
+    assert_eq!(created_node["kind"], "chapter");
+    assert_eq!(created_node["name"], "Imported Chapter");
+    assert_eq!(created_node["parent_id"], ids.chapter1.to_string());
+    assert_eq!(created_node["status"], "active");
     let (status, renamed) = call(
         app.clone(),
         admin_req(
@@ -4567,8 +4637,11 @@ async fn editorial_hierarchy_question_and_import_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{dry}");
     assert_eq!(dry["status"], "dry_run");
+    assert_eq!(dry["rows"], 2);
     assert_eq!(dry["valid"], 1);
     assert_eq!(dry["issues"].as_array().unwrap().len(), 1);
+    assert_eq!(dry["issues"][0]["row"], 2);
+    assert_eq!(dry["issues"][0]["code"], "invalid_option_count");
 
     // Nothing was created by the dry run.
     let (status, q) = call(
@@ -4600,6 +4673,10 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(status, StatusCode::OK, "{applied}");
     assert_eq!(applied["status"], "applied");
     let batch_id: Uuid = applied["batch_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(applied["rows"], 1);
+    assert_eq!(applied["created"].as_array().unwrap().len(), 1);
+    assert!(applied["created"][0]["question_id"].as_str().is_some());
+    assert!(applied["created"][0]["version_id"].as_str().is_some());
 
     // The imported question is live in the learner pool.
     let (status, q) = call(
@@ -4622,9 +4699,17 @@ async fn editorial_hierarchy_question_and_import_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{audit}");
-    let actions: Vec<&str> = audit["events"]
-        .as_array()
-        .unwrap()
+    let events = audit["events"].as_array().unwrap();
+    let imported_event = events
+        .iter()
+        .find(|event| event["action"] == "import_applied")
+        .expect("import audit event");
+    assert_eq!(imported_event["entity"], "import_batch");
+    assert_eq!(imported_event["entity_id"], batch_id.to_string());
+    assert!(imported_event["actor"].is_string());
+    assert!(imported_event["at"].as_str().is_some());
+    assert_eq!(imported_event["new_value"]["rows"], 1);
+    let actions: Vec<&str> = events
         .iter()
         .filter_map(|e| e["action"].as_str())
         .collect();
@@ -4642,6 +4727,8 @@ async fn editorial_hierarchy_question_and_import_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{rolled}");
+    assert_eq!(rolled["batch_id"], batch_id.to_string());
+    assert_eq!(rolled["status"], "rolled_back");
     assert_eq!(rolled["removed_questions"], 1);
     let (status, q) = call(
         app.clone(),
@@ -4692,7 +4779,9 @@ async fn editorial_hierarchy_question_and_import_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{wf}");
-    for action in ["approve", "publish"] {
+    assert_eq!(wf["results"][0]["version_id"], vids[0].to_string());
+    assert_eq!(wf["results"][0]["status"], "in_review");
+    for (action, expected_status) in [("approve", "approved"), ("publish", "published")] {
         let (status, wf) = call(
             app.clone(),
             admin_req(
@@ -4704,6 +4793,8 @@ async fn editorial_hierarchy_question_and_import_flow() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{wf}");
+        assert_eq!(wf["results"][0]["version_id"], vids[0].to_string());
+        assert_eq!(wf["results"][0]["status"], expected_status);
         assert!(
             wf["results"][0]["status"].is_string(),
             "transition {action} failed: {wf}"
@@ -4857,6 +4948,16 @@ async fn coach_grounded_abstaining_and_allowance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{turn}");
+    assert_json_keys(
+        &turn,
+        &[
+            "already_recorded",
+            "answer",
+            "adapter",
+            "model",
+            "grounded_on",
+        ],
+    );
     assert_eq!(turn["already_recorded"], false);
     assert_eq!(turn["adapter"], "extractive");
     let answer = turn["answer"].as_str().unwrap();
@@ -4884,7 +4985,19 @@ async fn coach_grounded_abstaining_and_allowance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_json_keys(
+        &replay,
+        &[
+            "already_recorded",
+            "answer",
+            "adapter",
+            "model",
+            "grounded_on",
+            "created_at",
+        ],
+    );
     assert_eq!(replay["already_recorded"], true);
+    assert!(replay["created_at"].is_string());
     assert_eq!(replay["answer"], turn["answer"]);
     let count = sqlx::query("SELECT COUNT(*) AS n FROM coach_turns WHERE idempotency_key = $1")
         .bind("c-key-1")
@@ -4905,7 +5018,12 @@ async fn coach_grounded_abstaining_and_allowance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{history}");
+    assert_json_keys(&history, &["turns"]);
     assert_eq!(history["turns"].as_array().unwrap().len(), 1);
+    assert_json_keys(
+        &history["turns"][0],
+        &["prompt_type", "message", "answer", "adapter", "created_at"],
+    );
 
     // 7. AI-13: allowance refusal with structured details. The state's
     // default here is 20; drive 19 more turns then expect refusal on the
@@ -4917,7 +5035,12 @@ async fn coach_grounded_abstaining_and_allowance() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{list}");
+    assert_json_keys(&list, &["questions"]);
     assert_eq!(list["questions"].as_array().unwrap().len(), 1);
+    assert_json_keys(
+        &list["questions"][0],
+        &["question_version_id", "vignette", "chapter"],
+    );
 }
 
 #[tokio::test]
@@ -6691,6 +6814,26 @@ async fn notifications_preferences_roundtrip() {
     let state = setup().await;
     let app = router(state.clone());
     let token = register_and_login(app.clone()).await;
+    let token_hash = Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let user_id: Uuid = sqlx::query_scalar(
+        "SELECT user_id FROM auth_sessions WHERE token_hash = $1",
+    )
+    .bind(&token_hash)
+    .fetch_one(&state.pool)
+    .await
+    .expect("authenticated user");
+    sqlx::query(
+        "INSERT INTO notifications (id, user_id, category, title, body, deep_link)
+         VALUES ($1, $2, 'plan_reminder', 'Study reminder', 'A plan task is due.', NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("notification fixture");
 
     let (status, inbox) = call(
         app.clone(),
@@ -6698,10 +6841,28 @@ async fn notifications_preferences_roundtrip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{inbox}");
-    assert_eq!(inbox["notifications"].as_array().unwrap().len(), 0);
+    assert_json_keys(&inbox, &["notifications", "preferences"]);
+    assert_eq!(inbox["notifications"].as_array().unwrap().len(), 1);
+    assert_json_keys(
+        &inbox["notifications"][0],
+        &["id", "category", "title", "body", "deep_link", "read", "created_at"],
+    );
+    assert_eq!(inbox["notifications"][0]["deep_link"], Value::Null);
+    assert!(inbox["notifications"][0]["created_at"].is_string());
+    assert_json_keys(
+        &inbox["preferences"],
+        &[
+            "plan_reminders",
+            "mock_results",
+            "reports",
+            "content_updates",
+            "quiet_hours_start",
+            "quiet_hours_end",
+        ],
+    );
     assert_eq!(inbox["preferences"]["content_updates"], true);
 
-    let (status, _) = call(
+    let (status, updated) = call(
         app.clone(),
         request(
             "PATCH",
@@ -6715,18 +6876,31 @@ async fn notifications_preferences_roundtrip() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_json_keys(&updated, &["updated"]);
+    assert_eq!(updated["updated"], true);
+
+    let (status, invalid_end) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/me/notifications",
+            Some(&token),
+            Some(serde_json::json!({ "quiet_hours_end": 24 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_end}");
+    assert_eq!(invalid_end["error"]["code"], "invalid_quiet_hours");
+
     let (status, saved) = call(
         app.clone(),
         request("GET", "/v1/me/notifications", Some(&token), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_json_keys(&saved, &["notifications", "preferences"]);
     assert_eq!(saved["preferences"]["content_updates"], false);
-    let token_hash = Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
     let content_updates: bool = sqlx::query_scalar(
         "SELECT content_updates FROM notification_preferences
          WHERE user_id = (SELECT user_id FROM auth_sessions WHERE token_hash = $1)",
@@ -7260,7 +7434,7 @@ async fn pregen_tutoring_generated_and_cached() {
     assert_ne!(changed_manifest["signature"], first_signature);
 
     let lease_id = lease["lease_id"].as_str().unwrap();
-    let (status, _) = call(
+    let (status, revoked_lease) = call(
         app.clone(),
         request(
             "DELETE",
@@ -7270,7 +7444,8 @@ async fn pregen_tutoring_generated_and_cached() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{revoked_lease}");
+    assert_eq!(revoked_lease, serde_json::json!({"revoked": true}));
     let (status, revoked) = call(app, request("GET", &manifest_url, Some(&token), None)).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{revoked}");
 }
@@ -7488,6 +7663,7 @@ async fn portfolio_and_ce_records() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{entry}");
+    assert_json_keys(&entry, &["entry_id"]);
 
     let (status, list) = call(
         app.clone(),
@@ -7495,7 +7671,22 @@ async fn portfolio_and_ce_records() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{list}");
+    assert_json_keys(&list, &["entries"]);
     assert_eq!(list["entries"].as_array().unwrap().len(), 1);
+    assert_json_keys(
+        &list["entries"][0],
+        &[
+            "entry_id",
+            "kind",
+            "title",
+            "detail",
+            "occurred_on",
+            "created_at",
+        ],
+    );
+    assert_eq!(list["entries"][0]["entry_id"], entry["entry_id"]);
+    assert_eq!(list["entries"][0]["kind"], "rotation");
+    assert_eq!(list["entries"][0]["occurred_on"], "2026-08-01");
 
     let (status, ce) = call(
         app.clone(),
@@ -7508,11 +7699,10 @@ async fn portfolio_and_ce_records() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{ce}");
-    assert!(
-        ce["note"]
-            .as_str()
-            .unwrap()
-            .contains("Not an accredited credit"),
+    assert_json_keys(&ce, &["activity_id", "note"]);
+    assert_eq!(
+        ce["note"],
+        "Recorded as activity. Not an accredited credit.",
         "§16 honesty: records are never labelled accredited"
     );
 
@@ -9247,13 +9437,23 @@ async fn phase2_pools_marks_timing_insights() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
+    assert_json_keys(&v, &["marked"]);
+    assert_eq!(v["marked"], true);
     let (status, v) = call(
         app.clone(),
         request("GET", "/v1/me/marks", Some(&learner), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
+    assert_json_keys(&v, &["marks"]);
     assert_eq!(v["marks"].as_array().unwrap().len(), 1, "marks: {v}");
+    assert_json_keys(
+        &v["marks"][0],
+        &["question_version_id", "lead_in", "marked_at"],
+    );
+    assert_eq!(v["marks"][0]["question_version_id"], q1.to_string());
+    assert!(v["marks"][0]["lead_in"].is_string(), "{v}");
+    assert!(v["marks"][0]["marked_at"].is_string(), "{v}");
 
     let (status, marked) = call(
         app.clone(),
@@ -9276,6 +9476,20 @@ async fn phase2_pools_marks_timing_insights() {
         q1.to_string()
     );
     let sid: Uuid = marked["session_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, unmarked) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/questions/{q1}/mark"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unmarked}");
+    assert_json_keys(&unmarked, &["marked"]);
+    assert_eq!(unmarked["marked"], false);
 
     // Answer wrong with QB-17 elapsed reporting, submit, and check the
     // timing analysis carries the reported time.
@@ -11142,10 +11356,37 @@ async fn engagement_goal_streak_and_qotd() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_json_keys(
+        &eng,
+        &["enabled", "available_minutes", "daily_goal", "streak", "qotd"],
+    );
     assert_eq!(eng["enabled"], true, "{eng}");
+    assert_json_keys(
+        &eng["daily_goal"],
+        &[
+            "enabled",
+            "mode",
+            "unit",
+            "target",
+            "answered_today",
+            "minutes_today",
+            "met",
+        ],
+    );
     assert_eq!(eng["daily_goal"]["enabled"], true, "{eng}");
     assert_eq!(eng["daily_goal"]["target"], 20, "{eng}");
+    assert_json_keys(&eng["streak"], &["enabled", "count", "freezes"]);
     assert_eq!(eng["streak"]["enabled"], true, "{eng}");
+    assert_json_keys(
+        &eng["qotd"],
+        &[
+            "enabled",
+            "exam_id",
+            "needs_exam_selection",
+            "answered",
+            "available",
+        ],
+    );
     assert_eq!(eng["qotd"]["enabled"], true, "{eng}");
     assert_eq!(eng["qotd"]["answered"], false, "{eng}");
     assert_eq!(eng["qotd"]["needs_exam_selection"], true, "{eng}");
@@ -11166,6 +11407,19 @@ async fn engagement_goal_streak_and_qotd() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{set}");
+    assert_json_keys(
+        &set,
+        &[
+            "daily_goal_questions",
+            "daily_goal_mode",
+            "available_minutes",
+            "daily_goal_enabled",
+            "streak_enabled",
+            "qotd_enabled",
+            "freezes",
+            "qotd_exam_id",
+        ],
+    );
     assert_eq!(set["daily_goal_questions"], 1, "{set}");
     assert_eq!(set["qotd_exam_id"], ids.exam_id.to_string(), "{set}");
 
@@ -11239,6 +11493,19 @@ async fn engagement_goal_streak_and_qotd() {
 
     // QOTD: published question is offered; correct_index is withheld until answered.
     assert_eq!(eng["qotd"]["available"], true, "{eng}");
+    assert_json_keys(
+        &eng["qotd"],
+        &[
+            "enabled",
+            "exam_id",
+            "needs_exam_selection",
+            "answered",
+            "available",
+            "question_version_id",
+            "vignette",
+            "options",
+        ],
+    );
     let qv = eng["qotd"]["question_version_id"]
         .as_str()
         .expect("qotd version")
@@ -11248,12 +11515,29 @@ async fn engagement_goal_streak_and_qotd() {
         eng["qotd"]["options"].as_array().unwrap().len() >= 2,
         "{eng}"
     );
+    for option in eng["qotd"]["options"].as_array().unwrap() {
+        assert_json_keys(option, &["text"]);
+        assert!(option["text"].is_string(), "{option}");
+    }
     assert!(eng["qotd"].get("correct_index").is_none(), "{eng}");
 
     // Canonical QOTD route returns the same server-selected question.
     let (status, canonical_qotd) =
         call(app.clone(), request("GET", "/v1/qotd", Some(&user), None)).await;
     assert_eq!(status, StatusCode::OK, "{canonical_qotd}");
+    assert_json_keys(
+        &canonical_qotd,
+        &[
+            "enabled",
+            "exam_id",
+            "needs_exam_selection",
+            "answered",
+            "available",
+            "question_version_id",
+            "vignette",
+            "options",
+        ],
+    );
     assert_eq!(
         canonical_qotd["question_version_id"], qv,
         "{canonical_qotd}"
@@ -11312,6 +11596,13 @@ async fn engagement_goal_streak_and_qotd() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{ans}");
+    assert_json_keys(
+        &ans,
+        &["correct", "correct_index", "community_split", "community_total"],
+    );
+    for vote in ans["community_split"].as_array().unwrap() {
+        assert_json_keys(vote, &["chosen_index", "count"]);
+    }
     assert!(ans["correct"].is_boolean(), "{ans}");
     assert_eq!(ans["community_total"], 1, "{ans}");
     let (status, dup) = call(
@@ -11369,6 +11660,18 @@ async fn engagement_goal_streak_and_qotd() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{eng}");
+    assert_json_keys(
+        &eng["qotd"],
+        &[
+            "enabled",
+            "exam_id",
+            "needs_exam_selection",
+            "answered",
+            "available",
+            "community_split",
+            "community_total",
+        ],
+    );
     assert_eq!(eng["qotd"]["answered"], true, "{eng}");
     assert!(
         !eng["qotd"]["community_split"]
@@ -11398,6 +11701,7 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(set["daily_goal_enabled"], false, "{set}");
     assert_eq!(set["streak_enabled"], false, "{set}");
     assert_eq!(set["qotd_enabled"], false, "{set}");
+    assert_eq!(set["qotd_exam_id"], ids.exam_id.to_string(), "{set}");
 
     let (status, eng) = call(
         app.clone(),
@@ -11407,6 +11711,7 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::OK, "{eng}");
     assert_eq!(eng["daily_goal"]["enabled"], false, "{eng}");
     assert_eq!(eng["streak"]["enabled"], false, "{eng}");
+    assert_json_keys(&eng["qotd"], &["enabled"]);
     assert_eq!(eng["qotd"]["enabled"], false, "{eng}");
 
     // Disabled QOTD refuses answers at the API, not just in the UI.
@@ -11439,6 +11744,7 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::OK, "{eng}");
     assert_eq!(eng["enabled"], false, "{eng}");
     assert_eq!(eng["daily_goal"]["enabled"], false, "{eng}");
+    assert_json_keys(&eng["qotd"], &["enabled"]);
     assert_eq!(eng["qotd"]["enabled"], false, "{eng}");
     let (status, refused) = call(
         app.clone(),
@@ -11841,6 +12147,16 @@ async fn qotd_is_shared_and_stable_per_exam() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{unavailable_pick}");
+    assert_json_keys(
+        &unavailable_pick,
+        &[
+            "enabled",
+            "exam_id",
+            "needs_exam_selection",
+            "answered",
+            "available",
+        ],
+    );
     assert_eq!(unavailable_pick["available"], false, "{unavailable_pick}");
     assert!(unavailable_pick.get("question_version_id").is_none());
     sqlx::query("UPDATE question_versions SET status = 'published' WHERE id = $1")
@@ -11913,6 +12229,19 @@ async fn qotd_is_shared_and_stable_per_exam() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_json_keys(
+        &cleared,
+        &[
+            "daily_goal_questions",
+            "daily_goal_mode",
+            "available_minutes",
+            "daily_goal_enabled",
+            "streak_enabled",
+            "qotd_enabled",
+            "freezes",
+            "qotd_exam_id",
+        ],
+    );
     assert_eq!(
         cleared["qotd_exam_id"],
         serde_json::Value::Null,
@@ -14148,6 +14477,17 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_json_keys(
+        &body,
+        &[
+            "replanned",
+            "reason",
+            "committed_minutes",
+            "daily_minutes",
+            "plan_id",
+            "version",
+        ],
+    );
     assert_eq!(body["replanned"], false, "{body}");
     assert_eq!(body["reason"], "within_capacity", "{body}");
 
@@ -14163,6 +14503,18 @@ async fn plan_replan_trims_to_capacity_with_receipt() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{replanned}");
+    assert_json_keys(
+        &replanned,
+        &[
+            "replanned",
+            "plan_id",
+            "version",
+            "kept_tasks",
+            "deferred_tasks",
+            "deferred",
+            "deferred_task_ids",
+        ],
+    );
     assert_eq!(replanned["replanned"], true, "{replanned}");
     assert_eq!(replanned["deferred_tasks"], 1, "{replanned}");
     assert_eq!(replanned["kept_tasks"], 0, "{replanned}");
@@ -14908,6 +15260,7 @@ async fn ai08_replan_preserves_done_and_protected_tasks_and_rejects_stale_versio
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{protected}");
+    assert_json_keys(&protected, &["task_id", "protected"]);
 
     let (status, blocked) = call(
         app.clone(),
@@ -16323,8 +16676,19 @@ async fn review_debt_and_exam_switch_gap_report_are_honest() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{debt}");
+    assert_json_keys(
+        &debt,
+        &[
+            "due_now",
+            "completed_last_7_days",
+            "daily_rate",
+            "projected_backlog_days",
+            "note",
+        ],
+    );
     assert_eq!(debt["due_now"], 0, "{debt}");
     assert_eq!(debt["completed_last_7_days"], 0, "{debt}");
+    assert!(debt["daily_rate"].is_null(), "{debt}");
     assert!(debt["projected_backlog_days"].is_null(), "{debt}");
 
     // PLAN-04: attempt chapter1 for real, then read the switch report.
@@ -17654,12 +18018,23 @@ async fn exam_registry_serves_official_source_and_aliases() {
     let (status, registry) =
         call(app.clone(), request("GET", "/v1/exams", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{registry}");
+    assert_json_keys(&registry, &["exams"]);
     let pilt = registry["exams"]
         .as_array()
         .unwrap()
         .iter()
         .find(|exam| exam["code"] == "PILT")
         .expect("pilot fixture is registered");
+    assert_json_keys(
+        pilt,
+        &[
+            "exam_id",
+            "code",
+            "name",
+            "official_source_url",
+            "aliases",
+        ],
+    );
     assert_eq!(
         pilt["official_source_url"],
         "https://fixtures.example.test/pilot-blueprint"
@@ -17883,6 +18258,7 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
+    assert_eq!(decision["annotation_id"], annotation_id);
     assert_eq!(decision["decision"], "approved");
     assert_eq!(decision["review_status"], "approved");
 
@@ -19163,8 +19539,23 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     assert_eq!(configured["enabled"], true, "{configured}");
+    assert_json_keys(
+        &configured,
+        &["issuer", "client_id", "enabled", "client_secret_configured"],
+    );
     assert_eq!(configured["client_secret_configured"], true, "{configured}");
     assert!(configured.get("client_secret").is_none(), "{configured}");
+    let (status, provider_view) = call(
+        app.clone(),
+        admin_req("GET", &config_uri, Some(&password_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{provider_view}");
+    assert_json_keys(
+        &provider_view,
+        &["issuer", "client_id", "enabled", "client_secret_configured"],
+    );
+    assert!(provider_view.get("client_secret").is_none(), "{provider_view}");
 
     let (status, _) = call(
         app.clone(),
@@ -19195,6 +19586,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        assert_json_keys(&body, &["authorization_url"]);
         let authorization_url = url::Url::parse(body["authorization_url"].as_str().unwrap())
             .expect("authorization URL");
         authorization_url.query_pairs().into_owned().collect()
@@ -19260,6 +19652,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
+    assert_json_keys(&session, &["token"]);
     let sso_token = session["token"].as_str().unwrap();
 
     let (status, _) = call(
@@ -19346,14 +19739,17 @@ async fn qb13_calculators_conversions_and_assisted_hints() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{bmi}");
+    assert_json_keys(&bmi, &["calculator", "value", "unit", "disclaimer"]);
+    assert_eq!(bmi["calculator"], "bmi");
+    assert_eq!(bmi["unit"], "kg/m²");
     assert!(
         (bmi["value"].as_f64().unwrap() - 22.86).abs() < 0.01,
         "{bmi}"
     );
-    assert!(bmi["disclaimer"]
-        .as_str()
-        .unwrap()
-        .contains("not for clinical use"));
+    assert_eq!(
+        bmi["disclaimer"],
+        "For exam practice only; not for clinical use."
+    );
 
     let (status, invalid) = call(
         app.clone(),
@@ -19398,6 +19794,12 @@ async fn qb13_calculators_conversions_and_assisted_hints() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{conversion}");
+    assert_json_keys(&conversion, &["value", "unit", "disclaimer"]);
+    assert_eq!(conversion["unit"], "mmol/L");
+    assert_eq!(
+        conversion["disclaimer"],
+        "For exam practice only; not for clinical use."
+    );
     assert!(
         (conversion["value"].as_f64().unwrap() - 5.55).abs() < 0.01,
         "{conversion}"
@@ -19542,10 +19944,12 @@ async fn qb13_calculators_conversions_and_assisted_hints() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{hint}");
+    assert_json_keys(&hint, &["hint", "assisted"]);
     assert_eq!(
         hint["hint"],
         "Compare the direction of the two pressure components first."
     );
+    assert_eq!(hint["assisted"], true);
 
     let (status, answer) = call(
         app.clone(),
@@ -19822,6 +20226,7 @@ async fn core10_concepts_are_versioned_and_curriculum_mappings_are_many_to_many(
         .unwrap()
         .parse::<Uuid>()
         .unwrap();
+    assert_eq!(first["canonical_key"], "cardiac-output");
     assert_eq!(first["current_version"], 1);
 
     let (status, unauthorized_version) = call(
@@ -19853,6 +20258,7 @@ async fn core10_concepts_are_versioned_and_curriculum_mappings_are_many_to_many(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{version}");
+    assert_eq!(version["concept_id"], concept_id.to_string());
     assert_eq!(version["current_version"], 2);
 
     let (status, listed) = call(
@@ -19897,6 +20303,8 @@ async fn core10_concepts_are_versioned_and_curriculum_mappings_are_many_to_many(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{mapped}");
+    assert_eq!(mapped["node_id"], ids.chapter1.to_string());
+    assert_eq!(mapped["mapped"], 2);
     let (status, chapter1) = call(
         app.clone(),
         admin(request(

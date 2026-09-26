@@ -2,8 +2,7 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,12 +13,58 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "integrity/IntegrityEventRequest.ts",
+        rename = "IntegrityEventRequest"
+    )
+)]
 pub struct IntegrityEventReq {
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub session_id: Option<Uuid>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"background\" | \"screenshot\" | \"screen_record\" | \"split_screen\" | \"clock_change\" | \"fullscreen_exit\" | \"window_blur\" | \"foreground\" | \"attestation_failure\" | \"second_session\""
+        )
+    )]
     pub signal_type: String,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(type = "unknown", optional))]
     pub detail: serde_json::Value,
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub client_time: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "integrity/IntegrityEventResponse.ts",
+        rename = "IntegrityEventResponse"
+    )
+)]
+pub struct IntegrityEventResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    recorded: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    event_id: Uuid,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"none\" | \"warn\" | \"auto_submitted\"")
+    )]
+    action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    away_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "unknown", optional))]
+    receipt: Option<serde_json::Value>,
 }
 
 const VALID_SIGNALS: &[&str] = &[
@@ -39,7 +84,7 @@ pub async fn record_integrity_event(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<IntegrityEventReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<IntegrityEventResponse>> {
     if !VALID_SIGNALS.contains(&req.signal_type.as_str()) {
         return Err(ApiError::unprocessable(
             "invalid_signal",
@@ -142,14 +187,7 @@ pub async fn record_integrity_event(
     .await?;
     tx.commit().await?;
 
-    let mut response = json!({
-        "recorded": true,
-        "event_id": id,
-        "action": action,
-    });
-    if let Some(seconds) = away_seconds {
-        response["away_seconds"] = json!(seconds);
-    }
+    let mut receipt = None;
     if let Some(session_id) = auto_submit {
         let Json(receipt) = crate::routes::practice::submit(
             State(state.clone()),
@@ -159,7 +197,7 @@ pub async fn record_integrity_event(
             Path(session_id),
         )
         .await?;
-        response["receipt"] = receipt;
+        receipt = Some(receipt);
         sqlx::query(
             "UPDATE practice_sessions SET away_since = NULL
              WHERE id = $1 AND status = 'submitted' AND auto_submitted_by_policy = TRUE",
@@ -168,7 +206,13 @@ pub async fn record_integrity_event(
         .execute(&state.pool)
         .await?;
     }
-    Ok(Json(response))
+    Ok(Json(IntegrityEventResponse {
+        recorded: true,
+        event_id: id,
+        action: action.to_owned(),
+        away_seconds,
+        receipt,
+    }))
 }
 
 /// Complete one bounded worker tick. Persisted away intervals and policy

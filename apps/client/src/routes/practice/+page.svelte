@@ -6,7 +6,7 @@
 		Api,
 		ApiError,
 		type CompetitionAttemptStep,
-		type CompetitionLeaderboard,
+		type CompetitionLeaderboardResponse,
 		type CompetitionLeagueState,
 		type CompetitionSummary
 	} from '$lib/api';
@@ -55,7 +55,7 @@
 	} | null>(null);
 	let selectedCompetitionChoice = $state<number | null>(null);
 	let pendingCompetitionAnswerKey = $state('');
-	let competitionLeaderboard = $state<CompetitionLeaderboard | null>(null);
+	let competitionLeaderboard = $state<CompetitionLeaderboardResponse | null>(null);
 	let leaderboardCompetition = $state<CompetitionSummary | null>(null);
 	let competitionQuestionHeading = $state<HTMLHeadingElement>();
 	let competitionErrorSummary = $state<HTMLDivElement>();

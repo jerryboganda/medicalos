@@ -764,8 +764,33 @@ pub async fn today(
     }))
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/TaskProtectionRequest.ts",
+        rename = "TaskProtectionRequest"
+    )
+)]
 pub struct TaskProtectionReq {
+    protected: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/TaskProtectionResponse.ts",
+        rename = "TaskProtectionResponse"
+    )
+)]
+pub struct TaskProtectionResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    task_id: Uuid,
     protected: bool,
 }
 
@@ -774,7 +799,7 @@ pub async fn set_task_protection(
     user: AuthUser,
     Path((plan_id, task_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<TaskProtectionReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<TaskProtectionResponse>> {
     let mut tx = state.pool.begin().await?;
     sqlx::query_scalar!(
         "SELECT id FROM users WHERE id = $1 FOR UPDATE",
@@ -823,12 +848,14 @@ pub async fn set_task_protection(
         .await?;
     }
     tx.commit().await?;
-    Ok(Json(
-        json!({ "task_id": task_id, "protected": req.protected }),
-    ))
+    Ok(Json(TaskProtectionResponse {
+        task_id,
+        protected: req.protected,
+    }))
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "today/UndoResponse.ts", rename = "UndoResponse"))]
 pub struct UndoResponse {
     plan_version: i32,
 }
@@ -1035,12 +1062,46 @@ pub async fn undo_revision(
 
 // ---- QB-12: learner-facing curriculum for the session builder ---------------
 
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/CurriculumChapter.ts",
+        rename = "CurriculumChapter"
+    )
+)]
+pub struct CurriculumChapter {
+    pub chapter_id: Uuid,
+    pub chapter_name: String,
+    pub system: String,
+    pub subject: String,
+    pub exam_id: Uuid,
+    pub exam: String,
+    pub published_questions: i64,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/MyCurriculumResponse.ts",
+        rename = "MyCurriculumResponse"
+    )
+)]
+pub struct MyCurriculumResponse {
+    pub chapters: Vec<CurriculumChapter>,
+}
+
 /// Chapters with their system/subject context — the multi-select source for
 /// the practice builder. Read-only, learner-scoped, no admin gate.
 pub async fn my_curriculum(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MyCurriculumResponse>> {
     let rows = sqlx::query!(
         r#"SELECT ch.id AS chapter_id, ch.name AS chapter_name,
                   sys.name AS system_name, sub.name AS subject_name,
@@ -1056,19 +1117,19 @@ pub async fn my_curriculum(
     )
     .fetch_all(&state.pool)
     .await?;
-    let chapters: Vec<serde_json::Value> = rows
+    let chapters = rows
         .iter()
         .map(|r| {
-            json!({
-                "chapter_id": r.chapter_id,
-                "chapter_name": r.chapter_name,
-                "system": r.system_name,
-                "subject": r.subject_name,
-                "exam_id": r.exam_id,
-                "exam": r.exam_name,
-                "published_questions": r.published,
-            })
+            CurriculumChapter {
+                chapter_id: r.chapter_id,
+                chapter_name: r.chapter_name.clone(),
+                system: r.system_name.clone(),
+                subject: r.subject_name.clone(),
+                exam_id: r.exam_id,
+                exam: r.exam_name.clone(),
+                published_questions: r.published,
+            }
         })
         .collect();
-    Ok(Json(json!({ "chapters": chapters })))
+    Ok(Json(MyCurriculumResponse { chapters }))
 }

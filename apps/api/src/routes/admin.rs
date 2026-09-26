@@ -80,12 +80,39 @@ pub(crate) async fn audit_scoped(
 // ---- hierarchy management (§5.5) -------------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/CreateNodeRequest.ts", rename = "CreateNodeRequest"))]
 pub struct CreateNodeReq {
     pub exam_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"subject\" | \"system\" | \"chapter\""))]
     pub kind: String,
     pub name: String,
     pub parent_id: Option<Uuid>,
     pub display_order: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/CreateNodeResponse.ts", rename = "CreateNodeResponse"))]
+pub struct CreateNodeResponse {
+    pub node_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminCurriculumNode.ts", rename = "AdminCurriculumNode"))]
+pub struct AdminCurriculumNode {
+    pub id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"subject\" | \"system\" | \"chapter\""))]
+    pub kind: String,
+    pub name: String,
+    pub parent_id: Option<Uuid>,
+    pub display_order: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "\"active\" | \"retired\""))]
+    pub status: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminHierarchyResponse.ts", rename = "AdminHierarchyResponse"))]
+pub struct AdminHierarchyResponse {
+    pub nodes: Vec<AdminCurriculumNode>,
 }
 
 pub async fn create_node(
@@ -93,7 +120,7 @@ pub async fn create_node(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateNodeReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateNodeResponse>> {
     state.require_admin(admin_headers(&headers))?;
     if !matches!(req.kind.as_str(), "subject" | "system" | "chapter") {
         return Err(ApiError::unprocessable(
@@ -130,7 +157,7 @@ pub async fn create_node(
         json!({"kind": req.kind, "name": name}),
     )
     .await?;
-    Ok(Json(json!({ "node_id": node_id })))
+    Ok(Json(CreateNodeResponse { node_id }))
 }
 
 #[derive(Deserialize)]
@@ -189,7 +216,7 @@ pub async fn list_nodes(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Query(q): Query<std::collections::HashMap<String, Uuid>>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminHierarchyResponse>> {
     let exam_id = q
         .get("exam_id")
         .copied()
@@ -202,20 +229,18 @@ pub async fn list_nodes(
     )
     .fetch_all(&state.pool)
     .await?;
-    let nodes: Vec<serde_json::Value> = rows
+    let nodes: Vec<AdminCurriculumNode> = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "kind": r.kind,
-                "name": r.name,
-                "parent_id": r.parent_id,
-                "display_order": r.display_order,
-                "status": r.status,
-            })
+        .map(|row| AdminCurriculumNode {
+            id: row.id,
+            kind: row.kind,
+            name: row.name,
+            parent_id: row.parent_id,
+            display_order: row.display_order,
+            status: row.status,
         })
         .collect();
-    Ok(Json(json!({ "nodes": nodes })))
+    Ok(Json(AdminHierarchyResponse { nodes }))
 }
 
 // ---- question CRUD (§19.5) --------------------------------------------------
@@ -231,8 +256,10 @@ fn validate_hint_length(hint: Option<&str>) -> ApiResult<()> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/ImportQuestion.ts", rename = "ImportQuestion"))]
 pub struct CreateQuestionReq {
     pub chapter_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"easy\" | \"medium\" | \"hard\""))]
     pub difficulty: String,
     pub vignette: String,
     pub lead_in: String,
@@ -246,10 +273,13 @@ pub struct CreateQuestionReq {
     #[serde(default)]
     pub rights_ref: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub tags: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub source_refs: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub media_refs: Vec<String>,
 }
 
@@ -432,11 +462,38 @@ pub async fn create_question(
 // visible). §19.3: the author of an item can never be its approver.
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowRequest.ts", rename = "AssessmentWorkflowRequest"))]
 pub struct AssessmentWorkflowReq {
     /// submit | approve | reject | publish
+    #[cfg_attr(feature = "type-export", ts(type = "\"submit\" | \"approve\" | \"reject\" | \"publish\""))]
     pub action: String,
     pub version_ids: Vec<Uuid>,
     pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowError.ts", rename = "AssessmentWorkflowError"))]
+pub struct AssessmentWorkflowError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowResult.ts", rename = "AssessmentWorkflowResult"))]
+pub struct AssessmentWorkflowResult {
+    pub version_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "\"in_review\" | \"approved\" | \"draft\" | \"published\"", optional))]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    pub error: Option<AssessmentWorkflowError>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowResponse.ts", rename = "AssessmentWorkflowResponse"))]
+pub struct AssessmentWorkflowResponse {
+    pub results: Vec<AssessmentWorkflowResult>,
 }
 
 /// Single transition function so every duty-separation rule lives in
@@ -594,7 +651,7 @@ pub async fn assessment_workflow(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<AssessmentWorkflowReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AssessmentWorkflowResponse>> {
     state.require_admin(admin_headers(&headers))?;
     if req.version_ids.is_empty() {
         return Err(ApiError::unprocessable(
@@ -606,14 +663,28 @@ pub async fn assessment_workflow(
     for vid in &req.version_ids {
         match transition_version(&state, user.user_id, &req.action, *vid, req.note.as_deref()).await
         {
-            Ok(v) => results.push(v),
-            Err(e) => results.push(json!({
-                "version_id": vid,
-                "error": { "code": e.code, "message": e.message }
-            })),
+            Ok(value) => {
+                let status = value
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(ApiError::internal)?;
+                results.push(AssessmentWorkflowResult {
+                    version_id: *vid,
+                    status: Some(status.to_owned()),
+                    error: None,
+                });
+            }
+            Err(error) => results.push(AssessmentWorkflowResult {
+                version_id: *vid,
+                status: None,
+                error: Some(AssessmentWorkflowError {
+                    code: error.code.to_owned(),
+                    message: error.message,
+                }),
+            }),
         }
     }
-    Ok(Json(json!({ "results": results })))
+    Ok(Json(AssessmentWorkflowResponse { results }))
 }
 
 pub async fn search_questions(
@@ -674,11 +745,14 @@ pub async fn search_questions(
 // ---- bulk import with dry-run/rollback (§19.5) -------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportRequest.ts", rename = "AdminImportRequest"))]
 pub struct ImportReq {
     pub exam_id: Uuid,
     #[serde(default = "default_filename")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub filename: String,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     pub dry_run: bool,
     pub rows: Vec<CreateQuestionReq>,
 }
@@ -695,10 +769,75 @@ pub struct ImportFileQuery {
 }
 
 #[derive(Serialize)]
-struct RowIssue {
-    row: usize,
-    code: &'static str,
-    message: String,
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportIssue.ts", rename = "AdminImportIssue"))]
+pub struct RowIssue {
+    pub row: usize,
+    pub code: &'static str,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportedQuestion.ts", rename = "AdminImportedQuestion"))]
+pub struct AdminImportedQuestion {
+    pub question_id: Uuid,
+    pub version_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportPreviewResponse.ts", rename = "AdminImportPreviewResponse"))]
+pub struct AdminImportPreviewResponse {
+    pub batch_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"dry_run\" | \"rejected\""))]
+    pub status: String,
+    pub rows: usize,
+    pub valid: usize,
+    pub issues: Vec<RowIssue>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportAppliedResponse.ts", rename = "AdminImportAppliedResponse"))]
+pub struct AdminImportAppliedResponse {
+    pub batch_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"applied\""))]
+    pub status: String,
+    pub rows: usize,
+    pub created: Vec<AdminImportedQuestion>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportResponse.ts", rename = "AdminImportResponse"))]
+pub enum AdminImportResponse {
+    Preview(AdminImportPreviewResponse),
+    Applied(AdminImportAppliedResponse),
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/RollbackImportResponse.ts", rename = "RollbackImportResponse"))]
+pub struct RollbackImportResponse {
+    pub batch_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "\"rolled_back\""))]
+    pub status: String,
+    pub removed_questions: usize,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminAuditEvent.ts", rename = "AdminAuditEvent"))]
+pub struct AdminAuditEvent {
+    pub actor: Option<Uuid>,
+    pub action: String,
+    pub entity: String,
+    pub entity_id: Option<Uuid>,
+    pub old_value: Option<serde_json::Value>,
+    pub new_value: Option<serde_json::Value>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminAuditResponse.ts", rename = "AdminAuditResponse"))]
+pub struct AdminAuditResponse {
+    pub events: Vec<AdminAuditEvent>,
 }
 
 #[derive(Default)]
@@ -1164,7 +1303,7 @@ async fn import_rows(
     exam_id: Uuid,
     dry_run: bool,
     mut parsed: ParsedImport,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminImportResponse>> {
     if parsed.total_rows == 0 || parsed.total_rows > MAX_IMPORT_ROWS {
         return Err(ApiError::unprocessable(
             "invalid_row_count",
@@ -1195,19 +1334,24 @@ async fn import_rows(
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        return Ok(Json(json!({
-            "batch_id": batch_id,
-            "status": status,
-            "rows": parsed.total_rows,
-            "valid": valid_count,
-            "issues": parsed.issues,
-        })));
+        return Ok(Json(AdminImportResponse::Preview(
+            AdminImportPreviewResponse {
+                batch_id,
+                status: status.to_owned(),
+                rows: parsed.total_rows,
+                valid: valid_count,
+                issues: parsed.issues,
+            },
+        )));
     }
 
-    let mut created: Vec<serde_json::Value> = Vec::new();
+    let mut created: Vec<AdminImportedQuestion> = Vec::new();
     for row in &parsed.rows {
         let (qid, vid) = insert_question_version(&mut tx, row, "draft", user_id).await?;
-        created.push(json!({"question_id": qid, "version_id": vid}));
+        created.push(AdminImportedQuestion {
+            question_id: qid,
+            version_id: vid,
+        });
     }
     sqlx::query!(
         "INSERT INTO import_batches (id, created_by, exam_id, status, summary)
@@ -1230,12 +1374,14 @@ async fn import_rows(
     .await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
-        "batch_id": batch_id,
-        "status": "applied",
-        "rows": parsed.total_rows,
-        "created": created,
-    })))
+    Ok(Json(AdminImportResponse::Applied(
+        AdminImportAppliedResponse {
+            batch_id,
+            status: "applied".to_owned(),
+            rows: parsed.total_rows,
+            created,
+        },
+    )))
 }
 
 pub async fn import(
@@ -1243,7 +1389,7 @@ pub async fn import(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<ImportReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminImportResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let ImportReq {
         exam_id,
@@ -1268,7 +1414,7 @@ pub async fn import_file(
     headers: axum::http::HeaderMap,
     Query(query): Query<ImportFileQuery>,
     body: Bytes,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminImportResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
@@ -1299,7 +1445,7 @@ pub async fn rollback_import(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(batch_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<RollbackImportResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let batch = sqlx::query!(
         "SELECT status, summary, exam_id FROM import_batches WHERE id = $1",
@@ -1388,18 +1534,18 @@ pub async fn rollback_import(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "batch_id": batch_id,
-        "status": "rolled_back",
-        "removed_questions": question_ids.len(),
-    })))
+    Ok(Json(RollbackImportResponse {
+        batch_id,
+        status: "rolled_back".to_owned(),
+        removed_questions: question_ids.len(),
+    }))
 }
 
 pub async fn audit_log(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminAuditResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let rows = sqlx::query(
         "SELECT actor, action, entity, entity_id, old_value, new_value, created_at
@@ -1407,21 +1553,21 @@ pub async fn audit_log(
     )
     .fetch_all(&state.pool)
     .await?;
-    let events: Vec<serde_json::Value> = rows
+    let events: Vec<AdminAuditEvent> = rows
         .into_iter()
         .map(|r| {
-            json!({
-                "actor": r.get::<Option<Uuid>, _>("actor"),
-                "action": r.get::<String, _>("action"),
-                "entity": r.get::<String, _>("entity"),
-                "entity_id": r.get::<Option<Uuid>, _>("entity_id"),
-                "old_value": r.get::<Option<serde_json::Value>, _>("old_value"),
-                "new_value": r.get::<Option<serde_json::Value>, _>("new_value"),
-                "at": r.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
-            })
+            AdminAuditEvent {
+                actor: r.get("actor"),
+                action: r.get("action"),
+                entity: r.get("entity"),
+                entity_id: r.get("entity_id"),
+                old_value: r.get("old_value"),
+                new_value: r.get("new_value"),
+                at: r.get("created_at"),
+            }
         })
         .collect();
-    Ok(Json(json!({ "events": events })))
+    Ok(Json(AdminAuditResponse { events }))
 }
 
 /// QB-16: psychometric screening defaults (§11.4). Flag a question version
@@ -1613,6 +1759,15 @@ pub async fn dashboard(
 // ---- ADMIN-02/TRUST-07: content rights ledger (§19.2) ------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ContentRightsRequest.ts",
+        rename = "ContentRightsRequest"
+    )
+)]
 pub struct ContentRightsReq {
     pub ref_code: String,
     pub licensor: String,
@@ -1637,12 +1792,45 @@ pub struct ContentRightsReq {
     pub royalty_terms: Option<String>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/CreateContentRightsResponse.ts",
+        rename = "CreateContentRightsResponse"
+    )
+)]
+pub struct CreateContentRightsResponse {
+    pub rights_id: Uuid,
+    pub ref_code: String,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ContentRightStatus.ts",
+        rename = "ContentRightStatus"
+    )
+)]
+pub enum ContentRightStatus {
+    Active,
+    Scheduled,
+    Expired,
+    Revoked,
+}
+
 pub async fn create_content_rights(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<ContentRightsReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateContentRightsResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let ref_code = req.ref_code.trim().to_uppercase();
     if ref_code.is_empty() || ref_code.len() > 60 {
@@ -1784,7 +1972,60 @@ pub async fn create_content_rights(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "rights_id": id, "ref_code": ref_code })))
+    Ok(Json(CreateContentRightsResponse {
+        rights_id: id,
+        ref_code,
+    }))
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminContentRight.ts",
+        rename = "AdminContentRight"
+    )
+)]
+pub struct AdminContentRight {
+    pub rights_id: Uuid,
+    pub ref_code: String,
+    pub licensor: String,
+    pub territory: String,
+    pub permitted_uses: Vec<String>,
+    pub valid_from: chrono::NaiveDate,
+    pub valid_to: Option<chrono::NaiveDate>,
+    pub notes: Option<String>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub revoked_by: Option<Uuid>,
+    pub revocation_note: Option<String>,
+    pub contract_ref: Option<String>,
+    pub contract_version: Option<String>,
+    pub asset_refs: Vec<String>,
+    pub audiences: Vec<String>,
+    pub seat_limit: Option<i32>,
+    pub offline_terms: Option<String>,
+    pub quotation_limit_words: Option<i32>,
+    pub ai_terms: Option<String>,
+    pub derivative_terms: Option<String>,
+    pub attribution: Option<String>,
+    pub royalty_terms: Option<String>,
+    pub status: ContentRightStatus,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ContentRightsResponse.ts",
+        rename = "ContentRightsResponse"
+    )
+)]
+pub struct ContentRightsResponse {
+    pub rights: Vec<AdminContentRight>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1818,7 +2059,7 @@ pub async fn list_content_rights(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ContentRightsResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let rows = sqlx::query_as::<_, ContentRightsRow>(
         r#"SELECT id, ref_code, licensor, territory, permitted_uses,
@@ -1836,36 +2077,75 @@ pub async fn list_content_rights(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "rights": rows.iter().map(|r| json!({
-        "rights_id": r.id,
-        "ref_code": r.ref_code,
-        "licensor": r.licensor,
-        "territory": r.territory,
-        "permitted_uses": r.permitted_uses,
-        "valid_from": r.valid_from,
-        "valid_to": r.valid_to,
-        "notes": r.notes,
-        "revoked_at": r.revoked_at,
-        "revoked_by": r.revoked_by,
-        "revocation_note": r.revocation_note,
-        "contract_ref": r.contract_ref,
-        "contract_version": r.contract_version,
-        "asset_refs": r.asset_refs,
-        "audiences": r.audiences,
-        "seat_limit": r.seat_limit,
-        "offline_terms": r.offline_terms,
-        "quotation_limit_words": r.quotation_limit_words,
-        "ai_terms": r.ai_terms,
-        "derivative_terms": r.derivative_terms,
-        "attribution": r.attribution,
-        "royalty_terms": r.royalty_terms,
-        "status": r.status,
-    })).collect::<Vec<_>>() })))
+    let rights = rows
+        .into_iter()
+        .map(|row| {
+            Ok(AdminContentRight {
+                rights_id: row.id,
+                ref_code: row.ref_code,
+                licensor: row.licensor,
+                territory: row.territory,
+                permitted_uses: serde_json::from_value(row.permitted_uses)
+                    .map_err(|_| ApiError::internal())?,
+                valid_from: row.valid_from,
+                valid_to: row.valid_to,
+                notes: row.notes,
+                revoked_at: row.revoked_at,
+                revoked_by: row.revoked_by,
+                revocation_note: row.revocation_note,
+                contract_ref: row.contract_ref,
+                contract_version: row.contract_version,
+                asset_refs: serde_json::from_value(row.asset_refs)
+                    .map_err(|_| ApiError::internal())?,
+                audiences: serde_json::from_value(row.audiences)
+                    .map_err(|_| ApiError::internal())?,
+                seat_limit: row.seat_limit,
+                offline_terms: row.offline_terms,
+                quotation_limit_words: row.quotation_limit_words,
+                ai_terms: row.ai_terms,
+                derivative_terms: row.derivative_terms,
+                attribution: row.attribution,
+                royalty_terms: row.royalty_terms,
+                status: match row.status.as_str() {
+                    "active" => ContentRightStatus::Active,
+                    "scheduled" => ContentRightStatus::Scheduled,
+                    "expired" => ContentRightStatus::Expired,
+                    "revoked" => ContentRightStatus::Revoked,
+                    _ => return Err(ApiError::internal()),
+                },
+            })
+        })
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(Json(ContentRightsResponse { rights }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/RevokeContentRightsRequest.ts",
+        rename = "RevokeContentRightsRequest"
+    )
+)]
 pub struct RevokeContentRightsReq {
     pub reason: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/RevokeContentRightsResponse.ts",
+        rename = "RevokeContentRightsResponse"
+    )
+)]
+pub struct RevokeContentRightsResponse {
+    pub revoked: bool,
+    pub already_revoked: bool,
 }
 
 pub async fn revoke_content_rights(
@@ -1874,7 +2154,7 @@ pub async fn revoke_content_rights(
     headers: axum::http::HeaderMap,
     Path(rights_id): Path<Uuid>,
     Json(req): Json<RevokeContentRightsReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<RevokeContentRightsResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let reason = req.reason.trim();
     if reason.is_empty() || reason.chars().count() > 500 {
@@ -1906,7 +2186,10 @@ pub async fn revoke_content_rights(
             return Err(ApiError::not_found("content_rights_not_found"));
         }
         tx.commit().await?;
-        return Ok(Json(json!({ "revoked": false, "already_revoked": true })));
+        return Ok(Json(RevokeContentRightsResponse {
+            revoked: false,
+            already_revoked: true,
+        }));
     };
     audit(
         &mut *tx,
@@ -1918,7 +2201,10 @@ pub async fn revoke_content_rights(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "revoked": true, "already_revoked": false })))
+    Ok(Json(RevokeContentRightsResponse {
+        revoked: true,
+        already_revoked: false,
+    }))
 }
 
 // ---- LIB-07: extraction coverage evidence ----------------------------------
@@ -1937,6 +2223,15 @@ const EXTRACTION_MEDIA_TYPES: &[&str] = &[
 ];
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/CreateExtractionReportRequest.ts",
+        rename = "CreateExtractionReportRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct CreateExtractionReportReq {
     pub source_label: String,
@@ -1944,6 +2239,10 @@ pub struct CreateExtractionReportReq {
     pub media_type: String,
     pub parser_version: String,
     pub rights_ref: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"clean\" | \"blocked\" | \"not_scanned\"")
+    )]
     pub malware_scan_status: String,
     pub expected_regions: Vec<String>,
     pub extracted_regions: Vec<String>,
@@ -1952,8 +2251,21 @@ pub struct CreateExtractionReportReq {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ReviewExtractionReportRequest.ts",
+        rename = "ReviewExtractionReportRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewExtractionReportReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"approved\" | \"rejected\"")
+    )]
     pub decision: String,
     pub verified_regions: Vec<String>,
     pub note: String,
@@ -2010,6 +2322,121 @@ struct ExtractionReportRow {
     reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ExtractionReportReview.ts",
+        rename = "ExtractionReportReview"
+    )
+)]
+pub struct ExtractionReportReview {
+    pub decision: ExtractionReviewDecision,
+    pub reviewer_id: Option<Uuid>,
+    pub verified_regions: Option<Vec<String>>,
+    pub note: Option<String>,
+    pub reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminExtractionReport.ts",
+        rename = "AdminExtractionReport"
+    )
+)]
+pub struct AdminExtractionReport {
+    pub report_id: Uuid,
+    pub source_label: String,
+    pub source_sha256: String,
+    pub media_type: String,
+    pub parser_version: String,
+    pub rights_ref: String,
+    pub rights_available: bool,
+    pub malware_scan_status: ExtractionMalwareScanStatus,
+    pub expected_regions: Vec<String>,
+    pub extracted_regions: Vec<String>,
+    pub missing_regions: Vec<String>,
+    pub uncertain_regions: Vec<String>,
+    pub critical_regions: Vec<String>,
+    pub status: ExtractionReportStatus,
+    pub created_by: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub review: Option<ExtractionReportReview>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ExtractionMalwareScanStatus.ts",
+        rename = "ExtractionMalwareScanStatus"
+    )
+)]
+pub enum ExtractionMalwareScanStatus {
+    Clean,
+    Blocked,
+    NotScanned,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ExtractionReviewDecision.ts",
+        rename = "ExtractionReviewDecision"
+    )
+)]
+pub enum ExtractionReviewDecision {
+    Approved,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ExtractionReportStatus.ts",
+        rename = "ExtractionReportStatus"
+    )
+)]
+pub enum ExtractionReportStatus {
+    Blocked,
+    Incomplete,
+    ReviewRequired,
+    Rejected,
+    Complete,
+    RightsUnavailable,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminExtractionReportListResponse.ts",
+        rename = "AdminExtractionReportListResponse"
+    )
+)]
+pub struct AdminExtractionReportListResponse {
+    pub reports: Vec<AdminExtractionReport>,
+}
+
 const EXTRACTION_REPORT_SELECT: &str = r#"
     SELECT report.id, report.source_label, report.source_sha256, report.media_type,
            report.parser_version, rights.ref_code AS rights_ref,
@@ -2026,53 +2453,71 @@ const EXTRACTION_REPORT_SELECT: &str = r#"
     LEFT JOIN document_extraction_reviews review ON review.report_id = report.id
 "#;
 
-fn extraction_report_json(row: ExtractionReportRow) -> serde_json::Value {
+fn extraction_report_json(row: ExtractionReportRow) -> ApiResult<AdminExtractionReport> {
     let expected = string_set(&row.expected_regions);
     let extracted = string_set(&row.extracted_regions);
     let missing: Vec<String> = expected.difference(&extracted).cloned().collect();
     let mut needs_review = string_set(&row.uncertain_regions);
     needs_review.extend(string_set(&row.critical_regions));
     let status = if !row.rights_available {
-        "rights_unavailable"
+        ExtractionReportStatus::RightsUnavailable
     } else if row.malware_scan_status == "blocked" {
-        "blocked"
+        ExtractionReportStatus::Blocked
     } else if row.review_decision.as_deref() == Some("rejected") {
-        "rejected"
+        ExtractionReportStatus::Rejected
     } else if !missing.is_empty() {
-        "incomplete"
+        ExtractionReportStatus::Incomplete
     } else if row.malware_scan_status != "clean" {
-        "review_required"
+        ExtractionReportStatus::ReviewRequired
     } else if row.review_decision.as_deref() == Some("approved")
         || (needs_review.is_empty() && row.review_decision.is_none())
     {
-        "complete"
+        ExtractionReportStatus::Complete
     } else {
-        "review_required"
+        ExtractionReportStatus::ReviewRequired
     };
-    json!({
-        "report_id": row.id,
-        "source_label": row.source_label,
-        "source_sha256": row.source_sha256,
-        "media_type": row.media_type,
-        "parser_version": row.parser_version,
-        "rights_ref": row.rights_ref,
-        "rights_available": row.rights_available,
-        "malware_scan_status": row.malware_scan_status,
-        "expected_regions": expected,
-        "extracted_regions": extracted,
-        "missing_regions": missing,
-        "uncertain_regions": string_set(&row.uncertain_regions),
-        "critical_regions": string_set(&row.critical_regions),
-        "status": status,
-        "created_by": row.created_by,
-        "created_at": row.created_at,
-        "review": row.review_decision.map(|decision| json!({
-            "decision": decision,
-            "reviewer_id": row.reviewer_id,
-            "verified_regions": row.verified_regions.map(|regions| string_set(&regions)),
-            "note": row.review_note,
-            "reviewed_at": row.reviewed_at,
-        })),
+
+    let malware_scan_status = match row.malware_scan_status.as_str() {
+        "clean" => ExtractionMalwareScanStatus::Clean,
+        "blocked" => ExtractionMalwareScanStatus::Blocked,
+        "not_scanned" => ExtractionMalwareScanStatus::NotScanned,
+        _ => return Err(ApiError::internal()),
+    };
+    let review = match row.review_decision {
+        Some(decision) => Some(ExtractionReportReview {
+            decision: match decision.as_str() {
+                "approved" => ExtractionReviewDecision::Approved,
+                "rejected" => ExtractionReviewDecision::Rejected,
+                _ => return Err(ApiError::internal()),
+            },
+            reviewer_id: row.reviewer_id,
+            verified_regions: row
+                .verified_regions
+                .map(|regions| string_set(&regions).into_iter().collect()),
+            note: row.review_note,
+            reviewed_at: row.reviewed_at,
+        }),
+        None => None,
+    };
+
+    Ok(AdminExtractionReport {
+        report_id: row.id,
+        source_label: row.source_label,
+        source_sha256: row.source_sha256,
+        media_type: row.media_type,
+        parser_version: row.parser_version,
+        rights_ref: row.rights_ref,
+        rights_available: row.rights_available,
+        malware_scan_status,
+        expected_regions: expected.into_iter().collect(),
+        extracted_regions: extracted.into_iter().collect(),
+        missing_regions,
+        uncertain_regions: string_set(&row.uncertain_regions).into_iter().collect(),
+        critical_regions: string_set(&row.critical_regions).into_iter().collect(),
+        status,
+        created_by: row.created_by,
+        created_at: row.created_at,
+        review,
     })
 }
 
@@ -2089,15 +2534,18 @@ pub async fn list_extraction_reports(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminExtractionReportListResponse>> {
     state.require_admin(admin_headers(&headers))?;
     let query = format!("{EXTRACTION_REPORT_SELECT} ORDER BY report.created_at DESC LIMIT 100");
     let rows = sqlx::query_as::<_, ExtractionReportRow>(&query)
         .fetch_all(&state.pool)
         .await?;
-    Ok(Json(
-        json!({ "reports": rows.into_iter().map(extraction_report_json).collect::<Vec<_>>() }),
-    ))
+    Ok(Json(AdminExtractionReportListResponse {
+        reports: rows
+            .into_iter()
+            .map(extraction_report_json)
+            .collect::<ApiResult<Vec<_>>>()?,
+    }))
 }
 
 pub async fn get_extraction_report(
@@ -2105,11 +2553,11 @@ pub async fn get_extraction_report(
     _user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(report_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminExtractionReport>> {
     state.require_admin(admin_headers(&headers))?;
     Ok(Json(extraction_report_json(
         extraction_report(&state, report_id).await?,
-    )))
+    )?))
 }
 
 pub async fn create_extraction_report(
@@ -2117,7 +2565,7 @@ pub async fn create_extraction_report(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateExtractionReportReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<AdminExtractionReport>)> {
     state.require_admin(admin_headers(&headers))?;
     let source_label = req.source_label.trim();
     let parser_version = req.parser_version.trim();
@@ -2246,7 +2694,10 @@ pub async fn create_extraction_report(
     .await?;
     tx.commit().await?;
     let report = extraction_report(&state, report_id).await?;
-    Ok((StatusCode::CREATED, Json(extraction_report_json(report))))
+    Ok((
+        StatusCode::CREATED,
+        Json(extraction_report_json(report)?),
+    ))
 }
 
 pub async fn review_extraction_report(
@@ -2255,7 +2706,7 @@ pub async fn review_extraction_report(
     headers: axum::http::HeaderMap,
     Path(report_id): Path<Uuid>,
     Json(req): Json<ReviewExtractionReportReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<AdminExtractionReport>)> {
     state.require_admin(admin_headers(&headers))?;
     if !matches!(req.decision.as_str(), "approved" | "rejected") {
         return Err(ApiError::unprocessable(
@@ -2363,7 +2814,10 @@ pub async fn review_extraction_report(
     .await?;
     tx.commit().await?;
     let report = extraction_report(&state, report_id).await?;
-    Ok((StatusCode::CREATED, Json(extraction_report_json(report))))
+    Ok((
+        StatusCode::CREATED,
+        Json(extraction_report_json(report)?),
+    ))
 }
 
 // ---- ADMIN-03: AI cost/policy read-out ----------------------------------------

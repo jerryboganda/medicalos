@@ -2,7 +2,13 @@
 	/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
-	import { Api, ApiError } from '$lib/api';
+	import {
+		Api,
+		ApiError,
+		type DuelSummary,
+		type ShareCard,
+		type UnavailableShareCard
+	} from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
 
@@ -39,28 +45,10 @@
 
 	let duelHandle = $state('');
 	let duelCount = $state(5);
-	let duels = $state<
-		{
-			duel_id: string;
-			status: string;
-			question_count: number;
-			winner: string | null;
-			sent_by_me: boolean;
-			challenger: string;
-			opponent: string;
-		}[]
-	>([]);
+	let duels = $state<DuelSummary[]>([]);
 	let lastShare = $state('');
-	let cards = $state<
-		{
-			kind: string;
-			headline: string;
-			subline: string;
-			detail: string;
-			share_text: string;
-		}[]
-	>([]);
-	let unavailableCards = $state<{ kind: string; reason: string }[]>([]);
+	let cards = $state<ShareCard[]>([]);
+	let unavailableCards = $state<UnavailableShareCard[]>([]);
 
 	async function refreshMyReports() {
 		myReports = null;
@@ -78,7 +66,7 @@
 			profile = { opted_in: false };
 		}
 		try {
-			duels = (await Api.myDuels()).duels as typeof duels;
+			duels = (await Api.myDuels()).duels;
 		} catch {
 			duels = [];
 		}

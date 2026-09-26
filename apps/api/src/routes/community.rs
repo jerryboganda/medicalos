@@ -7,7 +7,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use rand::Rng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::routes::engagement::{CompetitionLeaderboardEntry, CompetitionLeaderboardResponse};
 use crate::state::AppState;
 
 fn valid_handle(handle: &str) -> bool {
@@ -27,7 +28,29 @@ fn valid_handle(handle: &str) -> bool {
 // ---- COMMUNITY-03: opt-in identity ------------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileRequest.ts", rename = "CommunityProfileRequest"))]
 pub struct ProfileReq {
+    pub handle: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityProfileResponse.ts", rename = "CreateCommunityProfileResponse"))]
+pub struct CreateCommunityProfileResponse {
+    pub handle: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileResponse.ts", rename = "CommunityProfileResponse"))]
+pub struct CommunityProfileResponse {
+    pub opted_in: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileByHandleResponse.ts", rename = "CommunityProfileByHandleResponse"))]
+pub struct CommunityProfileByHandleResponse {
+    pub user_id: Uuid,
     pub handle: String,
 }
 
@@ -37,7 +60,7 @@ pub async fn create_profile(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<ProfileReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateCommunityProfileResponse>> {
     let handle = req.handle.trim().to_lowercase();
     if !valid_handle(&handle) {
         return Err(ApiError::unprocessable(
@@ -62,13 +85,13 @@ pub async fn create_profile(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "handle": handle })))
+    Ok(Json(CreateCommunityProfileResponse { handle }))
 }
 
 pub async fn my_profile(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CommunityProfileResponse>> {
     let row = sqlx::query!(
         "SELECT handle FROM community_profiles WHERE user_id = $1",
         user.user_id
@@ -76,23 +99,159 @@ pub async fn my_profile(
     .fetch_optional(&state.pool)
     .await?;
     Ok(Json(match row {
-        Some(r) => json!({ "opted_in": true, "handle": r.handle }),
-        None => json!({ "opted_in": false }),
+        Some(r) => CommunityProfileResponse {
+            opted_in: true,
+            handle: Some(r.handle),
+        },
+        None => CommunityProfileResponse {
+            opted_in: false,
+            handle: None,
+        },
     }))
 }
 
 // ---- COMMUNITY-01: moderated groups -----------------------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityGroupRequest.ts", rename = "CreateCommunityGroupRequest"))]
 pub struct GroupReq {
     pub name: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityGroupResponse.ts", rename = "CreateCommunityGroupResponse"))]
+pub struct CreateCommunityGroupResponse {
+    pub group_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/JoinCommunityGroupResponse.ts", rename = "JoinCommunityGroupResponse"))]
+pub struct JoinCommunityGroupResponse {
+    pub joined: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityPostResponse.ts", rename = "CreateCommunityPostResponse"))]
+pub struct CreateCommunityPostResponse {
+    pub post_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPost.ts", rename = "CommunityPost"))]
+pub struct CommunityPost {
+    pub post_id: Uuid,
+    pub body: String,
+    pub status: String,
+    pub handle: String,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPostListResponse.ts", rename = "CommunityPostListResponse"))]
+pub struct CommunityPostListResponse {
+    pub posts: Vec<CommunityPost>,
+    pub is_moderator: bool,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityPostRequest.ts", rename = "CreateCommunityPostRequest"))]
+pub struct PostReq {
+    pub body: String,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ReportCommunityPostRequest.ts", rename = "ReportCommunityPostRequest"))]
+#[serde(deny_unknown_fields)]
+pub struct ReportPostReq {
+    #[cfg_attr(feature = "type-export", ts(type = "\"spam\" | \"harassment\" | \"medical_misinformation\" | \"other\""))]
+    pub reason: String,
+    pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ReportCommunityPostResponse.ts", rename = "ReportCommunityPostResponse"))]
+pub struct ReportCommunityPostResponse {
+    pub report_id: Uuid,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPostReportSummary.ts", rename = "CommunityPostReportSummary"))]
+pub struct CommunityPostReportSummary {
+    pub report_id: Uuid,
+    pub group_id: Uuid,
+    pub group_name: String,
+    pub post_id: Uuid,
+    pub reason: String,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/MyCommunityPostReportsResponse.ts", rename = "MyCommunityPostReportsResponse"))]
+pub struct MyCommunityPostReportsResponse {
+    pub reports: Vec<CommunityPostReportSummary>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/GroupPostReport.ts", rename = "GroupPostReport"))]
+pub struct GroupPostReport {
+    pub report_id: Uuid,
+    pub post_id: Uuid,
+    pub reason: String,
+    pub note: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub post_body: String,
+    pub author_handle: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/GroupPostReportQueueResponse.ts", rename = "GroupPostReportQueueResponse"))]
+pub struct GroupPostReportQueueResponse {
+    pub reports: Vec<GroupPostReport>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ResolveCommunityPostReportRequest.ts", rename = "ResolveCommunityPostReportRequest"))]
+#[serde(deny_unknown_fields)]
+pub struct ResolvePostReportReq {
+    #[cfg_attr(feature = "type-export", ts(type = "\"dismiss\" | \"remove\""))]
+    pub action: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ResolveCommunityPostReportResponse.ts", rename = "ResolveCommunityPostReportResponse"))]
+pub struct ResolveCommunityPostReportResponse {
+    pub resolved_reports: u64,
+    pub status: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/RemoveCommunityPostResponse.ts", rename = "RemoveCommunityPostResponse"))]
+pub struct RemoveCommunityPostResponse {
+    pub removed: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityGroupSummary.ts", rename = "CommunityGroupSummary"))]
+pub struct CommunityGroupSummary {
+    pub group_id: Uuid,
+    pub name: String,
+    pub members: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityGroupsResponse.ts", rename = "CommunityGroupsResponse"))]
+pub struct CommunityGroupsResponse {
+    pub groups: Vec<CommunityGroupSummary>,
 }
 
 pub async fn create_group(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<GroupReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateCommunityGroupResponse>> {
     let name = req.name.trim();
     if name.is_empty() || name.len() > 100 {
         return Err(ApiError::unprocessable(
@@ -117,7 +276,7 @@ pub async fn create_group(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "group_id": id })))
+    Ok(Json(CreateCommunityGroupResponse { group_id: id }))
 }
 
 async fn require_member(state: &AppState, group_id: Uuid, user_id: Uuid) -> ApiResult<()> {
@@ -137,7 +296,7 @@ pub async fn join_group(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(group_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<JoinCommunityGroupResponse>> {
     let exists = sqlx::query!(
         "SELECT 1 AS one FROM community_groups WHERE id = $1",
         group_id
@@ -155,12 +314,7 @@ pub async fn join_group(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "joined": true })))
-}
-
-#[derive(Deserialize)]
-pub struct PostReq {
-    pub body: String,
+    Ok(Json(JoinCommunityGroupResponse { joined: true }))
 }
 
 pub async fn create_post(
@@ -168,7 +322,7 @@ pub async fn create_post(
     user: AuthUser,
     Path(group_id): Path<Uuid>,
     Json(req): Json<PostReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateCommunityPostResponse>> {
     require_member(&state, group_id, user.user_id).await?;
     let body = req.body.trim();
     if body.is_empty() || body.len() > 2000 {
@@ -187,7 +341,7 @@ pub async fn create_post(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "post_id": id })))
+    Ok(Json(CreateCommunityPostResponse { post_id: id }))
 }
 
 /// COMMUNITY-01: members see visible posts only; moderation removes content,
@@ -196,7 +350,7 @@ pub async fn list_posts(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(group_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CommunityPostListResponse>> {
     require_member(&state, group_id, user.user_id).await?;
     let is_moderator = is_group_moderator(&state, group_id, user.user_id).await?;
     let rows = sqlx::query!(
@@ -222,37 +376,29 @@ pub async fn list_posts(
     )
     .fetch_all(&state.pool)
     .await?;
-    let mut posts: Vec<serde_json::Value> = rows
+    let mut posts: Vec<CommunityPost> = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "post_id": r.id, "body": r.body, "status": r.status,
-                "handle": r.handle, "at": r.created_at,
-            })
+        .map(|r| CommunityPost {
+            post_id: r.id,
+            body: r.body,
+            status: r.status,
+            handle: r.handle,
+            at: r.created_at,
         })
         .collect();
     posts.extend(anonymous.into_iter().map(|r| {
-        json!({
-            "post_id": r.id, "body": r.body, "status": r.status,
-            "handle": "member", "at": r.created_at,
-        })
+        CommunityPost {
+            post_id: r.id,
+            body: r.body,
+            status: r.status,
+            handle: "member".into(),
+            at: r.created_at,
+        }
     }));
-    Ok(Json(
-        json!({ "posts": posts, "is_moderator": is_moderator }),
-    ))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReportPostReq {
-    pub reason: String,
-    pub note: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ResolvePostReportReq {
-    pub action: String,
+    Ok(Json(CommunityPostListResponse {
+        posts,
+        is_moderator,
+    }))
 }
 
 pub async fn report_post(
@@ -260,7 +406,7 @@ pub async fn report_post(
     user: AuthUser,
     Path((group_id, post_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<ReportPostReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<ReportCommunityPostResponse>)> {
     require_member(&state, group_id, user.user_id).await?;
     if !matches!(
         req.reason.as_str(),
@@ -315,11 +461,11 @@ pub async fn report_post(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "report_id": row.try_get::<Uuid, _>("id")?,
-            "status": row.try_get::<String, _>("status")?,
-            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
-        })),
+        Json(ReportCommunityPostResponse {
+            report_id: row.try_get("id")?,
+            status: row.try_get("status")?,
+            created_at: row.try_get("created_at")?,
+        }),
     ))
 }
 
@@ -328,7 +474,7 @@ pub async fn report_post(
 pub async fn my_post_reports(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MyCommunityPostReportsResponse>> {
     let rows = sqlx::query(
         "SELECT r.id, r.group_id, g.name AS group_name, r.post_id, r.reason,
                 r.status, r.created_at
@@ -343,25 +489,25 @@ pub async fn my_post_reports(
     let reports = rows
         .iter()
         .map(|row| {
-            Ok(json!({
-                "report_id": row.try_get::<Uuid, _>("id")?,
-                "group_id": row.try_get::<Uuid, _>("group_id")?,
-                "group_name": row.try_get::<String, _>("group_name")?,
-                "post_id": row.try_get::<Uuid, _>("post_id")?,
-                "reason": row.try_get::<String, _>("reason")?,
-                "status": row.try_get::<String, _>("status")?,
-                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
-            }))
+            Ok(CommunityPostReportSummary {
+                report_id: row.try_get("id")?,
+                group_id: row.try_get("group_id")?,
+                group_name: row.try_get("group_name")?,
+                post_id: row.try_get("post_id")?,
+                reason: row.try_get("reason")?,
+                status: row.try_get("status")?,
+                created_at: row.try_get("created_at")?,
+            })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    Ok(Json(json!({ "reports": reports })))
+    Ok(Json(MyCommunityPostReportsResponse { reports }))
 }
 
 pub async fn group_report_queue(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(group_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<GroupPostReportQueueResponse>> {
     require_moderator(&state, group_id, user.user_id).await?;
     let rows = sqlx::query(
         "SELECT r.id, r.post_id, r.reason, r.note, r.created_at, p.body,
@@ -378,18 +524,18 @@ pub async fn group_report_queue(
     let reports = rows
         .iter()
         .map(|row| {
-            Ok(json!({
-                "report_id": row.try_get::<Uuid, _>("id")?,
-                "post_id": row.try_get::<Uuid, _>("post_id")?,
-                "reason": row.try_get::<String, _>("reason")?,
-                "note": row.try_get::<Option<String>, _>("note")?,
-                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
-                "post_body": row.try_get::<String, _>("body")?,
-                "author_handle": row.try_get::<String, _>("author_handle")?,
-            }))
+            Ok(GroupPostReport {
+                report_id: row.try_get("id")?,
+                post_id: row.try_get("post_id")?,
+                reason: row.try_get("reason")?,
+                note: row.try_get("note")?,
+                created_at: row.try_get("created_at")?,
+                post_body: row.try_get("body")?,
+                author_handle: row.try_get("author_handle")?,
+            })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    Ok(Json(json!({ "reports": reports })))
+    Ok(Json(GroupPostReportQueueResponse { reports }))
 }
 
 async fn is_group_moderator(state: &AppState, group_id: Uuid, user_id: Uuid) -> ApiResult<bool> {
@@ -445,7 +591,7 @@ pub async fn resolve_post_report(
     user: AuthUser,
     Path((group_id, report_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<ResolvePostReportReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ResolveCommunityPostReportResponse>> {
     require_moderator(&state, group_id, user.user_id).await?;
     if !matches!(req.action.as_str(), "dismiss" | "remove") {
         return Err(ApiError::unprocessable(
@@ -505,17 +651,21 @@ pub async fn resolve_post_report(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "resolved_reports": resolved_reports,
-        "status": if req.action == "remove" { "post_removed" } else { "dismissed" },
-    })))
+    Ok(Json(ResolveCommunityPostReportResponse {
+        resolved_reports,
+        status: if req.action == "remove" {
+            "post_removed".into()
+        } else {
+            "dismissed".into()
+        },
+    }))
 }
 
 pub async fn remove_post(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path((group_id, post_id)): Path<(Uuid, Uuid)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<RemoveCommunityPostResponse>> {
     require_moderator(&state, group_id, user.user_id).await?;
     let mut tx = state.pool.begin().await?;
     let status = sqlx::query_scalar::<_, String>(
@@ -541,17 +691,118 @@ pub async fn remove_post(
         .await?;
     }
     tx.commit().await?;
-    Ok(Json(json!({ "removed": true })))
+    Ok(Json(RemoveCommunityPostResponse { removed: true }))
 }
 
 // ---- COMP-03/GROW-01: private duels with share tokens ------------------------
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateDuelRequest.ts", rename = "CreateDuelRequest"))]
 pub struct DuelReq {
     pub opponent: Uuid,
     pub exam_id: Uuid,
     pub chapter_id: Option<Uuid>,
     pub question_count: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateDuelResponse.ts", rename = "CreateDuelResponse"))]
+pub struct CreateDuelResponse {
+    pub duel_id: Uuid,
+    pub share_token: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelByTokenResponse.ts", rename = "DuelByTokenResponse"))]
+pub struct DuelByTokenResponse {
+    pub duel_id: Uuid,
+    pub status: String,
+    pub question_count: i32,
+    pub chapter: Option<String>,
+    pub challenger: String,
+    pub opponent: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/AcceptDuelResponse.ts", rename = "AcceptDuelResponse"))]
+pub struct AcceptDuelResponse {
+    pub accepted: bool,
+    pub your_session_id: Uuid,
+    pub question_count: usize,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelSide.ts", rename = "DuelSide"))]
+pub struct DuelSide {
+    pub user_id: Uuid,
+    pub score: Option<i32>,
+    pub total_ms: Option<i64>,
+    pub session_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelStateResponse.ts", rename = "DuelStateResponse"))]
+pub struct DuelStateResponse {
+    pub status: String,
+    pub winner: Option<Uuid>,
+    pub sides: Vec<DuelSide>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DeclineDuelResponse.ts", rename = "DeclineDuelResponse"))]
+pub struct DeclineDuelResponse {
+    pub declined: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelSummary.ts", rename = "DuelSummary"))]
+pub struct DuelSummary {
+    pub duel_id: Uuid,
+    pub status: String,
+    pub question_count: i32,
+    pub winner: Option<Uuid>,
+    pub sent_by_me: bool,
+    pub challenger: String,
+    pub opponent: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/MyDuelsResponse.ts", rename = "MyDuelsResponse"))]
+pub struct MyDuelsResponse {
+    pub duels: Vec<DuelSummary>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCardKind.ts", rename = "ShareCardKind"))]
+pub enum ShareCardKind {
+    Score,
+    Consistency,
+    League,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCard.ts", rename = "ShareCard"))]
+pub struct ShareCard {
+    pub kind: ShareCardKind,
+    pub headline: String,
+    pub subline: String,
+    pub detail: String,
+    pub share_text: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/UnavailableShareCard.ts", rename = "UnavailableShareCard"))]
+pub struct UnavailableShareCard {
+    pub kind: ShareCardKind,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCardsResponse.ts", rename = "ShareCardsResponse"))]
+pub struct ShareCardsResponse {
+    pub cards: Vec<ShareCard>,
+    pub unavailable: Vec<UnavailableShareCard>,
 }
 
 fn share_token() -> String {
@@ -566,7 +817,7 @@ pub async fn create_duel(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<DuelReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateDuelResponse>> {
     if req.opponent == user.user_id {
         return Err(ApiError::unprocessable(
             "invalid_opponent",
@@ -600,7 +851,10 @@ pub async fn create_duel(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "duel_id": id, "share_token": token })))
+    Ok(Json(CreateDuelResponse {
+        duel_id: id,
+        share_token: token,
+    }))
 }
 
 /// GROW-01: the payload a deferred deep link resolves. Participation still
@@ -609,7 +863,7 @@ pub async fn duel_by_token(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Path(token): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<DuelByTokenResponse>> {
     let duel = sqlx::query!(
         r#"SELECT d.id, d.status, d.question_count, c.name AS "chapter?",
                   ch.handle AS "challenger_handle?", oh.handle AS "opponent_handle?"
@@ -623,14 +877,14 @@ pub async fn duel_by_token(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("duel_not_found"))?;
-    Ok(Json(json!({
-        "duel_id": duel.id,
-        "status": duel.status,
-        "question_count": duel.question_count,
-        "chapter": duel.chapter,
-        "challenger": duel.challenger_handle.unwrap_or_else(|| "member".into()),
-        "opponent": duel.opponent_handle.unwrap_or_else(|| "member".into()),
-    })))
+    Ok(Json(DuelByTokenResponse {
+        duel_id: duel.id,
+        status: duel.status,
+        question_count: duel.question_count,
+        chapter: duel.chapter,
+        challenger: duel.challenger_handle.unwrap_or_else(|| "member".into()),
+        opponent: duel.opponent_handle.unwrap_or_else(|| "member".into()),
+    }))
 }
 
 async fn pick_duel_questions(
@@ -663,7 +917,7 @@ pub async fn accept_duel(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(duel_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AcceptDuelResponse>> {
     let duel = sqlx::query!(
         "SELECT id, challenger, opponent, status, chapter_id, question_count
          FROM duels WHERE id = $1",
@@ -736,11 +990,11 @@ pub async fn accept_duel(
     sqlx::query!("UPDATE duels SET status = 'active' WHERE id = $1", duel.id)
         .execute(&state.pool)
         .await?;
-    Ok(Json(json!({
-        "accepted": true,
-        "your_session_id": opponent_session,
-        "question_count": opponent_qs.len(),
-    })))
+    Ok(Json(AcceptDuelResponse {
+        accepted: true,
+        your_session_id: opponent_session,
+        question_count: opponent_qs.len(),
+    }))
 }
 
 /// Called from the practice submit pipeline: score a duel participant and
@@ -813,7 +1067,7 @@ pub async fn duel_state(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(duel_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<DuelStateResponse>> {
     let duel = sqlx::query!(
         "SELECT status, challenger, opponent, winner, question_count FROM duels WHERE id = $1",
         duel_id
@@ -833,21 +1087,26 @@ pub async fn duel_state(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "status": duel.status,
-        "winner": duel.winner,
-        "sides": sides.iter().map(|s| json!({
-            "user_id": s.user_id, "score": s.score, "total_ms": s.total_ms,
-            "session_id": s.session_id,
-        })).collect::<Vec<_>>(),
-    })))
+    Ok(Json(DuelStateResponse {
+        status: duel.status,
+        winner: duel.winner,
+        sides: sides
+            .into_iter()
+            .map(|side| DuelSide {
+                user_id: side.user_id,
+                score: side.score,
+                total_ms: side.total_ms,
+                session_id: side.session_id,
+            })
+            .collect(),
+    }))
 }
 
 pub async fn decline_duel(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(duel_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<DeclineDuelResponse>> {
     let updated = sqlx::query!(
         "UPDATE duels SET status = 'declined'
          WHERE id = $1 AND opponent = $2 AND status = 'pending'",
@@ -859,7 +1118,7 @@ pub async fn decline_duel(
     if updated.rows_affected() == 0 {
         return Err(ApiError::not_found("duel_not_found"));
     }
-    Ok(Json(json!({ "declined": true })))
+    Ok(Json(DeclineDuelResponse { declined: true }))
 }
 
 // ---- COMP-01/04: competition leaderboard + integrity-gated prizes -----------
@@ -870,7 +1129,7 @@ pub async fn competition_leaderboard(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(comp_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionLeaderboardResponse>> {
     let comp =
         sqlx::query("SELECT prize_reviewed, status, ends_at FROM competitions WHERE id = $1")
             .bind(comp_id)
@@ -910,7 +1169,7 @@ pub async fn competition_leaderboard(
     .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
-    let entries: Vec<serde_json::Value> = rows
+    let entries: Vec<CompetitionLeaderboardEntry> = rows
         .iter()
         .map(|row| {
             let user_id: Uuid = row.try_get("user_id")?;
@@ -926,24 +1185,24 @@ pub async fn competition_leaderboard(
             let score: f32 = row.try_get("score")?;
             let total_time_ms: i64 = row.try_get("total_time_ms")?;
             let average_response_time_ms: f64 = row.try_get("average_response_time_ms")?;
-            Ok(json!({
-                "rank": leaderboard_rank,
-                "handle": handle,
-                "score": score,
-                "accuracy": accuracy,
-                "questions_attempted": attempted_count,
-                "average_response_time_ms": average_response_time_ms,
-                "total_time_ms": total_time_ms,
-                "is_me": user_id == user.user_id,
-                "prize_eligible": prize_reviewed && prize_window_closed,
-            }))
+            Ok(CompetitionLeaderboardEntry {
+                rank: leaderboard_rank,
+                handle,
+                score,
+                accuracy,
+                questions_attempted: attempted_count,
+                average_response_time_ms,
+                total_time_ms,
+                is_me: user_id == user.user_id,
+                prize_eligible: prize_reviewed && prize_window_closed,
+            })
         })
         .collect::<Result<_, sqlx::Error>>()?;
-    Ok(Json(json!({
-        "prize_reviewed": prize_reviewed,
-        "status": competition_status,
-        "entries": entries,
-    })))
+    Ok(Json(CompetitionLeaderboardResponse {
+        prize_reviewed,
+        status: competition_status,
+        entries,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1043,7 +1302,7 @@ pub async fn profile_by_handle(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Path(handle): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CommunityProfileByHandleResponse>> {
     let row = sqlx::query!(
         "SELECT user_id, handle FROM community_profiles WHERE handle = $1",
         handle.to_lowercase()
@@ -1051,9 +1310,10 @@ pub async fn profile_by_handle(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("profile_not_found"))?;
-    Ok(Json(
-        json!({ "user_id": row.user_id, "handle": row.handle }),
-    ))
+    Ok(Json(CommunityProfileByHandleResponse {
+        user_id: row.user_id,
+        handle: row.handle,
+    }))
 }
 
 /// My duels: challenges I sent or received, newest first. The client renders
@@ -1061,7 +1321,7 @@ pub async fn profile_by_handle(
 pub async fn my_duels(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MyDuelsResponse>> {
     let rows = sqlx::query!(
         r#"SELECT d.id, d.status, d.question_count, d.winner AS "winner?",
                   d.challenger = $1 AS "mine_sent!",
@@ -1075,22 +1335,27 @@ pub async fn my_duels(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "duels": rows.into_iter().map(|r| json!({
-        "duel_id": r.id,
-        "status": r.status,
-        "question_count": r.question_count,
-        "winner": r.winner,
-        "sent_by_me": r.mine_sent,
-        "challenger": r.challenger_handle.unwrap_or_else(|| "member".into()),
-        "opponent": r.opponent_handle.unwrap_or_else(|| "member".into()),
-    })).collect::<Vec<_>>() })))
+    Ok(Json(MyDuelsResponse {
+        duels: rows
+            .into_iter()
+            .map(|row| DuelSummary {
+                duel_id: row.id,
+                status: row.status,
+                question_count: row.question_count,
+                winner: row.winner,
+                sent_by_me: row.mine_sent,
+                challenger: row.challenger_handle.unwrap_or_else(|| "member".into()),
+                opponent: row.opponent_handle.unwrap_or_else(|| "member".into()),
+            })
+            .collect(),
+    }))
 }
 
 /// Group discovery: id and name only. Content stays members-only.
 pub async fn list_groups(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CommunityGroupsResponse>> {
     let rows = sqlx::query!(
         r#"SELECT g.id, g.name,
                   (SELECT COUNT(*) FROM community_group_members m
@@ -1099,11 +1364,15 @@ pub async fn list_groups(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({ "groups": rows.iter().map(|r| json!({
-        "group_id": r.id,
-        "name": r.name,
-        "members": r.members,
-    })).collect::<Vec<_>>() })))
+    let groups = rows
+        .into_iter()
+        .map(|row| CommunityGroupSummary {
+            group_id: row.id,
+            name: row.name,
+            members: row.members,
+        })
+        .collect();
+    Ok(Json(CommunityGroupsResponse { groups }))
 }
 
 // ---- GROW-01: share cards ----------------------------------------------------
@@ -1114,7 +1383,7 @@ pub async fn list_groups(
 pub async fn share_cards(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ShareCardsResponse>> {
     let min_sample = crate::routes::settings::current_bounded_i64(
         &state.pool,
         "community_min_sample",
@@ -1142,23 +1411,23 @@ pub async fn share_cards(
     .await?;
     if score.total >= min_sample {
         let percent = (score.correct * 100) / score.total;
-        cards.push(json!({
-            "kind": "score",
-            "headline": format!("{percent}%"),
-            "subline": "accuracy over the last 30 days",
-            "detail": format!("{} of {} answered correctly", score.correct, score.total),
-            "share_text": format!(
+        cards.push(ShareCard {
+            kind: ShareCardKind::Score,
+            headline: format!("{percent}%"),
+            subline: "accuracy over the last 30 days".into(),
+            detail: format!("{} of {} answered correctly", score.correct, score.total),
+            share_text: format!(
                 "My 30-day accuracy on Medical Learning OS: {percent}% ({} of {} questions answered correctly).",
                 score.correct, score.total
             ),
-        }));
+        });
     } else {
-        unavailable.push(json!({
-            "kind": "score",
-            "reason": format!(
+        unavailable.push(UnavailableShareCard {
+            kind: ShareCardKind::Score,
+            reason: format!(
                 "a shareable accuracy needs at least {min_sample} answered questions in the last 30 days"
             ),
-        }));
+        });
     }
 
     // Consistency: today's streak and last week's met goals (ENG-01 records).
@@ -1176,21 +1445,21 @@ pub async fn share_cards(
     .await?;
     match consistency.streak {
         Some(streak) if streak > 0 => {
-            cards.push(json!({
-                "kind": "consistency",
-                "headline": format!("{streak}-day streak"),
-                "subline": "daily practice",
-                "detail": format!("goal met on {} of the last 7 days", consistency.met_week),
-                "share_text": format!(
+            cards.push(ShareCard {
+                kind: ShareCardKind::Consistency,
+                headline: format!("{streak}-day streak"),
+                subline: "daily practice".into(),
+                detail: format!("goal met on {} of the last 7 days", consistency.met_week),
+                share_text: format!(
                     "My practice streak on Medical Learning OS: {streak} days in a row (goal met {} of the last 7 days).",
                     consistency.met_week
                 ),
-            }));
+            });
         }
-        _ => unavailable.push(json!({
-            "kind": "consistency",
-            "reason": "no active streak — answer a question today to start one",
-        })),
+        _ => unavailable.push(UnavailableShareCard {
+            kind: ShareCardKind::Consistency,
+            reason: "no active streak — answer a question today to start one".into(),
+        }),
     }
 
     // League: the learner's most recent competition entry, ranked by the same
@@ -1219,22 +1488,22 @@ pub async fn share_cards(
             )
             .fetch_one(&state.pool)
             .await?;
-            cards.push(json!({
-                "kind": "league",
-                "headline": format!("Rank {rank}"),
-                "subline": format!("{} — {}", e.handle, e.title),
-                "detail": format!("score {} in the latest competition", e.score),
-                "share_text": format!(
+            cards.push(ShareCard {
+                kind: ShareCardKind::League,
+                headline: format!("Rank {rank}"),
+                subline: format!("{} — {}", e.handle, e.title),
+                detail: format!("score {} in the latest competition", e.score),
+                share_text: format!(
                     "{} finished rank {rank} in the {} competition on Medical Learning OS with a score of {}.",
                     e.handle, e.title, e.score
                 ),
-            }));
+            });
         }
-        None => unavailable.push(json!({
-            "kind": "league",
-            "reason": "no competition entries yet — join a competition to share a rank",
-        })),
+        None => unavailable.push(UnavailableShareCard {
+            kind: ShareCardKind::League,
+            reason: "no competition entries yet — join a competition to share a rank".into(),
+        }),
     }
 
-    Ok(Json(json!({ "cards": cards, "unavailable": unavailable })))
+    Ok(Json(ShareCardsResponse { cards, unavailable }))
 }

@@ -4,7 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::NaiveDate;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -12,6 +12,41 @@ use uuid::Uuid;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "exams/ExamRegistryItem.ts",
+        rename = "ExamRegistryItem"
+    )
+)]
+pub struct ExamRegistryItem {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    exam_id: Uuid,
+    code: String,
+    name: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    official_source_url: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown"))]
+    aliases: serde_json::Value,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "exams/ExamRegistryResponse.ts",
+        rename = "ExamRegistryResponse"
+    )
+)]
+pub struct ExamRegistryResponse {
+    exams: Vec<ExamRegistryItem>,
+}
 
 fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
@@ -21,26 +56,24 @@ fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
 pub async fn list_exams(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ExamRegistryResponse>> {
     let rows = sqlx::query!(
         r#"SELECT id, code, name, official_source_url, aliases
            FROM exams ORDER BY code"#
     )
     .fetch_all(&state.pool)
     .await?;
-    let exams: Vec<_> = rows
+    let exams: Vec<ExamRegistryItem> = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "exam_id": r.id,
-                "code": r.code,
-                "name": r.name,
-                "official_source_url": r.official_source_url,
-                "aliases": r.aliases,
-            })
+        .map(|r| ExamRegistryItem {
+            exam_id: r.id,
+            code: r.code,
+            name: r.name,
+            official_source_url: r.official_source_url,
+            aliases: r.aliases,
         })
         .collect();
-    Ok(Json(json!({ "exams": exams })))
+    Ok(Json(ExamRegistryResponse { exams }))
 }
 
 #[derive(Deserialize)]

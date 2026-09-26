@@ -6,6 +6,7 @@
 		Api,
 		ApiError,
 		adminToken,
+		type CreateNodeRequest,
 		type AdminSettings,
 		type AdminConcept,
 		type AdminContentRight,
@@ -133,7 +134,7 @@
 
 	// hierarchy
 	let examId = $state('');
-	let nodeKind = $state('chapter');
+	let nodeKind = $state<CreateNodeRequest['kind']>('chapter');
 	let nodeName = $state('');
 	let nodes = $state<AdminCurriculumNode[]>([]);
 	let concepts = $state<AdminConcept[]>([]);

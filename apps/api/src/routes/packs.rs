@@ -182,6 +182,20 @@ pub struct PackLeaseListResponse {
     pub leases: Vec<PackLeaseSummary>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "packs/PackLeaseRevokedResponse.ts",
+        rename = "PackLeaseRevokedResponse"
+    )
+)]
+pub struct PackLeaseRevokedResponse {
+    pub revoked: bool,
+}
+
 pub async fn export_account(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -927,7 +941,7 @@ pub async fn revoke_lease(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(lease_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PackLeaseRevokedResponse>> {
     let deleted = sqlx::query!(
         "DELETE FROM pack_leases WHERE id = $1 AND user_id = $2",
         lease_id,
@@ -938,7 +952,7 @@ pub async fn revoke_lease(
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("lease_not_found"));
     }
-    Ok(Json(json!({ "revoked": true })))
+    Ok(Json(PackLeaseRevokedResponse { revoked: true }))
 }
 
 #[cfg(test)]

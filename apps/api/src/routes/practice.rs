@@ -1120,11 +1120,27 @@ pub async fn get_session(
 
 /// Return an authored hint only after explicit learner action in a tutor run.
 /// Viewing it is persisted on the session item before the answer can be saved.
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionHintResponse.ts",
+        rename = "SessionHintResponse"
+    )
+)]
+pub struct SessionHintResponse {
+    hint: String,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    assisted: bool,
+}
+
 pub async fn hint(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path((sid, item_index)): Path<(Uuid, i16)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<SessionHintResponse>> {
     let mut tx = state.pool.begin().await?;
     let session = sqlx::query!(
         "SELECT preset, status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2 FOR UPDATE",
@@ -1194,7 +1210,10 @@ pub async fn hint(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(serde_json::json!({ "hint": hint, "assisted": true })))
+    Ok(Json(SessionHintResponse {
+        hint,
+        assisted: true,
+    }))
 }
 
 #[derive(Deserialize)]

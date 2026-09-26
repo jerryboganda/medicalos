@@ -6,7 +6,7 @@
 use axum::extract::{Path, State};
 use axum::Json;
 use scheduler::{build_queue, from_state, to_state, QueueCard, QueueLimits, Rating, Scheduler};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgConnection, Row};
 use std::sync::Arc;
@@ -50,8 +50,32 @@ async fn daily_review_usage(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/CreateDeckRequest.ts",
+        rename = "CreateDeckRequest"
+    )
+)]
 pub struct CreateDeckReq {
     pub name: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/CreateDeckResponse.ts",
+        rename = "CreateDeckResponse"
+    )
+)]
+pub struct CreateDeckResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    deck_id: Uuid,
 }
 
 pub async fn create_deck(
@@ -75,20 +99,70 @@ pub async fn create_deck(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(serde_json::json!({ "deck_id": deck_id })))
+    Ok(Json(CreateDeckResponse { deck_id }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/AddCardRequest.ts",
+        rename = "AddCardRequest"
+    )
+)]
 pub struct AddCardReq {
     pub front: String,
     pub back: String,
     /// SR-03: basic (default) | cloze | image.
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"basic\" | \"cloze\" | \"image\"", optional = nullable)
+    )]
     pub card_type: Option<String>,
     /// SR-04: editorial (default) | ai_draft. AI-drafted cards carry the
     /// label everywhere they render; they never masquerade as reviewed.
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"editorial\" | \"ai_draft\"", optional = nullable)
+    )]
     pub trust: Option<String>,
     /// SR-03 cloze text with {{c1::deletion}} markers; required for cloze.
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "string", optional = nullable)
+    )]
     pub cloze: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/AddCardResponse.ts",
+        rename = "AddCardResponse"
+    )
+)]
+pub struct AddCardResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    card_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    due: Option<chrono::DateTime<chrono::Utc>>,
+    #[cfg_attr(feature = "type-export", ts(type = "\"new\""))]
+    state: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"basic\" | \"cloze\" | \"image\"")
+    )]
+    card_type: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"editorial\" | \"ai_draft\"")
+    )]
+    trust: String,
 }
 
 pub async fn add_card(
@@ -178,10 +252,60 @@ pub async fn add_card(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(serde_json::json!({
-        "card_id": card_id, "due": null, "state": "new",
-        "card_type": card_type, "trust": trust,
-    })))
+    Ok(Json(AddCardResponse {
+        card_id,
+        due: None,
+        state: "new".to_owned(),
+        card_type,
+        trust,
+    }))
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/ReviewQueueItem.ts",
+        rename = "ReviewQueueItem"
+    )
+)]
+pub struct ReviewQueueItem {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    card_id: String,
+    front: String,
+    back: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"basic\" | \"cloze\" | \"image\"")
+    )]
+    card_type: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    cloze: Option<String>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"editorial\" | \"ai_draft\"")
+    )]
+    trust: String,
+    ai_draft: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/ReviewQueueResponse.ts",
+        rename = "ReviewQueueResponse"
+    )
+)]
+pub struct ReviewQueueResponse {
+    due: Vec<ReviewQueueItem>,
+    new: Vec<ReviewQueueItem>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    backlog_remaining: usize,
 }
 
 /// Today's review queue: due cards first (most-at-risk-first), then new
@@ -190,7 +314,7 @@ pub async fn add_card(
 pub async fn queue(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ReviewQueueResponse>> {
     let now = chrono::Utc::now();
     let due_rows = sqlx::query!(
         r#"SELECT id, front, back, state, card_type, trust, cloze FROM cards
@@ -314,37 +438,67 @@ pub async fn queue(
             .map_err(|_| ApiError::internal())?,
     };
     let queue = build_queue(limits, due_cards, new_cards);
-    let render = |cards: &[QueueCard]| -> Vec<serde_json::Value> {
+    let render = |cards: &[QueueCard]| -> Vec<ReviewQueueItem> {
         cards
             .iter()
             .filter_map(|qc| {
-                meta.get(&qc.id).map(|m| {
-                    serde_json::json!({
-                        "card_id": qc.id,
-                        "front": m.front,
-                        "back": m.back,
-                        "card_type": m.card_type,
-                        "cloze": m.cloze,
-                        "trust": m.trust,
-                        "ai_draft": m.trust == "ai_draft",
-                    })
+                meta.get(&qc.id).map(|m| ReviewQueueItem {
+                    card_id: qc.id.clone(),
+                    front: m.front.clone(),
+                    back: m.back.clone(),
+                    card_type: m.card_type.clone(),
+                    cloze: m.cloze.clone(),
+                    trust: m.trust.clone(),
+                    ai_draft: m.trust == "ai_draft",
                 })
             })
             .collect()
     };
 
-    Ok(Json(serde_json::json!({
-        "due": render(&queue.due),
-        "new": render(&queue.new),
-        "backlog_remaining": queue.backlog_remaining,
-    })))
+    Ok(Json(ReviewQueueResponse {
+        due: render(&queue.due),
+        new: render(&queue.new),
+        backlog_remaining: queue.backlog_remaining,
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/ReviewEventRequest.ts",
+        rename = "ReviewEventRequest"
+    )
+)]
 pub struct ReviewEventReq {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub card_id: Uuid,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"again\" | \"hard\" | \"good\" | \"easy\"")
+    )]
     pub rating: String,
     pub idempotency_key: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/ReviewEventResponse.ts",
+        rename = "ReviewEventResponse"
+    )
+)]
+pub struct ReviewEventResponse {
+    already_recorded: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    due: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    reviewed_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// POST /v1/reviews/events (§21.2): apply one review through the shared
@@ -353,7 +507,7 @@ pub async fn review_event(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<ReviewEventReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ReviewEventResponse>> {
     apply_review(&state, user.user_id, req).await
 }
 
@@ -362,7 +516,7 @@ pub async fn apply_review(
     state: &AppState,
     user_id: Uuid,
     req: ReviewEventReq,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ReviewEventResponse>> {
     let rating = parse_rating(&req.rating)?;
     let mut tx = state.pool.begin().await?;
     sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE")
@@ -391,11 +545,11 @@ pub async fn apply_review(
         let cs: scheduler::CardState =
             serde_json::from_value(card.try_get("state")?).map_err(|_| ApiError::internal())?;
         tx.commit().await?;
-        return Ok(Json(serde_json::json!({
-            "already_recorded": true,
-            "due": cs.due,
-            "reviewed_at": reviewed_at,
-        })));
+        return Ok(Json(ReviewEventResponse {
+            already_recorded: true,
+            due: cs.due,
+            reviewed_at,
+        }));
     }
 
     let row = sqlx::query(
@@ -491,11 +645,11 @@ pub async fn apply_review(
         let card_state: scheduler::CardState =
             serde_json::from_value(card.try_get("state")?).map_err(|_| ApiError::internal())?;
         tx.commit().await?;
-        return Ok(Json(serde_json::json!({
-            "already_recorded": true,
-            "due": card_state.due,
-            "reviewed_at": replayed_at,
-        })));
+        return Ok(Json(ReviewEventResponse {
+            already_recorded: true,
+            due: card_state.due,
+            reviewed_at: replayed_at,
+        }));
     }
 
     sqlx::query("UPDATE cards SET state = $2 WHERE id = $1 AND user_id = $3")
@@ -507,11 +661,11 @@ pub async fn apply_review(
 
     tx.commit().await?;
 
-    Ok(Json(serde_json::json!({
-        "already_recorded": false,
-        "due": next_state.due,
-        "reviewed_at": reviewed_at,
-    })))
+    Ok(Json(ReviewEventResponse {
+        already_recorded: false,
+        due: next_state.due,
+        reviewed_at,
+    }))
 }
 
 // ---- SR-07: authorized deck import / export ---------------------------------
@@ -659,13 +813,35 @@ pub async fn import_decks(
 
 // ---- PLAN-03: review-debt recovery numbers -----------------------------------
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "review/ReviewDebtResponse.ts",
+        rename = "ReviewDebtResponse"
+    )
+)]
+pub struct ReviewDebtResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    due_now: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    completed_last_7_days: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    daily_rate: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    projected_backlog_days: Option<i64>,
+    note: String,
+}
+
 /// Honest debt report: what is due now, how much was actually cleared in the
 /// last week, and how many days the backlog would take at that real rate.
 /// No rate history means no projection.
 pub async fn review_debt(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ReviewDebtResponse>> {
     let now = chrono::Utc::now();
     let week_ago = now - chrono::Duration::days(7);
     let due: i64 = sqlx::query!(
@@ -693,15 +869,20 @@ pub async fn review_debt(
     } else {
         None
     };
-    Ok(Json(json!({
-        "due_now": due,
-        "completed_last_7_days": recent,
-        "daily_rate": if recent > 0 { Some(recent as f64 / 7.0) } else { None },
-        "projected_backlog_days": backlog_days,
-        "note": if recent > 0 {
+    Ok(Json(ReviewDebtResponse {
+        due_now: due,
+        completed_last_7_days: recent,
+        daily_rate: if recent > 0 {
+            Some(recent as f64 / 7.0)
+        } else {
+            None
+        },
+        projected_backlog_days: backlog_days,
+        note: if recent > 0 {
             "projection at your actual last-7-day rate"
         } else {
             "no review history yet - no projection without evidence"
-        },
-    })))
+        }
+        .to_owned(),
+    }))
 }

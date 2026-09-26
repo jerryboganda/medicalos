@@ -5,7 +5,7 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -13,6 +13,78 @@ use uuid::Uuid;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "inbox/NotificationPreferences.ts",
+        rename = "NotificationPreferences"
+    )
+)]
+pub struct NotificationPreferences {
+    plan_reminders: bool,
+    mock_results: bool,
+    reports: bool,
+    content_updates: bool,
+    quiet_hours_start: i32,
+    quiet_hours_end: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "inbox/NotificationItem.ts",
+        rename = "NotificationItem"
+    )
+)]
+pub struct NotificationItem {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    id: Uuid,
+    category: String,
+    title: String,
+    body: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    deep_link: Option<String>,
+    read: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "inbox/NotificationInboxResponse.ts",
+        rename = "NotificationInboxResponse"
+    )
+)]
+pub struct NotificationInboxResponse {
+    notifications: Vec<NotificationItem>,
+    preferences: NotificationPreferences,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "inbox/NotificationPreferencesUpdateResponse.ts",
+        rename = "NotificationPreferencesUpdateResponse"
+    )
+)]
+pub struct NotificationPreferencesUpdateResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    updated: bool,
+}
 
 /// Create an in-app notification, honouring the learner's per-category
 /// preference. Callers own the copy: never shaming, factual (§6.4, §2.2).
@@ -72,7 +144,7 @@ pub async fn deliver(
 pub async fn inbox(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<NotificationInboxResponse>> {
     let rows = sqlx::query!(
         r#"SELECT id, category, title, body, deep_link, read_at, created_at
            FROM notifications WHERE user_id = $1
@@ -91,43 +163,42 @@ pub async fn inbox(
     .await?;
     let preferences = stored_preferences.map_or_else(
         || {
-            json!({
-                "plan_reminders": true,
-                "mock_results": true,
-                "reports": true,
-                "content_updates": true,
-                "quiet_hours_start": 22,
-                "quiet_hours_end": 7,
-            })
+            NotificationPreferences {
+                plan_reminders: true,
+                mock_results: true,
+                reports: true,
+                content_updates: true,
+                quiet_hours_start: 22,
+                quiet_hours_end: 7,
+            }
         },
         |p| {
-            json!({
-                "plan_reminders": p.plan_reminders,
-                "mock_results": p.mock_results,
-                "reports": p.reports,
-                "content_updates": p.content_updates,
-                "quiet_hours_start": p.quiet_hours_start,
-                "quiet_hours_end": p.quiet_hours_end,
-            })
+            NotificationPreferences {
+                plan_reminders: p.plan_reminders,
+                mock_results: p.mock_results,
+                reports: p.reports,
+                content_updates: p.content_updates,
+                quiet_hours_start: p.quiet_hours_start,
+                quiet_hours_end: p.quiet_hours_end,
+            }
         },
     );
-    let items: Vec<serde_json::Value> = rows
+    let notifications = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "category": r.category,
-                "title": r.title,
-                "body": r.body,
-                "deep_link": r.deep_link,
-                "read": r.read_at.is_some(),
-                "created_at": r.created_at,
-            })
+        .map(|r| NotificationItem {
+            id: r.id,
+            category: r.category,
+            title: r.title,
+            body: r.body,
+            deep_link: r.deep_link,
+            read: r.read_at.is_some(),
+            created_at: r.created_at,
         })
         .collect();
-    Ok(Json(
-        json!({ "notifications": items, "preferences": preferences }),
-    ))
+    Ok(Json(NotificationInboxResponse {
+        notifications,
+        preferences,
+    }))
 }
 
 pub async fn mark_read(
@@ -150,12 +221,45 @@ pub async fn mark_read(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "inbox/NotificationPreferencesUpdateRequest.ts",
+        rename = "NotificationPreferencesUpdateRequest"
+    )
+)]
 pub struct PrefReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub plan_reminders: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub mock_results: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub reports: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub content_updates: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "number", optional = nullable)
+    )]
     pub quiet_hours_start: Option<i32>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "number", optional = nullable)
+    )]
     pub quiet_hours_end: Option<i32>,
 }
 
@@ -163,14 +267,14 @@ pub async fn update_preferences(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<PrefReq>,
-) -> ApiResult<Json<serde_json::Value>> {
-    if let Some(s) = req.quiet_hours_start {
-        if !(0..=23).contains(&s) || req.quiet_hours_end.is_some_and(|e| !(0..=23).contains(&e)) {
-            return Err(ApiError::unprocessable(
-                "invalid_quiet_hours",
-                "quiet hours must be hours of day (0-23)",
-            ));
-        }
+) -> ApiResult<Json<NotificationPreferencesUpdateResponse>> {
+    if req.quiet_hours_start.is_some_and(|hour| !(0..=23).contains(&hour))
+        || req.quiet_hours_end.is_some_and(|hour| !(0..=23).contains(&hour))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_quiet_hours",
+            "quiet hours must be hours of day (0-23)",
+        ));
     }
     sqlx::query!(
         "INSERT INTO notification_preferences
@@ -196,5 +300,5 @@ pub async fn update_preferences(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(json!({ "updated": true })))
+    Ok(Json(NotificationPreferencesUpdateResponse { updated: true }))
 }

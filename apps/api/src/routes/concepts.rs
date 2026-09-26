@@ -3,7 +3,7 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -47,6 +47,7 @@ fn required_text(value: &str, field: &'static str, max: usize) -> ApiResult<Stri
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptRequest.ts", rename = "CreateConceptRequest"))]
 pub struct CreateConceptReq {
     pub canonical_key: String,
     pub display_name: String,
@@ -54,21 +55,77 @@ pub struct CreateConceptReq {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptVersionRequest.ts", rename = "CreateConceptVersionRequest"))]
 pub struct NewVersionReq {
     pub display_name: String,
     pub definition: String,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/SetNodeConceptsRequest.ts", rename = "SetNodeConceptsRequest"))]
 pub struct SetNodeConceptsReq {
     pub concept_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/AdminConcept.ts", rename = "AdminConcept"))]
+pub struct AdminConcept {
+    pub concept_id: Uuid,
+    pub canonical_key: String,
+    pub current_version: i32,
+    pub display_name: String,
+    pub definition: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/AdminConceptListResponse.ts", rename = "AdminConceptListResponse"))]
+pub struct AdminConceptListResponse {
+    pub concepts: Vec<AdminConcept>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptResponse.ts", rename = "CreateConceptResponse"))]
+pub struct CreateConceptResponse {
+    pub concept_id: Uuid,
+    pub canonical_key: String,
+    pub current_version: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptVersionResponse.ts", rename = "CreateConceptVersionResponse"))]
+pub struct CreateConceptVersionResponse {
+    pub concept_id: Uuid,
+    pub current_version: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/NodeConcept.ts", rename = "NodeConcept"))]
+pub struct NodeConcept {
+    pub concept_id: Uuid,
+    pub canonical_key: String,
+    pub version: i32,
+    pub display_name: String,
+    pub definition: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/NodeConceptsResponse.ts", rename = "NodeConceptsResponse"))]
+pub struct NodeConceptsResponse {
+    pub concepts: Vec<NodeConcept>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/SetNodeConceptsResponse.ts", rename = "SetNodeConceptsResponse"))]
+pub struct SetNodeConceptsResponse {
+    pub node_id: Uuid,
+    pub mapped: usize,
 }
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: HeaderMap,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<AdminConceptListResponse>> {
     require_admin(&state, &headers)?;
     let rows = sqlx::query!(
         r#"SELECT c.id, c.canonical_key, c.current_version,
@@ -80,19 +137,17 @@ pub async fn list(
     )
     .fetch_all(&state.pool)
     .await?;
-    let concepts: Vec<Value> = rows
+    let concepts: Vec<AdminConcept> = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "concept_id": row.id,
-                "canonical_key": row.canonical_key,
-                "current_version": row.current_version,
-                "display_name": row.display_name,
-                "definition": row.definition,
-            })
+        .map(|row| AdminConcept {
+            concept_id: row.id,
+            canonical_key: row.canonical_key,
+            current_version: row.current_version,
+            display_name: row.display_name,
+            definition: row.definition,
         })
         .collect();
-    Ok(Json(json!({ "concepts": concepts })))
+    Ok(Json(AdminConceptListResponse { concepts }))
 }
 
 pub async fn create(
@@ -100,7 +155,7 @@ pub async fn create(
     user: AuthUser,
     headers: HeaderMap,
     Json(req): Json<CreateConceptReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<CreateConceptResponse>> {
     require_admin(&state, &headers)?;
     let key = normalized_key(&req.canonical_key)?;
     let name = required_text(&req.display_name, "display_name", 200)?;
@@ -145,11 +200,11 @@ pub async fn create(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "concept_id": id,
-        "canonical_key": key,
-        "current_version": 1,
-    })))
+    Ok(Json(CreateConceptResponse {
+        concept_id: id,
+        canonical_key: key,
+        current_version: 1,
+    }))
 }
 
 pub async fn create_version(
@@ -158,7 +213,7 @@ pub async fn create_version(
     headers: HeaderMap,
     Path(concept_id): Path<Uuid>,
     Json(req): Json<NewVersionReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<CreateConceptVersionResponse>> {
     require_admin(&state, &headers)?;
     let name = required_text(&req.display_name, "display_name", 200)?;
     let definition = required_text(&req.definition, "definition", 4000)?;
@@ -200,10 +255,10 @@ pub async fn create_version(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "concept_id": concept_id,
-        "current_version": version,
-    })))
+    Ok(Json(CreateConceptVersionResponse {
+        concept_id,
+        current_version: version,
+    }))
 }
 
 pub async fn node_mappings(
@@ -211,7 +266,7 @@ pub async fn node_mappings(
     _user: AuthUser,
     headers: HeaderMap,
     Path(node_id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<NodeConceptsResponse>> {
     require_admin(&state, &headers)?;
     let node = sqlx::query_scalar::<_, Uuid>("SELECT id FROM curriculum_nodes WHERE id = $1")
         .bind(node_id)
@@ -233,19 +288,17 @@ pub async fn node_mappings(
     )
     .fetch_all(&state.pool)
     .await?;
-    let concepts: Vec<Value> = rows
+    let concepts: Vec<NodeConcept> = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "concept_id": row.concept_id,
-                "canonical_key": row.canonical_key,
-                "version": row.version,
-                "display_name": row.display_name,
-                "definition": row.definition,
-            })
+        .map(|row| NodeConcept {
+            concept_id: row.concept_id,
+            canonical_key: row.canonical_key,
+            version: row.version,
+            display_name: row.display_name,
+            definition: row.definition,
         })
         .collect();
-    Ok(Json(json!({ "concepts": concepts })))
+    Ok(Json(NodeConceptsResponse { concepts }))
 }
 
 pub async fn set_node_mappings(
@@ -254,7 +307,7 @@ pub async fn set_node_mappings(
     headers: HeaderMap,
     Path(node_id): Path<Uuid>,
     Json(req): Json<SetNodeConceptsReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<SetNodeConceptsResponse>> {
     require_admin(&state, &headers)?;
     let mut ids = req.concept_ids;
     ids.sort_unstable();
@@ -312,5 +365,8 @@ pub async fn set_node_mappings(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "node_id": node_id, "mapped": ids.len() })))
+    Ok(Json(SetNodeConceptsResponse {
+        node_id,
+        mapped: ids.len(),
+    }))
 }

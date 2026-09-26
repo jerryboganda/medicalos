@@ -1,4 +1,25 @@
 import { auth, clearToken } from './auth.svelte';
+import type { LoginRequest } from './generated/auth/LoginRequest';
+import type { LoginResponse } from './generated/auth/LoginResponse';
+import type { RegisterRequest } from './generated/auth/RegisterRequest';
+import type { RegisterResponse } from './generated/auth/RegisterResponse';
+import type { Engagement } from './generated/engagement/Engagement';
+import type { EngagementSettings } from './generated/engagement/EngagementSettings';
+import type { EngagementSettingsResponse } from './generated/engagement/EngagementSettingsResponse';
+import type { CompetitionListResponse } from './generated/engagement/CompetitionListResponse';
+import type { StartCompetitionEntryRequest } from './generated/engagement/StartCompetitionEntryRequest';
+import type { AnswerCompetitionQuestionRequest } from './generated/engagement/AnswerCompetitionQuestionRequest';
+import type { CompetitionAttemptStep } from './generated/engagement/CompetitionAttemptStep';
+import type { CompetitionLeaderboardResponse } from './generated/engagement/CompetitionLeaderboardResponse';
+import type { CompetitionLeagueState } from './generated/engagement/CompetitionLeagueState';
+import type { LeaveCompetitionLeagueResponse } from './generated/engagement/LeaveCompetitionLeagueResponse';
+import type { QotdAnswerRequest } from './generated/engagement/QotdAnswerRequest';
+import type { QotdAnswerResponse } from './generated/engagement/QotdAnswerResponse';
+import type { CompleteOidcRequest } from './generated/oidc/CompleteOidcRequest';
+import type { CompleteOidcResponse } from './generated/oidc/CompleteOidcResponse';
+import type { OidcProviderUpdate } from './generated/oidc/OidcProviderUpdate';
+import type { OidcProviderView } from './generated/oidc/OidcProviderView';
+import type { StartInstitutionSsoResponse } from './generated/oidc/StartInstitutionSsoResponse';
 import type { CreateNoteResponse } from './generated/notes/CreateNoteResponse';
 import type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
 import type { ListNotesResponse } from './generated/notes/ListNotesResponse';
@@ -6,6 +27,11 @@ import type { NoteRequest } from './generated/notes/NoteRequest';
 import type { UpdateNoteResponse } from './generated/notes/UpdateNoteResponse';
 import type { NextActionRecommendation } from './generated/today/NextActionRecommendation';
 import type { NextActionRequest } from './generated/today/NextActionRequest';
+import type { ReplanRequest } from './generated/today/ReplanRequest';
+import type { ReplanResponse } from './generated/today/ReplanResponse';
+import type { UndoResponse } from './generated/today/UndoResponse';
+import type { TaskProtectionRequest } from './generated/today/TaskProtectionRequest';
+import type { TaskProtectionResponse } from './generated/today/TaskProtectionResponse';
 import type { CreateMockRequest } from './generated/mock/CreateMockRequest';
 import type { CreateMockResponse } from './generated/mock/CreateMockResponse';
 import type { MockListResponse } from './generated/mock/MockListResponse';
@@ -17,6 +43,54 @@ import type { AnswerRequest } from './generated/practice/AnswerRequest';
 import type { AnswerResponse } from './generated/practice/AnswerResponse';
 import type { PracticeSession } from './generated/practice/PracticeSession';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
+import type { AdminHierarchyResponse } from './generated/admin/AdminHierarchyResponse';
+import type { CreateNodeRequest } from './generated/admin/CreateNodeRequest';
+import type { CreateNodeResponse } from './generated/admin/CreateNodeResponse';
+import type { AdminConceptListResponse } from './generated/concepts/AdminConceptListResponse';
+import type { CreateConceptRequest } from './generated/concepts/CreateConceptRequest';
+import type { CreateConceptResponse } from './generated/concepts/CreateConceptResponse';
+import type { CreateConceptVersionRequest } from './generated/concepts/CreateConceptVersionRequest';
+import type { CreateConceptVersionResponse } from './generated/concepts/CreateConceptVersionResponse';
+import type { NodeConceptsResponse } from './generated/concepts/NodeConceptsResponse';
+import type { SetNodeConceptsRequest } from './generated/concepts/SetNodeConceptsRequest';
+import type { SetNodeConceptsResponse } from './generated/concepts/SetNodeConceptsResponse';
+import type { AdminSettingsResponse } from './generated/settings/AdminSettingsResponse';
+import type { AdminSettingsUpdateRequest } from './generated/settings/AdminSettingsUpdateRequest';
+import type { AdminSettingsUpdateResponse } from './generated/settings/AdminSettingsUpdateResponse';
+import type { AdminAuditResponse } from './generated/admin/AdminAuditResponse';
+import type { AdminImportRequest } from './generated/admin/AdminImportRequest';
+import type { AdminImportResponse } from './generated/admin/AdminImportResponse';
+import type { AssessmentWorkflowRequest } from './generated/admin/AssessmentWorkflowRequest';
+import type { AssessmentWorkflowResponse } from './generated/admin/AssessmentWorkflowResponse';
+import type { RollbackImportResponse } from './generated/admin/RollbackImportResponse';
+import type { AdminExtractionReport } from './generated/admin/AdminExtractionReport';
+import type { AdminExtractionReportListResponse } from './generated/admin/AdminExtractionReportListResponse';
+import type { ContentRightsRequest } from './generated/admin/ContentRightsRequest';
+import type { ContentRightsResponse } from './generated/admin/ContentRightsResponse';
+import type { CreateContentRightsResponse } from './generated/admin/CreateContentRightsResponse';
+import type { CreateExtractionReportRequest } from './generated/admin/CreateExtractionReportRequest';
+import type { ReviewExtractionReportRequest } from './generated/admin/ReviewExtractionReportRequest';
+import type { RevokeContentRightsRequest } from './generated/admin/RevokeContentRightsRequest';
+import type { RevokeContentRightsResponse } from './generated/admin/RevokeContentRightsResponse';
+import type { AddInstitutionMemberRequest } from './generated/institutions/AddInstitutionMemberRequest';
+import type { AddInstitutionMemberResponse } from './generated/institutions/AddInstitutionMemberResponse';
+import type { CreateAssignmentRequest } from './generated/institutions/CreateAssignmentRequest';
+import type { CreateAssignmentResponse } from './generated/institutions/CreateAssignmentResponse';
+import type { CreateCohortRequest } from './generated/institutions/CreateCohortRequest';
+import type { CreateCohortResponse } from './generated/institutions/CreateCohortResponse';
+import type { CreateInstitutionRequest } from './generated/institutions/CreateInstitutionRequest';
+import type { CreateInstitutionResponse } from './generated/institutions/CreateInstitutionResponse';
+import type { CreateProgramRequest } from './generated/institutions/CreateProgramRequest';
+import type { CreateProgramResponse } from './generated/institutions/CreateProgramResponse';
+import type { InstitutionAnalyticsQuery } from './generated/institutions/InstitutionAnalyticsQuery';
+import type { InstitutionAnalyticsResponse } from './generated/institutions/InstitutionAnalyticsResponse';
+import type { InstitutionAuditResponse } from './generated/institutions/InstitutionAuditResponse';
+import type { InstitutionCohortsResponse } from './generated/institutions/InstitutionCohortsResponse';
+import type { InstitutionProgramsResponse } from './generated/institutions/InstitutionProgramsResponse';
+import type { MyInstitutionsResponse } from './generated/institutions/MyInstitutionsResponse';
+import type { ProgramCurriculumCoverageResponse } from './generated/institutions/ProgramCurriculumCoverageResponse';
+import type { SetProgramCurriculumRequest } from './generated/institutions/SetProgramCurriculumRequest';
+import type { SetProgramCurriculumResponse } from './generated/institutions/SetProgramCurriculumResponse';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
 import type { CreateArticleRequest } from './generated/library/CreateArticleRequest';
@@ -25,9 +99,18 @@ import type { PublishArticleResponse } from './generated/library/PublishArticleR
 import type { LibraryArticleResponse } from './generated/library/LibraryArticleResponse';
 import type { LibrarySearchResponse } from './generated/library/LibrarySearchResponse';
 import type { PrivateDocumentSearchResult } from './generated/library/PrivateDocumentSearchResult';
+import type { PrivateImportRightsResponse } from './generated/library/PrivateImportRightsResponse';
+import type { PrivateImportSummary } from './generated/library/PrivateImportSummary';
+import type { PrivateImportListResponse } from './generated/library/PrivateImportListResponse';
+import type { CreatePrivateImportRequest } from './generated/library/CreatePrivateImportRequest';
+import type { PrivateImportResponse } from './generated/library/PrivateImportResponse';
+import type { PrivateImportDeletedResponse } from './generated/library/PrivateImportDeletedResponse';
 import type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
+import type { ImageAnnotationRequest } from './generated/image/ImageAnnotationRequest';
 import type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
+import type { ImageAnnotationReviewRequest } from './generated/image/ImageAnnotationReviewRequest';
 import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
+import type { ImageCaseConceptsRequest } from './generated/image/ImageCaseConceptsRequest';
 import type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
 import type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
 import type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
@@ -56,20 +139,133 @@ import type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
 import type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
 import type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
 import type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
+
 import type { Today } from './generated/today/Today';
+import type { MyCurriculumResponse } from './generated/today/MyCurriculumResponse';
 import type { PackLeaseListResponse } from './generated/packs/PackLeaseListResponse';
 import type { PackLeaseRequest } from './generated/packs/PackLeaseRequest';
 import type { PackLeaseResponse } from './generated/packs/PackLeaseResponse';
+import type { PackLeaseRevokedResponse } from './generated/packs/PackLeaseRevokedResponse';
 import type { PackManifest } from './generated/packs/PackManifest';
 import type { PackQuestionResource } from './generated/packs/PackQuestionResource';
 import type { PackResourcesRequest } from './generated/packs/PackResourcesRequest';
 import type { PackResourcesResponse } from './generated/packs/PackResourcesResponse';
+import type { CeActivityRequest } from './generated/career/CeActivityRequest';
+import type { CeActivityResponse } from './generated/career/CeActivityResponse';
+import type { PortfolioCreateRequest } from './generated/career/PortfolioCreateRequest';
+import type { PortfolioCreateResponse } from './generated/career/PortfolioCreateResponse';
+import type { PortfolioListResponse } from './generated/career/PortfolioListResponse';
+import type { NotificationInboxResponse } from './generated/inbox/NotificationInboxResponse';
+import type { NotificationPreferencesUpdateRequest } from './generated/inbox/NotificationPreferencesUpdateRequest';
+import type { NotificationPreferencesUpdateResponse } from './generated/inbox/NotificationPreferencesUpdateResponse';
+import type { MarkResponse } from './generated/marks/MarkResponse';
+import type { MarkedQuestionsResponse } from './generated/marks/MarkedQuestionsResponse';
+import type { AddCardRequest } from './generated/review/AddCardRequest';
+import type { AddCardResponse } from './generated/review/AddCardResponse';
+import type { CreateDeckRequest } from './generated/review/CreateDeckRequest';
+import type { CreateDeckResponse } from './generated/review/CreateDeckResponse';
+import type { ReviewDebtResponse } from './generated/review/ReviewDebtResponse';
+import type { ReviewEventRequest } from './generated/review/ReviewEventRequest';
+import type { ReviewEventResponse } from './generated/review/ReviewEventResponse';
+import type { ReviewQueueResponse } from './generated/review/ReviewQueueResponse';
+import type { CalculatorInput } from './generated/calculators/CalculatorInput';
+import type { CalculatorResponse } from './generated/calculators/CalculatorResponse';
+import type { ConvertInput } from './generated/calculators/ConvertInput';
+import type { ConvertResponse } from './generated/calculators/ConvertResponse';
+import type { SessionHintResponse } from './generated/practice/SessionHintResponse';
+import type { IntegrityEventRequest } from './generated/integrity/IntegrityEventRequest';
+import type { IntegrityEventResponse } from './generated/integrity/IntegrityEventResponse';
+import type { ExamRegistryResponse } from './generated/exams/ExamRegistryResponse';
+import type { CoachTurnRequest } from './generated/coach/CoachTurnRequest';
+import type { CoachTurnResponse } from './generated/coach/CoachTurnResponse';
+import type { CoachHistoryResponse } from './generated/coach/CoachHistoryResponse';
+import type { AnswerableQuestionsResponse } from './generated/coach/AnswerableQuestionsResponse';
+import type { HeatmapQuery } from './generated/insights/HeatmapQuery';
+import type { MasteryHeatmapResponse } from './generated/insights/MasteryHeatmapResponse';
+import type { SelectionPolicyResponse } from './generated/program/SelectionPolicyResponse';
+import type { CommunityProfileRequest } from './generated/community/CommunityProfileRequest';
+import type { CommunityProfileResponse } from './generated/community/CommunityProfileResponse';
+import type { CommunityProfileByHandleResponse } from './generated/community/CommunityProfileByHandleResponse';
+import type { CreateCommunityProfileResponse } from './generated/community/CreateCommunityProfileResponse';
+import type { CreateCommunityGroupRequest } from './generated/community/CreateCommunityGroupRequest';
+import type { CreateCommunityGroupResponse } from './generated/community/CreateCommunityGroupResponse';
+import type { JoinCommunityGroupResponse } from './generated/community/JoinCommunityGroupResponse';
+import type { CreateCommunityPostRequest } from './generated/community/CreateCommunityPostRequest';
+import type { CreateCommunityPostResponse } from './generated/community/CreateCommunityPostResponse';
+import type { CommunityPostListResponse } from './generated/community/CommunityPostListResponse';
+import type { ReportCommunityPostRequest } from './generated/community/ReportCommunityPostRequest';
+import type { ReportCommunityPostResponse } from './generated/community/ReportCommunityPostResponse';
+import type { MyCommunityPostReportsResponse } from './generated/community/MyCommunityPostReportsResponse';
+import type { GroupPostReportQueueResponse } from './generated/community/GroupPostReportQueueResponse';
+import type { ResolveCommunityPostReportRequest } from './generated/community/ResolveCommunityPostReportRequest';
+import type { ResolveCommunityPostReportResponse } from './generated/community/ResolveCommunityPostReportResponse';
+import type { RemoveCommunityPostResponse } from './generated/community/RemoveCommunityPostResponse';
+import type { CommunityGroupsResponse } from './generated/community/CommunityGroupsResponse';
+import type { CreateDuelRequest } from './generated/community/CreateDuelRequest';
+import type { CreateDuelResponse } from './generated/community/CreateDuelResponse';
+import type { DuelByTokenResponse } from './generated/community/DuelByTokenResponse';
+import type { AcceptDuelResponse } from './generated/community/AcceptDuelResponse';
+import type { DuelStateResponse } from './generated/community/DuelStateResponse';
+import type { DeclineDuelResponse } from './generated/community/DeclineDuelResponse';
+import type { MyDuelsResponse } from './generated/community/MyDuelsResponse';
+import type { ShareCardsResponse } from './generated/community/ShareCardsResponse';
+import type { ReportQuestionRequest } from './generated/reports/ReportQuestionRequest';
+import type { QuestionReportResponse } from './generated/reports/QuestionReportResponse';
+import type { AdminReportsResponse } from './generated/reports/AdminReportsResponse';
+import type { ResolveQuestionReportRequest } from './generated/reports/ResolveQuestionReportRequest';
+import type { ResolveQuestionReportResponse } from './generated/reports/ResolveQuestionReportResponse';
 
 // Keep transport and authentication here. Data contracts are exported from
 // Rust DTOs incrementally as ARCH-02 bindings are generated.
 // Production reaches the API same-origin through the /api/ prefix
 // (medicalos.polytronx.com/api/* -> the API container); local dev keeps
 // talking straight to the API host.
+export type { LoginRequest } from './generated/auth/LoginRequest';
+export type { LoginResponse } from './generated/auth/LoginResponse';
+export type { RegisterRequest } from './generated/auth/RegisterRequest';
+export type { RegisterResponse } from './generated/auth/RegisterResponse';
+export type { Engagement } from './generated/engagement/Engagement';
+export type { CompetitionSummary } from './generated/engagement/CompetitionSummary';
+export type { CompetitionListResponse } from './generated/engagement/CompetitionListResponse';
+export type { StartCompetitionEntryRequest } from './generated/engagement/StartCompetitionEntryRequest';
+export type { AnswerCompetitionQuestionRequest } from './generated/engagement/AnswerCompetitionQuestionRequest';
+export type { CompetitionQuestionOption } from './generated/engagement/CompetitionQuestionOption';
+export type { CompetitionQuestion } from './generated/engagement/CompetitionQuestion';
+export type { CompetitionInProgressResponse } from './generated/engagement/CompetitionInProgressResponse';
+export type { CompetitionSubmittedResponse } from './generated/engagement/CompetitionSubmittedResponse';
+export type { CompetitionAttemptStep } from './generated/engagement/CompetitionAttemptStep';
+export type { CompetitionLeaderboardEntry } from './generated/engagement/CompetitionLeaderboardEntry';
+export type { CompetitionLeaderboardResponse } from './generated/engagement/CompetitionLeaderboardResponse';
+export type { CompetitionLeagueNotJoined } from './generated/engagement/CompetitionLeagueNotJoined';
+export type { CompetitionLeagueStanding } from './generated/engagement/CompetitionLeagueStanding';
+export type { CompetitionLeagueJoined } from './generated/engagement/CompetitionLeagueJoined';
+export type { CompetitionLeagueState } from './generated/engagement/CompetitionLeagueState';
+export type { LeaveCompetitionLeagueResponse } from './generated/engagement/LeaveCompetitionLeagueResponse';
+export type { EngagementDailyGoal } from './generated/engagement/EngagementDailyGoal';
+export type { EngagementStreak } from './generated/engagement/EngagementStreak';
+export type { EngagementOption } from './generated/engagement/EngagementOption';
+export type { EngagementCommunitySplit } from './generated/engagement/EngagementCommunitySplit';
+export type { EngagementQotd } from './generated/engagement/EngagementQotd';
+export type { EngagementSettings } from './generated/engagement/EngagementSettings';
+export type { EngagementSettingsResponse } from './generated/engagement/EngagementSettingsResponse';
+export type { QotdAnswerRequest } from './generated/engagement/QotdAnswerRequest';
+export type { QotdAnswerResponse } from './generated/engagement/QotdAnswerResponse';
+export type { CompleteOidcRequest } from './generated/oidc/CompleteOidcRequest';
+export type { CompleteOidcResponse } from './generated/oidc/CompleteOidcResponse';
+export type { OidcProviderUpdate } from './generated/oidc/OidcProviderUpdate';
+export type { OidcProviderView } from './generated/oidc/OidcProviderView';
+export type { StartInstitutionSsoResponse } from './generated/oidc/StartInstitutionSsoResponse';
+export type { CeActivityRequest } from './generated/career/CeActivityRequest';
+export type { CeActivityResponse } from './generated/career/CeActivityResponse';
+export type { PortfolioCreateRequest } from './generated/career/PortfolioCreateRequest';
+export type { PortfolioCreateResponse } from './generated/career/PortfolioCreateResponse';
+export type { PortfolioEntry } from './generated/career/PortfolioEntry';
+export type { PortfolioListResponse } from './generated/career/PortfolioListResponse';
+export type { NotificationInboxResponse } from './generated/inbox/NotificationInboxResponse';
+export type { NotificationItem } from './generated/inbox/NotificationItem';
+export type { NotificationPreferences } from './generated/inbox/NotificationPreferences';
+export type { NotificationPreferencesUpdateRequest } from './generated/inbox/NotificationPreferencesUpdateRequest';
+export type { NotificationPreferencesUpdateResponse } from './generated/inbox/NotificationPreferencesUpdateResponse';
 export type { Today } from './generated/today/Today';
 export type { TodayTask } from './generated/today/TodayTask';
 export type { TodayRevision } from './generated/today/TodayRevision';
@@ -83,7 +279,143 @@ export type { NextActionRecommendation } from './generated/today/NextActionRecom
 export type { NextActionRequest } from './generated/today/NextActionRequest';
 export type { NextActionWithAction } from './generated/today/NextActionWithAction';
 export type { RecommendedAction } from './generated/today/RecommendedAction';
+export type { ReplanAppliedResponse } from './generated/today/ReplanAppliedResponse';
+export type { ReplanRequest } from './generated/today/ReplanRequest';
+export type { ReplanResponse } from './generated/today/ReplanResponse';
+export type { UndoResponse } from './generated/today/UndoResponse';
+export type { ReplanWithinCapacityResponse } from './generated/today/ReplanWithinCapacityResponse';
+export type { TaskProtectionRequest } from './generated/today/TaskProtectionRequest';
+export type { TaskProtectionResponse } from './generated/today/TaskProtectionResponse';
+export type { CurriculumChapter } from './generated/today/CurriculumChapter';
+export type { MyCurriculumResponse } from './generated/today/MyCurriculumResponse';
 export type { AdminDashboard } from './generated/admin/AdminDashboard';
+export type { AdminAuditEvent } from './generated/admin/AdminAuditEvent';
+export type { AdminAuditResponse } from './generated/admin/AdminAuditResponse';
+export type { AdminImportAppliedResponse } from './generated/admin/AdminImportAppliedResponse';
+export type { AdminImportIssue } from './generated/admin/AdminImportIssue';
+export type { AdminImportedQuestion } from './generated/admin/AdminImportedQuestion';
+export type { AdminImportPreviewResponse } from './generated/admin/AdminImportPreviewResponse';
+export type { AdminImportRequest } from './generated/admin/AdminImportRequest';
+export type { AdminImportResponse } from './generated/admin/AdminImportResponse';
+export type { AssessmentWorkflowError } from './generated/admin/AssessmentWorkflowError';
+export type { AssessmentWorkflowRequest } from './generated/admin/AssessmentWorkflowRequest';
+export type { AssessmentWorkflowResponse } from './generated/admin/AssessmentWorkflowResponse';
+export type { AssessmentWorkflowResult } from './generated/admin/AssessmentWorkflowResult';
+export type { ImportQuestion } from './generated/admin/ImportQuestion';
+export type { RollbackImportResponse } from './generated/admin/RollbackImportResponse';
+export type { AdminCurriculumNode } from './generated/admin/AdminCurriculumNode';
+export type { AdminHierarchyResponse } from './generated/admin/AdminHierarchyResponse';
+export type { CreateNodeRequest } from './generated/admin/CreateNodeRequest';
+export type { CreateNodeResponse } from './generated/admin/CreateNodeResponse';
+export type { AdminConcept } from './generated/concepts/AdminConcept';
+export type { AdminConceptListResponse } from './generated/concepts/AdminConceptListResponse';
+export type { CreateConceptRequest } from './generated/concepts/CreateConceptRequest';
+export type { CreateConceptResponse } from './generated/concepts/CreateConceptResponse';
+export type { CreateConceptVersionRequest } from './generated/concepts/CreateConceptVersionRequest';
+export type { CreateConceptVersionResponse } from './generated/concepts/CreateConceptVersionResponse';
+export type { NodeConcept } from './generated/concepts/NodeConcept';
+export type { NodeConceptsResponse } from './generated/concepts/NodeConceptsResponse';
+export type { SetNodeConceptsRequest } from './generated/concepts/SetNodeConceptsRequest';
+export type { SetNodeConceptsResponse } from './generated/concepts/SetNodeConceptsResponse';
+export type { AdminSettings } from './generated/settings/AdminSettings';
+export type { AdminSettingsResponse } from './generated/settings/AdminSettingsResponse';
+export type { AdminSettingsUpdateRequest } from './generated/settings/AdminSettingsUpdateRequest';
+export type { AdminSettingsUpdateResponse } from './generated/settings/AdminSettingsUpdateResponse';
+export type { AdminContentRight } from './generated/admin/AdminContentRight';
+export type { AdminExtractionReport } from './generated/admin/AdminExtractionReport';
+export type { AdminExtractionReportListResponse } from './generated/admin/AdminExtractionReportListResponse';
+export type { ContentRightStatus } from './generated/admin/ContentRightStatus';
+export type { ContentRightsRequest } from './generated/admin/ContentRightsRequest';
+export type { ContentRightsResponse } from './generated/admin/ContentRightsResponse';
+export type { CreateContentRightsResponse } from './generated/admin/CreateContentRightsResponse';
+export type { CreateExtractionReportRequest } from './generated/admin/CreateExtractionReportRequest';
+export type { ExtractionMalwareScanStatus } from './generated/admin/ExtractionMalwareScanStatus';
+export type { ExtractionReportReview } from './generated/admin/ExtractionReportReview';
+export type { ExtractionReportStatus } from './generated/admin/ExtractionReportStatus';
+export type { ExtractionReviewDecision } from './generated/admin/ExtractionReviewDecision';
+export type { AddInstitutionMemberRequest } from './generated/institutions/AddInstitutionMemberRequest';
+export type { AddInstitutionMemberResponse } from './generated/institutions/AddInstitutionMemberResponse';
+export type { CreateAssignmentRequest } from './generated/institutions/CreateAssignmentRequest';
+export type { CreateAssignmentResponse } from './generated/institutions/CreateAssignmentResponse';
+export type { CreateCohortRequest } from './generated/institutions/CreateCohortRequest';
+export type { CreateCohortResponse } from './generated/institutions/CreateCohortResponse';
+export type { CreateInstitutionRequest } from './generated/institutions/CreateInstitutionRequest';
+export type { CreateInstitutionResponse } from './generated/institutions/CreateInstitutionResponse';
+export type { CreateProgramRequest } from './generated/institutions/CreateProgramRequest';
+export type { CreateProgramResponse } from './generated/institutions/CreateProgramResponse';
+export type { InstitutionAnalyticsChapter } from './generated/institutions/InstitutionAnalyticsChapter';
+export type { InstitutionAnalyticsQuery } from './generated/institutions/InstitutionAnalyticsQuery';
+export type { InstitutionAnalyticsResponse } from './generated/institutions/InstitutionAnalyticsResponse';
+export type { InstitutionAuditEvent } from './generated/institutions/InstitutionAuditEvent';
+export type { InstitutionAuditResponse } from './generated/institutions/InstitutionAuditResponse';
+export type { CohortSummary } from './generated/institutions/CohortSummary';
+export type { InstitutionCohortsResponse } from './generated/institutions/InstitutionCohortsResponse';
+export type { InstitutionMembership } from './generated/institutions/InstitutionMembership';
+export type { InstitutionProgram } from './generated/institutions/InstitutionProgram';
+export type { InstitutionProgramsResponse } from './generated/institutions/InstitutionProgramsResponse';
+export type { MyInstitutionsResponse } from './generated/institutions/MyInstitutionsResponse';
+export type { ProgramCurriculumCoverageChapter } from './generated/institutions/ProgramCurriculumCoverageChapter';
+export type { ProgramCurriculumCoverageResponse } from './generated/institutions/ProgramCurriculumCoverageResponse';
+export type { SetProgramCurriculumRequest } from './generated/institutions/SetProgramCurriculumRequest';
+export type { SetProgramCurriculumResponse } from './generated/institutions/SetProgramCurriculumResponse';
+export type { ReviewExtractionReportRequest } from './generated/admin/ReviewExtractionReportRequest';
+export type { RevokeContentRightsRequest } from './generated/admin/RevokeContentRightsRequest';
+export type { RevokeContentRightsResponse } from './generated/admin/RevokeContentRightsResponse';
+export type { ExtractionMalwareScanStatus } from './generated/admin/ExtractionMalwareScanStatus';
+export type { ExtractionReportReview } from './generated/admin/ExtractionReportReview';
+export type { ExtractionReportStatus } from './generated/admin/ExtractionReportStatus';
+export type { ExtractionReviewDecision } from './generated/admin/ExtractionReviewDecision';
+export type { MasteryHeatmapBand } from './generated/insights/MasteryHeatmapBand';
+export type { MasteryHeatmapBands } from './generated/insights/MasteryHeatmapBands';
+export type { MasteryHeatmapChapter } from './generated/insights/MasteryHeatmapChapter';
+export type { MasteryHeatmapSystem } from './generated/insights/MasteryHeatmapSystem';
+export type { MasteryHeatmapResponse } from './generated/insights/MasteryHeatmapResponse';
+export type { HeatmapQuery } from './generated/insights/HeatmapQuery';
+export type { SelectionPolicyChapter } from './generated/program/SelectionPolicyChapter';
+export type { SelectionPolicyEstimator } from './generated/program/SelectionPolicyEstimator';
+export type { SelectionPolicyResponse } from './generated/program/SelectionPolicyResponse';
+export type { CommunityProfileRequest } from './generated/community/CommunityProfileRequest';
+export type { CommunityProfileResponse } from './generated/community/CommunityProfileResponse';
+export type { CommunityProfileByHandleResponse } from './generated/community/CommunityProfileByHandleResponse';
+export type { CreateCommunityProfileResponse } from './generated/community/CreateCommunityProfileResponse';
+export type { CreateCommunityGroupRequest } from './generated/community/CreateCommunityGroupRequest';
+export type { CreateCommunityGroupResponse } from './generated/community/CreateCommunityGroupResponse';
+export type { JoinCommunityGroupResponse } from './generated/community/JoinCommunityGroupResponse';
+export type { CreateCommunityPostRequest } from './generated/community/CreateCommunityPostRequest';
+export type { CreateCommunityPostResponse } from './generated/community/CreateCommunityPostResponse';
+export type { CommunityPost } from './generated/community/CommunityPost';
+export type { CommunityPostListResponse } from './generated/community/CommunityPostListResponse';
+export type { ReportCommunityPostRequest } from './generated/community/ReportCommunityPostRequest';
+export type { ReportCommunityPostResponse } from './generated/community/ReportCommunityPostResponse';
+export type { CommunityPostReportSummary } from './generated/community/CommunityPostReportSummary';
+export type { MyCommunityPostReportsResponse } from './generated/community/MyCommunityPostReportsResponse';
+export type { GroupPostReport } from './generated/community/GroupPostReport';
+export type { GroupPostReportQueueResponse } from './generated/community/GroupPostReportQueueResponse';
+export type { ResolveCommunityPostReportRequest } from './generated/community/ResolveCommunityPostReportRequest';
+export type { ResolveCommunityPostReportResponse } from './generated/community/ResolveCommunityPostReportResponse';
+export type { RemoveCommunityPostResponse } from './generated/community/RemoveCommunityPostResponse';
+export type { CommunityGroupSummary } from './generated/community/CommunityGroupSummary';
+export type { CommunityGroupsResponse } from './generated/community/CommunityGroupsResponse';
+export type { CreateDuelRequest } from './generated/community/CreateDuelRequest';
+export type { CreateDuelResponse } from './generated/community/CreateDuelResponse';
+export type { DuelByTokenResponse } from './generated/community/DuelByTokenResponse';
+export type { AcceptDuelResponse } from './generated/community/AcceptDuelResponse';
+export type { DuelSide } from './generated/community/DuelSide';
+export type { DuelStateResponse } from './generated/community/DuelStateResponse';
+export type { DeclineDuelResponse } from './generated/community/DeclineDuelResponse';
+export type { DuelSummary } from './generated/community/DuelSummary';
+export type { MyDuelsResponse } from './generated/community/MyDuelsResponse';
+export type { ShareCardKind } from './generated/community/ShareCardKind';
+export type { ShareCard } from './generated/community/ShareCard';
+export type { UnavailableShareCard } from './generated/community/UnavailableShareCard';
+export type { ShareCardsResponse } from './generated/community/ShareCardsResponse';
+export type { ReportQuestionRequest } from './generated/reports/ReportQuestionRequest';
+export type { QuestionReportResponse } from './generated/reports/QuestionReportResponse';
+export type { ReportFeedback } from './generated/reports/ReportFeedback';
+export type { AdminReport } from './generated/reports/AdminReport';
+export type { AdminReportsResponse } from './generated/reports/AdminReportsResponse';
+export type { ResolveQuestionReportRequest } from './generated/reports/ResolveQuestionReportRequest';
+export type { ResolveQuestionReportResponse } from './generated/reports/ResolveQuestionReportResponse';
 export type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 export type { AdminArticleSummary } from './generated/library/AdminArticleSummary';
 export type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -95,17 +427,27 @@ export type { LibrarySearchResult } from './generated/library/LibrarySearchResul
 export type { UpdateArticleDraftRequest } from './generated/library/UpdateArticleDraftRequest';
 export type { PublishArticleResponse } from './generated/library/PublishArticleResponse';
 export type { PrivateDocumentSearchResult } from './generated/library/PrivateDocumentSearchResult';
+export type { PrivateImportRight } from './generated/library/PrivateImportRight';
+export type { PrivateImportRightsResponse } from './generated/library/PrivateImportRightsResponse';
+export type { PrivateImportSummary } from './generated/library/PrivateImportSummary';
+export type { PrivateImportListResponse } from './generated/library/PrivateImportListResponse';
+export type { CreatePrivateImportRequest } from './generated/library/CreatePrivateImportRequest';
+export type { PrivateImportResponse } from './generated/library/PrivateImportResponse';
+export type { PrivateImportDeletedResponse } from './generated/library/PrivateImportDeletedResponse';
 export type { ArticleMedia } from './generated/library/ArticleMedia';
 export type { MediaCaptionCue } from './generated/library/MediaCaptionCue';
 export type { MediaChapterMarker } from './generated/library/MediaChapterMarker';
 export type { ImageConceptLink } from './generated/image/ImageConceptLink';
 export type { AdminImageAnnotation } from './generated/image/AdminImageAnnotation';
 export type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
+export type { ImageAnnotationRequest } from './generated/image/ImageAnnotationRequest';
 export type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
 export type { ImageAnnotationDecision } from './generated/image/ImageAnnotationDecision';
+export type { ImageAnnotationReviewRequest } from './generated/image/ImageAnnotationReviewRequest';
 export type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
 export type { ImageCaseAnnotation } from './generated/image/ImageCaseAnnotation';
 export type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
+export type { ImageCaseConceptsRequest } from './generated/image/ImageCaseConceptsRequest';
 export type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
 export type { ImageCaseKind } from './generated/image/ImageCaseKind';
 export type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
@@ -155,6 +497,7 @@ export type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 export type { PackLeaseListResponse } from './generated/packs/PackLeaseListResponse';
 export type { PackLeaseRequest } from './generated/packs/PackLeaseRequest';
 export type { PackLeaseResponse } from './generated/packs/PackLeaseResponse';
+export type { PackLeaseRevokedResponse } from './generated/packs/PackLeaseRevokedResponse';
 export type { PackLeaseSummary } from './generated/packs/PackLeaseSummary';
 export type { PackManifest } from './generated/packs/PackManifest';
 export type { PackManifestItem } from './generated/packs/PackManifestItem';
@@ -197,6 +540,33 @@ export type { CreateNoteResponse } from './generated/notes/CreateNoteResponse';
 export type { UpdateNoteResponse } from './generated/notes/UpdateNoteResponse';
 export type { ListNotesResponse } from './generated/notes/ListNotesResponse';
 export type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
+export type { MarkResponse } from './generated/marks/MarkResponse';
+export type { MarkedQuestion } from './generated/marks/MarkedQuestion';
+export type { MarkedQuestionsResponse } from './generated/marks/MarkedQuestionsResponse';
+export type { AddCardRequest } from './generated/review/AddCardRequest';
+export type { AddCardResponse } from './generated/review/AddCardResponse';
+export type { CreateDeckRequest } from './generated/review/CreateDeckRequest';
+export type { CreateDeckResponse } from './generated/review/CreateDeckResponse';
+export type { ReviewDebtResponse } from './generated/review/ReviewDebtResponse';
+export type { ReviewEventRequest } from './generated/review/ReviewEventRequest';
+export type { ReviewEventResponse } from './generated/review/ReviewEventResponse';
+export type { ReviewQueueItem } from './generated/review/ReviewQueueItem';
+export type { ReviewQueueResponse } from './generated/review/ReviewQueueResponse';
+export type { CalculatorInput } from './generated/calculators/CalculatorInput';
+export type { CalculatorResponse } from './generated/calculators/CalculatorResponse';
+export type { ConvertInput } from './generated/calculators/ConvertInput';
+export type { ConvertResponse } from './generated/calculators/ConvertResponse';
+export type { SessionHintResponse } from './generated/practice/SessionHintResponse';
+export type { IntegrityEventRequest } from './generated/integrity/IntegrityEventRequest';
+export type { IntegrityEventResponse } from './generated/integrity/IntegrityEventResponse';
+export type { ExamRegistryItem } from './generated/exams/ExamRegistryItem';
+export type { ExamRegistryResponse } from './generated/exams/ExamRegistryResponse';
+export type { CoachTurnRequest } from './generated/coach/CoachTurnRequest';
+export type { CoachTurnResponse } from './generated/coach/CoachTurnResponse';
+export type { CoachHistoryTurn } from './generated/coach/CoachHistoryTurn';
+export type { CoachHistoryResponse } from './generated/coach/CoachHistoryResponse';
+export type { AnswerableQuestion } from './generated/coach/AnswerableQuestion';
+export type { AnswerableQuestionsResponse } from './generated/coach/AnswerableQuestionsResponse';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
 	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
@@ -263,268 +633,19 @@ async function call<T>(
 	return (await res.json()) as T;
 }
 
-export interface AdminImportResult {
-	batch_id: string;
-	status: string;
-	rows: number;
-	valid?: number;
-	issues?: { row: number; code: string; message: string }[];
-	created?: unknown[];
-}
-
-export interface PrivateImportRight {
-	rights_id: string;
-	ref_code: string;
-	licensor: string;
-	valid_to: string | null;
-	search_allowed: boolean;
-}
-
-export interface PrivateImportSummary {
-	document_id: string;
-	title: string;
-	media_type: 'text/plain' | 'text/markdown';
-	rights_ref: string;
-	sha256: string;
-	created_at: string;
-	available: boolean;
-}
-
-export interface PrivateImport extends PrivateImportSummary {
-	content: string;
-}
-
-export interface AdminContentRight {
-	rights_id: string;
-	ref_code: string;
-	licensor: string;
-	territory: string;
-	permitted_uses: string[];
-	valid_from: string;
-	valid_to: string | null;
-	notes: string | null;
-	revoked_at: string | null;
-	revoked_by: string | null;
-	revocation_note: string | null;
-	contract_ref: string | null;
-	contract_version: string | null;
-	asset_refs: string[];
-	audiences: string[];
-	seat_limit: number | null;
-	offline_terms: string | null;
-	quotation_limit_words: number | null;
-	ai_terms: string | null;
-	derivative_terms: string | null;
-	attribution: string | null;
-	royalty_terms: string | null;
-	status: 'active' | 'scheduled' | 'expired' | 'revoked';
-}
-
-export interface AdminExtractionReport {
-	report_id: string;
-	source_label: string;
-	source_sha256: string;
-	media_type: string;
-	parser_version: string;
-	rights_ref: string;
-	rights_available: boolean;
-	malware_scan_status: 'clean' | 'blocked' | 'not_scanned';
-	expected_regions: string[];
-	extracted_regions: string[];
-	missing_regions: string[];
-	uncertain_regions: string[];
-	critical_regions: string[];
-	status: 'blocked' | 'incomplete' | 'review_required' | 'rejected' | 'complete' | 'rights_unavailable';
-	created_by: string | null;
-	created_at: string;
-	review: {
-		decision: 'approved' | 'rejected';
-		reviewer_id: string | null;
-		verified_regions: string[] | null;
-		note: string | null;
-		reviewed_at: string | null;
-	} | null;
-}
-
-export interface AdminConcept {
-	concept_id: string;
-	canonical_key: string;
-	current_version: number;
-	display_name: string;
-	definition: string;
-}
-
-export interface AdminCurriculumNode {
-	id: string;
-	kind: string;
-	name: string;
-	parent_id: string | null;
-	display_order: number;
-	status: string;
-}
-
-export interface AdminReport {
-	report_id: string;
-	question_version_id: string;
-	question_id: string;
-	version: number;
-	vignette: string;
-	lead_in: string;
-	category: string;
-	reporter_feedback: { category: string; note: string }[];
-	feedback_truncated: boolean;
-	report_count: number;
-	first_reported_at: string;
-	acknowledgement_due_at: string;
-	resolution_due_at: string;
-	acknowledgements_on_time: boolean;
-	resolution_overdue: boolean;
-	quarantined: boolean;
-}
-
-export interface EngagementQotd {
-	enabled: boolean;
-	exam_id?: string | null;
-	needs_exam_selection?: boolean;
-	answered?: boolean;
-	available?: boolean;
-	question_version_id?: string;
-	vignette?: string;
-	options?: { text: string }[];
-	community_split?: { chosen_index: number; count: number }[];
-	community_total?: number;
-}
-
-export interface Engagement {
-	enabled: boolean;
-	available_minutes: number;
-	daily_goal: {
-		enabled: boolean;
-		mode: 'questions' | 'minutes';
-		unit: 'questions' | 'minutes';
-		target: number;
-		answered_today: number;
-		minutes_today: number;
-		met: boolean;
-	};
-	streak: { enabled: boolean; count: number; freezes: number };
-	qotd: EngagementQotd;
-}
-
-export interface EngagementSettings {
-	daily_goal_questions?: number;
-	daily_goal_mode?: 'questions' | 'minutes';
-	available_minutes?: number;
-	daily_goal_enabled?: boolean;
-	streak_enabled?: boolean;
-	qotd_enabled?: boolean;
-	qotd_exam_id?: string | null;
-}
-
-export interface OidcProviderView {
-	issuer: string;
-	client_id: string;
-	enabled: boolean;
-	client_secret_configured: boolean;
-}
-
-export interface OidcProviderUpdate {
-	issuer: string;
-	client_id: string;
-	client_secret?: string;
-	clear_client_secret?: boolean;
-	enabled: boolean;
-}
-
-export interface AdminSettings {
-	mastery_bands: number[];
-	community_min_sample: number;
-	free_daily_questions: number;
-	free_daily_coach_turns: number;
-	retest_intervals_days: number[];
-	offline_lease_days: number;
-	max_reviews_per_day: number;
-	max_new_cards_per_day: number;
-	competition_difficulty_points: number[];
-}
-
-export interface CompetitionSummary {
-	competition_id: string;
-	title: string;
-	exam_id: string;
-	exam: string;
-	cadence: 'one_off' | 'daily' | 'weekly' | 'monthly' | 'live';
-	series_id: string | null;
-	starts_at: string;
-	ends_at: string;
-	status: string;
-	entered: boolean;
-	attempt_status: 'in_progress' | 'submitted' | null;
-}
-
-export interface CompetitionLeagueStanding {
-	rank: number;
-	handle: string;
-	points: number;
-	accuracy: number;
-	total_time_ms: number;
-	is_me: boolean;
-}
-
-export type CompetitionLeagueState =
-	| { joined: false }
-	| {
-			joined: true;
-			exam_id: string;
-			cohort_id: string;
-			week_start: string;
-			week_end: string;
-			division: number;
-			cohort_number: number;
-			standings: CompetitionLeagueStanding[];
-	  };
-
-export interface CompetitionQuestion {
-	question_version_id: string;
-	question_number: number;
-	total_questions: number;
-	vignette: string;
-	lead_in: string;
-	options: { text: string }[];
-}
-
-export type CompetitionAttemptStep =
-	| { attempt_id: string; submitted: false; question: CompetitionQuestion }
-	| {
-			attempt_id: string;
-			submitted: true;
-			entry_id: string;
-			score: number;
-			questions: number;
-			total_time_ms: number;
-		};
-
-export interface CompetitionLeaderboard {
-	prize_reviewed: boolean;
-	status: string;
-	entries: {
-		rank: number;
-		handle: string;
-		score: number;
-		accuracy: number;
-		questions_attempted: number;
-		average_response_time_ms: number;
-		total_time_ms: number;
-		is_me: boolean;
-		prize_eligible: boolean;
-	}[];
-}
-
 export const Api = {
 	register: (email: string, password: string) =>
-		call<{ user_id: string }>('POST', '/v1/auth/register', { email, password }),
+		call<RegisterResponse>(
+			'POST',
+			'/v1/auth/register',
+			{ email, password } satisfies RegisterRequest
+		),
 	login: (email: string, password: string) =>
-		call<{ token: string }>('POST', '/v1/auth/login', { email, password }),
+		call<LoginResponse>(
+			'POST',
+			'/v1/auth/login',
+			{ email, password } satisfies LoginRequest
+		),
 	getInstitutionOidc: (institutionId: string) =>
 		call<OidcProviderView>(
 			'GET',
@@ -537,12 +658,16 @@ export const Api = {
 			body
 		),
 	startInstitutionSso: (institutionId: string) =>
-		call<{ authorization_url: string }>(
+		call<StartInstitutionSsoResponse>(
 			'GET',
 			`/v1/institutions/${encodeURIComponent(institutionId)}/sso/oidc/start`
 		),
 	completeInstitutionSso: (ticket: string) =>
-		call<{ token: string }>('POST', '/v1/auth/oidc/complete', { ticket }),
+		call<CompleteOidcResponse>(
+			'POST',
+			'/v1/auth/oidc/complete',
+			{ ticket } satisfies CompleteOidcRequest
+		),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	recommendNextAction: (
 		availableMinutes: NextActionRequest['available_minutes'],
@@ -557,45 +682,28 @@ export const Api = {
 		return call<NextActionRecommendation>('GET', `/v1/me/plan/next-action?${query}`);
 	},
 	protectPlanTask: (planId: string, taskId: string, isProtected: boolean) =>
-		call<{ task_id: string; protected: boolean }>(
+		call<TaskProtectionResponse>(
 			'PUT',
 			`/v1/plans/${planId}/tasks/${taskId}/protection`,
-			{ protected: isProtected }
+			{ protected: isProtected } satisfies TaskProtectionRequest
 		),
 	replan: (dailyMinutes: number, expectedVersion: number) =>
-		call<{
-			replanned: boolean;
-			version?: number;
-			deferred_tasks?: number;
-			deferred_task_ids?: string[];
-		}>(
+		call<ReplanResponse>(
 			'POST',
 			'/v1/me/plan/replan',
-			{ daily_minutes: dailyMinutes, expected_version: expectedVersion }
+			{ daily_minutes: dailyMinutes, expected_version: expectedVersion } satisfies ReplanRequest
 		),
 	engagement: () => call<Engagement>('GET', '/v1/me/engagement'),
 	updateEngagementSettings: (body: EngagementSettings) =>
-		call<{
-			daily_goal_questions: number;
-		daily_goal_mode: 'questions' | 'minutes';
-		available_minutes: number;
-			daily_goal_enabled: boolean;
-			streak_enabled: boolean;
-			qotd_enabled: boolean;
-			freezes: number;
-			qotd_exam_id: string | null;
-		}>('PUT', '/v1/me/engagement/settings', body),
-	answerQotd: (questionVersionId: string, chosenIndex: number, elapsedMs = 0) =>
-		call<{
-			correct: boolean;
-			correct_index: number;
-			community_split: { chosen_index: number; count: number }[];
-			community_total: number;
-		}>('POST', '/v1/me/qotd/answers', {
+		call<EngagementSettingsResponse>('PUT', '/v1/me/engagement/settings', body),
+	answerQotd: (questionVersionId: string, chosenIndex: number, elapsedMs = 0) => {
+		const body: QotdAnswerRequest = {
 			question_version_id: questionVersionId,
 			chosen_index: chosenIndex,
 			elapsed_ms: elapsedMs
-		}),
+		};
+		return call<QotdAnswerResponse>('POST', '/v1/me/qotd/answers', body);
+	},
 	createSession: (body: CreateSessionRequest) =>
 		call<CreateSessionResponse>('POST', '/v1/practice/sessions', body),
 	createPackLease: (body: PackLeaseRequest) =>
@@ -617,7 +725,7 @@ export const Api = {
 			body
 		),
 	revokePackLease: (leaseId: string) =>
-		call<{ revoked: boolean }>('DELETE', `/v1/packs/lease/${encodeURIComponent(leaseId)}`),
+		call<PackLeaseRevokedResponse>('DELETE', `/v1/packs/lease/${encodeURIComponent(leaseId)}`),
 	listPackLeases: () => call<PackLeaseListResponse>('GET', '/v1/me/packs'),
 	listScenarios: () => call<ScenarioListResponse>('GET', '/v1/scenarios'),
 	imageCases: () => call<ImageCaseListResponse>('GET', '/v1/me/image-cases'),
@@ -632,13 +740,13 @@ export const Api = {
 		call<ImageCaseConceptsResponse>(
 			'PUT',
 			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/concepts`,
-			{ concept_ids: conceptIds }
+			{ concept_ids: conceptIds } satisfies ImageCaseConceptsRequest
 		),
 	adminImageAnnotations: () =>
 		call<AdminImageAnnotationListResponse>('GET', '/v1/admin/image-annotations'),
 	createImageAnnotation: (
 		caseId: string,
-		body: { image_index: number; x_percent: number; y_percent: number; body: string }
+		body: ImageAnnotationRequest
 	) =>
 		call<ImageAnnotationCreatedResponse>(
 			'POST',
@@ -653,7 +761,7 @@ export const Api = {
 		call<ImageAnnotationReviewResponse>(
 			'POST',
 			`/v1/admin/image-annotations/${encodeURIComponent(annotationId)}/review`,
-			{ decision, note }
+			{ decision, note } satisfies ImageAnnotationReviewRequest
 		),
 	startScenario: (scenarioSlug: string) =>
 		call<ScenarioStartResponse>('POST', '/v1/scenarios/runs', { scenario_slug: scenarioSlug }),
@@ -737,37 +845,21 @@ export const Api = {
 			body
 		),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
-	recordIntegrityEvent: (body: {
-		session_id: string;
-		signal_type:
-			| 'background'
-			| 'foreground'
-			| 'window_blur'
-			| 'fullscreen_exit'
-			| 'clock_change';
-		detail?: Record<string, number>;
-		client_time: string;
-	}) =>
-		call<{
-			recorded: true;
-			event_id: string;
-			action: 'none' | 'warn' | 'auto_submitted';
-			away_seconds?: number;
-			receipt?: SubmitReceipt;
-		}>('POST', '/v1/integrity-events', body),
+	recordIntegrityEvent: (body: IntegrityEventRequest) =>
+		call<IntegrityEventResponse>('POST', '/v1/integrity-events', body),
 	getSessionHint: (sid: string, itemIndex: number) =>
-		call<{ hint: string; assisted: true }>(
+		call<SessionHintResponse>(
 			'GET',
 			`/v1/practice/sessions/${sid}/items/${itemIndex}/hint`
 		),
-	calculate: (kind: string, inputs: Record<string, number | boolean>) =>
-		call<{ calculator: string; value: number; unit: string; disclaimer: string }>(
+	calculate: (kind: string, inputs: CalculatorInput) =>
+		call<CalculatorResponse>(
 			'POST',
 			`/v1/calculators/${encodeURIComponent(kind)}`,
 			inputs
 		),
-	convertUnits: (body: { value: number; analyte?: string; from: string; to: string }) =>
-		call<{ value: number; unit: string; disclaimer: string }>(
+	convertUnits: (body: ConvertInput) =>
+		call<ConvertResponse>(
 			'POST',
 			'/v1/calculators/convert',
 			body
@@ -776,32 +868,18 @@ export const Api = {
 		call<AnswerResponse>('POST', `/v1/practice/sessions/${sid}/answers`, body),
 	submit: (sid: string) => call<SubmitReceipt>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
-		call<{ plan_version: number }>(
+		call<UndoResponse>(
 			'POST',
 			`/v1/plans/${planId}/revisions/${revisionId}/undo`
 		),
-	reportQuestion: (versionId: string, body: { category: string; note?: string }) =>
-		call<{
-			report_id: string;
-			already_recorded: boolean;
-			quarantined: boolean;
-			status: 'open' | 'quarantined' | 'resolved_fixed' | 'resolved_rejected';
-			created_at: string;
-			acknowledged_at: string;
-			acknowledgement_due_at: string;
-			resolution_due_at: string;
-			resolution_note: string | null;
-			resolved_at: string | null;
-			corrected_version_id: string | null;
-			corrected_version_number: number | null;
-			correction_note: string | null;
-		}>(
+	reportQuestion: (versionId: string, body: ReportQuestionRequest) =>
+		call<QuestionReportResponse>(
 			'POST',
 			`/v1/questions/versions/${versionId}/reports`,
 			body
 		),
 	adminReports: () =>
-		call<{ reports: AdminReport[] }>('GET', '/v1/admin/reports?limit=100'),
+		call<AdminReportsResponse>('GET', '/v1/admin/reports?limit=100'),
 	adminDashboard: () => call<AdminDashboard>('GET', '/v1/admin/dashboard'),
 	adminArticles: () => call<AdminArticleListResponse>('GET', '/v1/admin/articles'),
 	createAdminArticle: (body: CreateArticleRequest) =>
@@ -831,13 +909,13 @@ export const Api = {
 			'POST',
 			`/v1/admin/articles/${encodeURIComponent(articleId)}/versions/${encodeURIComponent(versionId)}/publish`
 		),
-	adminSettings: () => call<{ settings: AdminSettings }>('GET', '/v1/admin/settings'),
-	updateAdminSettings: (settings: AdminSettings) =>
-		call<{ updated: (keyof AdminSettings)[] }>('PATCH', '/v1/admin/settings', settings),
+	adminSettings: () => call<AdminSettingsResponse>('GET', '/v1/admin/settings'),
+	updateAdminSettings: (settings: AdminSettingsUpdateRequest) =>
+		call<AdminSettingsUpdateResponse>('PATCH', '/v1/admin/settings', settings),
 	listContentRights: () =>
-		call<{ rights: AdminContentRight[] }>('GET', '/v1/admin/content-rights'),
+		call<ContentRightsResponse>('GET', '/v1/admin/content-rights'),
 	listExtractionReports: () =>
-		call<{ reports: AdminExtractionReport[] }>('GET', '/v1/admin/library/extraction-reports'),
+		call<AdminExtractionReportListResponse>('GET', '/v1/admin/library/extraction-reports'),
 	pendingScenarioAssessments: () =>
 		call<PendingScenarioAssessmentsResponse>(
 			'GET',
@@ -857,94 +935,60 @@ export const Api = {
 			`/v1/admin/scenarios/runs/${encodeURIComponent(runId)}/assessment`,
 			body
 		),
-	createExtractionReport: (body: {
-		source_label: string;
-		source_sha256: string;
-		media_type: string;
-		parser_version: string;
-		rights_ref: string;
-		malware_scan_status: AdminExtractionReport['malware_scan_status'];
-		expected_regions: string[];
-		extracted_regions: string[];
-		uncertain_regions: string[];
-		critical_regions: string[];
-	}) => call<AdminExtractionReport>('POST', '/v1/admin/library/extraction-reports', body),
+	createExtractionReport: (body: CreateExtractionReportRequest) =>
+		call<AdminExtractionReport>('POST', '/v1/admin/library/extraction-reports', body),
 	reviewExtractionReport: (
 		reportId: string,
-		body: {
-			decision: 'approved' | 'rejected';
-			verified_regions: string[];
-			note: string;
-		}
+		body: ReviewExtractionReportRequest
 	) =>
 		call<AdminExtractionReport>(
 			'POST',
 			`/v1/admin/library/extraction-reports/${encodeURIComponent(reportId)}/review`,
 			body
 		),
-	createContentRights: (body: {
-		ref_code: string;
-		licensor: string;
-		territory: string;
-		permitted_uses: string[];
-		valid_from: string;
-		valid_to?: string;
-		notes?: string;
-		contract_ref?: string;
-		contract_version?: string;
-		asset_refs?: string[];
-		audiences?: string[];
-		seat_limit?: number;
-		offline_terms?: string;
-		quotation_limit_words?: number;
-		ai_terms?: string;
-		derivative_terms?: string;
-		attribution?: string;
-		royalty_terms?: string;
-	}) => call<{ rights_id: string; ref_code: string }>('POST', '/v1/admin/content-rights', body),
+	createContentRights: (body: ContentRightsRequest) =>
+		call<CreateContentRightsResponse>('POST', '/v1/admin/content-rights', body),
 	revokeContentRights: (rightsId: string, reason: string) =>
-		call<{ revoked: boolean; already_revoked: boolean }>(
+		call<RevokeContentRightsResponse>(
 			'PATCH',
 			`/v1/admin/content-rights/${encodeURIComponent(rightsId)}/revoke`,
-			{ reason }
+			{ reason } satisfies RevokeContentRightsRequest
 		),
 	resolveReport: (
 		reportId: string,
-		status: 'resolved_fixed' | 'resolved_rejected',
+		status: ResolveQuestionReportRequest['status'],
 		resolutionNote: string,
 		correctionNote?: string
 	) =>
-		call<{
-			status: string;
-			question_version_id: string;
-			corrected_version_id: string | null;
-			resolved_reports: number;
-			notified_reporters: number;
-		}>('POST', `/v1/reports/${encodeURIComponent(reportId)}/resolve`, {
-			status,
-			resolution_note: resolutionNote,
-			...(correctionNote ? { correction_note: correctionNote } : {})
-		}),
+		call<ResolveQuestionReportResponse>(
+			'POST',
+			`/v1/reports/${encodeURIComponent(reportId)}/resolve`,
+			{
+				status,
+				resolution_note: resolutionNote,
+				...(correctionNote ? { correction_note: correctionNote } : {})
+			} satisfies ResolveQuestionReportRequest
+		),
 	createDeck: (name: string) =>
-		call<{ deck_id: string }>('POST', '/v1/decks', { name }),
+		call<CreateDeckResponse>(
+			'POST',
+			'/v1/decks',
+			{ name } satisfies CreateDeckRequest
+		),
 	addCard: (deckId: string, front: string, back: string) =>
-		call<{ card_id: string }>('POST', `/v1/decks/${deckId}/cards`, {
-			front,
-			back
-		}),
+		call<AddCardResponse>(
+			'POST',
+			`/v1/decks/${deckId}/cards`,
+			{ front, back } satisfies AddCardRequest
+		),
 	reviewQueue: () =>
-		call<{
-			due: { card_id: string; front: string; back: string }[];
-			new: { card_id: string; front: string; back: string }[];
-			backlog_remaining: number;
-		}>('GET', '/v1/reviews/queue'),
-	listExams: () =>
-		call<{ exams: { exam_id: string; code: string; name: string }[] }>('GET', '/v1/exams'),
+		call<ReviewQueueResponse>('GET', '/v1/reviews/queue'),
+	listExams: () => call<ExamRegistryResponse>('GET', '/v1/exams'),
 	listMocks: () => call<MockListResponse>('GET', '/v1/mocks'),
 	createMock: (body: CreateMockRequest) =>
 		call<CreateMockResponse>('POST', '/v1/mocks', body),
 	listCompetitions: () =>
-		call<{ competitions: CompetitionSummary[] }>('GET', '/v1/competitions'),
+		call<CompetitionListResponse>('GET', '/v1/competitions'),
 	competitionLeague: (examId: string) =>
 		call<CompetitionLeagueState>(
 			'GET',
@@ -956,7 +1000,7 @@ export const Api = {
 			`/v1/leagues/${encodeURIComponent(examId)}/join`
 		),
 	leaveCompetitionLeague: (examId: string) =>
-		call<{ left: boolean }>(
+		call<LeaveCompetitionLeagueResponse>(
 			'DELETE',
 			`/v1/leagues/${encodeURIComponent(examId)}/membership`
 		),
@@ -964,7 +1008,7 @@ export const Api = {
 		call<CompetitionAttemptStep>(
 			'POST',
 			`/v1/competitions/${encodeURIComponent(competitionId)}/entry`,
-			{ handle }
+			{ handle } satisfies StartCompetitionEntryRequest
 		),
 	answerCompetitionQuestion: (
 		competitionId: string,
@@ -979,41 +1023,31 @@ export const Api = {
 				question_version_id: questionVersionId,
 				chosen_index: chosenIndex,
 				idempotency_key: idempotencyKey
-			}
+			} satisfies AnswerCompetitionQuestionRequest
 		),
 	competitionLeaderboard: (competitionId: string) =>
-		call<CompetitionLeaderboard>(
+		call<CompetitionLeaderboardResponse>(
 			'GET',
 			`/v1/competitions/${encodeURIComponent(competitionId)}/leaderboard`
 		),
 	startMock: (mockId: string) =>
 		call<StartMockResponse>('POST', `/v1/mocks/${mockId}/start`),
 	answerableQuestions: () =>
-		call<{
-			questions: {
-				question_version_id: string;
-				vignette: string;
-				chapter: string;
-			}[];
-		}>('GET', '/v1/coach/answerable-questions'),
+		call<AnswerableQuestionsResponse>('GET', '/v1/coach/answerable-questions'),
 	coachTurn: (
 		vid: string,
 		promptType: string,
 		message: string,
 		idempotencyKey: string
 	) =>
-		call<{
-			already_recorded: boolean;
-			answer: string;
-			adapter: string;
-		}>('POST', '/v1/coach/turns', {
+		call<CoachTurnResponse>('POST', '/v1/coach/turns', {
 			question_version_id: vid,
 			prompt_type: promptType,
 			message,
 			idempotency_key: idempotencyKey
-		}),
+		} satisfies CoachTurnRequest),
 	coachHistory: (vid: string) =>
-		call<{ turns: unknown[] }>(
+		call<CoachHistoryResponse>(
 			'GET',
 			`/v1/coach/history?question_version_id=${vid}`
 		),
@@ -1036,14 +1070,14 @@ export const Api = {
 		call<UpdateNoteResponse>('PATCH', `/v1/notes/${encodeURIComponent(noteId)}`, body),
 	listNotes: () => call<ListNotesResponse>('GET', '/v1/notes'),
 	myMarks: () =>
-		call<{ marks: { question_version_id: string; marked_at: string }[] }>(
+		call<MarkedQuestionsResponse>(
 			'GET',
 			'/v1/me/marks'
 		),
 	markQuestion: (versionId: string) =>
-		call<{ marked: boolean }>('POST', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
+		call<MarkResponse>('POST', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
 	unmarkQuestion: (versionId: string) =>
-		call<{ marked: boolean }>('DELETE', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
+		call<MarkResponse>('DELETE', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
 	deleteNote: (noteId: string) =>
 		call<DeleteNoteResponse>('DELETE', `/v1/notes/${noteId}`),
 	librarySearch: (q: string, scope: { jurisdiction?: string; as_of?: string } = {}) => {
@@ -1062,100 +1096,65 @@ export const Api = {
 			`/v1/library/articles/${encodeURIComponent(slug)}${suffix ? `?${suffix}` : ''}`
 		);
 	},
-	privateImportRights: () => call<{ rights: PrivateImportRight[] }>('GET', '/v1/me/library/import-rights'),
-	listPrivateImports: () => call<{ documents: PrivateImportSummary[] }>('GET', '/v1/me/library/imports'),
-	createPrivateImport: (body: {
-		title: string;
-		media_type: PrivateImport['media_type'];
-		content: string;
-		rights_ref: string;
-	}) => call<PrivateImportSummary>('POST', '/v1/me/library/imports', body),
+	privateImportRights: () =>
+		call<PrivateImportRightsResponse>('GET', '/v1/me/library/import-rights'),
+	listPrivateImports: () =>
+		call<PrivateImportListResponse>('GET', '/v1/me/library/imports'),
+	createPrivateImport: (body: CreatePrivateImportRequest) =>
+		call<PrivateImportSummary>('POST', '/v1/me/library/imports', body),
 	getPrivateImport: (documentId: string) =>
-		call<PrivateImport>('GET', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
+		call<PrivateImportResponse>('GET', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
 	deletePrivateImport: (documentId: string) =>
-		call<{ deleted: boolean }>('DELETE', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
-	inbox: () =>
-		call<{
-			preferences: {
-				plan_reminders: boolean;
-				mock_results: boolean;
-				reports: boolean;
-				content_updates: boolean;
-				quiet_hours_start: number;
-				quiet_hours_end: number;
-			};
-			notifications: {
-				id: string;
-				category: string;
-				title: string;
-				body: string;
-				read: boolean;
-			}[];
-		}>('GET', '/v1/me/notifications'),
-	updateNotificationPrefs: (body: Partial<{
-		plan_reminders: boolean;
-		mock_results: boolean;
-		reports: boolean;
-		content_updates: boolean;
-		quiet_hours_start: number;
-		quiet_hours_end: number;
-	}>) =>
-		call<{ updated: boolean }>('PATCH', '/v1/me/notifications', body),
-	addPortfolioEntry: (body: Record<string, unknown>) =>
-		call<{ entry_id: string }>('POST', '/v1/me/portfolio', body),
-	listPortfolio: () => call<{ entries: unknown[] }>('GET', '/v1/me/portfolio'),
+		call<PrivateImportDeletedResponse>('DELETE', `/v1/me/library/imports/${encodeURIComponent(documentId)}`),
+	inbox: () => call<NotificationInboxResponse>('GET', '/v1/me/notifications'),
+	updateNotificationPrefs: (body: NotificationPreferencesUpdateRequest) =>
+		call<NotificationPreferencesUpdateResponse>('PATCH', '/v1/me/notifications', body),
+	addPortfolioEntry: (body: PortfolioCreateRequest) =>
+		call<PortfolioCreateResponse>('POST', '/v1/me/portfolio', body),
+	listPortfolio: () => call<PortfolioListResponse>('GET', '/v1/me/portfolio'),
 	addCeActivity: (activity: string, hours: number) =>
-		call<{ activity_id: string; note: string }>('POST', '/v1/me/ce-activities', {
-			activity,
-			hours
-		}),
+		call<CeActivityResponse>(
+			'POST',
+			'/v1/me/ce-activities',
+			{ activity, hours } satisfies CeActivityRequest
+		),
 	listAdminAudit: () =>
-		call<{ events: unknown[] }>('GET', '/v1/admin/audit'),
-	createNode: (body: {
-		exam_id: string;
-		kind: string;
-		name: string;
-		parent_id?: string;
-	}) => call<{ node_id: string }>('POST', '/v1/admin/hierarchy', body),
+		call<AdminAuditResponse>('GET', '/v1/admin/audit'),
+	createNode: (body: CreateNodeRequest) =>
+		call<CreateNodeResponse>('POST', '/v1/admin/hierarchy', body),
 	adminHierarchy: (examId: string) =>
-		call<{ nodes: AdminCurriculumNode[] }>(
+		call<AdminHierarchyResponse>(
 			'GET',
 			`/v1/admin/hierarchy?exam_id=${encodeURIComponent(examId)}`
 		),
-	adminConcepts: () => call<{ concepts: AdminConcept[] }>('GET', '/v1/admin/concepts'),
-	createConcept: (body: {
-		canonical_key: string;
-		display_name: string;
-		definition: string;
-	}) => call<{ concept_id: string; current_version: number }>('POST', '/v1/admin/concepts', body),
+	adminConcepts: () => call<AdminConceptListResponse>('GET', '/v1/admin/concepts'),
+	createConcept: (body: CreateConceptRequest) =>
+		call<CreateConceptResponse>('POST', '/v1/admin/concepts', body),
 	createConceptVersion: (
 		conceptId: string,
-		body: { display_name: string; definition: string }
+		body: CreateConceptVersionRequest
 	) =>
-		call<{ concept_id: string; current_version: number }>(
+		call<CreateConceptVersionResponse>(
 			'POST',
 			`/v1/admin/concepts/${encodeURIComponent(conceptId)}/versions`,
 			body
 		),
 	adminNodeConcepts: (nodeId: string) =>
-		call<{ concepts: (Omit<AdminConcept, 'current_version'> & { version: number })[] }>(
+		call<NodeConceptsResponse>(
 			'GET',
 			`/v1/admin/hierarchy/${encodeURIComponent(nodeId)}/concepts`
 		),
 	setAdminNodeConcepts: (nodeId: string, conceptIds: string[]) =>
-		call<{ node_id: string; mapped: number }>(
+		call<SetNodeConceptsResponse>(
 			'PUT',
 			`/v1/admin/hierarchy/${encodeURIComponent(nodeId)}/concepts`,
-			{ concept_ids: conceptIds }
+			{ concept_ids: conceptIds } satisfies SetNodeConceptsRequest
 		),
-	importQuestions: (body: {
-		exam_id: string;
-		dry_run: boolean;
-		rows: unknown[];
-	}) => call<AdminImportResult>('POST', '/v1/admin/import', body),
+	importQuestions: (body: AdminImportRequest) =>
+		call<AdminImportResponse>('POST', '/v1/admin/import', body),
 	importQuestionFile: (examId: string, dryRun: boolean, file: File, contentType: string) => {
 		const query = new URLSearchParams({ exam_id: examId, dry_run: String(dryRun) });
-		return call<AdminImportResult>(
+		return call<AdminImportResponse>(
 			'POST',
 			`/v1/admin/import-file?${query.toString()}`,
 			file,
@@ -1163,7 +1162,7 @@ export const Api = {
 		);
 	},
 	rollbackImport: (batchId: string) =>
-		call<{ removed_questions: number }>(
+		call<RollbackImportResponse>(
 			'POST',
 			`/v1/admin/import/${batchId}/rollback`
 		),
@@ -1171,152 +1170,80 @@ export const Api = {
 		action: 'submit' | 'approve' | 'reject' | 'publish',
 		versionIds: string[]
 	) =>
-		call<{
-			results: {
-				version_id: string;
-				status?: string;
-				error?: { code: string; message: string };
-			}[];
-		}>('POST', '/v1/admin/assessment-workflow', {
+		call<AssessmentWorkflowResponse>('POST', '/v1/admin/assessment-workflow', {
 			action,
 			version_ids: versionIds
-		}),
-	institutionAnalytics: (institutionId: string, cohortId: string) =>
-		call<{
-			cohort_id: string;
-			cohort_size: number;
-			suppressed: boolean;
-			reason?: string;
-			minimum?: number;
-			chapters?: {
-				chapter: string | null;
-				attempts: number;
-				correct: number;
-				accuracy: number;
-				learners: number;
-			}[];
-		}>(
+		} satisfies AssessmentWorkflowRequest),
+	institutionAnalytics: (institutionId: string, cohortId: string) => {
+		const query = { cohort_id: cohortId } satisfies InstitutionAnalyticsQuery;
+		const params = new URLSearchParams(query);
+		return call<InstitutionAnalyticsResponse>(
 			'GET',
-			`/v1/institutions/${institutionId}/analytics?cohort_id=${cohortId}`
-		),
+			`/v1/institutions/${institutionId}/analytics?${params.toString()}`
+		);
+	},
 	institutionAudit: (institutionId: string) =>
-		call<{ events: unknown[] }>(
+		call<InstitutionAuditResponse>(
 			'GET',
 			`/v1/institutions/${institutionId}/audit`
 		),
-	reviewEvent: (cardId: string, rating: string, idempotencyKey: string) =>
-		call<{ already_recorded: boolean; due: string }>(
+	reviewEvent: (
+		cardId: string,
+		rating: ReviewEventRequest['rating'],
+		idempotencyKey: string
+	) =>
+		call<ReviewEventResponse>(
 			'POST',
 			'/v1/reviews/events',
-			{ card_id: cardId, rating, idempotency_key: idempotencyKey }
+			{ card_id: cardId, rating, idempotency_key: idempotencyKey } satisfies ReviewEventRequest
 		),
-	reviewDebt: () =>
-		call<{
-			due_now: number;
-			completed_last_7_days: number;
-			daily_rate: number | null;
-			projected_backlog_days: number | null;
-			note: string;
-		}>('GET', '/v1/me/review-debt'),
+	reviewDebt: () => call<ReviewDebtResponse>('GET', '/v1/me/review-debt'),
 	myCurriculum: () =>
-		call<{
-			chapters: {
-				chapter_id: string;
-				chapter_name: string;
-				system: string;
-				subject: string;
-				exam_id: string;
-				exam: string;
-				published_questions: number;
-			}[];
-		}>('GET', '/v1/me/curriculum'),
-	masteryHeatmap: (params?: {
-		system_id?: string;
-		difficulty?: string;
-		trend_days?: number;
-	}) => {
+		call<MyCurriculumResponse>('GET', '/v1/me/curriculum'),
+	masteryHeatmap: (params?: HeatmapQuery) => {
 		const qs = new URLSearchParams();
 		if (params?.system_id) qs.set('system_id', params.system_id);
 		if (params?.difficulty) qs.set('difficulty', params.difficulty);
 		if (params?.trend_days) qs.set('trend_days', String(params.trend_days));
 		const suffix = qs.toString() ? `?${qs.toString()}` : '';
-		return call<{
-			systems: {
-				system_id: string;
-				system_name: string;
-				chapters: {
-					chapter_id: string;
-					chapter_name: string;
-					ability: number | null;
-					evidence_count: number | null;
-					band: string;
-					filtered_accuracy?: number | null;
-					recent_answered?: number;
-					recent_correct?: number;
-				}[];
-			}[];
-			bands: { weak_below: number; strong_at: number };
-		}>('GET', `/v1/me/heatmap${suffix}`);
+		return call<MasteryHeatmapResponse>('GET', `/v1/me/heatmap${suffix}`);
 	},
 	myInstitutions: () =>
-		call<{
-			memberships: { institution_id: string; name: string; role: string }[];
-		}>('GET', '/v1/me/institutions'),
+		call<MyInstitutionsResponse>('GET', '/v1/me/institutions'),
 	createInstitution: (name: string) =>
-		call<{ institution_id: string }>('POST', '/v1/institutions', { name }),
+		call<CreateInstitutionResponse>(
+			'POST',
+			'/v1/institutions',
+			{ name } satisfies CreateInstitutionRequest
+		),
 	addInstitutionMember: (
 		institutionId: string,
 		userId: string,
 		role: string
 	) =>
-		call<{ member: string; role: string }>(
+		call<AddInstitutionMemberResponse>(
 			'POST',
 			`/v1/institutions/${institutionId}/members`,
-			{ user_id: userId, role }
+			{ user_id: userId, role } satisfies AddInstitutionMemberRequest
 		),
 	institutionCohorts: (institutionId: string) =>
-		call<{
-			cohorts: {
-				cohort_id: string;
-				name: string;
-				program_id: string | null;
-				members: number;
-			}[];
-		}>('GET', `/v1/institutions/${institutionId}/cohorts`),
+		call<InstitutionCohortsResponse>('GET', `/v1/institutions/${institutionId}/cohorts`),
 	institutionPrograms: (institutionId: string) =>
-		call<{
-			programs: {
-				program_id: string;
-				name: string;
-				chapter_ids: string[];
-			}[];
-		}>('GET', `/v1/institutions/${institutionId}/programs`),
+		call<InstitutionProgramsResponse>('GET', `/v1/institutions/${institutionId}/programs`),
 	createInstitutionProgram: (institutionId: string, name: string) =>
-		call<{ program_id: string }>(
+		call<CreateProgramResponse>(
 			'POST',
 			`/v1/institutions/${institutionId}/programs`,
-			{ name }
+			{ name } satisfies CreateProgramRequest
 		),
 	setProgramCurriculum: (institutionId: string, programId: string, chapterIds: string[]) =>
-		call<{ program_id: string; chapter_ids: string[]; chapter_count: number }>(
+		call<SetProgramCurriculumResponse>(
 			'PUT',
 			`/v1/institutions/${institutionId}/programs/${programId}/curriculum`,
-			{ chapter_ids: chapterIds }
+			{ chapter_ids: chapterIds } satisfies SetProgramCurriculumRequest
 		),
 	programCurriculumCoverage: (institutionId: string, programId: string) =>
-		call<{
-			program_id: string;
-			cohort_size: number;
-			minimum_group_size: number;
-			suppressed: boolean;
-			chapters: {
-				chapter_id: string;
-				chapter: string;
-				learners_with_evidence: number | null;
-				attempts: number | null;
-				coverage_percent: number | null;
-			}[];
-		}>(
+		call<ProgramCurriculumCoverageResponse>(
 			'GET',
 			`/v1/institutions/${institutionId}/programs/${programId}/coverage`
 		),
@@ -1326,28 +1253,32 @@ export const Api = {
 		memberIds: string[],
 		programId?: string
 	) =>
-		call<{ cohort_id: string }>(
+		call<CreateCohortResponse>(
 			'POST',
 			`/v1/institutions/${institutionId}/cohorts`,
-			{ name, member_ids: memberIds, ...(programId ? { program_id: programId } : {}) }
+			{ name, member_ids: memberIds, ...(programId ? { program_id: programId } : {}) } satisfies CreateCohortRequest
 		),
 	createAssignment: (cohortId: string, title: string, dueAt?: string) =>
-		call<{ assignment_id: string }>(
+		call<CreateAssignmentResponse>(
 			'POST',
 			`/v1/cohorts/${cohortId}/assignments`,
-			{ title, due_at: dueAt }
+			{ title, due_at: dueAt } satisfies CreateAssignmentRequest
 		),
 	communityProfile: () =>
-		call<{ opted_in: boolean; handle?: string }>('GET', '/v1/community/me'),
+		call<CommunityProfileResponse>('GET', '/v1/community/me'),
 	createCommunityProfile: (handle: string) =>
-		call<{ handle: string }>('POST', '/v1/community/profile', { handle }),
+		call<CreateCommunityProfileResponse>(
+			'POST',
+			'/v1/community/profile',
+			{ handle } satisfies CommunityProfileRequest
+		),
 	profileByHandle: (handle: string) =>
-		call<{ user_id: string; handle: string }>(
+		call<CommunityProfileByHandleResponse>(
 			'GET',
 			`/v1/community/profiles/${handle}`
 		),
 	createDuel: (opponent: string, examId: string, questionCount: number, chapterId?: string) =>
-		call<{ duel_id: string; share_token: string }>(
+		call<CreateDuelResponse>(
 			'POST',
 			'/v1/community/duels',
 			{
@@ -1355,128 +1286,81 @@ export const Api = {
 				exam_id: examId,
 				question_count: questionCount,
 				...(chapterId ? { chapter_id: chapterId } : {})
-			}
+			} satisfies CreateDuelRequest
 		),
-	myDuels: () => call<{ duels: unknown[] }>('GET', '/v1/me/duels'),
-	shareCards: () =>
-		call<{
-			cards: {
-				kind: string;
-				headline: string;
-				subline: string;
-				detail: string;
-				share_text: string;
-			}[];
-			unavailable: { kind: string; reason: string }[];
-		}>('GET', '/v1/me/share-cards'),
+	duelByToken: (token: string) =>
+		call<DuelByTokenResponse>(
+			'GET',
+			`/v1/community/duels/by-token/${encodeURIComponent(token)}`
+		),
+	myDuels: () => call<MyDuelsResponse>('GET', '/v1/me/duels'),
+	shareCards: () => call<ShareCardsResponse>('GET', '/v1/me/share-cards'),
 	duelState: (duelId: string) =>
-		call<{ status: string; winner: string | null; sides: unknown[] }>(
+		call<DuelStateResponse>(
 			'GET',
 			`/v1/community/duels/${duelId}`
 		),
 	acceptDuel: (duelId: string) =>
-		call<{ accepted: boolean; your_session_id: string; question_count: number }>(
+		call<AcceptDuelResponse>(
 			'POST',
 			`/v1/community/duels/${duelId}/accept`
 		),
 	declineDuel: (duelId: string) =>
-		call<{ declined: boolean }>(
+		call<DeclineDuelResponse>(
 			'POST',
 			`/v1/community/duels/${duelId}/decline`
 		),
 	createCommunityGroup: (name: string) =>
-		call<{ group_id: string }>('POST', '/v1/community/groups', { name }),
+		call<CreateCommunityGroupResponse>(
+			'POST',
+			'/v1/community/groups',
+			{ name } satisfies CreateCommunityGroupRequest
+		),
 	joinGroup: (groupId: string) =>
-		call<{ joined: boolean }>('POST', `/v1/community/groups/${groupId}/join`),
+		call<JoinCommunityGroupResponse>('POST', `/v1/community/groups/${groupId}/join`),
 	listGroupPosts: (groupId: string) =>
-		call<{
-			posts: {
-				post_id: string;
-				body: string;
-				status: string;
-				handle: string;
-				at: string;
-			}[];
-			is_moderator: boolean;
-		}>(
+		call<CommunityPostListResponse>(
 			'GET',
 			`/v1/community/groups/${groupId}/posts`
 		),
 	createGroupPost: (groupId: string, body: string) =>
-		call<{ post_id: string }>(
+		call<CreateCommunityPostResponse>(
 			'POST',
 			`/v1/community/groups/${groupId}/posts`,
-			{ body }
+			{ body } satisfies CreateCommunityPostRequest
 		),
 	removeGroupPost: (groupId: string, postId: string) =>
-		call<{ removed: boolean }>(
+		call<RemoveCommunityPostResponse>(
 			'DELETE',
 			`/v1/community/groups/${groupId}/posts/${postId}`
 		),
 	reportGroupPost: (
 		groupId: string,
 		postId: string,
-		reason: 'spam' | 'harassment' | 'medical_misinformation' | 'other',
+		reason: ReportCommunityPostRequest['reason'],
 		note: string
 	) =>
-		call<{ report_id: string; status: string; created_at: string }>(
+		call<ReportCommunityPostResponse>(
 			'POST',
 			`/v1/community/groups/${groupId}/posts/${postId}/reports`,
-			{ reason, note: note.trim() || null }
+			{ reason, note: note.trim() || null } satisfies ReportCommunityPostRequest
 		),
 	myCommunityPostReports: () =>
-		call<{
-			reports: {
-				report_id: string;
-				group_id: string;
-				group_name: string;
-				post_id: string;
-				reason: string;
-				status: string;
-				created_at: string;
-			}[];
-		}>('GET', '/v1/community/me/reports'),
+		call<MyCommunityPostReportsResponse>('GET', '/v1/community/me/reports'),
 	groupPostReportQueue: (groupId: string) =>
-		call<{
-			reports: {
-				report_id: string;
-				post_id: string;
-				reason: string;
-				note: string | null;
-				created_at: string;
-				post_body: string;
-				author_handle: string;
-			}[];
-		}>('GET', `/v1/community/groups/${groupId}/reports`),
+		call<GroupPostReportQueueResponse>('GET', `/v1/community/groups/${groupId}/reports`),
 	resolveGroupPostReport: (
 		groupId: string,
 		reportId: string,
-		action: 'dismiss' | 'remove'
+		action: ResolveCommunityPostReportRequest['action']
 	) =>
-		call<{ resolved_reports: number }>(
+		call<ResolveCommunityPostReportResponse>(
 			'POST',
 			`/v1/community/groups/${groupId}/reports/${reportId}/resolve`,
-			{ action }
+			{ action } satisfies ResolveCommunityPostReportRequest
 		),
 	listGroups: () =>
-		call<{
-			groups: { group_id: string; name: string; members: number }[];
-		}>('GET', '/v1/community/groups'),
+		call<CommunityGroupsResponse>('GET', '/v1/community/groups'),
 	selectionPolicy: () =>
-		call<{
-			estimator: {
-				model: string;
-				base: number;
-				difficulty_anchors: Record<string, number>;
-				k_rule: string;
-				counted_evidence: string;
-			};
-			selection_rules: string[];
-			your_chapters: {
-				chapter: string;
-				ability: number | null;
-				current_k: number;
-				evidence_count: number;
-			}[];
-		}>('GET', '/v1/me/selection-policy')
+		call<SelectionPolicyResponse>('GET', '/v1/me/selection-policy')
 };

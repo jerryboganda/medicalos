@@ -44,9 +44,26 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   authored in issue 12 on this branch; both await final CI acceptance. The
   practice answer request and response are authored in issues 13 and 14 and
   also await CI. Session detail is tracked in issue 15. Learner note contracts
-  are tracked in issue 16, and next-action contracts in issue 17. Other
-  client-consumed request and response families remain handwritten, so ARCH-02
-  stays in progress.
+  are tracked in issue 16, next-action contracts in issue 17, and engagement
+  contracts in issue 18, auth/OIDC contracts in issue 19, and plan-action
+  contracts in issue 20, portfolio/CE contracts in issue 21, notification
+  contracts in issue 22, marks/review contracts in issue 23, learner study-tool
+  contracts in issue 24, integrity-event contracts in issue 25, and the exam
+  registry response in issue 26, Coach conversation contracts in issue 27, and
+  admin rights/extraction-report contracts in issue 28, and learner
+  curriculum/mastery/selection-policy contracts in issue 29, institutional
+  workspace/analytics contracts in issue 30, opt-in community group and
+  moderation contracts in issue 31, private duel/share-card contracts in
+  issue 32, competition listing/attempt/leaderboard contracts in issue 33, and
+  weekly league contracts in issue 34, and plan-undo/question-report contracts
+  in issue 35, and administrator settings contracts in issue 36. These
+  branch-authored slices await final CI acceptance. Private-import contracts
+  are authored in issue 37, administrator hierarchy/concept contracts in
+  issue 38, administrator workflow/import/audit contracts in issue 39, and
+  pack lease revocation in issue 40, and image case administration requests
+  in issue 41. The API facade now uses generated request and response types;
+  final generator-drift, client-build, and browser acceptance remain pending,
+  so ARCH-02 stays in progress.
 - The image-case response slice preserves existing endpoint payloads and
   rights and review gates; its evidence is recorded in
   `issues/02-image-case-contracts.md`.
