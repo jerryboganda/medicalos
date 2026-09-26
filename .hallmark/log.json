@@ -1,6 +1,14 @@
 [
   {
     "date": "2026-09-26",
+    "macrostructure": "Workbench (article index and editor) + Long Document (library reader)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "country/date search controls, version history rail, and plain-text citation reader",
+    "brief": "LIB-01/03/04 article authoring and regional reading"
+  },
+  {
+    "date": "2026-09-26",
     "macrostructure": "App Shell (Owner Dashboard)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
     "enrichment": "none",

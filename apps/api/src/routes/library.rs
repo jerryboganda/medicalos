@@ -1,13 +1,10 @@
-//! LIB-01/02/03: versioned library articles with search and citation
-//! anchors. Published versions only for learners; the editorial console's
-//! authoring surface arrives with ADMIN-06 iteration 2. Jurisdiction/date
-//! overlays (LIB-04) and hybrid semantic search (LIB-02 full) follow in the
-//! Phase 2 library slice — this is the versioned + text-searched base.
+//! LIB-01/02/03/04: versioned articles, source citations, and explicit
+//! jurisdiction/date resolution. Published versions only are visible to learners.
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgConnection;
 use std::collections::HashMap;
@@ -21,6 +18,819 @@ use crate::state::AppState;
 const PRIVATE_IMPORT_MAX_BYTES: usize = 1024 * 1024;
 const PRIVATE_IMPORT_MAX_DOCUMENTS: i64 = 25;
 const PRIVATE_IMPORT_MAX_TOTAL_BYTES: i64 = 10 * 1024 * 1024;
+
+#[derive(Clone, Debug, Deserialize, Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "library/ArticleCitation.ts", rename = "ArticleCitation")
+)]
+pub struct ArticleCitation {
+    pub kind: String,
+    pub anchor: String,
+    pub target: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/CreateArticleRequest.ts",
+        rename = "CreateArticleRequest"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct CreateArticleRequest {
+    pub slug: String,
+    pub title: String,
+    pub body: String,
+    pub source_ref: String,
+    pub jurisdiction: Option<String>,
+    pub effective_from: Option<String>,
+    pub effective_to: Option<String>,
+    pub citations: Vec<ArticleCitation>,
+}
+
+#[derive(Debug, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/UpdateArticleDraftRequest.ts",
+        rename = "UpdateArticleDraftRequest"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateArticleDraftRequest {
+    pub body: String,
+    pub source_ref: String,
+    pub jurisdiction: Option<String>,
+    pub effective_from: Option<String>,
+    pub effective_to: Option<String>,
+    pub citations: Vec<ArticleCitation>,
+}
+
+#[derive(Debug)]
+struct ArticleDraftFields {
+    body: String,
+    source_ref: String,
+    jurisdiction: Option<String>,
+    effective_from: Option<chrono::NaiveDate>,
+    effective_to: Option<chrono::NaiveDate>,
+    citations: Vec<ArticleCitation>,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/AdminArticleSummary.ts",
+        rename = "AdminArticleSummary"
+    )
+)]
+pub struct AdminArticleSummary {
+    pub article_id: Uuid,
+    pub slug: String,
+    pub title: String,
+    pub version_id: Uuid,
+    pub version: i32,
+    pub status: String,
+    pub jurisdiction: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_from: Option<chrono::NaiveDate>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_to: Option<chrono::NaiveDate>,
+    pub is_latest: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/AdminArticleListResponse.ts",
+        rename = "AdminArticleListResponse"
+    )
+)]
+pub struct AdminArticleListResponse {
+    pub articles: Vec<AdminArticleSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/AdminArticleVersion.ts",
+        rename = "AdminArticleVersion"
+    )
+)]
+pub struct AdminArticleVersion {
+    pub article_id: Uuid,
+    pub version_id: Uuid,
+    pub slug: String,
+    pub title: String,
+    pub version: i32,
+    pub status: String,
+    pub body: String,
+    pub source_ref: String,
+    pub jurisdiction: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_from: Option<chrono::NaiveDate>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_to: Option<chrono::NaiveDate>,
+    pub citations: Vec<ArticleCitation>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PublishArticleResponse.ts",
+        rename = "PublishArticleResponse"
+    )
+)]
+pub struct PublishArticleResponse {
+    pub article_id: Uuid,
+    pub version_id: Uuid,
+    pub version: i32,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/LibrarySearchResult.ts",
+        rename = "LibrarySearchResult"
+    )
+)]
+pub struct LibrarySearchResult {
+    pub content_type: String,
+    pub article_id: Uuid,
+    pub slug: String,
+    pub title: String,
+    pub version: i32,
+    pub jurisdiction: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_from: Option<chrono::NaiveDate>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_to: Option<chrono::NaiveDate>,
+    pub as_of: String,
+    pub score: i64,
+    pub source_ref: String,
+    pub excerpt: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateDocumentSearchResult.ts",
+        rename = "PrivateDocumentSearchResult"
+    )
+)]
+pub struct PrivateDocumentSearchResult {
+    pub document_id: Uuid,
+    pub content_type: String,
+    pub title: String,
+    pub media_type: String,
+    pub rights_ref: String,
+    pub sha256: String,
+    pub created_at: String,
+    pub available: bool,
+    pub excerpt: String,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/LibrarySearchResponse.ts",
+        rename = "LibrarySearchResponse"
+    )
+)]
+pub struct LibrarySearchResponse {
+    pub results: Vec<LibrarySearchResult>,
+    pub private_documents: Vec<PrivateDocumentSearchResult>,
+}
+
+#[derive(Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/LibraryArticleResponse.ts",
+        rename = "LibraryArticleResponse"
+    )
+)]
+pub struct LibraryArticleResponse {
+    pub slug: String,
+    pub title: String,
+    pub version: i32,
+    pub body: String,
+    pub source_ref: String,
+    pub selected_jurisdiction: Option<String>,
+    pub as_of: String,
+    pub jurisdiction: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_from: Option<chrono::NaiveDate>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub effective_to: Option<chrono::NaiveDate>,
+    pub citations: Vec<ArticleCitation>,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown"))]
+    pub media: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct LibraryScopeQuery {
+    jurisdiction: Option<String>,
+    as_of: Option<String>,
+}
+
+#[derive(Debug)]
+struct LibraryScope {
+    jurisdiction: Option<String>,
+    as_of: chrono::NaiveDate,
+}
+
+#[derive(sqlx::FromRow)]
+struct ArticleVersionRow {
+    article_id: Uuid,
+    version_id: Uuid,
+    slug: String,
+    title: String,
+    version: i32,
+    status: String,
+    body: String,
+    source_ref: String,
+    jurisdiction: Option<String>,
+    effective_from: Option<chrono::NaiveDate>,
+    effective_to: Option<chrono::NaiveDate>,
+}
+
+fn require_article_admin(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
+    state.require_admin(headers.get("x-admin-token").and_then(|v| v.to_str().ok()))
+}
+
+fn normalize_jurisdiction(value: Option<&str>) -> ApiResult<Option<String>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.len() != 2 || !value.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return Err(ApiError::unprocessable(
+            "invalid_jurisdiction",
+            "jurisdiction must be a two-letter country code",
+        ));
+    }
+    Ok(Some(value.to_ascii_uppercase()))
+}
+
+fn parse_article_date(value: Option<&str>) -> ApiResult<Option<chrono::NaiveDate>> {
+    value
+        .map(|value| {
+            chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(|_| {
+                ApiError::unprocessable("invalid_effective_date", "dates must use YYYY-MM-DD")
+            })
+        })
+        .transpose()
+}
+
+fn library_scope(query: LibraryScopeQuery) -> ApiResult<LibraryScope> {
+    let jurisdiction = normalize_jurisdiction(query.jurisdiction.as_deref())?;
+    let as_of = match query.as_of.as_deref() {
+        Some(value) => chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(|_| {
+            ApiError::unprocessable("invalid_as_of_date", "as_of must use YYYY-MM-DD")
+        })?,
+        None => chrono::Utc::now().date_naive(),
+    };
+    Ok(LibraryScope { jurisdiction, as_of })
+}
+
+fn valid_article_slug(slug: &str) -> bool {
+    (1..=120).contains(&slug.len())
+        && slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && slug
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && slug
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
+fn clean_article_text(value: &str, field: &'static str, max: usize) -> ApiResult<String> {
+    let value = value.trim();
+    let length = value.chars().count();
+    if length == 0 || length > max {
+        return Err(ApiError::unprocessable(
+            "invalid_article_field",
+            format!("{field} must be 1-{max} characters"),
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn valid_timestamp(value: &str) -> bool {
+    let parts: Vec<_> = value.split(':').collect();
+    if !(2..=3).contains(&parts.len())
+        || !parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
+    match parts.as_slice() {
+        [minutes, seconds] => {
+            minutes.parse::<u32>().is_ok() && seconds.parse::<u8>().is_ok_and(|value| value < 60)
+        }
+        [hours, minutes, seconds] => {
+            hours.parse::<u32>().is_ok()
+                && minutes.parse::<u8>().is_ok_and(|value| value < 60)
+                && seconds.parse::<u8>().is_ok_and(|value| value < 60)
+        }
+        _ => false,
+    }
+}
+
+fn clean_article_draft(
+    body: &str,
+    source_ref: &str,
+    jurisdiction: Option<&str>,
+    effective_from: Option<&str>,
+    effective_to: Option<&str>,
+    mut citations: Vec<ArticleCitation>,
+) -> ApiResult<ArticleDraftFields> {
+    let body = clean_article_text(body, "body", 200_000)?;
+    let source_ref = clean_article_text(source_ref, "source_ref", 512)?;
+    let jurisdiction = normalize_jurisdiction(jurisdiction)?;
+    let effective_from = parse_article_date(effective_from)?;
+    let effective_to = parse_article_date(effective_to)?;
+    if effective_from.zip(effective_to).is_some_and(|(from, to)| from > to) {
+        return Err(ApiError::unprocessable(
+            "invalid_effective_range",
+            "effective_from must be on or before effective_to",
+        ));
+    }
+    if citations.len() > 100 {
+        return Err(ApiError::unprocessable(
+            "too_many_citations",
+            "an article can have at most 100 citations",
+        ));
+    }
+    for citation in &mut citations {
+        citation.kind = citation.kind.trim().to_ascii_lowercase();
+        citation.anchor = clean_article_text(&citation.anchor, "citation anchor", 160)?;
+        citation.target = clean_article_text(&citation.target, "citation target", 512)?;
+        if !matches!(citation.kind.as_str(), "source" | "page" | "figure" | "timestamp") {
+            return Err(ApiError::unprocessable(
+                "invalid_citation_kind",
+                "citation kind must be source, page, figure, or timestamp",
+            ));
+        }
+        if citation.kind == "timestamp" && !valid_timestamp(&citation.target) {
+            return Err(ApiError::unprocessable(
+                "invalid_citation_timestamp",
+                "timestamp targets must use MM:SS or HH:MM:SS",
+            ));
+        }
+        if !body.to_lowercase().contains(&citation.anchor.to_lowercase()) {
+            return Err(ApiError::unprocessable(
+                "citation_anchor_not_found",
+                "each citation anchor must appear in the article body",
+            ));
+        }
+    }
+    Ok(ArticleDraftFields {
+        body,
+        source_ref,
+        jurisdiction,
+        effective_from,
+        effective_to,
+        citations,
+    })
+}
+
+async fn replace_article_citations(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    version_id: Uuid,
+    citations: &[ArticleCitation],
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM article_citations WHERE version_id = $1")
+        .bind(version_id)
+        .execute(&mut **tx)
+        .await?;
+    for citation in citations {
+        sqlx::query(
+            "INSERT INTO article_citations (id, version_id, anchor, target, kind)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(version_id)
+        .bind(&citation.anchor)
+        .bind(&citation.target)
+        .bind(&citation.kind)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn fetch_admin_article_version(
+    state: &AppState,
+    article_id: Uuid,
+    version_id: Uuid,
+) -> ApiResult<AdminArticleVersion> {
+    let row = sqlx::query_as::<_, ArticleVersionRow>(
+        r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,
+                  av.version, av.status, av.body, av.source_ref, av.jurisdiction,
+                  av.effective_from, av.effective_to
+           FROM articles a
+           JOIN article_versions av ON av.article_id = a.id
+           WHERE a.id = $1 AND av.id = $2"#,
+    )
+    .bind(article_id)
+    .bind(version_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("article_version_not_found"))?;
+    let citations = sqlx::query_as::<_, ArticleCitation>(
+        "SELECT kind, anchor, target FROM article_citations WHERE version_id = $1 ORDER BY anchor, kind, target",
+    )
+    .bind(version_id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(AdminArticleVersion {
+        article_id: row.article_id,
+        version_id: row.version_id,
+        slug: row.slug,
+        title: row.title,
+        version: row.version,
+        status: row.status,
+        body: row.body,
+        source_ref: row.source_ref,
+        jurisdiction: row.jurisdiction,
+        effective_from: row.effective_from,
+        effective_to: row.effective_to,
+        citations,
+    })
+}
+
+pub async fn admin_list_articles(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: HeaderMap,
+) -> ApiResult<Json<AdminArticleListResponse>> {
+    require_article_admin(&state, &headers)?;
+    let articles = sqlx::query_as::<_, AdminArticleSummary>(
+        r#"SELECT a.id AS article_id, a.slug, a.title, av.id AS version_id,
+                  av.version, av.status, av.jurisdiction, av.effective_from,
+                  av.effective_to,
+                  av.version = (SELECT MAX(version) FROM article_versions
+                                WHERE article_id = a.id) AS is_latest
+           FROM articles a
+           JOIN article_versions av ON av.article_id = a.id
+           ORDER BY a.created_at DESC, av.version DESC"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(AdminArticleListResponse { articles }))
+}
+
+pub async fn create_article(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Json(req): Json<CreateArticleRequest>,
+) -> ApiResult<Json<AdminArticleVersion>> {
+    require_article_admin(&state, &headers)?;
+    let slug = req.slug.trim().to_string();
+    if !valid_article_slug(&slug) {
+        return Err(ApiError::unprocessable(
+            "invalid_article_slug",
+            "slug must be 1-120 lowercase letters, digits, or hyphens and start/end with a letter or digit",
+        ));
+    }
+    let title = clean_article_text(&req.title, "title", 200)?;
+    let fields = clean_article_draft(
+        &req.body,
+        &req.source_ref,
+        req.jurisdiction.as_deref(),
+        req.effective_from.as_deref(),
+        req.effective_to.as_deref(),
+        req.citations,
+    )?;
+    let article_id = Uuid::new_v4();
+    let version_id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await?;
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO articles (id, slug, title) VALUES ($1, $2, $3)
+         ON CONFLICT (slug) DO NOTHING RETURNING id",
+    )
+    .bind(article_id)
+    .bind(&slug)
+    .bind(&title)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if inserted.is_none() {
+        return Err(ApiError::conflict(
+            "article_slug_exists",
+            "an article already uses this slug",
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO article_versions
+         (id, article_id, version, status, body, source_ref, jurisdiction, effective_from, effective_to)
+         VALUES ($1, $2, 1, 'draft', $3, $4, $5, $6, $7)",
+    )
+    .bind(version_id)
+    .bind(article_id)
+    .bind(&fields.body)
+    .bind(&fields.source_ref)
+    .bind(&fields.jurisdiction)
+    .bind(fields.effective_from)
+    .bind(fields.effective_to)
+    .execute(&mut *tx)
+    .await?;
+    replace_article_citations(&mut tx, version_id, &fields.citations).await?;
+    super::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "article_draft_created",
+        "article_version",
+        version_id,
+        json!({
+            "article_id": article_id,
+            "slug": slug,
+            "version": 1,
+            "status": "draft",
+            "jurisdiction": fields.jurisdiction,
+            "citation_count": fields.citations.len()
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(
+        fetch_admin_article_version(&state, article_id, version_id).await?,
+    ))
+}
+
+pub async fn create_article_version(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Path(article_id): Path<Uuid>,
+) -> ApiResult<Json<AdminArticleVersion>> {
+    require_article_admin(&state, &headers)?;
+    let mut tx = state.pool.begin().await?;
+    let exists = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM articles WHERE id = $1 FOR UPDATE",
+    )
+    .bind(article_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if exists.is_none() {
+        return Err(ApiError::not_found("article_not_found"));
+    }
+    let has_draft = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM article_versions WHERE article_id = $1 AND status = 'draft')",
+    )
+    .bind(article_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if has_draft {
+        return Err(ApiError::conflict(
+            "article_draft_exists",
+            "publish or finish the current draft before creating another",
+        ));
+    }
+    let source = sqlx::query_as::<_, ArticleVersionRow>(
+        r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,
+                  av.version, av.status, av.body, av.source_ref, av.jurisdiction,
+                  av.effective_from, av.effective_to
+           FROM articles a
+           JOIN article_versions av ON av.article_id = a.id
+           WHERE a.id = $1 AND av.status = 'published'
+           ORDER BY av.version DESC LIMIT 1"#,
+    )
+    .bind(article_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        ApiError::conflict(
+            "article_has_no_published_version",
+            "publish the initial draft before creating a revision",
+        )
+    })?;
+    let version: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(version), 0) + 1 FROM article_versions WHERE article_id = $1",
+    )
+    .bind(article_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let version_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO article_versions
+         (id, article_id, version, status, body, source_ref, jurisdiction, effective_from, effective_to)
+         VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8)",
+    )
+    .bind(version_id)
+    .bind(article_id)
+    .bind(version)
+    .bind(&source.body)
+    .bind(&source.source_ref)
+    .bind(&source.jurisdiction)
+    .bind(source.effective_from)
+    .bind(source.effective_to)
+    .execute(&mut *tx)
+    .await?;
+    let citations = sqlx::query_as::<_, ArticleCitation>(
+        "SELECT kind, anchor, target FROM article_citations WHERE version_id = $1 ORDER BY anchor, kind, target",
+    )
+    .bind(source.version_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    replace_article_citations(&mut tx, version_id, &citations).await?;
+    super::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "article_draft_created",
+        "article_version",
+        version_id,
+        json!({
+            "article_id": article_id,
+            "slug": source.slug,
+            "version": version,
+            "status": "draft",
+            "jurisdiction": source.jurisdiction,
+            "citation_count": citations.len()
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(
+        fetch_admin_article_version(&state, article_id, version_id).await?,
+    ))
+}
+
+pub async fn get_admin_article_version(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: HeaderMap,
+    Path((article_id, version_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<AdminArticleVersion>> {
+    require_article_admin(&state, &headers)?;
+    Ok(Json(
+        fetch_admin_article_version(&state, article_id, version_id).await?,
+    ))
+}
+
+pub async fn update_article_draft(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Path((article_id, version_id)): Path<(Uuid, Uuid)>,
+    Json(req): Json<UpdateArticleDraftRequest>,
+) -> ApiResult<Json<AdminArticleVersion>> {
+    require_article_admin(&state, &headers)?;
+    let fields = clean_article_draft(
+        &req.body,
+        &req.source_ref,
+        req.jurisdiction.as_deref(),
+        req.effective_from.as_deref(),
+        req.effective_to.as_deref(),
+        req.citations,
+    )?;
+    let mut tx = state.pool.begin().await?;
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM article_versions WHERE article_id = $1 AND id = $2 FOR UPDATE",
+    )
+    .bind(article_id)
+    .bind(version_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("article_version_not_found"))?;
+    if status != "draft" {
+        return Err(ApiError::conflict(
+            "article_version_not_draft",
+            "published article versions are immutable",
+        ));
+    }
+    sqlx::query(
+        "UPDATE article_versions SET body = $3, source_ref = $4, jurisdiction = $5,
+                effective_from = $6, effective_to = $7
+         WHERE article_id = $1 AND id = $2",
+    )
+    .bind(article_id)
+    .bind(version_id)
+    .bind(&fields.body)
+    .bind(&fields.source_ref)
+    .bind(&fields.jurisdiction)
+    .bind(fields.effective_from)
+    .bind(fields.effective_to)
+    .execute(&mut *tx)
+    .await?;
+    replace_article_citations(&mut tx, version_id, &fields.citations).await?;
+    super::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "article_draft_updated",
+        "article_version",
+        version_id,
+        json!({
+            "article_id": article_id,
+            "status": "draft",
+            "jurisdiction": fields.jurisdiction,
+            "citation_count": fields.citations.len()
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(
+        fetch_admin_article_version(&state, article_id, version_id).await?,
+    ))
+}
+
+pub async fn publish_article_draft(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: HeaderMap,
+    Path((article_id, version_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<PublishArticleResponse>> {
+    require_article_admin(&state, &headers)?;
+    let mut tx = state.pool.begin().await?;
+    let row = sqlx::query_as::<_, ArticleVersionRow>(
+        r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,
+                  av.version, av.status, av.body, av.source_ref, av.jurisdiction,
+                  av.effective_from, av.effective_to
+           FROM articles a
+           JOIN article_versions av ON av.article_id = a.id
+           WHERE a.id = $1 AND av.id = $2 FOR UPDATE OF av"#,
+    )
+    .bind(article_id)
+    .bind(version_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("article_version_not_found"))?;
+    if row.status != "draft" {
+        return Err(ApiError::conflict(
+            "article_version_not_draft",
+            "only a draft article version can be published",
+        ));
+    }
+    let citation_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM article_citations WHERE version_id = $1",
+    )
+    .bind(version_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE article_versions SET status = 'published' WHERE id = $1")
+        .bind(version_id)
+        .execute(&mut *tx)
+        .await?;
+    super::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "article_version_published",
+        "article_version",
+        version_id,
+        json!({
+            "article_id": article_id,
+            "slug": row.slug,
+            "version": row.version,
+            "status": "published",
+            "jurisdiction": row.jurisdiction,
+            "citation_count": citation_count
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(PublishArticleResponse {
+        article_id,
+        version_id,
+        version: row.version,
+        status: "published".to_string(),
+    }))
+}
 
 // ---- CORE-03: the free tier's library retrievals are metered ----------------
 // Search queries and article opens both consume one retrieval from the daily
@@ -78,19 +888,26 @@ pub async fn search(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Query(q): Query<std::collections::HashMap<String, String>>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<LibrarySearchResponse>> {
+    let scope = library_scope(LibraryScopeQuery {
+        jurisdiction: q.get("jurisdiction").cloned(),
+        as_of: q.get("as_of").cloned(),
+    })?;
     // LIB-02 hybrid ranking: the whole-phrase match anchors the query, then
     // per-token hits add weighted signal (title hits outweigh body hits).
     // Pure lexical by design — no vector index is claimed or faked.
-    let query = q
+    let query_text = q
         .get("q")
         .map(|s| s.trim().to_lowercase())
         .unwrap_or_default();
-    if query.is_empty() {
-        return Ok(Json(json!({ "results": [], "private_documents": [] })));
+    if query_text.is_empty() {
+        return Ok(Json(LibrarySearchResponse {
+            results: Vec::new(),
+            private_documents: Vec::new(),
+        }));
     }
     require_library_allowance(&state, user.user_id).await?;
-    let tokens: Vec<String> = query
+    let tokens: Vec<String> = query_text
         .split_whitespace()
         .filter(|t| t.len() >= 2)
         .map(String::from)
@@ -98,29 +915,55 @@ pub async fn search(
     let patterns: Vec<String> = tokens
         .iter()
         .map(|t| format!("%{t}%"))
-        .chain(std::iter::once(format!("%{query}%")))
+        .chain(std::iter::once(format!("%{query_text}%")))
         .collect();
-    // Only the latest published version of each article is searchable.
-    let rows = sqlx::query!(
-        r#"SELECT a.id, a.slug, a.title, av.version, av.body, av.source_ref
-           FROM articles a
-           JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'
-           WHERE (a.title ILIKE ANY($1) OR av.body ILIKE ANY($1))
-             AND av.version = (
-                 SELECT MAX(version) FROM article_versions
-                 WHERE article_id = a.id AND status = 'published')
+    #[derive(sqlx::FromRow)]
+    struct EditorialArticleHit {
+        article_id: Uuid,
+        slug: String,
+        title: String,
+        version: i32,
+        body: String,
+        source_ref: String,
+        jurisdiction: Option<String>,
+        effective_from: Option<chrono::NaiveDate>,
+        effective_to: Option<chrono::NaiveDate>,
+    }
+    let rows = sqlx::query_as::<_, EditorialArticleHit>(
+        r#"WITH applicable AS (
+               SELECT a.id AS article_id, a.slug, a.title, av.version, av.body,
+                      av.source_ref, av.jurisdiction, av.effective_from, av.effective_to,
+                      ROW_NUMBER() OVER (
+                          PARTITION BY a.id
+                          ORDER BY CASE WHEN av.jurisdiction = $2 THEN 0 ELSE 1 END,
+                                   av.effective_from DESC NULLS LAST, av.version DESC
+                      ) AS scope_rank
+               FROM articles a
+               JOIN article_versions av ON av.article_id = a.id
+               WHERE av.status = 'published'
+                 AND (av.jurisdiction IS NULL OR av.jurisdiction = $2)
+                 AND (av.effective_from IS NULL OR av.effective_from <= $3)
+                 AND (av.effective_to IS NULL OR av.effective_to >= $3)
+           )
+           SELECT article_id, slug, title, version, body, source_ref,
+                  jurisdiction, effective_from, effective_to
+           FROM applicable
+           WHERE scope_rank = 1 AND (title ILIKE ANY($1) OR body ILIKE ANY($1))
            LIMIT 100"#,
-        &patterns
     )
+    .bind(&patterns)
+    .bind(scope.jurisdiction.as_deref())
+    .bind(scope.as_of)
     .fetch_all(&state.pool)
     .await?;
-    let mut scored: Vec<(i64, serde_json::Value)> = rows
+    let as_of = scope.as_of.to_string();
+    let mut results: Vec<LibrarySearchResult> = rows
         .into_iter()
         .map(|r| {
             let title_lower = r.title.to_lowercase();
             let body_lower = r.body.to_lowercase();
             let mut score: i64 = 0;
-            if body_lower.contains(&query) {
+            if body_lower.contains(&query_text) {
                 score += 5;
             }
             for t in &tokens {
@@ -131,33 +974,24 @@ pub async fn search(
                     score += 2;
                 }
             }
-            let article = json!({
-                "content_type": "editorial_article",
-                "article_id": r.id,
-                "slug": r.slug,
-                "title": r.title,
-                "version": r.version,
-                "score": score,
-                "source_ref": r.source_ref,
-                // A body excerpt keeps the list honest about what matched.
-                "excerpt": r.body.chars().take(200).collect::<String>(),
-            });
-            (score, article)
+            LibrarySearchResult {
+                content_type: "editorial_article".into(),
+                article_id: r.article_id,
+                slug: r.slug,
+                title: r.title,
+                version: r.version,
+                jurisdiction: r.jurisdiction,
+                effective_from: r.effective_from,
+                effective_to: r.effective_to,
+                as_of: as_of.clone(),
+                score,
+                source_ref: r.source_ref,
+                excerpt: r.body.chars().take(200).collect(),
+            }
         })
         .collect();
-    scored.sort_by(|a, b| {
-        b.0.cmp(&a.0).then_with(|| {
-            a.1["title"]
-                .as_str()
-                .unwrap_or("")
-                .cmp(b.1["title"].as_str().unwrap_or(""))
-        })
-    });
-    let results: Vec<serde_json::Value> = scored
-        .into_iter()
-        .take(25)
-        .map(|(_, article)| article)
-        .collect();
+    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.title.cmp(&b.title)));
+    results.truncate(25);
     #[derive(sqlx::FromRow)]
     struct PrivateDocumentSearchHit {
         document_id: Uuid,
@@ -187,47 +1021,56 @@ pub async fn search(
     .bind(&patterns)
     .fetch_all(&state.pool)
     .await?;
-    let private_documents: Vec<serde_json::Value> = private_documents
+    let private_documents: Vec<PrivateDocumentSearchResult> = private_documents
         .into_iter()
         .map(|document| {
-            json!({
-                "document_id": document.document_id,
-                "content_type": "private_document",
-                "title": document.title,
-                "media_type": document.media_type,
-                "rights_ref": document.rights_ref,
-                "sha256": document.sha256,
-                "created_at": document.created_at,
-                "available": true,
-                "excerpt": document.content.chars().take(200).collect::<String>(),
-            })
+            PrivateDocumentSearchResult {
+                document_id: document.document_id,
+                content_type: "private_document".into(),
+                title: document.title,
+                media_type: document.media_type,
+                rights_ref: document.rights_ref,
+                sha256: document.sha256,
+                created_at: document.created_at.to_rfc3339(),
+                available: true,
+                excerpt: document.content.chars().take(200).collect(),
+            }
         })
         .collect();
-    Ok(Json(
-        json!({ "results": results, "private_documents": private_documents }),
-    ))
+    Ok(Json(LibrarySearchResponse {
+        results,
+        private_documents,
+    }))
 }
 
 pub async fn get_article(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Path(slug): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let article = sqlx::query!(
-        r#"SELECT a.id, a.slug, a.title, av.id AS "version_id!", av.version, av.body, av.source_ref,
-                  av.jurisdiction AS "jurisdiction?", av.effective_from AS "effective_from?",
-                  av.effective_to AS "effective_to?"
+    Query(query): Query<LibraryScopeQuery>,
+) -> ApiResult<Json<LibraryArticleResponse>> {
+    let scope = library_scope(query)?;
+    let article = sqlx::query_as::<_, ArticleVersionRow>(
+        r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,
+                  av.version, av.status, av.body, av.source_ref, av.jurisdiction,
+                  av.effective_from, av.effective_to
            FROM articles a
-           JOIN article_versions av ON av.article_id = a.id AND av.status = 'published'
+           JOIN article_versions av ON av.article_id = a.id
            WHERE a.slug = $1
-             AND av.version = (
-                 SELECT MAX(version) FROM article_versions
-                 WHERE article_id = a.id AND status = 'published')"#,
-        slug
+             AND av.status = 'published'
+             AND (av.jurisdiction IS NULL OR av.jurisdiction = $2)
+             AND (av.effective_from IS NULL OR av.effective_from <= $3)
+             AND (av.effective_to IS NULL OR av.effective_to >= $3)
+           ORDER BY CASE WHEN av.jurisdiction = $2 THEN 0 ELSE 1 END,
+                    av.effective_from DESC NULLS LAST, av.version DESC
+           LIMIT 1"#,
     )
+    .bind(slug)
+    .bind(scope.jurisdiction.as_deref())
+    .bind(scope.as_of)
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::not_found("article_not_found"))?;
+    .ok_or_else(|| ApiError::not_found("article_not_available_for_region"))?;
     require_library_allowance(&state, _user.user_id).await?;
     sqlx::query!(
         "INSERT INTO article_reads (user_id, article_version_id)
@@ -237,26 +1080,26 @@ pub async fn get_article(
     )
     .execute(&state.pool)
     .await?;
-    let citations = sqlx::query!(
-        "SELECT anchor, target, kind FROM article_citations WHERE version_id = $1",
-        article.version_id
+    let citations = sqlx::query_as::<_, ArticleCitation>(
+        "SELECT kind, anchor, target FROM article_citations WHERE version_id = $1 ORDER BY anchor, kind, target",
     )
+    .bind(article.version_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "slug": article.slug,
-        "title": article.title,
-        "version": article.version,
-        "body": article.body,
-        "source_ref": article.source_ref,
-        "jurisdiction": article.jurisdiction,
-        "effective_from": article.effective_from,
-        "effective_to": article.effective_to,
-        "citations": citations.iter().map(|c| json!({
-            "anchor": c.anchor, "target": c.target, "kind": c.kind
-        })).collect::<Vec<_>>(),
-        "media": media_list(&state, article.id).await?,
-    })))
+    Ok(Json(LibraryArticleResponse {
+        slug: article.slug,
+        title: article.title,
+        version: article.version,
+        body: article.body,
+        source_ref: article.source_ref,
+        selected_jurisdiction: scope.jurisdiction,
+        as_of: scope.as_of.to_string(),
+        jurisdiction: article.jurisdiction,
+        effective_from: article.effective_from,
+        effective_to: article.effective_to,
+        citations,
+        media: media_list(&state, article.article_id).await?,
+    }))
 }
 
 #[derive(sqlx::FromRow)]

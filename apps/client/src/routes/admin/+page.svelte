@@ -991,6 +991,8 @@
 	</div>
 {:else}
 	<nav class="admin-shortcuts" aria-label="Admin tools">
+		<a class="btn" href={base + '/admin/articles'}>Article workspace</a>
+		<a class="btn" href={base + '/admin/articles'}>Article workspace</a>
 		<a class="btn primary" href={`${base}/admin/dashboard`}>Owner dashboard</a>
 		<a class="btn" href={`${base}/admin/image-annotations`}>Image annotation review</a>
 	</nav>

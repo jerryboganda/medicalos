@@ -1,30 +1,27 @@
-<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 -->
+<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { Api, ApiError } from '$lib/api';
-import type {
-	PrivateImport,
-	PrivateImportRight,
-	PrivateImportSearchResult,
-	PrivateImportSummary
-} from '$lib/api';
+	import type {
+		LibrarySearchResult,
+		PrivateImport,
+		PrivateImportRight,
+		PrivateDocumentSearchResult,
+		PrivateImportSummary
+	} from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
 
-	interface Result {
-		article_id: string;
-		slug: string;
-		title: string;
-		version: number;
-		excerpt: string;
-		content_type?: string;
-	}
-
 	let q = $state('');
-	let results = $state<Result[] | null>(null);
+	let jurisdiction = $state('');
+	let asOf = $state('');
+	let lastSearchJurisdiction = $state('');
+	let lastSearchAsOf = $state('');
+	let results = $state<LibrarySearchResult[] | null>(null);
 	let searched = $state(false);
-	let privateSearchResults = $state<PrivateImportSearchResult[]>([]);
+	let searchError = $state('');
+	let privateSearchResults = $state<PrivateDocumentSearchResult[]>([]);
 	let busy = $state(false);
 	let importRights = $state<PrivateImportRight[]>([]);
 	let privateImports = $state<PrivateImportSummary[]>([]);
@@ -41,6 +38,10 @@ import type {
 	let deletingId = $state('');
 	let openedImport = $state<PrivateImport | null>(null);
 
+	function utcToday(): string {
+		return new Date().toISOString().slice(0, 10);
+	}
+
 	function errorMessage(error: unknown): string {
 		return error instanceof ApiError || error instanceof Error
 			? error.message
@@ -50,10 +51,23 @@ import type {
 	async function search(e: Event) {
 		e.preventDefault();
 		busy = true;
+		searchError = '';
 		try {
-			const searchResults = await Api.librarySearch(q);
-			results = searchResults.results as Result[];
+			const selectedJurisdiction = jurisdiction.trim().toUpperCase();
+			const selectedDate = asOf || utcToday();
+			const searchResults = await Api.librarySearch(q, {
+				jurisdiction: selectedJurisdiction || undefined,
+				as_of: selectedDate
+			});
+			lastSearchJurisdiction = selectedJurisdiction;
+			lastSearchAsOf = selectedDate;
+			results = searchResults.results;
 			privateSearchResults = searchResults.private_documents ?? [];
+			searched = true;
+		} catch (error) {
+			searchError = errorMessage(error);
+			results = [];
+			privateSearchResults = [];
 			searched = true;
 		} finally {
 			busy = false;
@@ -147,7 +161,21 @@ import type {
 		}
 	}
 
+	function articleHref(result: LibrarySearchResult): string {
+		const params = new URLSearchParams();
+		if (lastSearchJurisdiction) params.set('jurisdiction', lastSearchJurisdiction);
+		params.set('as_of', lastSearchAsOf || utcToday());
+		return (
+			base +
+			'/library/articles/' +
+			encodeURIComponent(result.slug) +
+			'?' +
+			params.toString()
+		);
+	}
+
 	onMount(() => {
+		asOf = utcToday();
 		loadAuth();
 		if (!auth.token) {
 			goto(`${base}/login`);
@@ -166,24 +194,47 @@ import type {
 			<span>Search reviewed articles</span>
 			<input id="lib-q" bind:value={q} placeholder="e.g. glorbin" data-testid="lib-q" />
 		</label>
-		<button class="btn primary" type="submit" disabled={busy} data-loading={busy}>
+		<div class="scope-fields">
+			<label class="field" for="lib-jurisdiction">
+				<span>Country code</span>
+				<input
+					id="lib-jurisdiction"
+					bind:value={jurisdiction}
+					maxlength="2"
+					autocomplete="off"
+					placeholder="Blank shows global articles"
+					data-testid="lib-jurisdiction"
+				/>
+			</label>
+			<label class="field" for="lib-as-of">
+				<span>Guidance date</span>
+				<input id="lib-as-of" type="date" bind:value={asOf} data-testid="lib-as-of" />
+			</label>
+		</div>
+		<button class="btn" type="submit" disabled={busy} data-loading={busy}>
 			{busy ? 'Searching…' : 'Search'}
 		</button>
 	</form>
+	{#if searchError}<p class="error-text" role="alert">{searchError}</p>{/if}
 
 	{#if searched && results !== null}
 		{#if results.length === 0 && privateSearchResults.length === 0}
 			<p class="muted">Nothing found. Try another term.</p>
 		{:else}
 			{#each results as r (r.article_id)}
-				<div class="card">
-					<strong>{r.title}</strong>
-					<span class="chip">v{r.version}</span>
-					<span class="chip">
-						{r.content_type === 'editorial_article' ? 'Reviewed article' : r.content_type}
-					</span>
+				<article class="card library-result" data-testid={'library-result-' + r.slug}>
+					<a class="library-result-link" href={articleHref(r)} data-testid={'library-reader-' + r.slug}>
+						<strong>{r.title}</strong>
+						<span class="btn">Read article · v{r.version}</span>
+					</a>
+					<div class="result-meta">
+						<span class="chip">Published</span>
+						<span class="chip">{r.jurisdiction ?? 'Global guidance'}</span>
+						<span class="muted">As of {r.as_of}</span>
+					</div>
 					<p>{r.excerpt}…</p>
-				</div>
+					<p class="muted">Source: {r.source_ref}</p>
+				</article>
 			{/each}
 		{/if}
 	{/if}
@@ -264,7 +315,7 @@ import type {
 					/>
 				</label>
 				<button
-					class="btn primary"
+					class="btn"
 					type="submit"
 					disabled={importing || !selectedFile || !importRightsRef}
 					data-loading={importing}
@@ -335,6 +386,57 @@ import type {
 </section>
 
 <style>
+	/* Hallmark · macrostructure: App Shell · tone: focused and utilitarian · anchor hue: violet
+	 * theme: Midnight-equivalent (owner-locked) · variation: country/date controls and linked full-text reader
+	 * motion: cut · contrast: pass (40–41) · mobile: pending final E2E (34, 49, 50–57)
+	 */
+	.scope-fields {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+		gap: var(--space-md);
+	}
+
+	.library-result {
+		min-width: 0;
+		margin: var(--space-md) 0;
+	}
+
+	.library-result-link {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-md);
+		color: var(--color-text-primary);
+		text-decoration: none;
+	}
+
+	.library-result-link strong {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.library-result-link:focus-visible {
+		outline: 2px solid var(--color-focus);
+		outline-offset: 2px;
+	}
+
+	.library-result-link:active {
+		opacity: 0.85;
+	}
+
+	.result-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-sm);
+		margin-top: var(--space-md);
+	}
+
+	.library-result > p:last-child {
+		margin-bottom: 0;
+	}
+
 	.private-imports > p:first-of-type {
 		margin-top: 0;
 	}

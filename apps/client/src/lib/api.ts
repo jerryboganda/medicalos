@@ -1,5 +1,13 @@
 import { auth, clearToken } from './auth.svelte';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
+import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
+import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
+import type { CreateArticleRequest } from './generated/library/CreateArticleRequest';
+import type { UpdateArticleDraftRequest } from './generated/library/UpdateArticleDraftRequest';
+import type { PublishArticleResponse } from './generated/library/PublishArticleResponse';
+import type { LibraryArticleResponse } from './generated/library/LibraryArticleResponse';
+import type { LibrarySearchResponse } from './generated/library/LibrarySearchResponse';
+import type { PrivateDocumentSearchResult } from './generated/library/PrivateDocumentSearchResult';
 import type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
 import type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
 import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
@@ -41,6 +49,17 @@ export type { TodayRevision } from './generated/today/TodayRevision';
 export type { LearnerChapter } from './generated/today/LearnerChapter';
 export type { TodayRevisionBudget } from './generated/today/TodayRevisionBudget';
 export type { AdminDashboard } from './generated/admin/AdminDashboard';
+export type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
+export type { AdminArticleSummary } from './generated/library/AdminArticleSummary';
+export type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
+export type { ArticleCitation } from './generated/library/ArticleCitation';
+export type { CreateArticleRequest } from './generated/library/CreateArticleRequest';
+export type { LibraryArticleResponse } from './generated/library/LibraryArticleResponse';
+export type { LibrarySearchResponse } from './generated/library/LibrarySearchResponse';
+export type { LibrarySearchResult } from './generated/library/LibrarySearchResult';
+export type { UpdateArticleDraftRequest } from './generated/library/UpdateArticleDraftRequest';
+export type { PublishArticleResponse } from './generated/library/PublishArticleResponse';
+export type { PrivateDocumentSearchResult } from './generated/library/PrivateDocumentSearchResult';
 export type { ImageConceptLink } from './generated/image/ImageConceptLink';
 export type { AdminImageAnnotation } from './generated/image/AdminImageAnnotation';
 export type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
@@ -253,18 +272,6 @@ export interface PrivateImportSummary {
 
 export interface PrivateImport extends PrivateImportSummary {
 	content: string;
-}
-
-export interface PrivateImportSearchResult {
-	document_id: string;
-	content_type: 'private_document';
-	title: string;
-	media_type: PrivateImportSummary['media_type'];
-	rights_ref: string;
-	sha256: string;
-	created_at: string;
-	available: boolean;
-	excerpt: string;
 }
 
 export interface AdminContentRight {
@@ -854,6 +861,34 @@ export const Api = {
 	adminReports: () =>
 		call<{ reports: AdminReport[] }>('GET', '/v1/admin/reports?limit=100'),
 	adminDashboard: () => call<AdminDashboard>('GET', '/v1/admin/dashboard'),
+	adminArticles: () => call<AdminArticleListResponse>('GET', '/v1/admin/articles'),
+	createAdminArticle: (body: CreateArticleRequest) =>
+		call<AdminArticleVersion>('POST', '/v1/admin/articles', body),
+	createAdminArticleVersion: (articleId: string) =>
+		call<AdminArticleVersion>(
+			'POST',
+			`/v1/admin/articles/${encodeURIComponent(articleId)}/versions`
+		),
+	adminArticleVersion: (articleId: string, versionId: string) =>
+		call<AdminArticleVersion>(
+			'GET',
+			`/v1/admin/articles/${encodeURIComponent(articleId)}/versions/${encodeURIComponent(versionId)}`
+		),
+	updateAdminArticleDraft: (
+		articleId: string,
+		versionId: string,
+		body: UpdateArticleDraftRequest
+	) =>
+		call<AdminArticleVersion>(
+			'PATCH',
+			`/v1/admin/articles/${encodeURIComponent(articleId)}/versions/${encodeURIComponent(versionId)}`,
+			body
+		),
+	publishAdminArticleDraft: (articleId: string, versionId: string) =>
+		call<PublishArticleResponse>(
+			'POST',
+			`/v1/admin/articles/${encodeURIComponent(articleId)}/versions/${encodeURIComponent(versionId)}/publish`
+		),
 	adminSettings: () => call<{ settings: AdminSettings }>('GET', '/v1/admin/settings'),
 	updateAdminSettings: (settings: AdminSettings) =>
 		call<{ updated: (keyof AdminSettings)[] }>('PATCH', '/v1/admin/settings', settings),
@@ -1070,11 +1105,22 @@ export const Api = {
 		call<{ marked: boolean }>('DELETE', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
 	deleteNote: (noteId: string) =>
 		call<{ deleted: boolean }>('DELETE', `/v1/notes/${noteId}`),
-	librarySearch: (q: string) =>
-		call<{ results: unknown[]; private_documents: PrivateImportSearchResult[] }>(
+	librarySearch: (q: string, scope: { jurisdiction?: string; as_of?: string } = {}) => {
+		const params = new URLSearchParams({ q });
+		if (scope.jurisdiction) params.set('jurisdiction', scope.jurisdiction);
+		if (scope.as_of) params.set('as_of', scope.as_of);
+		return call<LibrarySearchResponse>('GET', `/v1/library/search?${params.toString()}`);
+	},
+	libraryArticle: (slug: string, scope: { jurisdiction?: string; as_of?: string } = {}) => {
+		const params = new URLSearchParams();
+		if (scope.jurisdiction) params.set('jurisdiction', scope.jurisdiction);
+		if (scope.as_of) params.set('as_of', scope.as_of);
+		const suffix = params.toString();
+		return call<LibraryArticleResponse>(
 			'GET',
-			`/v1/library/search?q=${encodeURIComponent(q)}`
-		),
+			`/v1/library/articles/${encodeURIComponent(slug)}${suffix ? `?${suffix}` : ''}`
+		);
+	},
 	privateImportRights: () => call<{ rights: PrivateImportRight[] }>('GET', '/v1/me/library/import-rights'),
 	listPrivateImports: () => call<{ documents: PrivateImportSummary[] }>('GET', '/v1/me/library/imports'),
 	createPrivateImport: (body: {

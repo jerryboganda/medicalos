@@ -245,6 +245,23 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::library::attach_media),
         )
         .route(
+            "/v1/admin/articles",
+            get(routes::library::admin_list_articles).post(routes::library::create_article),
+        )
+        .route(
+            "/v1/admin/articles/{article_id}/versions",
+            post(routes::library::create_article_version),
+        )
+        .route(
+            "/v1/admin/articles/{article_id}/versions/{version_id}",
+            get(routes::library::get_admin_article_version)
+                .patch(routes::library::update_article_draft),
+        )
+        .route(
+            "/v1/admin/articles/{article_id}/versions/{version_id}/publish",
+            post(routes::library::publish_article_draft),
+        )
+        .route(
             "/v1/admin/image-cases",
             post(routes::library::create_image_case),
         )
@@ -904,6 +921,23 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/admin/articles/{article_id}/media",
             post(routes::library::attach_media),
+        )
+        .route(
+            "/api/v1/admin/articles",
+            get(routes::library::admin_list_articles).post(routes::library::create_article),
+        )
+        .route(
+            "/api/v1/admin/articles/{article_id}/versions",
+            post(routes::library::create_article_version),
+        )
+        .route(
+            "/api/v1/admin/articles/{article_id}/versions/{version_id}",
+            get(routes::library::get_admin_article_version)
+                .patch(routes::library::update_article_draft),
+        )
+        .route(
+            "/api/v1/admin/articles/{article_id}/versions/{version_id}/publish",
+            post(routes::library::publish_article_draft),
         )
         .route(
             "/api/v1/admin/image-cases",

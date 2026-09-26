@@ -4545,6 +4545,526 @@ async fn library_seed_search_article() {
 }
 
 #[tokio::test]
+async fn admin_article_authoring_publishes_immutable_audited_versions() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+
+    let create = serde_json::json!({
+        "slug": "versioned-library-fixture",
+        "title": "Versioned library fixture",
+        "body": "Draft recommendation.",
+        "source_ref": "Fixture guideline, 2026",
+        "jurisdiction": "PK",
+        "effective_from": "2026-01-01",
+        "effective_to": "2026-12-31",
+        "citations": [{
+            "kind": "page",
+            "anchor": "Recommendation",
+            "target": "page 12"
+        }]
+    });
+
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(create.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let (status, invalid) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "invalid-window",
+                "title": "Invalid window",
+                "body": "Body",
+                "source_ref": "Source",
+                "jurisdiction": null,
+                "effective_from": "2026-12-31",
+                "effective_to": "2026-01-01",
+                "citations": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    assert_eq!(invalid["error"]["code"], "invalid_effective_range");
+
+    let (status, missing_anchor) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "missing-citation-anchor",
+                "title": "Missing citation anchor",
+                "body": "The body does not contain this reference.",
+                "source_ref": "Fixture",
+                "jurisdiction": null,
+                "effective_from": null,
+                "effective_to": null,
+                "citations": [{
+                    "kind": "page",
+                    "anchor": "absent phrase",
+                    "target": "page 4"
+                }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_anchor}");
+    assert_eq!(missing_anchor["error"]["code"], "citation_anchor_not_found");
+
+    let (status, invalid_timestamp) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "invalid-citation-time",
+                "title": "Invalid citation time",
+                "body": "Timestamp anchor",
+                "source_ref": "Fixture",
+                "jurisdiction": null,
+                "effective_from": null,
+                "effective_to": null,
+                "citations": [{
+                    "kind": "timestamp",
+                    "anchor": "Timestamp",
+                    "target": "00:99"
+                }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_timestamp}");
+    assert_eq!(invalid_timestamp["error"]["code"], "invalid_citation_timestamp");
+
+    let (status, created) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(create),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["version"], 1);
+    assert_eq!(created["status"], "draft");
+    let article_id: Uuid = created["article_id"].as_str().unwrap().parse().unwrap();
+    let first_version_id: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+    let first_version_path = format!(
+        "/v1/admin/articles/{article_id}/versions/{first_version_id}"
+    );
+
+    let (status, hidden_draft) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/versioned-library-fixture?jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{hidden_draft}");
+
+    let (status, saved) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &first_version_path,
+            Some(&token),
+            Some(serde_json::json!({
+                "body": "Published recommendation.",
+                "source_ref": "Fixture guideline, revision 1",
+                "jurisdiction": "PK",
+                "effective_from": "2026-01-01",
+                "effective_to": "2026-12-31",
+                "citations": [{
+                    "kind": "figure",
+                    "anchor": "Recommendation",
+                    "target": "figure 2"
+                }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["citations"][0]["kind"], "figure");
+
+    let (status, published) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("{first_version_path}/publish"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published}");
+    assert_eq!(published["status"], "published");
+
+    let (status, article_v1) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/versioned-library-fixture?jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{article_v1}");
+    assert_eq!(article_v1["version"], 1);
+    assert_eq!(article_v1["body"], "Published recommendation.");
+    assert_eq!(article_v1["citations"][0]["target"], "figure 2");
+
+    let (status, locked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &first_version_path,
+            Some(&token),
+            Some(serde_json::json!({
+                "body": "Changed after publication.",
+                "source_ref": "Fixture guideline, revision 2",
+                "jurisdiction": "PK",
+                "effective_from": null,
+                "effective_to": null,
+                "citations": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{locked}");
+    assert_eq!(locked["error"]["code"], "article_version_not_draft");
+
+    let (status, version2) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/versions"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version2}");
+    assert_eq!(version2["version"], 2);
+    assert_eq!(version2["status"], "draft");
+    let second_version_id: Uuid = version2["version_id"].as_str().unwrap().parse().unwrap();
+    let second_version_path = format!(
+        "/v1/admin/articles/{article_id}/versions/{second_version_id}"
+    );
+
+    let (status, still_v1) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/versioned-library-fixture?jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{still_v1}");
+    assert_eq!(still_v1["version"], 1);
+
+    let (status, saved_v2) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &second_version_path,
+            Some(&token),
+            Some(serde_json::json!({
+                "body": "Updated recommendation.",
+                "source_ref": "Fixture guideline, revision 2",
+                "jurisdiction": "PK",
+                "effective_from": "2026-01-01",
+                "effective_to": "2026-12-31",
+                "citations": [{
+                    "kind": "timestamp",
+                    "anchor": "Recommendation",
+                    "target": "00:42"
+                }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved_v2}");
+    let (status, published_v2) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("{second_version_path}/publish"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published_v2}");
+
+    let (status, article_v2) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/versioned-library-fixture?jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{article_v2}");
+    assert_eq!(article_v2["version"], 2);
+    assert_eq!(article_v2["body"], "Updated recommendation.");
+
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit["events"].as_array().unwrap().iter().any(|event| {
+        event["action"] == "article_version_published"
+            && event["entity_id"] == second_version_id.to_string()
+    }));
+    assert!(!audit.to_string().contains("Updated recommendation."));
+}
+
+#[tokio::test]
+async fn library_region_resolution_prefers_country_then_global_and_respects_dates() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let (user_id, token) = register(app.clone(), "library-region-reader".into()).await;
+    sqlx::query!("UPDATE users SET tier = 'paid' WHERE id = $1", user_id)
+        .execute(&state.pool)
+        .await
+        .expect("paid article-reader fixture");
+
+    let (status, global) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "regional-scope-guideline",
+                "title": "Regional scope guideline",
+                "body": "Global recommendation for the study fixture.",
+                "source_ref": "Global guideline",
+                "jurisdiction": null,
+                "effective_from": "2026-01-01",
+                "effective_to": "2026-12-31",
+                "citations": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{global}");
+    let article_id: Uuid = global["article_id"].as_str().unwrap().parse().unwrap();
+    let global_version_id: Uuid = global["version_id"].as_str().unwrap().parse().unwrap();
+    let global_path = format!("/v1/admin/articles/{article_id}/versions/{global_version_id}");
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("{global_path}/publish"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, pakistan_draft) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/versions"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pakistan_draft}");
+    let pakistan_version_id: Uuid = pakistan_draft["version_id"].as_str().unwrap().parse().unwrap();
+    let pakistan_path = format!("/v1/admin/articles/{article_id}/versions/{pakistan_version_id}");
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &pakistan_path,
+            Some(&token),
+            Some(serde_json::json!({
+                "body": "Pakistan recommendation for the study fixture.",
+                "source_ref": "Pakistan guideline",
+                "jurisdiction": "pk",
+                "effective_from": "2026-02-01",
+                "effective_to": "2026-10-31",
+                "citations": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("{pakistan_path}/publish"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request_article = |scope: &str| {
+        request(
+            "GET",
+            &format!("/v1/library/articles/regional-scope-guideline{scope}"),
+            Some(&token),
+            None,
+        )
+    };
+    let (status, default_scope) = call(app.clone(), request_article("?as_of=2026-06-01")).await;
+    assert_eq!(status, StatusCode::OK, "{default_scope}");
+    assert_eq!(default_scope["version"], 1);
+    assert_eq!(default_scope["jurisdiction"], Value::Null);
+
+    let (status, exact_country) =
+        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-06-01")).await;
+    assert_eq!(status, StatusCode::OK, "{exact_country}");
+    assert_eq!(exact_country["version"], 2);
+    assert_eq!(exact_country["jurisdiction"], "PK");
+
+    let (status, fallback) =
+        call(app.clone(), request_article("?jurisdiction=IN&as_of=2026-06-01")).await;
+    assert_eq!(status, StatusCode::OK, "{fallback}");
+    assert_eq!(fallback["version"], 1);
+    assert_eq!(fallback["jurisdiction"], Value::Null);
+
+    let (status, before_country_window) =
+        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-01-31")).await;
+    assert_eq!(status, StatusCode::OK, "{before_country_window}");
+    assert_eq!(before_country_window["version"], 1);
+    let (status, first_country_day) =
+        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-02-01")).await;
+    assert_eq!(status, StatusCode::OK, "{first_country_day}");
+    assert_eq!(first_country_day["version"], 2);
+    let (status, last_country_day) =
+        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-10-31")).await;
+    assert_eq!(status, StatusCode::OK, "{last_country_day}");
+    assert_eq!(last_country_day["version"], 2);
+    let (status, after_all_windows) =
+        call(app.clone(), request_article("?jurisdiction=PK&as_of=2027-01-01")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{after_all_windows}");
+    assert_eq!(after_all_windows["error"]["code"], "article_not_available_for_region");
+
+    let (status, invalid_scope_date) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/regional-scope-guideline?jurisdiction=PK&as_of=2026-02-30",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_scope_date}");
+    assert_eq!(invalid_scope_date["error"]["code"], "invalid_as_of_date");
+
+    let (status, exact_search) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/search?q=Pakistan&jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{exact_search}");
+    assert_eq!(exact_search["results"][0]["version"], 2);
+    assert_eq!(exact_search["results"][0]["jurisdiction"], "PK");
+
+    let (status, no_wrong_country_match) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/search?q=Global&jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_wrong_country_match}");
+    assert!(no_wrong_country_match["results"].as_array().unwrap().is_empty());
+
+    let (status, us_only) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/articles",
+            Some(&token),
+            Some(serde_json::json!({
+                "slug": "us-only-guideline",
+                "title": "US only guideline",
+                "body": "United States only recommendation.",
+                "source_ref": "US guideline",
+                "jurisdiction": "US",
+                "effective_from": "2026-01-01",
+                "effective_to": "2026-12-31",
+                "citations": []
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{us_only}");
+    let us_article_id: Uuid = us_only["article_id"].as_str().unwrap().parse().unwrap();
+    let us_version_id: Uuid = us_only["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, published_us) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{us_article_id}/versions/{us_version_id}/publish"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{published_us}");
+    let (status, cross_country) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/library/articles/us-only-guideline?jurisdiction=PK&as_of=2026-06-01",
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{cross_country}");
+}
+
+#[tokio::test]
 async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts() {
     let _g = LOCK.lock().await;
     let state = setup().await;
