@@ -135,11 +135,11 @@
 				if (
 					!lease ||
 					lease.exam_id !== pack.exam_id ||
-					lease.device_id !== pack.manifest.device_id ||
+					lease.device_id !== pack.device_id ||
 					Date.now() >= Date.parse(lease.expires_at) ||
 					pack.chapters.some((chapter) => !lease.chapters.includes(chapter))
 				) {
-					await removeOfflinePack(summary.exam_id, pack.manifest.device_id);
+					await removeOfflinePack(summary.exam_id, pack.device_id);
 					await refreshPacks();
 					throw new Error('This pack lease expired or was revoked. The downloaded copy was removed.');
 				}

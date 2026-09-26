@@ -34,6 +34,7 @@ interface EncryptedResource {
 export interface OfflinePackSummary {
 	pack_id: string;
 	exam_id: string;
+	device_id: string;
 	chapters: string[];
 	lease_id: string;
 	expires_at: string;
