@@ -1158,8 +1158,21 @@
 				{:else}
 					<p>You are ahead of {result.mock.percentile}% of takers of this same form.</p>
 				{/if}
+				{#if result.mock.total_time_seconds !== undefined}
+					<p class="muted" data-testid="mock-time-analysis" style="margin: var(--space-xs) 0;">
+						Total time: {Math.floor(result.mock.total_time_seconds / 60)}m {result.mock.total_time_seconds % 60}s
+						{#if result.mock.avg_time_per_question_seconds !== undefined}
+							· {result.mock.avg_time_per_question_seconds}s/question avg
+						{/if}
+					</p>
+				{/if}
 				{#each result.mock.breakdown as row (row.chapter)}
-					<p style="margin:2px 0;">{row.chapter}: {row.correct}/{row.total}</p>
+					<p style="margin:2px 0;">
+						{row.chapter}: {row.correct}/{row.total}
+						{#if row.time_seconds !== undefined}
+							<span class="muted">({Math.floor(row.time_seconds / 60)}m {row.time_seconds % 60}s)</span>
+						{/if}
+					</p>
 				{/each}
 			</div>
 		{:else if result.expected_score !== null}

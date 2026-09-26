@@ -1766,10 +1766,29 @@ pub async fn submit(
         } else {
             None
         };
+        let total_time_seconds = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(elapsed_ms) / 1000, 0)::BIGINT FROM attempts WHERE session_id = $1",
+        )
+        .bind(sid)
+        .fetch_one(&state.pool)
+        .await?;
+        let answered_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT FROM attempts WHERE session_id = $1 AND chosen_index IS NOT NULL",
+        )
+        .bind(sid)
+        .fetch_one(&state.pool)
+        .await?;
+        let avg_time_per_question_seconds = if answered_count > 0 {
+            total_time_seconds / answered_count
+        } else {
+            0
+        };
+
         let breakdown = sqlx::query!(
             r#"SELECT c.name AS chapter_name,
                       COALESCE(COUNT(*), 0) AS "total!",
-                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!"
+                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!",
+                      COALESCE(SUM(a.elapsed_ms) / 1000, 0)::BIGINT AS "time_seconds!"
                FROM session_items si
                JOIN question_versions qv ON qv.id = si.question_version_id
                JOIN curriculum_nodes c ON c.id = qv.chapter_id
@@ -1789,10 +1808,13 @@ pub async fn submit(
             "takers": takers,
             "ranked": ranked,
             "late_sync_answers": late_sync_answers,
+            "total_time_seconds": total_time_seconds,
+            "avg_time_per_question_seconds": avg_time_per_question_seconds,
             "breakdown": breakdown.iter().map(|b| serde_json::json!({
                 "chapter": b.chapter_name,
                 "total": b.total,
                 "correct": b.correct,
+                "time_seconds": b.time_seconds,
             })).collect::<Vec<_>>(),
         });
     }

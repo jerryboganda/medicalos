@@ -439,6 +439,7 @@ export interface Note {
 export interface MockTest {
 	mock_id: string;
 	title: string;
+	mock_type?: 'full' | 'mini' | 'subject' | 'system' | 'chapter' | 'grand_test' | 'final_assessment' | string;
 	pass_mark_percent: number;
 	attempts_allowed: number;
 	attempts_used: number;
@@ -456,7 +457,9 @@ export interface MockResult {
 	takers: number;
 	ranked: boolean;
 	late_sync_answers: number;
-	breakdown: { chapter: string; total: number; correct: number }[];
+	total_time_seconds?: number;
+	avg_time_per_question_seconds?: number;
+	breakdown: { chapter: string; total: number; correct: number; time_seconds?: number }[];
 }
 
 export interface EngagementQotd {
@@ -1043,6 +1046,25 @@ export const Api = {
 			backlog_remaining: number;
 		}>('GET', '/v1/reviews/queue'),
 	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
+	createMock: (body: {
+		title: string;
+		exam_id: string;
+		mock_type?: string;
+		blueprint: { chapter_id: string; count: number }[];
+		time_limit_seconds?: number;
+		pass_mark_percent?: number;
+		attempts_allowed?: number;
+		late_sync_grace_seconds?: number;
+		integrity_policy?: 'log_only' | 'warn' | 'auto_submit';
+		away_timeout_seconds?: number;
+	}) =>
+		call<{
+			mock_id: string;
+			mock_type: string;
+			late_sync_grace_seconds: number;
+			integrity_policy: string;
+			away_timeout_seconds: number | null;
+		}>('POST', '/v1/mocks', body),
 	listCompetitions: () =>
 		call<{ competitions: CompetitionSummary[] }>('GET', '/v1/competitions'),
 	competitionLeague: (examId: string) =>

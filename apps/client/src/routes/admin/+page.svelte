@@ -15,7 +15,8 @@
 		type PendingScenarioAssessment,
 		type ScenarioAppealDecision,
 		type ScenarioAssessmentAppeal,
-		type ScenarioAssessmentAppealQueueItem
+		type ScenarioAssessmentAppealQueueItem,
+		type MockTest
 	} from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -174,6 +175,24 @@
 	let oidcError = $state('');
 	let oidcSignInUrl = $state('');
 
+	// mock tests (EX-07)
+	let mocksList = $state<MockTest[]>([]);
+	let mocksBusy = $state(false);
+	let mocksError = $state('');
+	let mocksMessage = $state('');
+	let mockExamId = $state('');
+	let mockTitle = $state('');
+	let mockType = $state<MockTest['mock_type']>('full');
+	let mockTimeLimitMinutes = $state(120);
+	let mockPassMarkPercent = $state(70);
+	let mockAttemptsAllowed = $state(1);
+	let mockLateSyncGraceMinutes = $state(5);
+	let mockIntegrityPolicy = $state<'log_only' | 'warn' | 'auto_submit'>('log_only');
+	let mockAwayTimeoutSeconds = $state(30);
+	let mockBlueprintEntries = $state<Array<{ chapter_id: string; count: number }>>([]);
+	let blueprintChapterId = $state('');
+	let blueprintCount = $state(10);
+
 	async function unlock() {
 		unlocked = adminToken().length > 0;
 		if (unlocked) {
@@ -185,7 +204,8 @@
 				loadExtractionReports(),
 				loadPendingAssessments(),
 				loadScenarioAssessmentAppeals(),
-				loadRuntimeSettings()
+				loadRuntimeSettings(),
+				loadMocks()
 			]);
 		}
 	}
@@ -952,6 +972,63 @@
 			error = err instanceof ApiError ? err.message : 'Rollback failed.';
 		} finally {
 			busy = false;
+		}
+	}
+
+	async function loadMocks() {
+		mocksBusy = true;
+		mocksError = '';
+		try {
+			const res = await Api.listMocks();
+			mocksList = res.mocks;
+		} catch (err) {
+			mocksError = err instanceof ApiError ? err.message : 'Failed to load mock tests.';
+		} finally {
+			mocksBusy = false;
+		}
+	}
+
+	function addBlueprintEntry() {
+		const cid = blueprintChapterId.trim();
+		if (!cid || blueprintCount < 1) return;
+		mockBlueprintEntries = [...mockBlueprintEntries, { chapter_id: cid, count: blueprintCount }];
+		blueprintChapterId = '';
+		blueprintCount = 10;
+	}
+
+	function removeBlueprintEntry(index: number) {
+		mockBlueprintEntries = mockBlueprintEntries.filter((_, i) => i !== index);
+	}
+
+	async function createMockTest(event: Event) {
+		event.preventDefault();
+		const eId = mockExamId.trim() || examId.trim();
+		if (!eId || !mockTitle.trim() || mockBlueprintEntries.length === 0 || mocksBusy) return;
+		mocksBusy = true;
+		mocksError = '';
+		mocksMessage = '';
+		try {
+			await Api.createMock({
+				exam_id: eId,
+				title: mockTitle.trim(),
+				mock_type: mockType,
+				time_limit_seconds: mockTimeLimitMinutes * 60,
+				pass_mark_percent: mockPassMarkPercent,
+				attempts_allowed: mockAttemptsAllowed,
+				late_sync_grace_seconds: Math.min(mockLateSyncGraceMinutes * 60, 600),
+				integrity_policy: mockIntegrityPolicy,
+				...(mockIntegrityPolicy === 'log_only' ? {} : { away_timeout_seconds: mockAwayTimeoutSeconds }),
+				blueprint: mockBlueprintEntries
+			});
+			mocksMessage = `Mock "${mockTitle.trim()}" created successfully.`;
+			mockTitle = '';
+			mockBlueprintEntries = [];
+			await loadMocks();
+			await refreshAudit();
+		} catch (err) {
+			mocksError = err instanceof ApiError ? err.message : 'Failed to create mock test.';
+		} finally {
+			mocksBusy = false;
 		}
 	}
 
@@ -2036,6 +2113,127 @@
 			</article>
 		{/each}
 	</div>
+
+	<section class="card" aria-labelledby="mock-builder-heading" data-testid="mock-builder">
+		<h2 id="mock-builder-heading">Mock test builder (EX-07)</h2>
+		<p class="muted">
+			Configure examination forms with frozen blueprints, pass marks, attempt limits, and integrity constraints.
+			Blueprint draws randomize questions per chapter at start time and freeze the composition for attempts.
+		</p>
+		{#if mocksError}<p class="error-text" role="alert" data-testid="mock-error">{mocksError}</p>{/if}
+		{#if mocksMessage}<p class="muted" role="status" data-testid="mock-message">{mocksMessage}</p>{/if}
+
+		<form onsubmit={createMockTest}>
+			<div class="runtime-settings-fields">
+				<label class="field" for="mock-title">
+					<span>Mock title</span>
+					<input id="mock-title" bind:value={mockTitle} placeholder="e.g. Cardiorespiratory Mock A" required data-testid="mock-title" />
+				</label>
+				<label class="field" for="mock-exam-id">
+					<span>Exam ID</span>
+					<input id="mock-exam-id" bind:value={mockExamId} placeholder={examId || 'Target exam UUID'} data-testid="mock-exam-id" />
+				</label>
+				<label class="field" for="mock-type">
+					<span>Form type</span>
+					<select id="mock-type" bind:value={mockType} data-testid="mock-type">
+						<option value="full">Full examination form</option>
+						<option value="mini">Mini mock</option>
+						<option value="subject">Subject focus</option>
+						<option value="system">System focus</option>
+						<option value="chapter">Chapter assessment</option>
+						<option value="grand_test">Grand test</option>
+						<option value="final_assessment">Final assessment</option>
+					</select>
+				</label>
+				<label class="field" for="mock-time-limit">
+					<span>Time limit (minutes)</span>
+					<input id="mock-time-limit" type="number" min="1" max="1440" step="1" bind:value={mockTimeLimitMinutes} required data-testid="mock-time-limit" />
+				</label>
+				<label class="field" for="mock-pass-mark">
+					<span>Pass mark (%)</span>
+					<input id="mock-pass-mark" type="number" min="1" max="100" step="1" bind:value={mockPassMarkPercent} required data-testid="mock-pass-mark" />
+				</label>
+				<label class="field" for="mock-attempts">
+					<span>Attempts allowed</span>
+					<input id="mock-attempts" type="number" min="1" max="100" step="1" bind:value={mockAttemptsAllowed} required data-testid="mock-attempts" />
+				</label>
+				<label class="field" for="mock-grace-period">
+					<span>Late sync grace (minutes)</span>
+					<input id="mock-grace-period" type="number" min="0" max="60" step="1" bind:value={mockLateSyncGraceMinutes} required data-testid="mock-grace-period" />
+				</label>
+				<label class="field" for="mock-integrity">
+					<span>Integrity policy</span>
+					<select id="mock-integrity" bind:value={mockIntegrityPolicy} data-testid="mock-integrity">
+						<option value="log_only">Log only</option>
+						<option value="warn">Warn on tab away</option>
+						<option value="auto_submit">Auto-submit on timeout</option>
+					</select>
+				</label>
+				{#if mockIntegrityPolicy !== 'log_only'}
+					<label class="field" for="mock-away-timeout">
+						<span>Away timeout (seconds)</span>
+						<input id="mock-away-timeout" type="number" min="15" max="3600" step="1" bind:value={mockAwayTimeoutSeconds} required data-testid="mock-away-timeout" />
+					</label>
+				{/if}
+			</div>
+
+			<fieldset class="rights-record" style="margin-top:var(--space-md);">
+				<legend>Blueprint chapters</legend>
+				<p class="muted">Add chapters and the question count to sample from each chapter.</p>
+				<div style="display:flex; gap:var(--space-sm); align-items:flex-end; flex-wrap:wrap;">
+					<label class="field" for="blueprint-chapter" style="flex:1; min-width:14rem;">
+						<span>Chapter ID</span>
+						<input id="blueprint-chapter" bind:value={blueprintChapterId} placeholder="Chapter UUID" data-testid="blueprint-chapter-id" />
+					</label>
+					<label class="field" for="blueprint-count" style="width:8rem;">
+						<span>Count</span>
+						<input id="blueprint-count" type="number" min="1" max="500" step="1" bind:value={blueprintCount} data-testid="blueprint-count" />
+					</label>
+					<button class="btn" type="button" onclick={addBlueprintEntry} disabled={!blueprintChapterId.trim()} data-testid="add-blueprint-entry">
+						Add chapter
+					</button>
+				</div>
+
+				{#if mockBlueprintEntries.length > 0}
+					<ul style="margin-top:var(--space-sm); list-style:none; padding:0;" data-testid="blueprint-entries">
+						{#each mockBlueprintEntries as entry, index}
+							<li style="display:flex; justify-content:space-between; align-items:center; padding:var(--space-xs) 0; border-bottom:1px solid var(--color-surface-elevated);" data-testid="blueprint-entry-item">
+								<span>Chapter <code>{entry.chapter_id}</code>: <strong>{entry.count} questions</strong></span>
+								<button class="btn" type="button" onclick={() => removeBlueprintEntry(index)}>Remove</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</fieldset>
+
+			<div style="margin-top:var(--space-md);">
+				<button class="btn primary" type="submit" disabled={mocksBusy || !mockTitle.trim() || mockBlueprintEntries.length === 0} data-testid="create-mock-btn">
+					{mocksBusy ? 'Creating mock…' : 'Create mock test'}
+				</button>
+			</div>
+		</form>
+
+		<h3 style="margin-top:var(--space-lg);">Configured mock tests</h3>
+		{#if mocksBusy && mocksList.length === 0}
+			<p class="muted" role="status">Loading mock tests…</p>
+		{:else if mocksList.length === 0}
+			<p class="muted">No mock tests configured yet.</p>
+		{:else}
+			<ul style="list-style:none; padding:0;" data-testid="mock-list">
+				{#each mocksList as mock (mock.mock_id)}
+					<li class="rights-record" style="margin-bottom:var(--space-sm);" data-testid="mock-item">
+						<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--space-xs);">
+							<strong>{mock.title}</strong>
+							<span class="chip" data-testid="mock-item-type">{(mock.mock_type ?? 'full').replace('_', ' ')}</span>
+						</div>
+						<p class="muted" style="margin:var(--space-xs) 0; font-size:var(--text-sm);">
+							Time limit: {mock.time_limit_seconds ? Math.round(mock.time_limit_seconds / 60) + 'm' : 'Unlimited'} · Pass mark: {mock.pass_mark_percent}% · Attempts: {mock.attempts_used} / {mock.attempts_allowed} · Integrity: {mock.integrity_policy}
+						</p>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 
 	<div class="card">
 		<h2>Audit trail (last 50)</h2>

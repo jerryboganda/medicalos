@@ -22013,3 +22013,146 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     }
 }
 
+#[tokio::test]
+async fn mock_types_and_time_analysis() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    // 1. Validation reject: unsupported mock_type
+    let mut invalid_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Invalid Type Mock",
+            "mock_type": "invalid_kind",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 70,
+            "attempts_allowed": 2,
+            "integrity_policy": "log_only"
+        })),
+    );
+    invalid_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, invalid_res) = call(app.clone(), invalid_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_res}");
+    assert_eq!(invalid_res["error"]["code"], "invalid_mock_type");
+
+    // 2. Admin successfully creates a mock with mock_type: "mini"
+    let mut create_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Mini Cardio Mock",
+            "mock_type": "mini",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 2 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 50,
+            "attempts_allowed": 1,
+            "integrity_policy": "log_only"
+        })),
+    );
+    create_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, created) = call(app.clone(), create_req).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["mock_type"], "mini");
+    let mid: Uuid = created["mock_id"].as_str().unwrap().parse().unwrap();
+
+    // 3. GET /v1/mocks returns mock_type
+    let (status, mocks) = call(
+        app.clone(),
+        request("GET", "/v1/mocks", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mocks}");
+    let mock_list = mocks["mocks"].as_array().unwrap();
+    let our_mock = mock_list
+        .iter()
+        .find(|m| m["mock_id"] == serde_json::json!(mid.to_string()))
+        .expect("mock in list");
+    assert_eq!(our_mock["mock_type"], "mini");
+
+    // 4. Start the mock session
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mid}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["mock_type"], "mini");
+    let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
+
+    // 5. Answer both questions
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "confidence": "sure",
+                "idempotency_key": "mini-item-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 1,
+                "chosen_index": 0,
+                "confidence": "sure",
+                "idempotency_key": "mini-item-2"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // 6. Submit session and verify time analysis and mock_type
+    let (status, result) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    let mock = result["mock"].as_object().expect("mock result object");
+    assert_eq!(mock["mock_type"], "mini");
+    assert!(mock.contains_key("total_time_seconds"));
+    assert!(mock.contains_key("avg_time_per_question_seconds"));
+    let breakdown = mock["breakdown"].as_array().expect("breakdown array");
+    assert!(!breakdown.is_empty());
+    for chapter in breakdown {
+        assert!(chapter.get("time_seconds").is_some());
+    }
+}
+
+
