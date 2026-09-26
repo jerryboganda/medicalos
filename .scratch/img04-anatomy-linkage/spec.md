@@ -1,6 +1,6 @@
 # IMG-04 — Versioned anatomy and image-case links
 
-Status: in-progress
+Status: complete (version-pinned educational concept mapping; clinical and DICOM validation remain separate)
 Requirement IDs: IMG-04, ARCH-02
 
 ## Outcome
@@ -45,3 +45,10 @@ when that case remains available under its display-rights grant.
 Concept mapping does not establish clinical correctness, replace image review,
 or clear image rights. DICOM de-identification and pixel-integrity workflows
 remain part of IMG-03.
+
+## Acceptance evidence
+
+GitHub Actions runs [36221287354](https://github.com/jerryboganda/medicalos/actions/runs/36221287354)
+and [36221289903](https://github.com/jerryboganda/medicalos/actions/runs/36221289903)
+passed the API integration, author-to-learner browser E2E, generated TypeScript
+drift, client, site, and Rust gates on source commit `faaa84a12f1fc90b091234ef2089f9750b5b4c4f`.

@@ -31,20 +31,23 @@ builds. No deployment, merge, or production verification is implied.
 
 ## Current verification (2026-09-26)
 
-- The ENG-01 declared-time goal and EX-08 configurable mock policy slices are
-  CI-verified at source commit `05601c5a8e4d8df4c8a28db263151d02b61828ff`.
-  Actions runs [36215825107](https://github.com/jerryboganda/medicalos/actions/runs/36215825107)
-  and [36215822849](https://github.com/jerryboganda/medicalos/actions/runs/36215822849)
-  passed: 111 API integration tests, 19 other Rust tests, 55 Playwright E2E
-  tests, formatting, Clippy, dependency/license checks, SQLx cache generation,
-  WASM builds, and client/site builds.
-- Read-only production probes returned HTTP 200 for `/`, `/api/healthz`, and
-  `/version.json`; health was `ok`. The deployed SHA is
-  `b9beb6ed41308d5e89dcfc89809e18fbf3761f71` (deployed 2026-09-24), four
-  commits behind `origin/main` (`c5947c79aea913c8a3e929cef23fa751a63bfb04`).
-- PR #11 remains open and draft; the feature code under test is commit
-  `05601c5a8e4d8df4c8a28db263151d02b61828ff`. At that code snapshot, the
-  branch was 31 commits ahead of the deployed SHA. No merge or deployment was
+- GitHub Actions runs [36221287354](https://github.com/jerryboganda/medicalos/actions/runs/36221287354)
+  and [36221289903](https://github.com/jerryboganda/medicalos/actions/runs/36221289903)
+  passed on source commit `faaa84a12f1fc90b091234ef2089f9750b5b4c4f`: 112 API
+  integration tests, 19 other Rust tests, 9 Rust-owned TypeScript export tests,
+  57 Playwright E2E tests, formatting, Clippy, dependency/license checks, SQLx
+  cache generation, WASM, checked-in TypeScript drift, and client/site builds.
+  IMG-04's author-to-learner concept mapping is verified; ARCH-02 remains
+  in-progress because other client-consumed DTO families are handwritten.
+- Fresh read-only production probes returned HTTP 200 for `/`, `/api/healthz`,
+  and `/version.json`; health was `ok`. The deployed SHA remains
+  `b9beb6ed41308d5e89dcfc89809e18fbf3761f71`, deployed at
+  `2026-09-24T04:26:38Z`. It is 35 commits behind this feature branch; current
+  `origin/main` is `c5947c79aea913c8a3e929cef23fa751a63bfb04`.
+- PR #11 remains open and draft at source commit
+  `faaa84a12f1fc90b091234ef2089f9750b5b4c4f`. No merge or deployment was
   performed.
-- The owner decisions above remain unanswered; the feature ledger also retains
-  independent technical and external acceptance gates.
+- The owner decisions above remain unanswered. The traceability ledger has 36
+  requirements still marked not-started, in-progress, or blocked (17, 17, and
+  2 respectively); several tested rows also document external acceptance
+  tails.

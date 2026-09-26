@@ -1,6 +1,7 @@
 # ARCH-02 — Generate the Today response contract
 
-Status: in-progress
+Status: complete
+Triage label: complete
 Requirement IDs: ARCH-02
 Source: `.scratch/arch02-typescript-contracts/spec.md`
 
@@ -21,8 +22,9 @@ client-consumed API request and response models remain handwritten.
 
 ## Implementation Record
 
-- Work underway. Final acceptance is deferred to the GitHub Actions gate after
-  the remaining implementation batch is complete.
+- Complete. Rust-generated Today declarations are checked into the client
+  workspace, consumed by the client build, and protected by the tracked-file
+  drift gate in GitHub Actions run 36221287354.
 
 ## Follow-up slice
 
