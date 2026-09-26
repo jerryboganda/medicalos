@@ -141,7 +141,7 @@ async fn setup() -> Arc<AppState> {
     .await
     .expect("clean data");
     // Clean all data for test isolation (CASCADE handles FK ordering).
-    sqlx::query("TRUNCATE question_reports, retest_history, retest_cards, integrity_events, appeals, coach_turns, import_batches, audit_events, app_settings, xp_ledger, achievements, competition_entries, competitions, assignments, cohort_members, cohorts, institution_members, institutions, scenarios, scenario_runs, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, guest_trials, notification_preferences, notifications, note_collection_items, note_collections, note_links, notes, goals, protected_commitments, mock_attempts, attempts, session_items, practice_sessions, learner_concept_state, plan_revisions, plan_tasks, plans, question_versions, questions, curriculum_nodes, exams, auth_sessions, users, decks, cards, review_events, engagement_settings, engagement_days, qotd_answers CASCADE")
+    sqlx::query("TRUNCATE question_reports, retest_history, retest_cards, integrity_events, appeals, coach_turns, import_batches, audit_events, app_settings, xp_ledger, achievements, competition_entries, competitions, assignments, cohort_members, cohorts, institution_members, institutions, scenarios, scenario_runs, portfolio_entries, ce_activities, pregen_tutoring, feature_flags, guest_trials, notification_preferences, notifications, note_collection_items, note_collections, note_links, notes, goals, protected_commitments, mock_attempts, attempts, session_items, practice_sessions, learner_concept_state, plan_revisions, plan_tasks, plans, question_versions, questions, curriculum_nodes, exams, auth_sessions, users, decks, cards, review_events, engagement_settings, engagement_days, qotd_answers, qotd_daily_questions CASCADE")
         .execute(&pool)
         .await
         .expect("clean database");
@@ -9390,6 +9390,8 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(eng["streak"]["enabled"], true, "{eng}");
     assert_eq!(eng["qotd"]["enabled"], true, "{eng}");
     assert_eq!(eng["qotd"]["answered"], false, "{eng}");
+    assert_eq!(eng["qotd"]["needs_exam_selection"], true, "{eng}");
+    assert_eq!(eng["qotd"]["available"], false, "{eng}");
 
     // Shrink the goal so one real attempt meets it.
     let (status, set) = call(
@@ -9398,12 +9400,16 @@ async fn engagement_goal_streak_and_qotd() {
             "PUT",
             "/v1/me/engagement/settings",
             Some(&user),
-            Some(serde_json::json!({"daily_goal_questions": 1})),
+            Some(serde_json::json!({
+                "daily_goal_questions": 1,
+                "qotd_exam_id": ids.exam_id
+            })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{set}");
     assert_eq!(set["daily_goal_questions"], 1, "{set}");
+    assert_eq!(set["qotd_exam_id"], ids.exam_id.to_string(), "{set}");
 
     // Invalid goal is rejected.
     let (status, bad) = call(
@@ -9565,6 +9571,17 @@ async fn engagement_goal_streak_and_qotd() {
 
     // Out-of-range option is rejected for that learner's own QOTD.
     let other_user = register_and_login(app.clone()).await;
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&other_user),
+            Some(serde_json::json!({ "qotd_exam_id": ids.exam_id })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
     let (status, other_qotd) = call(
         app.clone(),
         request("GET", "/v1/qotd", Some(&other_user), None),
@@ -9677,6 +9694,321 @@ async fn engagement_goal_streak_and_qotd() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     assert_eq!(refused["error"]["code"], "engagement_disabled", "{refused}");
+}
+
+#[tokio::test]
+async fn qotd_is_shared_and_stable_per_exam() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let first_user = register_and_login(app.clone()).await;
+    let second_user = register_and_login(app.clone()).await;
+
+    let (status, no_exam) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&first_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_exam}");
+    assert_eq!(no_exam["needs_exam_selection"], true, "{no_exam}");
+    assert_eq!(no_exam["available"], false, "{no_exam}");
+
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&first_user),
+            Some(serde_json::json!({ "qotd_exam_id": ids.exam_id })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(set["qotd_exam_id"], ids.exam_id.to_string(), "{set}");
+
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&second_user),
+            Some(serde_json::json!({ "qotd_exam_id": ids.exam_id })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+
+    let ((first_status, first_pick), (second_status, concurrent_pick)) = tokio::join!(
+        call(
+            app.clone(),
+            request("GET", "/v1/qotd", Some(&first_user), None),
+        ),
+        call(
+            app.clone(),
+            request("GET", "/v1/qotd", Some(&second_user), None),
+        ),
+    );
+    assert_eq!(first_status, StatusCode::OK, "{first_pick}");
+    assert_eq!(second_status, StatusCode::OK, "{concurrent_pick}");
+    assert_eq!(first_pick["available"], true, "{first_pick}");
+    assert_eq!(
+        first_pick["exam_id"],
+        ids.exam_id.to_string(),
+        "{first_pick}"
+    );
+    assert_eq!(
+        concurrent_pick["question_version_id"], first_pick["question_version_id"],
+        "{concurrent_pick}"
+    );
+    let first_question: Uuid = first_pick["question_version_id"]
+        .as_str()
+        .expect("first exam question")
+        .parse()
+        .expect("question version UUID");
+
+    // A new candidate added after the first read cannot replace today's pick.
+    let source_question: Uuid = sqlx::query_scalar(
+        "SELECT id FROM question_versions WHERE chapter_id = $1 AND status = 'published' ORDER BY id LIMIT 1",
+    )
+    .bind(ids.chapter1)
+    .fetch_one(&state.pool)
+    .await
+    .expect("seed question");
+    let added_question = Uuid::new_v4();
+    let added_question_version = Uuid::new_v4();
+    sqlx::query("INSERT INTO questions (id, family_id) VALUES ($1, $2)")
+        .bind(added_question)
+        .bind(Uuid::new_v4())
+        .execute(&state.pool)
+        .await
+        .expect("new question identity");
+    sqlx::query(
+        r#"INSERT INTO question_versions (
+               id, question_id, version, status, chapter_id, difficulty,
+               vignette, lead_in, options, correct_index, key_learning_point,
+               exam_tip, high_yield, source_ref
+           )
+           SELECT $1, $2, version + 1, 'published', $3, difficulty,
+                  vignette || ' (new daily pool item)', lead_in, options,
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+           FROM question_versions WHERE id = $4"#,
+    )
+    .bind(added_question_version)
+    .bind(added_question)
+    .bind(ids.chapter1)
+    .bind(source_question)
+    .execute(&state.pool)
+    .await
+    .expect("add eligible question");
+
+    let (status, shared_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&second_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{shared_pick}");
+    assert_eq!(
+        shared_pick["question_version_id"],
+        first_question.to_string()
+    );
+
+    sqlx::query("UPDATE question_versions SET status = 'draft' WHERE id = $1")
+        .bind(first_question)
+        .execute(&state.pool)
+        .await
+        .expect("unpublish the pinned question");
+    let (status, unavailable_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&second_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unavailable_pick}");
+    assert_eq!(unavailable_pick["available"], false, "{unavailable_pick}");
+    assert!(unavailable_pick.get("question_version_id").is_none());
+    sqlx::query("UPDATE question_versions SET status = 'published' WHERE id = $1")
+        .bind(first_question)
+        .execute(&state.pool)
+        .await
+        .expect("republish the pinned question");
+    let (status, restored_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&second_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored_pick}");
+    assert_eq!(
+        restored_pick["question_version_id"],
+        first_question.to_string()
+    );
+
+    let persisted_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
+    )
+    .bind(ids.exam_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("persisted daily pick count");
+    assert_eq!(persisted_count, 1);
+
+    // A valid empty exam returns an explicit unavailable state.
+    let empty_exam = Uuid::new_v4();
+    sqlx::query("INSERT INTO exams (id, code, name) VALUES ($1, 'QOTD_EMPTY', 'Empty QOTD exam')")
+        .bind(empty_exam)
+        .execute(&state.pool)
+        .await
+        .expect("empty exam");
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&first_user),
+            Some(serde_json::json!({ "qotd_exam_id": empty_exam })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let (status, empty_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&first_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_pick}");
+    assert_eq!(
+        empty_pick["exam_id"],
+        empty_exam.to_string(),
+        "{empty_pick}"
+    );
+    assert_eq!(empty_pick["available"], false, "{empty_pick}");
+    assert_eq!(empty_pick["needs_exam_selection"], false, "{empty_pick}");
+
+    // Clearing is distinct from omitting the setting; a second exam has its
+    // own independent daily question.
+    let (status, cleared) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&first_user),
+            Some(serde_json::json!({ "qotd_exam_id": null })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(
+        cleared["qotd_exam_id"],
+        serde_json::Value::Null,
+        "{cleared}"
+    );
+    let second_exam = Uuid::new_v4();
+    let second_chapter = Uuid::new_v4();
+    let second_question = Uuid::new_v4();
+    let second_question_version = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO exams (id, code, name) VALUES ($1, 'QOTD_SECOND', 'Second QOTD exam')",
+    )
+    .bind(second_exam)
+    .execute(&state.pool)
+    .await
+    .expect("second exam");
+    sqlx::query(
+        "INSERT INTO curriculum_nodes (id, exam_id, kind, name) VALUES ($1, $2, 'chapter', 'Second exam chapter')",
+    )
+    .bind(second_chapter)
+    .bind(second_exam)
+    .execute(&state.pool)
+    .await
+    .expect("second exam chapter");
+    sqlx::query("INSERT INTO questions (id, family_id) VALUES ($1, $2)")
+        .bind(second_question)
+        .bind(Uuid::new_v4())
+        .execute(&state.pool)
+        .await
+        .expect("second exam question identity");
+    sqlx::query(
+        r#"INSERT INTO question_versions (
+               id, question_id, version, status, chapter_id, difficulty,
+               vignette, lead_in, options, correct_index, key_learning_point,
+               exam_tip, high_yield, source_ref
+           )
+           SELECT $1, $2, 1, 'published', $3, difficulty,
+                  'Question from the second exam', lead_in, options,
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+           FROM question_versions WHERE id = $4"#,
+    )
+    .bind(second_question_version)
+    .bind(second_question)
+    .bind(second_chapter)
+    .bind(source_question)
+    .execute(&state.pool)
+    .await
+    .expect("second exam question version");
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&first_user),
+            Some(serde_json::json!({ "qotd_exam_id": second_exam })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let (status, second_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&first_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_pick}");
+    assert_eq!(
+        second_pick["exam_id"],
+        second_exam.to_string(),
+        "{second_pick}"
+    );
+    assert_eq!(
+        second_pick["question_version_id"],
+        second_question_version.to_string(),
+        "{second_pick}"
+    );
+    let (status, unchanged_first_exam) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&second_user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged_first_exam}");
+    assert_eq!(
+        unchanged_first_exam["question_version_id"],
+        first_question.to_string(),
+        "{unchanged_first_exam}"
+    );
+
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&first_user),
+            Some(serde_json::json!({
+                "question_version_id": second_question_version,
+                "chosen_index": 0
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let (status, locked) = call(
+        app,
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&first_user),
+            Some(serde_json::json!({ "qotd_exam_id": ids.exam_id })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{locked}");
+    assert_eq!(locked["error"]["code"], "qotd_exam_locked", "{locked}");
 }
 
 #[tokio::test]

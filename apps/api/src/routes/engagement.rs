@@ -9,7 +9,7 @@ use competition_scoring::{rank, AnswerRecord, Difficulty, Entry, ScoringConfig};
 use rand::seq::SliceRandom;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{PgConnection, Row};
 use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -180,7 +180,8 @@ pub async fn engagement_status(
     ensure_engagement(&state, user.user_id).await?;
     record_daily_progress(&state, user.user_id).await?;
     let s = sqlx::query!(
-        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, qotd_enabled, freeze_bank
+        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, qotd_enabled,
+                  freeze_bank, qotd_exam_id
            FROM engagement_settings WHERE user_id = $1"#,
         user.user_id
     )
@@ -198,7 +199,7 @@ pub async fn engagement_status(
     let streak = day.as_ref().map(|d| d.streak_count).unwrap_or(0);
 
     let qotd = if global && s.qotd_enabled {
-        qotd_payload(&state, user.user_id).await?
+        qotd_payload(&state, user.user_id, s.qotd_exam_id).await?
     } else {
         json!({ "enabled": false })
     };
@@ -229,7 +230,8 @@ pub async fn qotd(
     }
     ensure_engagement(&state, user.user_id).await?;
     let settings = sqlx::query!(
-        r#"SELECT qotd_enabled FROM engagement_settings WHERE user_id = $1"#,
+        r#"SELECT qotd_enabled, qotd_exam_id
+           FROM engagement_settings WHERE user_id = $1"#,
         user.user_id
     )
     .fetch_one(&state.pool)
@@ -237,50 +239,104 @@ pub async fn qotd(
     if !settings.qotd_enabled {
         return Ok(Json(json!({ "enabled": false })));
     }
-    Ok(Json(qotd_payload(&state, user.user_id).await?))
+    Ok(Json(
+        qotd_payload(&state, user.user_id, settings.qotd_exam_id).await?,
+    ))
 }
 
-async fn selected_qotd_id(state: &AppState, user_id: Uuid) -> ApiResult<Option<Uuid>> {
-    let count: i64 = sqlx::query!(
-        r#"SELECT COUNT(*) AS "n!" FROM question_versions qv
-           WHERE qv.status = 'published'
-             AND NOT EXISTS (
-                 SELECT 1 FROM reserved_questions rq
-                 WHERE rq.question_version_id = qv.id)"#
+async fn qotd_question_is_eligible(
+    conn: &mut PgConnection,
+    exam_id: Uuid,
+    question_version_id: Uuid,
+) -> ApiResult<bool> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM question_versions qv
+               JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id
+               WHERE qv.id = $1
+                 AND qv.status = 'published'
+                 AND chapter.exam_id = $2
+                 AND chapter.kind = 'chapter'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM reserved_questions rq
+                     WHERE rq.question_version_id = qv.id)
+           )"#,
     )
-    .fetch_one(&state.pool)
+    .bind(question_version_id)
+    .bind(exam_id)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
+async fn selected_qotd_id(conn: &mut PgConnection, exam_id: Uuid) -> ApiResult<Option<Uuid>> {
+    if let Some(existing) = sqlx::query!(
+        "SELECT question_version_id FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
+        exam_id
+    )
+    .fetch_optional(&mut *conn)
     .await?
-    .n;
-    if count == 0 {
-        return Ok(None);
+    {
+        return Ok(qotd_question_is_eligible(conn, exam_id, existing.question_version_id)
+            .await?
+            .then_some(existing.question_version_id));
     }
-    let seed = sqlx::query!(
-        r##"SELECT hashtext($1::text || CURRENT_DATE::text) AS "h!""##,
-        user_id.to_string()
+
+    // The unique (exam, day) key chooses the winner if a pool change races the
+    // first request; every later read observes that same persisted version.
+    sqlx::query!(
+        r#"WITH eligible AS (
+               SELECT qv.id
+               FROM question_versions qv
+               JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id
+               WHERE chapter.exam_id = $1
+                 AND chapter.kind = 'chapter'
+                 AND qv.status = 'published'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM reserved_questions rq
+                     WHERE rq.question_version_id = qv.id)
+               ORDER BY qv.id
+           ), picked AS (
+               SELECT id FROM eligible
+               ORDER BY id
+               OFFSET (
+                   SELECT CASE WHEN COUNT(*) = 0 THEN 0
+                               ELSE ABS(hashtext($1::text || CURRENT_DATE::text)::bigint) % COUNT(*)
+                          END
+                   FROM eligible
+               )
+               LIMIT 1
+           )
+           INSERT INTO qotd_daily_questions (exam_id, day, question_version_id)
+           SELECT $1, CURRENT_DATE, id FROM picked
+           ON CONFLICT (exam_id, day) DO NOTHING"#,
+        exam_id
     )
-    .fetch_one(&state.pool)
-    .await?
-    .h;
-    let offset = (seed as i64).rem_euclid(count);
-    let selected = sqlx::query!(
-        r#"SELECT qv.id
-           FROM question_versions qv
-           WHERE qv.status = 'published'
-             AND NOT EXISTS (
-                 SELECT 1 FROM reserved_questions rq
-                 WHERE rq.question_version_id = qv.id)
-           ORDER BY qv.id
-           OFFSET $1 LIMIT 1"#,
-        offset
-    )
-    .fetch_optional(&state.pool)
+    .execute(&mut *conn)
     .await?;
-    Ok(selected.map(|q| q.id))
+
+    let selected = sqlx::query!(
+        "SELECT question_version_id FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
+        exam_id
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    Ok(
+        qotd_question_is_eligible(conn, exam_id, selected.question_version_id)
+            .await?
+            .then_some(selected.question_version_id),
+    )
 }
 
-/// Deterministic one-question-per-day pick: stable hash of (user, day) over
-/// published questions. Answered state and community split after answering.
-async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::Value> {
+/// Return the exam's stable daily pick. Answer state remains learner-specific.
+async fn qotd_payload(
+    state: &AppState,
+    user_id: Uuid,
+    exam_id: Option<Uuid>,
+) -> ApiResult<serde_json::Value> {
     let existing = sqlx::query!(
         r#"SELECT a.question_version_id, a.chosen_index
            FROM qotd_answers a
@@ -302,7 +358,10 @@ async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::
         let total: i64 = split.iter().map(|r| r.n).sum();
         return Ok(json!({
             "enabled": true,
+            "exam_id": exam_id,
+            "needs_exam_selection": false,
             "answered": true,
+            "available": false,
             "community_split": split.iter().map(|r| json!({
                 "chosen_index": r.chosen_index,
                 "count": r.n,
@@ -310,21 +369,54 @@ async fn qotd_payload(state: &AppState, user_id: Uuid) -> ApiResult<serde_json::
             "community_total": total,
         }));
     }
-    let Some(question_id) = selected_qotd_id(state, user_id).await? else {
-        return Ok(json!({ "enabled": true, "answered": false, "available": false }));
+    let Some(exam_id) = exam_id else {
+        return Ok(json!({
+            "enabled": true,
+            "exam_id": null,
+            "needs_exam_selection": true,
+            "answered": false,
+            "available": false,
+        }));
+    };
+    let mut conn = state.pool.acquire().await?;
+    let Some(question_id) = selected_qotd_id(&mut *conn, exam_id).await? else {
+        return Ok(json!({
+            "enabled": true,
+            "exam_id": exam_id,
+            "needs_exam_selection": false,
+            "answered": false,
+            "available": false,
+        }));
     };
     let q = sqlx::query!(
-        r#"SELECT qv.id, qv.vignette, qv.options, qv.correct_index
+        r#"SELECT qv.id, qv.vignette, qv.options
            FROM question_versions qv
-           WHERE qv.id = $1 AND qv.status = 'published'"#,
-        question_id
+           JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id
+           WHERE qv.id = $1 AND qv.status = 'published'
+             AND chapter.exam_id = $2 AND chapter.kind = 'chapter'
+             AND NOT EXISTS (
+                 SELECT 1 FROM reserved_questions rq
+                 WHERE rq.question_version_id = qv.id)"#,
+        question_id,
+        exam_id
     )
-    .fetch_one(&state.pool)
+    .fetch_optional(&mut *conn)
     .await?;
+    let Some(q) = q else {
+        return Ok(json!({
+            "enabled": true,
+            "exam_id": exam_id,
+            "needs_exam_selection": false,
+            "answered": false,
+            "available": false,
+        }));
+    };
     let options: Vec<serde_json::Value> =
         serde_json::from_value(q.options.clone()).unwrap_or_default();
     Ok(json!({
         "enabled": true,
+        "exam_id": exam_id,
+        "needs_exam_selection": false,
         "answered": false,
         "available": true,
         "question_version_id": q.id,
@@ -352,11 +444,13 @@ pub async fn answer_qotd(
         ));
     }
     ensure_engagement(&state, user.user_id).await?;
+    let mut tx = state.pool.begin().await?;
     let settings = sqlx::query!(
-        r#"SELECT qotd_enabled FROM engagement_settings WHERE user_id = $1"#,
+        r#"SELECT qotd_enabled, qotd_exam_id
+           FROM engagement_settings WHERE user_id = $1 FOR UPDATE"#,
         user.user_id
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
     if !settings.qotd_enabled {
         return Err(ApiError::forbidden(
@@ -364,24 +458,39 @@ pub async fn answer_qotd(
             "question of the day is disabled",
         ));
     }
-    let selected = selected_qotd_id(&state, user.user_id)
+    let exam_id = settings
+        .qotd_exam_id
+        .ok_or_else(|| ApiError::not_found("qotd_unavailable"))?;
+    let selected = selected_qotd_id(&mut *tx, exam_id)
         .await?
         .ok_or_else(|| ApiError::not_found("qotd_unavailable"))?;
     if req.question_version_id != selected {
+        tx.commit().await?;
         return Err(ApiError::unprocessable(
             "qotd_mismatch",
             "question_version_id is not today's question of the day",
         ));
     }
     let q = sqlx::query!(
-        r#"SELECT correct_index, jsonb_array_length(options) AS "n!"
-           FROM question_versions WHERE id = $1 AND status = 'published'"#,
-        req.question_version_id
+        r#"SELECT qv.correct_index, jsonb_array_length(qv.options) AS "n!"
+           FROM question_versions qv
+           JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id
+           WHERE qv.id = $1 AND qv.status = 'published'
+             AND chapter.exam_id = $2 AND chapter.kind = 'chapter'
+             AND NOT EXISTS (
+                 SELECT 1 FROM reserved_questions rq
+                 WHERE rq.question_version_id = qv.id)"#,
+        req.question_version_id,
+        exam_id
     )
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(q) = q else {
+        tx.commit().await?;
+        return Err(ApiError::not_found("question_not_found"));
+    };
     if req.chosen_index < 0 || req.chosen_index >= q.n {
+        tx.commit().await?;
         return Err(ApiError::unprocessable(
             "invalid_option",
             "chosen_index is out of range",
@@ -395,14 +504,16 @@ pub async fn answer_qotd(
         req.question_version_id,
         req.chosen_index
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
     if inserted.rows_affected() == 0 {
+        tx.commit().await?;
         return Err(ApiError::conflict(
             "already_answered",
             "today's question of the day is already answered",
         ));
     }
+    tx.commit().await?;
     record_daily_progress(&state, user.user_id).await?;
     let split = sqlx::query!(
         r#"SELECT chosen_index, COUNT(*) AS "n!"
@@ -426,12 +537,22 @@ pub async fn answer_qotd(
     })))
 }
 
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 #[derive(Deserialize)]
 pub struct EngagementSettingsReq {
     pub daily_goal_questions: Option<i32>,
     pub daily_goal_enabled: Option<bool>,
     pub streak_enabled: Option<bool>,
     pub qotd_enabled: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub qotd_exam_id: Option<Option<Uuid>>,
 }
 
 pub async fn update_engagement_settings(
@@ -440,65 +561,87 @@ pub async fn update_engagement_settings(
     Json(req): Json<EngagementSettingsReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     ensure_engagement(&state, user.user_id).await?;
-    if let Some(t) = req.daily_goal_questions {
-        if !(1..=500).contains(&t) {
-            return Err(ApiError::unprocessable(
-                "invalid_daily_goal",
-                "daily goal must be 1-500 questions",
-            ));
+    if req
+        .daily_goal_questions
+        .is_some_and(|t| !(1..=500).contains(&t))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_daily_goal",
+            "daily goal must be 1-500 questions",
+        ));
+    }
+
+    let qotd_exam_changed = req.qotd_exam_id.is_some();
+    let qotd_exam_id = req.qotd_exam_id.flatten();
+    let mut tx = state.pool.begin().await?;
+    let current = sqlx::query!(
+        r#"SELECT qotd_exam_id FROM engagement_settings
+           WHERE user_id = $1 FOR UPDATE"#,
+        user.user_id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if qotd_exam_changed {
+        if let Some(exam_id) = qotd_exam_id {
+            let exists =
+                sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM exams WHERE id = $1)")
+                    .bind(exam_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !exists {
+                return Err(ApiError::not_found("qotd_exam_not_found"));
+            }
         }
-        sqlx::query!(
-            r#"UPDATE engagement_settings SET daily_goal_questions = $2, updated_at = now()
-               WHERE user_id = $1"#,
-            user.user_id,
-            t
-        )
-        .execute(&state.pool)
-        .await?;
+        if current.qotd_exam_id != qotd_exam_id {
+            let answered = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (SELECT 1 FROM qotd_answers WHERE user_id = $1 AND day = CURRENT_DATE)",
+            )
+            .bind(user.user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if answered {
+                return Err(ApiError::conflict(
+                    "qotd_exam_locked",
+                    "the question of the day exam cannot change after today's answer",
+                ));
+            }
+        }
     }
-    if let Some(v) = req.daily_goal_enabled {
-        sqlx::query!(
-            r#"UPDATE engagement_settings SET daily_goal_enabled = $2, updated_at = now()
-               WHERE user_id = $1"#,
-            user.user_id,
-            v
-        )
-        .execute(&state.pool)
-        .await?;
-    }
-    if let Some(v) = req.streak_enabled {
-        sqlx::query!(
-            r#"UPDATE engagement_settings SET streak_enabled = $2, updated_at = now()
-               WHERE user_id = $1"#,
-            user.user_id,
-            v
-        )
-        .execute(&state.pool)
-        .await?;
-    }
-    if let Some(v) = req.qotd_enabled {
-        sqlx::query!(
-            r#"UPDATE engagement_settings SET qotd_enabled = $2, updated_at = now()
-               WHERE user_id = $1"#,
-            user.user_id,
-            v
-        )
-        .execute(&state.pool)
-        .await?;
-    }
+    sqlx::query!(
+        r#"UPDATE engagement_settings SET
+               daily_goal_questions = COALESCE($2, daily_goal_questions),
+               daily_goal_enabled = COALESCE($3, daily_goal_enabled),
+               streak_enabled = COALESCE($4, streak_enabled),
+               qotd_enabled = COALESCE($5, qotd_enabled),
+               qotd_exam_id = CASE WHEN $6 THEN $7 ELSE qotd_exam_id END,
+               updated_at = now()
+           WHERE user_id = $1"#,
+        user.user_id,
+        req.daily_goal_questions,
+        req.daily_goal_enabled,
+        req.streak_enabled,
+        req.qotd_enabled,
+        qotd_exam_changed,
+        qotd_exam_id
+    )
+    .execute(&mut *tx)
+    .await?;
     let s = sqlx::query!(
-        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, qotd_enabled, freeze_bank
+        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled,
+                  qotd_enabled, freeze_bank, qotd_exam_id
            FROM engagement_settings WHERE user_id = $1"#,
         user.user_id
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({
         "daily_goal_questions": s.daily_goal_questions,
         "daily_goal_enabled": s.daily_goal_enabled,
         "streak_enabled": s.streak_enabled,
         "qotd_enabled": s.qotd_enabled,
         "freezes": s.freeze_bank,
+        "qotd_exam_id": s.qotd_exam_id,
     })))
 }
 

@@ -13,6 +13,11 @@
 	let mocks = $state(null);
 	let startingMock = $state('');
 	let engagement = $state(null);
+	let curriculum = $state([]);
+	let qotdCurriculumLoading = $state(true);
+	let qotdCurriculumError = $state('');
+	let qotdExamSelection = $state('');
+	let changingQotdExam = $state(false);
 	let answeringQotd = $state(false);
 	let qotdError = $state('');
 	let qotdResult = $state(null);
@@ -26,6 +31,17 @@
 	let nextAction = $state(null);
 	let nextActionBusy = $state(false);
 	let nextActionError = $state('');
+	let qotdExams = $derived.by(() => {
+		const exams = new Map();
+		for (const chapter of curriculum) {
+			const exam = exams.get(chapter.exam_id) ?? {
+				exam_id: chapter.exam_id,
+				name: chapter.exam
+			};
+			exams.set(chapter.exam_id, exam);
+		}
+		return [...exams.values()].sort((a, b) => a.name.localeCompare(b.name));
+	});
 
 	async function loadMocks() {
 		try {
@@ -38,8 +54,36 @@
 	async function loadEngagement() {
 		try {
 			engagement = await Api.engagement();
+			qotdExamSelection = engagement.qotd.exam_id ?? '';
 		} catch {
 			engagement = null;
+		}
+	}
+
+	async function loadQotdCurriculum() {
+		try {
+			curriculum = (await Api.myCurriculum()).chapters;
+		} catch {
+			qotdCurriculumError = 'Could not load exam choices.';
+		} finally {
+			qotdCurriculumLoading = false;
+		}
+	}
+
+	async function setQotdExam(examId) {
+		if (changingQotdExam) return;
+		const previous = engagement?.qotd?.exam_id ?? '';
+		qotdExamSelection = examId;
+		changingQotdExam = true;
+		qotdError = '';
+		try {
+			await Api.updateEngagementSettings({ qotd_exam_id: examId || null });
+			await loadEngagement();
+		} catch (err) {
+			qotdExamSelection = previous;
+			qotdError = err instanceof ApiError ? err.message : 'Could not update the QOTD exam.';
+		} finally {
+			changingQotdExam = false;
 		}
 	}
 
@@ -48,6 +92,12 @@
 		try {
 			await Api.updateEngagementSettings(patch);
 			engagement = await Api.engagement();
+			qotdExamSelection = engagement.qotd.exam_id ?? '';
+			if (patch.qotd_enabled === true && curriculum.length === 0) {
+				qotdCurriculumLoading = true;
+				qotdCurriculumError = '';
+				await loadQotdCurriculum();
+			}
 		} catch (err) {
 			qotdError = err instanceof ApiError ? err.message : 'Could not update settings.';
 		}
@@ -250,6 +300,11 @@
 			return;
 		}
 		await Promise.all([load(), loadMocks(), loadEngagement()]);
+		if (engagement?.qotd?.enabled) {
+			await loadQotdCurriculum();
+		} else {
+			qotdCurriculumLoading = false;
+		}
 	});
 </script>
 
@@ -273,8 +328,33 @@
 			</p>
 		{/if}
 		{#if engagement.qotd.enabled}
+			<label class="field" for="qotd-exam">
+				<span>Question of the day exam</span>
+				<select
+					id="qotd-exam"
+					data-testid="qotd-exam"
+					bind:value={qotdExamSelection}
+					disabled={changingQotdExam || answeringQotd || engagement.qotd.answered}
+					onchange={(event) => setQotdExam(event.currentTarget.value)}
+				>
+					<option value="">Choose an exam</option>
+					{#each qotdExams as exam (exam.exam_id)}
+						<option value={exam.exam_id}>{exam.name}</option>
+					{/each}
+				</select>
+			</label>
+			{#if qotdCurriculumLoading}
+				<p class="muted" data-testid="qotd-exams-loading">Loading exam choices…</p>
+			{:else if qotdCurriculumError}
+				<p class="error-text" role="alert">{qotdCurriculumError}</p>
+			{:else if qotdExams.length === 0}
+				<p class="muted" data-testid="qotd-no-exams">No exams are available in your curriculum.</p>
+			{/if}
 			{#if engagement.qotd.answered}
 				<div data-testid="qotd-answered">
+					<p class="muted" style="margin: var(--space-sm) 0;" data-testid="qotd-exam-lock">
+						Exam selection unlocks when today's question resets.
+					</p>
 					{#if qotdResult}
 						<p style="margin: var(--space-sm) 0;" data-testid="qotd-verdict">
 							{qotdResult.correct ? 'Correct' : 'Not correct'} — correct answer was
@@ -292,6 +372,8 @@
 						</p>
 					{/if}
 				</div>
+			{:else if engagement.qotd.needs_exam_selection}
+				<p class="muted" data-testid="qotd-needs-exam">Choose an exam to see today's question.</p>
 			{:else if engagement.qotd.available}
 				<p class="muted" style="margin: var(--space-sm) 0 4px;">Question of the day</p>
 				<p style="margin: 0 0 var(--space-sm);" data-testid="qotd-vignette">{engagement.qotd.vignette}</p>
@@ -308,6 +390,10 @@
 						</button>
 					{/each}
 				</div>
+			{:else}
+				<p class="muted" data-testid="qotd-unavailable">
+					No published questions are available for this exam today.
+				</p>
 			{/if}
 		{/if}
 		{#if qotdError}

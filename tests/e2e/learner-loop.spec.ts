@@ -19,6 +19,17 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 
 	// Today: cold-start plan with one pending task (AI-02).
 	await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+	const qotdExam = page.getByTestId('qotd-exam');
+	await expect(qotdExam).toBeVisible();
+	await expect(page.getByTestId('qotd-needs-exam')).toBeVisible();
+	await expect(qotdExam.locator('option').nth(1)).toBeAttached();
+	await qotdExam.selectOption({ index: 1 });
+	await expect(page.getByTestId('qotd-vignette')).toBeVisible();
+	await page.getByTestId('qotd-option-0').click();
+	await expect(page.getByTestId('qotd-answered')).toBeVisible();
+	await expect(qotdExam).toBeDisabled();
+	await expect(page.getByTestId('qotd-exam-lock')).toContainText('unlocks');
+
 	const start = page.getByTestId('task-start');
 	await expect(start).toBeVisible();
 

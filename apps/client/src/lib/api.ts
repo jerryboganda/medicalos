@@ -510,6 +510,8 @@ export interface MockResult {
 
 export interface EngagementQotd {
 	enabled: boolean;
+	exam_id?: string | null;
+	needs_exam_selection?: boolean;
 	answered?: boolean;
 	available?: boolean;
 	question_version_id?: string;
@@ -531,6 +533,7 @@ export interface EngagementSettings {
 	daily_goal_enabled?: boolean;
 	streak_enabled?: boolean;
 	qotd_enabled?: boolean;
+	qotd_exam_id?: string | null;
 }
 
 export interface OidcProviderView {
@@ -729,6 +732,7 @@ export const Api = {
 			streak_enabled: boolean;
 			qotd_enabled: boolean;
 			freezes: number;
+			qotd_exam_id: string | null;
 		}>('PUT', '/v1/me/engagement/settings', body),
 	answerQotd: (questionVersionId: string, chosenIndex: number) =>
 		call<{

@@ -16,6 +16,14 @@ _Avoid_: Tag, when referring to a canonical knowledge identity.
 
 **Note tag**: A learner-entered label used to organize private notes. It is not a canonical concept identity unless explicitly linked to one.
 
+## Daily engagement
+
+**QOTD exam**: The exam a learner selects for their question of the day. The choice is scoped to QOTD and is independent of plan and practice-session exam contexts.
+
+**Shared daily question**: One eligible published question version for an exam and the database calendar day, shown to every learner who selects that exam.
+
+**Daily QOTD answer lock**: After a learner answers that day's question, the selected QOTD exam stays fixed until the next database calendar day, preserving one QOTD answer per learner per day.
+
 ## Content provenance
 
 **Source passage**: A stable reference to a precise part of an external source, identified by its citation and locator. The reference does not imply that the source text is stored or licensed for redistribution.

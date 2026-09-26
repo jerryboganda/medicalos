@@ -1,0 +1,21 @@
+# ENG-01 — Share the daily question by exam
+
+Status: in-progress
+Requirement IDs: ENG-01
+Triage label: in-progress
+Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §17.2; `.scratch/eng01-shared-qotd/spec.md`
+
+## Acceptance
+
+- Learners can select their QOTD exam from exams in their curriculum.
+- Each exam receives one persisted eligible question per database calendar day, shared by every learner who selects that exam.
+- The question does not change during that day if the pool changes.
+- If the selected question becomes ineligible, the API fails closed without choosing a replacement that day.
+- A learner can change exam before answering, but cannot change after answering until the next database day.
+- No exam and no eligible question have explicit UI states.
+- API integration and Playwright E2E verify the behavior through the existing HTTP and Today seams.
+
+## Comments
+
+- 2026-09-26: The previous picker was user-specific across all published questions. The project has no global current-exam setting, so this slice adds an explicit QOTD-only exam selector rather than inferring from plan or session history.
+- 2026-09-26: Implementation and HTTP/browser coverage are in progress; GitHub Actions evidence is pending.
