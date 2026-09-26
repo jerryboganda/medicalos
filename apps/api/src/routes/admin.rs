@@ -2690,16 +2690,18 @@ pub async fn run_recovery_drill(
     let mut items = Vec::with_capacity(rows.len());
     for r in &rows {
         let resource = crate::routes::packs::build_pack_resource(
-            r.id,
-            r.vignette.clone(),
-            r.lead_in.clone(),
-            r.difficulty.clone(),
-            r.options.clone(),
-            r.correct_index,
-            r.key_learning_point.clone(),
-            r.exam_tip.clone(),
-            r.source_ref.clone(),
-            tutoring_cards.remove(&r.id).unwrap_or_default(),
+            crate::routes::packs::PackQuestionData {
+                question_version_id: r.id,
+                vignette: r.vignette.clone(),
+                lead_in: r.lead_in.clone(),
+                difficulty: r.difficulty.clone(),
+                options: r.options.clone(),
+                correct_index: r.correct_index,
+                key_learning_point: r.key_learning_point.clone(),
+                exam_tip: r.exam_tip.clone(),
+                source_ref: r.source_ref.clone(),
+                tutoring_cards: tutoring_cards.remove(&r.id).unwrap_or_default(),
+            },
         )?;
         let checksum = resource.checksum.clone();
         items.push((r.id, checksum));

@@ -549,18 +549,34 @@ pub(crate) async fn tutoring_cards_for_questions(
     Ok(cards)
 }
 
+pub(crate) struct PackQuestionData {
+    pub(crate) question_version_id: Uuid,
+    pub(crate) vignette: String,
+    pub(crate) lead_in: String,
+    pub(crate) difficulty: String,
+    pub(crate) options: Value,
+    pub(crate) correct_index: i16,
+    pub(crate) key_learning_point: String,
+    pub(crate) exam_tip: Option<String>,
+    pub(crate) source_ref: String,
+    pub(crate) tutoring_cards: Vec<crate::routes::program::TutoringCard>,
+}
+
 pub(crate) fn build_pack_resource(
-    question_version_id: Uuid,
-    vignette: String,
-    lead_in: String,
-    difficulty: String,
-    options: Value,
-    correct_index: i16,
-    key_learning_point: String,
-    exam_tip: Option<String>,
-    source_ref: String,
-    tutoring_cards: Vec<crate::routes::program::TutoringCard>,
+    question: PackQuestionData,
 ) -> ApiResult<PackQuestionResource> {
+    let PackQuestionData {
+        question_version_id,
+        vignette,
+        lead_in,
+        difficulty,
+        options,
+        correct_index,
+        key_learning_point,
+        exam_tip,
+        source_ref,
+        tutoring_cards,
+    } = question;
     let options: Vec<crate::seed::QuestionOption> =
         serde_json::from_value(options).map_err(|_| ApiError::internal())?;
     let mut content = json!({
@@ -645,18 +661,18 @@ pub async fn pack_manifest(
     let answered_ids: Vec<_> = answered.iter().copied().collect();
     let mut tutoring_cards = tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
     for r in rows {
-        let resource = build_pack_resource(
-            r.id,
-            r.vignette,
-            r.lead_in,
-            r.difficulty,
-            r.options,
-            r.correct_index,
-            r.key_learning_point,
-            r.exam_tip,
-            r.source_ref,
-            tutoring_cards.remove(&r.id).unwrap_or_default(),
-        )?;
+        let resource = build_pack_resource(PackQuestionData {
+            question_version_id: r.id,
+            vignette: r.vignette,
+            lead_in: r.lead_in,
+            difficulty: r.difficulty,
+            options: r.options,
+            correct_index: r.correct_index,
+            key_learning_point: r.key_learning_point,
+            exam_tip: r.exam_tip,
+            source_ref: r.source_ref,
+            tutoring_cards: tutoring_cards.remove(&r.id).unwrap_or_default(),
+        })?;
         let checksum = resource.checksum.clone();
         canonical_items.push((r.id, checksum.clone()));
         items.push(PackManifestItem {
@@ -777,18 +793,18 @@ pub async fn pack_resources(
     let mut tutoring_cards = tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
     let mut resources = Vec::with_capacity(rows.len());
     for row in rows {
-        resources.push(build_pack_resource(
-            row.id,
-            row.vignette,
-            row.lead_in,
-            row.difficulty,
-            row.options,
-            row.correct_index,
-            row.key_learning_point,
-            row.exam_tip,
-            row.source_ref,
-            tutoring_cards.remove(&row.id).unwrap_or_default(),
-        )?);
+        resources.push(build_pack_resource(PackQuestionData {
+            question_version_id: row.id,
+            vignette: row.vignette,
+            lead_in: row.lead_in,
+            difficulty: row.difficulty,
+            options: row.options,
+            correct_index: row.correct_index,
+            key_learning_point: row.key_learning_point,
+            exam_tip: row.exam_tip,
+            source_ref: row.source_ref,
+            tutoring_cards: tutoring_cards.remove(&row.id).unwrap_or_default(),
+        })?);
     }
     Ok(Json(PackResourcesResponse { resources }))
 }

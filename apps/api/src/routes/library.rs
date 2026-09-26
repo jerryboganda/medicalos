@@ -311,7 +311,7 @@ pub struct LibraryArticleResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct LibraryScopeQuery {
+pub struct LibraryScopeQuery {
     jurisdiction: Option<String>,
     as_of: Option<String>,
 }
