@@ -3308,7 +3308,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
         .parse()
         .unwrap();
     let (status, _) = call(
-        app,
+        app.clone(),
         request(
             "POST",
             "/v1/integrity-events",
