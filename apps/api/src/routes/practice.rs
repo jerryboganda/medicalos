@@ -164,8 +164,9 @@ async fn insert_session(
     sqlx::query!(
         "INSERT INTO practice_sessions
            (id, user_id, preset, chapter_id, source_session_id, time_limit_seconds,
-            deadline, per_question_seconds, plan_task_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            deadline, per_question_seconds, plan_task_key, late_sync_grace_seconds,
+            integrity_policy)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'log_only')",
         sid,
         user_id,
         preset,
@@ -174,7 +175,12 @@ async fn insert_session(
         time_limit_seconds,
         deadline,
         per_question_seconds,
-        plan_task_key
+        plan_task_key,
+        if matches!(preset, "tutor" | "timed") {
+            600
+        } else {
+            0
+        }
     )
     .execute(&mut *tx)
     .await?;
@@ -1048,7 +1054,10 @@ pub async fn apply_answer(
     req: AnswerReq,
 ) -> ApiResult<Json<serde_json::Value>> {
     let session = sqlx::query!(
-        "SELECT status, deadline, preset, created_at, per_question_seconds AS \"per_question_seconds?\" FROM practice_sessions WHERE id = $1 AND user_id = $2",
+        "SELECT status, deadline, preset, created_at,
+                per_question_seconds AS \"per_question_seconds?\",
+                late_sync_grace_seconds
+         FROM practice_sessions WHERE id = $1 AND user_id = $2",
         sid,
         user_id
     )
@@ -1075,14 +1084,16 @@ pub async fn apply_answer(
         ));
     }
     // Late practice sync is accepted only for a locally recorded event inside
-    // the session window and ten-minute grace period. It never counts as
-    // independent evidence; assessment mocks have no offline grace.
+    // the session window and the session's snapshotted grace period.
     let late_offline_sync = if let Some(deadline) = session.deadline {
         if chrono::Utc::now() > deadline {
             let now = chrono::Utc::now();
             let recorded_at = req.client_recorded_at.as_ref();
-            let accepted = matches!(session.preset.as_str(), "tutor" | "timed")
-                && now <= deadline + chrono::Duration::minutes(10)
+            let accepted = matches!(session.preset.as_str(), "tutor" | "timed" | "mock")
+                && session.late_sync_grace_seconds > 0
+                && now
+                    <= deadline
+                        + chrono::Duration::seconds(i64::from(session.late_sync_grace_seconds))
                 && recorded_at.is_some_and(|at| at >= &session.created_at && at <= &deadline);
             if !accepted {
                 return Err(ApiError::conflict(
@@ -1129,12 +1140,21 @@ pub async fn apply_answer(
                 let correct = req.chosen_index.map(|c| c == prev.correct_index);
                 sqlx::query!(
                     r#"UPDATE attempts
-                       SET chosen_index = $3, correct = $4, answer_changes = answer_changes + 1
+                       SET chosen_index = $3, correct = $4,
+                           answer_changes = answer_changes + 1,
+                           assisted = assisted OR $5,
+                           offline_recorded_at = COALESCE(offline_recorded_at, $6)
                        WHERE id = $2 AND session_id = $1"#,
                     sid,
                     prev.id,
                     req.chosen_index,
-                    correct
+                    correct,
+                    req.assisted.unwrap_or(false) || item.hint_used || late_offline_sync,
+                    if late_offline_sync {
+                        req.client_recorded_at.clone()
+                    } else {
+                        None
+                    }
                 )
                 .execute(&state.pool)
                 .await?;
@@ -1642,39 +1662,45 @@ pub async fn submit(
             .fetch_one(&state.pool)
             .await?;
         let passed = score >= mock.pass_mark_percent as i64;
+        let late_sync_answers = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM attempts WHERE session_id = $1 AND offline_recorded_at IS NOT NULL",
+        )
+        .bind(sid)
+        .fetch_one(&state.pool)
+        .await?;
+        let ranked = late_sync_answers == 0;
         sqlx::query!(
             "INSERT INTO mock_attempts
-               (id, mock_id, user_id, session_id, score_percent, passed)
-             VALUES ($1, $2, $3, $4, $5, $6)
+               (id, mock_id, user_id, session_id, score_percent, passed, ranked)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (mock_id, user_id, session_id) DO NOTHING",
             Uuid::new_v4(),
             mock_id,
             user.user_id,
             sid,
             score as i32,
-            passed
+            passed,
+            ranked
         )
         .execute(&state.pool)
         .await?;
         // §11.8: percentile among takers of the SAME form, only once the
         // sample is meaningful — otherwise an honest null.
-        let takers = sqlx::query!(
-            r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts WHERE mock_id = $1"#,
-            mock_id
+        let takers = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mock_attempts WHERE mock_id = $1 AND ranked = TRUE",
         )
+        .bind(mock_id)
         .fetch_one(&state.pool)
-        .await?
-        .n;
-        let below = sqlx::query!(
-            r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts
-               WHERE mock_id = $1 AND score_percent < $2"#,
-            mock_id,
-            score as i32
+        .await?;
+        let below = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mock_attempts
+             WHERE mock_id = $1 AND ranked = TRUE AND score_percent < $2",
         )
+        .bind(mock_id)
+        .bind(score as i32)
         .fetch_one(&state.pool)
-        .await?
-        .n;
-        let percentile = if takers >= community_min_sample && takers > 1 {
+        .await?;
+        let percentile = if ranked && takers >= community_min_sample && takers > 1 {
             Some((below * 100 / (takers - 1)) as i32)
         } else {
             None
@@ -1700,6 +1726,8 @@ pub async fn submit(
             "pass_mark_percent": mock.pass_mark_percent,
             "percentile": percentile,
             "takers": takers,
+            "ranked": ranked,
+            "late_sync_answers": late_sync_answers,
             "breakdown": breakdown.iter().map(|b| serde_json::json!({
                 "chapter": b.chapter_name,
                 "total": b.total,

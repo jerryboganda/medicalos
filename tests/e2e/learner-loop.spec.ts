@@ -19,6 +19,26 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 
 	// Today: cold-start plan with one pending task (AI-02).
 	await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+	const dailyGoal = page.getByTestId('daily-goal');
+	const goalMode = page.getByTestId('daily-goal-mode');
+	await expect(goalMode).toHaveValue('questions');
+	await goalMode.selectOption('minutes');
+	await expect(dailyGoal).toContainText('0/60 minutes');
+	const availableMinutes = page.getByLabel('Daily available minutes');
+	await availableMinutes.fill('5');
+	await availableMinutes.press('Tab');
+	await expect(dailyGoal).toContainText('0/5 minutes');
+	await page.reload();
+	await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+	const persistedGoalMode = page.getByTestId('daily-goal-mode');
+	const persistedDailyGoal = page.getByTestId('daily-goal');
+	await expect(persistedGoalMode).toHaveValue('minutes');
+	await expect(persistedDailyGoal).toContainText('0/5 minutes');
+	await expect(page.getByLabel('Daily available minutes')).toHaveValue('5');
+	await persistedGoalMode.selectOption('questions');
+	await expect(persistedDailyGoal).toContainText('0/20 questions');
+	await persistedGoalMode.selectOption('minutes');
+	await expect(persistedDailyGoal).toContainText('0/5 minutes');
 	const qotdExam = page.getByTestId('qotd-exam');
 	await expect(qotdExam).toBeVisible();
 	await expect(page.getByTestId('qotd-needs-exam')).toBeVisible();

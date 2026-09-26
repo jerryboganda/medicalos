@@ -2952,6 +2952,479 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
 }
 
 #[tokio::test]
+async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let legacy_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions (id, user_id, preset)
+         VALUES ($1, $2, 'timed')",
+    )
+    .bind(legacy_session_id)
+    .bind(
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("registered learner"),
+    )
+    .execute(&state.pool)
+    .await
+    .expect("legacy timed session fixture");
+    sqlx::raw_sql(include_str!("../migrations/0055_ex08_policy_enforcement.down.sql"))
+        .execute(&state.pool)
+        .await
+        .expect("roll back EX-08 migration");
+    sqlx::raw_sql(include_str!("../migrations/0055_ex08_policy_enforcement.up.sql"))
+        .execute(&state.pool)
+        .await
+        .expect("replay EX-08 migration");
+    let legacy_grace: i32 = sqlx::query_scalar(
+        "SELECT late_sync_grace_seconds FROM practice_sessions WHERE id = $1",
+    )
+    .bind(legacy_session_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read preserved legacy grace");
+    assert_eq!(legacy_grace, 600);
+
+    let (status, invalid) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/mocks",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Invalid policy fixture",
+                "exam_id": ids.exam_id,
+                "blueprint": [{"chapter_id": ids.chapter1, "count": 1}],
+                "integrity_policy": "punish",
+                "away_timeout_seconds": 15,
+                "late_sync_grace_seconds": 601
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+
+    let mock_id = create_policy_mock(
+        app.clone(),
+        &token,
+        ids.exam_id,
+        ids.chapter1,
+        "Late upload fixture",
+        "log_only",
+        None,
+        120,
+    )
+    .await;
+    let (status, listed) = call(
+        app.clone(),
+        request("GET", "/v1/mocks", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let config = listed["mocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mock| mock["mock_id"] == mock_id.to_string())
+        .expect("configured mock is listed");
+    assert_eq!(config["late_sync_grace_seconds"], 120);
+    assert_eq!(config["integrity_policy"], "log_only");
+    assert!(config["away_timeout_seconds"].is_null());
+
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mock_id}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let session_id: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
+    let session_policy = sqlx::query(
+        "SELECT late_sync_grace_seconds, integrity_policy, away_timeout_seconds
+         FROM practice_sessions WHERE id = $1",
+    )
+    .bind(session_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read snapshotted policy");
+    assert_eq!(session_policy.get::<i32, _>("late_sync_grace_seconds"), 120);
+    assert_eq!(session_policy.get::<String, _>("integrity_policy"), "log_only");
+    assert_eq!(
+        session_policy.get::<Option<i32>, _>("away_timeout_seconds"),
+        None
+    );
+
+    let (status, on_time) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "ex08-on-time-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{on_time}");
+
+    // Keep offline answer timestamps inside the session window and grace,
+    // while simulating both a new answer and a changed answer syncing late.
+    sqlx::query(
+        "UPDATE practice_sessions
+         SET created_at = now() - interval '15 minutes',
+             deadline = now() - interval '30 seconds'
+         WHERE id = $1",
+    )
+    .bind(session_id)
+    .execute(&state.pool)
+    .await
+    .expect("prepare late-upload window");
+    let locally_recorded_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    let (status, changed_late) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 1,
+                "idempotency_key": "ex08-late-answer-change",
+                "client_recorded_at": locally_recorded_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed_late}");
+
+    let (status, accepted) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 1,
+                "chosen_index": 0,
+                "idempotency_key": "ex08-late-new-answer",
+                "client_recorded_at": locally_recorded_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+
+    let (status, invalid_time) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&token),
+            Some(serde_json::json!({
+                "item_index": 2,
+                "chosen_index": 0,
+                "idempotency_key": "ex08-invalid-late-answer-time",
+                "client_recorded_at": chrono::Utc::now()
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{invalid_time}");
+    assert_eq!(invalid_time["error"]["code"], "session_expired");
+
+    let late_attempts = sqlx::query(
+        "SELECT COUNT(*) AS late_count,
+                BOOL_AND(assisted) AS all_assisted
+         FROM attempts WHERE session_id = $1 AND offline_recorded_at IS NOT NULL",
+    )
+    .bind(session_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("late answers are durable");
+    assert_eq!(late_attempts.get::<i64, _>("late_count"), 2);
+    assert!(late_attempts.get::<bool, _>("all_assisted"));
+
+    let (status, result) = call(
+        app,
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["total"], 2);
+    assert_eq!(result["mock"]["late_sync_answers"], 2);
+    assert_eq!(result["mock"]["ranked"], false);
+    assert!(result["mock"]["percentile"].is_null());
+    let ranked = sqlx::query_scalar::<_, bool>(
+        "SELECT ranked FROM mock_attempts WHERE session_id = $1",
+    )
+    .bind(session_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("late attempt ranking state");
+    assert!(!ranked);
+}
+
+#[tokio::test]
+async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let token = register_and_login(app.clone()).await;
+
+    let warn_mock = create_policy_mock(
+        app.clone(),
+        &token,
+        ids.exam_id,
+        ids.chapter1,
+        "Warning fixture",
+        "warn",
+        Some(15),
+        0,
+    )
+    .await;
+    let (status, warn_started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{warn_mock}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{warn_started}");
+    let warn_session: Uuid = warn_started["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": warn_session,
+                "signal_type": "background"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query(
+        "UPDATE practice_sessions SET away_since = now() - interval '30 seconds' WHERE id = $1",
+    )
+    .bind(warn_session)
+    .execute(&state.pool)
+    .await
+    .expect("age warning interval");
+
+    let (status, warning) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": warn_session,
+                "signal_type": "foreground"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{warning}");
+    assert_eq!(warning["action"], "warn");
+    assert!(warning["away_seconds"].as_i64().unwrap() >= 15);
+
+    let (status, duplicate_return) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": warn_session,
+                "signal_type": "foreground"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate_return}");
+    assert_eq!(duplicate_return["action"], "none");
+    let warn_status: String = sqlx::query_scalar(
+        "SELECT status FROM practice_sessions WHERE id = $1",
+    )
+    .bind(warn_session)
+    .fetch_one(&state.pool)
+    .await
+    .expect("warning leaves session open");
+    assert_eq!(warn_status, "open");
+
+    let auto_mock = create_policy_mock(
+        app.clone(),
+        &token,
+        ids.exam_id,
+        ids.chapter1,
+        "Auto-submit fixture",
+        "auto_submit",
+        Some(15),
+        0,
+    )
+    .await;
+    let (status, auto_started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{auto_mock}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{auto_started}");
+    let auto_session: Uuid = auto_started["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app,
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": auto_session,
+                "signal_type": "background"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query(
+        "UPDATE practice_sessions SET away_since = now() - interval '30 seconds' WHERE id = $1",
+    )
+    .bind(auto_session)
+    .execute(&state.pool)
+    .await
+    .expect("age auto-submit interval");
+
+    let processed = api::routes::integrity::process_due_auto_submits(&state)
+        .await
+        .expect("run one durable enforcement tick");
+    assert_eq!(processed, 1);
+    let auto_result = sqlx::query(
+        "SELECT status, result_payload, auto_submitted_by_policy
+         FROM practice_sessions WHERE id = $1",
+    )
+    .bind(auto_session)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read auto-submitted session");
+    assert_eq!(auto_result.get::<String, _>("status"), "submitted");
+    assert!(auto_result
+        .get::<Option<Value>, _>("result_payload")
+        .is_some());
+    assert!(auto_result.get::<bool, _>("auto_submitted_by_policy"));
+    let submissions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM mock_attempts WHERE session_id = $1",
+    )
+    .bind(auto_session)
+    .fetch_one(&state.pool)
+    .await
+    .expect("normal mock completion side effects run");
+    assert_eq!(submissions, 1);
+
+    let manual_mock = create_policy_mock(
+        app.clone(),
+        &token,
+        ids.exam_id,
+        ids.chapter1,
+        "Manual submission fixture",
+        "auto_submit",
+        Some(15),
+        0,
+    )
+    .await;
+    let (status, manual_started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{manual_mock}/start"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manual_started}");
+    let manual_session: Uuid = manual_started["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{manual_session}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query(
+        "UPDATE practice_sessions SET away_since = now() - interval '30 seconds'
+         WHERE id = $1",
+    )
+    .bind(manual_session)
+    .execute(&state.pool)
+    .await
+    .expect("prepare already-submitted interval");
+    let (status, manual_return) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": manual_session,
+                "signal_type": "foreground"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manual_return}");
+    assert_eq!(manual_return["action"], "none");
+    assert!(manual_return.get("receipt").is_none());
+
+    let (status, resumed) = call(
+        router(state),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&token),
+            Some(serde_json::json!({
+                "session_id": auto_session,
+                "signal_type": "foreground"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_eq!(resumed["action"], "auto_submitted");
+    assert_eq!(resumed["receipt"]["total"], 2);
+}
+
+#[tokio::test]
 async fn community_stats_gate_and_expected_score() {
     let _g = LOCK.lock().await;
     let state = setup().await;
@@ -3052,6 +3525,38 @@ fn admin_req(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) 
         .headers_mut()
         .insert("x-admin-token", "test-admin".parse().expect("header"));
     builder
+}
+
+async fn create_policy_mock(
+    app: Router,
+    token: &str,
+    exam_id: Uuid,
+    chapter_id: Uuid,
+    title: &str,
+    integrity_policy: &str,
+    away_timeout_seconds: Option<i32>,
+    late_sync_grace_seconds: i32,
+) -> Uuid {
+    let (status, body) = call(
+        app,
+        admin_req(
+            "POST",
+            "/v1/mocks",
+            Some(token),
+            Some(serde_json::json!({
+                "title": title,
+                "exam_id": exam_id,
+                "blueprint": [{"chapter_id": chapter_id, "count": 2}],
+                "time_limit_seconds": 60,
+                "integrity_policy": integrity_policy,
+                "away_timeout_seconds": away_timeout_seconds,
+                "late_sync_grace_seconds": late_sync_grace_seconds
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["mock_id"].as_str().unwrap().parse().unwrap()
 }
 
 fn admin_file_req(uri: &str, token: &str, content_type: &str, bytes: Vec<u8>) -> Request<Body> {
@@ -9694,6 +10199,256 @@ async fn engagement_goal_streak_and_qotd() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     assert_eq!(refused["error"]["code"], "engagement_disabled", "{refused}");
+}
+
+#[tokio::test]
+async fn engagement_minutes_goal_counts_only_completed_answer_time() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let user = register_and_login(app.clone()).await;
+
+    let (status, bad_mode) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({ "daily_goal_mode": "hours" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad_mode}");
+    assert_eq!(bad_mode["error"]["code"], "invalid_daily_goal_mode");
+    let (status, bad_availability) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({ "available_minutes": 4 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad_availability}");
+    assert_eq!(
+        bad_availability["error"]["code"],
+        "invalid_daily_availability"
+    );
+
+    let (status, set) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({
+                "daily_goal_mode": "minutes",
+                "available_minutes": 5,
+                "qotd_exam_id": ids.exam_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(set["daily_goal_mode"], "minutes", "{set}");
+    assert_eq!(set["available_minutes"], 5, "{set}");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&user),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let (status, unanswered) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unanswered}");
+    assert_eq!(unanswered["daily_goal"]["minutes_today"], 0, "{unanswered}");
+    assert_eq!(unanswered["daily_goal"]["met"], false, "{unanswered}");
+    for (item_index, answer, elapsed_ms, key) in [
+        (0, Some(0), 240_000, "minutes-answer"),
+        (1, None, 300_000, "minutes-skip"),
+    ] {
+        let (status, body) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{sid}/answers"),
+                Some(&user),
+                Some(serde_json::json!({
+                    "item_index": item_index,
+                    "chosen_index": answer,
+                    "elapsed_ms": elapsed_ms,
+                    "idempotency_key": key
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let (status, before_qotd) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{before_qotd}");
+    assert_eq!(before_qotd["available_minutes"], 5, "{before_qotd}");
+    assert_eq!(before_qotd["daily_goal"]["mode"], "minutes", "{before_qotd}");
+    assert_eq!(before_qotd["daily_goal"]["target"], 5, "{before_qotd}");
+    assert_eq!(before_qotd["daily_goal"]["minutes_today"], 4, "{before_qotd}");
+    assert_eq!(before_qotd["daily_goal"]["met"], false, "{before_qotd}");
+
+    let qotd_id = before_qotd["qotd"]["question_version_id"]
+        .as_str()
+        .expect("selected QOTD");
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/qotd/answers",
+            Some(&user),
+            Some(serde_json::json!({
+                "question_version_id": qotd_id,
+                "chosen_index": 0,
+                "elapsed_ms": 60_000
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+
+    let (status, after_qotd) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{after_qotd}");
+    assert_eq!(after_qotd["daily_goal"]["minutes_today"], 5, "{after_qotd}");
+    assert_eq!(after_qotd["daily_goal"]["met"], true, "{after_qotd}");
+    assert_eq!(after_qotd["streak"]["count"], 1, "{after_qotd}");
+
+    let (status, updated) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({ "available_minutes": 6 })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let (status, raised_target) = call(
+        app.clone(),
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{raised_target}");
+    assert_eq!(raised_target["daily_goal"]["met"], false, "{raised_target}");
+    assert_eq!(raised_target["streak"]["count"], 1, "{raised_target}");
+
+    let (status, switched_mode) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({ "daily_goal_mode": "questions" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{switched_mode}");
+    let (status, question_goal) = call(
+        app,
+        request("GET", "/v1/me/engagement", Some(&user), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{question_goal}");
+    assert_eq!(question_goal["daily_goal"]["met"], false, "{question_goal}");
+    assert_eq!(question_goal["daily_goal"]["answered_today"], 2, "{question_goal}");
+    assert_eq!(question_goal["streak"]["count"], 1, "{question_goal}");
+}
+
+#[tokio::test]
+async fn eng01_time_goal_migration_rolls_back_and_replays_with_defaults() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let user = register_and_login(app.clone()).await;
+    let user_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM users ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("registered learner");
+
+    let (status, settings) = call(
+        app,
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&user),
+            Some(serde_json::json!({
+                "daily_goal_mode": "minutes",
+                "available_minutes": 5
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    sqlx::query(
+        "INSERT INTO qotd_answers (user_id, day, question_version_id, chosen_index, elapsed_ms)
+         VALUES ($1, CURRENT_DATE, $2, 0, 120000)",
+    )
+    .bind(user_id)
+    .bind(ids.question_versions[0])
+    .execute(&state.pool)
+    .await
+    .expect("write elapsed QOTD fixture");
+
+    sqlx::raw_sql(include_str!("../migrations/0054_eng01_time_goal.down.sql"))
+        .execute(&state.pool)
+        .await
+        .expect("roll back ENG-01 time-goal migration");
+    sqlx::raw_sql(include_str!("../migrations/0054_eng01_time_goal.up.sql"))
+        .execute(&state.pool)
+        .await
+        .expect("replay ENG-01 time-goal migration");
+
+    let settings = sqlx::query(
+        "SELECT daily_goal_mode, daily_available_minutes
+         FROM engagement_settings WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read replayed engagement defaults");
+    assert_eq!(settings.get::<String, _>("daily_goal_mode"), "questions");
+    assert_eq!(settings.get::<i32, _>("daily_available_minutes"), 60);
+    let qotd_elapsed: i64 = sqlx::query_scalar(
+        "SELECT elapsed_ms FROM qotd_answers WHERE user_id = $1 AND day = CURRENT_DATE",
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("read replayed QOTD timing default");
+    assert_eq!(qotd_elapsed, 0);
 }
 
 #[tokio::test]

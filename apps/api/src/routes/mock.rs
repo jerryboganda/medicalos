@@ -23,6 +23,9 @@ pub struct CreateMockReq {
     pub time_limit_seconds: Option<i64>,
     pub pass_mark_percent: Option<i32>,
     pub attempts_allowed: Option<i32>,
+    pub late_sync_grace_seconds: Option<i32>,
+    pub integrity_policy: Option<String>,
+    pub away_timeout_seconds: Option<i32>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -62,13 +65,44 @@ pub async fn create_mock(
             ));
         }
     }
+    let late_sync_grace_seconds = req.late_sync_grace_seconds.unwrap_or(600);
+    if !(0..=600).contains(&late_sync_grace_seconds) {
+        return Err(ApiError::unprocessable(
+            "late_sync_grace_out_of_range",
+            "late_sync_grace_seconds must be 0..=600",
+        ));
+    }
+    let integrity_policy = req.integrity_policy.as_deref().unwrap_or("log_only");
+    if !matches!(integrity_policy, "log_only" | "warn" | "auto_submit") {
+        return Err(ApiError::unprocessable(
+            "invalid_integrity_policy",
+            "integrity_policy must be log_only, warn, or auto_submit",
+        ));
+    }
+    let away_timeout_seconds = match (integrity_policy, req.away_timeout_seconds) {
+        ("log_only", None) => None,
+        ("log_only", Some(_)) => {
+            return Err(ApiError::unprocessable(
+                "unexpected_away_timeout",
+                "log_only policy does not accept away_timeout_seconds",
+            ));
+        }
+        (_, Some(seconds)) if (15..=3600).contains(&seconds) => Some(seconds),
+        _ => {
+            return Err(ApiError::unprocessable(
+                "away_timeout_out_of_range",
+                "warn and auto_submit policies require away_timeout_seconds from 15 through 3600",
+            ));
+        }
+    };
     let blueprint = serde_json::to_value(&req.blueprint).map_err(|_| ApiError::internal())?;
     let mock_id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO mocks
            (id, title, exam_id, blueprint, time_limit_seconds, pass_mark_percent,
-            attempts_allowed, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            attempts_allowed, created_by, late_sync_grace_seconds, integrity_policy,
+            away_timeout_seconds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         mock_id,
         title,
         req.exam_id,
@@ -77,11 +111,19 @@ pub async fn create_mock(
         req.time_limit_seconds.map(|l| l as i32),
         pass_mark,
         attempts,
-        user.user_id
+        user.user_id,
+        late_sync_grace_seconds,
+        integrity_policy,
+        away_timeout_seconds
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(serde_json::json!({ "mock_id": mock_id })))
+    Ok(Json(serde_json::json!({
+        "mock_id": mock_id,
+        "late_sync_grace_seconds": late_sync_grace_seconds,
+        "integrity_policy": integrity_policy,
+        "away_timeout_seconds": away_timeout_seconds,
+    })))
 }
 
 pub async fn list_mocks(
@@ -90,7 +132,8 @@ pub async fn list_mocks(
 ) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query!(
         r#"SELECT m.id, m.title, m.pass_mark_percent, m.attempts_allowed,
-                  m.time_limit_seconds,
+                  m.time_limit_seconds, m.late_sync_grace_seconds,
+                  m.integrity_policy, m.away_timeout_seconds,
                   (SELECT COUNT(*) FROM mock_attempts ma
                    WHERE ma.mock_id = m.id AND ma.user_id = $1) AS "used!"
            FROM mocks m ORDER BY m.created_at"#,
@@ -108,6 +151,9 @@ pub async fn list_mocks(
                 "attempts_allowed": m.attempts_allowed,
                 "attempts_used": m.used,
                 "time_limit_seconds": m.time_limit_seconds,
+                "late_sync_grace_seconds": m.late_sync_grace_seconds,
+                "integrity_policy": m.integrity_policy,
+                "away_timeout_seconds": m.away_timeout_seconds,
             })
         })
         .collect();
@@ -123,12 +169,18 @@ pub async fn start_mock(
     Path(mid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mock = sqlx::query!(
-        "SELECT id, blueprint, time_limit_seconds FROM mocks WHERE id = $1",
+        "SELECT id, blueprint, time_limit_seconds, late_sync_grace_seconds,
+                integrity_policy, away_timeout_seconds FROM mocks WHERE id = $1",
         mid
     )
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("mock_not_found"))?;
+    let blueprint_json = mock.blueprint;
+    let time_limit_seconds = mock.time_limit_seconds;
+    let late_sync_grace_seconds = mock.late_sync_grace_seconds;
+    let integrity_policy = mock.integrity_policy;
+    let away_timeout_seconds = mock.away_timeout_seconds;
 
     let used = sqlx::query!(
         r#"SELECT COALESCE(COUNT(*), 0) AS "n!" FROM mock_attempts
@@ -174,7 +226,7 @@ pub async fn start_mock(
     }
 
     let blueprint: Vec<BlueprintEntry> =
-        serde_json::from_value(mock.blueprint).map_err(|_| ApiError::internal())?;
+        serde_json::from_value(blueprint_json).map_err(|_| ApiError::internal())?;
     let mut pool_questions: Vec<PoolQuestion> = Vec::new();
     for entry in &blueprint {
         let count = entry.count.clamp(0, 200) as i64;
@@ -209,19 +261,22 @@ pub async fn start_mock(
         }
     }
 
-    let deadline = mock
-        .time_limit_seconds
+    let deadline = time_limit_seconds
         .map(|limit| chrono::Utc::now() + chrono::Duration::seconds(limit as i64));
     let sid = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO practice_sessions
-           (id, user_id, preset, mock_id, time_limit_seconds, deadline)
-         VALUES ($1, $2, 'mock', $3, $4, $5)",
+           (id, user_id, preset, mock_id, time_limit_seconds, deadline,
+            late_sync_grace_seconds, integrity_policy, away_timeout_seconds)
+         VALUES ($1, $2, 'mock', $3, $4, $5, $6, $7, $8)",
         sid,
         user.user_id,
         mid,
-        mock.time_limit_seconds,
-        deadline
+        time_limit_seconds,
+        deadline,
+        late_sync_grace_seconds,
+        integrity_policy,
+        away_timeout_seconds
     )
     .execute(&state.pool)
     .await?;
@@ -241,5 +296,6 @@ pub async fn start_mock(
     Ok(Json(serde_json::json!({
         "session_id": sid,
         "question_count": pool_questions.len(),
+        "late_sync_grace_seconds": late_sync_grace_seconds,
     })))
 }

@@ -92,10 +92,29 @@ test('timed session shows the server countdown and auto-submits', async ({
 			document.dispatchEvent(new Event('visibilitychange'));
 		})
 	);
-	await page.evaluate(() => {
-		Reflect.deleteProperty(document, 'visibilityState');
-		document.dispatchEvent(new Event('visibilitychange'));
+	await expectIntegritySignal(page, sessionId, 'foreground', () =>
+		page.evaluate(() => {
+			Reflect.deleteProperty(document, 'visibilityState');
+			document.dispatchEvent(new Event('visibilitychange'));
+		})
+	);
+	await page.route('**/v1/integrity-events', async (route) => {
+		if (route.request().postDataJSON()?.signal_type !== 'foreground') {
+			await route.continue();
+			return;
+		}
+		const upstream = await route.fetch();
+		const body = await upstream.json();
+		await route.fulfill({
+			response: upstream,
+			json: { ...body, action: 'warn', away_seconds: 30 }
+		});
 	});
+	await expectIntegritySignal(page, sessionId, 'foreground', () =>
+		page.evaluate(() => window.dispatchEvent(new Event('focus')))
+	);
+	await expect(page.getByTestId('integrity-warning')).toContainText(/away for/i);
+	await page.unroute('**/v1/integrity-events');
 	await page.evaluate(() => {
 		Object.defineProperty(document, 'fullscreenElement', {
 			configurable: true,
@@ -134,4 +153,80 @@ test('timed session shows the server countdown and auto-submits', async ({
 	// Auto-submit fires when the countdown reaches zero.
 	await expect(page.getByTestId('results')).toBeVisible({ timeout: 30_000 });
 	await expect(page.getByTestId('results')).toContainText('not a prediction');
+});
+
+test('session UI displays the server auto-submit receipt after a return signal', async ({
+	page
+}) => {
+	const email = `e2e-integrity-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
+	const register = await fetch(`${API}/v1/auth/register`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ email, password: 'correct horse battery' })
+	});
+	expect(register.ok).toBeTruthy();
+	const login = await fetch(`${API}/v1/auth/login`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ email, password: 'correct horse battery' })
+	});
+	const { token } = await login.json();
+	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+	const todayRes = await fetch(`${API}/v1/me/today`, { headers: authHeaders });
+	const today = await todayRes.json();
+	const sessionRes = await fetch(`${API}/v1/practice/sessions`, {
+		method: 'POST',
+		headers: authHeaders,
+		body: JSON.stringify({
+			preset: 'timed',
+			chapter_id: today.tasks[0].chapter_id,
+			question_count: 2,
+			time_limit_seconds: 120
+		})
+	});
+	expect(sessionRes.ok).toBeTruthy();
+	const { session_id: sessionId } = await sessionRes.json();
+
+	let receipt: Record<string, unknown> | null = null;
+	let deliverReceipt = false;
+	await page.route('**/v1/integrity-events', async (route) => {
+		if (
+			route.request().postDataJSON()?.signal_type !== 'foreground' ||
+			!deliverReceipt ||
+			!receipt
+		) {
+			await route.continue();
+			return;
+		}
+		deliverReceipt = false;
+		const upstream = await route.fetch();
+		const body = await upstream.json();
+		await route.fulfill({
+			response: upstream,
+			json: { ...body, action: 'auto_submitted', receipt }
+		});
+	});
+	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await page.goto(`/session/${sessionId}`);
+	await expect(page.getByText(/Question 1 of/)).toBeVisible();
+
+	// Use the persisted API receipt while the page still holds its open session
+	// state, then exercise the same return-signal response path as a mock policy.
+	const submitted = await fetch(`${API}/v1/practice/sessions/${sessionId}/submit`, {
+		method: 'POST',
+		headers: authHeaders
+	});
+	expect(submitted.ok).toBeTruthy();
+	receipt = await submitted.json();
+
+	const foreground = page.waitForResponse(
+		(response) =>
+			response.url().endsWith('/v1/integrity-events') &&
+			response.request().postDataJSON()?.signal_type === 'foreground'
+	);
+	deliverReceipt = true;
+	await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+	expect((await foreground).ok()).toBeTruthy();
+	await expect(page.getByTestId('results')).toBeVisible();
+	await expect(page.getByTestId('integrity-auto-submitted')).toContainText(/time-away limit/i);
 });

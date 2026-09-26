@@ -14,6 +14,8 @@
 	let error = $state('');
 	let result = $state(null);
 	let loadFailed = $state('');
+	let integrityWarning = $state('');
+	let integrityAutoSubmitted = $state(false);
 
 	// QB-08: report-a-problem control on answered items.
 	let reportOpen = $state(false);
@@ -167,19 +169,31 @@
 	let clockSampleAtMs = null;
 
 	/**
-	 * @param {'background' | 'window_blur' | 'fullscreen_exit' | 'clock_change'} signalType
+	 * @param {'background' | 'foreground' | 'window_blur' | 'fullscreen_exit' | 'clock_change'} signalType
 	 * @param {Record<string, number>} [detail]
 	 */
-	function recordIntegritySignal(signalType, detail = {}) {
-		if (!session?.deadline || session.status !== 'open' || result) return;
-		void Api.recordIntegrityEvent({
-			session_id: sid,
-			signal_type: signalType,
-			detail,
-			client_time: new Date().toISOString()
-		}).catch(() => {
+	async function recordIntegritySignal(signalType, detail = {}) {
+		if ((!session?.deadline && session?.preset !== 'mock') || session.status !== 'open' || result) return;
+		try {
+			const response = await Api.recordIntegrityEvent({
+				session_id: sid,
+				signal_type: signalType,
+				detail,
+				client_time: new Date().toISOString()
+			});
+			if (response.action === 'warn') {
+				const seconds = Math.max(1, response.away_seconds ?? 0);
+				integrityWarning = `You were away for ${seconds} seconds. This assessment remains open; check your connection before continuing.`;
+			} else if (response.action === 'auto_submitted' && response.receipt) {
+				integrityAutoSubmitted = true;
+				session.status = 'submitted';
+				result = response.receipt;
+				pendingSubmission = false;
+				persistDraft();
+			}
+		} catch {
 			// Integrity logging must never interrupt answering or submission.
-		});
+		}
 	}
 
 	function checkDeviceClock() {
@@ -903,7 +917,9 @@
 				clockSampleAtMs = null;
 				return;
 			}
-			if (document.visibilityState !== 'visible' || !session?.deadline || !navigator.onLine) return;
+			if (document.visibilityState !== 'visible') return;
+			recordIntegritySignal('foreground');
+			if (!session?.deadline || !navigator.onLine) return;
 			try {
 				const remote = await Api.getSession(sid);
 				anchorTimer(remote);
@@ -919,14 +935,17 @@
 			wasFullscreen = fullscreen;
 		};
 		const reportWindowBlur = () => recordIntegritySignal('window_blur');
+		const reportWindowFocus = () => recordIntegritySignal('foreground');
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		document.addEventListener('fullscreenchange', reportFullscreenExit);
 		window.addEventListener('blur', reportWindowBlur);
+		window.addEventListener('focus', reportWindowFocus);
 		return () => {
 			window.removeEventListener('online', onNetworkOnline);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			document.removeEventListener('fullscreenchange', reportFullscreenExit);
 			window.removeEventListener('blur', reportWindowBlur);
+			window.removeEventListener('focus', reportWindowFocus);
 			for (const timer of noteTimers.values()) clearTimeout(timer);
 		};
 	});
@@ -989,6 +1008,9 @@
 
 {#if timerWarning && !result}
 	<p class="feedback timer-warning" role="alert" data-testid="timer-warning">{timerWarning}</p>
+{/if}
+{#if integrityWarning && !result}
+	<p class="feedback timer-warning" role="status" data-testid="integrity-warning">{integrityWarning}</p>
 {/if}
 {#if offlineMessage && !result}
 	<p class="feedback" role="status" data-testid="offline-status">{offlineMessage}</p>
@@ -1113,6 +1135,11 @@
 {:else if result}
 	<div class="card" data-testid="results">
 		<h1>Session submitted</h1>
+		{#if integrityAutoSubmitted}
+			<p class="feedback" role="status" data-testid="integrity-auto-submitted">
+				This session was submitted after reaching its configured time-away limit.
+			</p>
+		{/if}
 		<div class="stat-row">
 			<span>Score<strong data-testid="score">{result.score}%</strong></span>
 			<span>Correct<strong>{result.correct}</strong></span>
@@ -1122,7 +1149,11 @@
 		{#if result.mock}
 			<div class="feedback {result.mock.passed ? 'good' : 'bad'}" data-testid="mock-result">
 				<p class="verdict">{result.mock.passed ? 'Passed' : 'Not passed'} — mark was {result.mock.pass_mark_percent}%</p>
-				{#if result.mock.percentile === null}
+				{#if result.mock.ranked === false}
+					<p class="muted" data-testid="mock-unranked-note">
+						This personal result includes late offline answers, so it is excluded from percentile ranking.
+					</p>
+				{:else if result.mock.percentile === null}
 					<p class="muted">Percentile appears once at least {result.mock.takers < 20 ? 20 : result.mock.takers} learners have taken this mock — nothing is invented meanwhile.</p>
 				{:else}
 					<p>You are ahead of {result.mock.percentile}% of takers of this same form.</p>

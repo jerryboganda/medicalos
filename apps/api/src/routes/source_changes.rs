@@ -742,7 +742,9 @@ async fn recalculate_mock_percentiles_on(
 ) -> ApiResult<()> {
     let rows = sqlx::query(
         r#"SELECT ma.session_id, ma.score_percent
-           FROM mock_attempts ma WHERE ma.mock_id = $1 ORDER BY ma.session_id"#,
+           FROM mock_attempts ma
+           WHERE ma.mock_id = $1 AND ma.ranked = TRUE
+           ORDER BY ma.session_id"#,
     )
     .bind(mock_id)
     .fetch_all(&mut *conn)

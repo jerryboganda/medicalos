@@ -18,6 +18,10 @@ _Avoid_: Tag, when referring to a canonical knowledge identity.
 
 ## Daily engagement
 
+**Daily available minutes**: The learner's persisted declaration of how many minutes they can study on a day. Today uses it as the planning budget, and minutes-mode engagement uses the same value as its goal target.
+
+**Daily goal mode**: Whether daily engagement progress is measured by completed answered questions or by recorded elapsed minutes on completed answers. Recorded minutes are a learner-facing progress aid, not proctored time evidence.
+
 **QOTD exam**: The exam a learner selects for their question of the day. The choice is scoped to QOTD and is independent of plan and practice-session exam contexts.
 
 **Shared daily question**: One eligible published question version for an exam and the database calendar day, shown to every learner who selects that exam.

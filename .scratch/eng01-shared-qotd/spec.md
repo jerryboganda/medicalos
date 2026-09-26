@@ -1,6 +1,6 @@
 # ENG-01 — Shared question of the day per exam
 
-Status: in-progress
+Status: complete (shared-per-exam QOTD slice; ENG-01 remains in-progress)
 Requirement: ENG-01
 
 ## Problem
@@ -31,3 +31,7 @@ Alternatives considered: infer the exam from the most recent practice session or
 ## Verification boundary
 
 Use the authenticated HTTP integration seam for selection, stability, exam isolation, concurrency-safe persistence, answer locking, and mismatch rejection. Use the real Today browser flow to choose an exam, answer the displayed item, then continue the existing learner loop. GitHub Actions is the only build/test authority for this repository.
+
+## Acceptance evidence
+
+GitHub Actions run [36211024073](https://github.com/jerryboganda/medicalos/actions/runs/36211024073), commit `8641ba2e36b3ed78379d1feb8c023ae1127d9154`: all four jobs passed; 107 Rust integration tests and 54 Playwright browser E2E tests passed; migration down/up replay and wasm32 shared-core build passed.

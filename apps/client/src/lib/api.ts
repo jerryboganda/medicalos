@@ -497,6 +497,9 @@ export interface MockTest {
 	attempts_allowed: number;
 	attempts_used: number;
 	time_limit_seconds: number | null;
+	late_sync_grace_seconds: number;
+	integrity_policy: 'log_only' | 'warn' | 'auto_submit';
+	away_timeout_seconds: number | null;
 }
 
 export interface MockResult {
@@ -505,6 +508,8 @@ export interface MockResult {
 	pass_mark_percent: number;
 	percentile: number | null;
 	takers: number;
+	ranked: boolean;
+	late_sync_answers: number;
 	breakdown: { chapter: string; total: number; correct: number }[];
 }
 
@@ -523,13 +528,24 @@ export interface EngagementQotd {
 
 export interface Engagement {
 	enabled: boolean;
-	daily_goal: { enabled: boolean; target: number; answered_today: number; met: boolean };
+	available_minutes: number;
+	daily_goal: {
+		enabled: boolean;
+		mode: 'questions' | 'minutes';
+		unit: 'questions' | 'minutes';
+		target: number;
+		answered_today: number;
+		minutes_today: number;
+		met: boolean;
+	};
 	streak: { enabled: boolean; count: number; freezes: number };
 	qotd: EngagementQotd;
 }
 
 export interface EngagementSettings {
 	daily_goal_questions?: number;
+	daily_goal_mode?: 'questions' | 'minutes';
+	available_minutes?: number;
 	daily_goal_enabled?: boolean;
 	streak_enabled?: boolean;
 	qotd_enabled?: boolean;
@@ -728,13 +744,15 @@ export const Api = {
 	updateEngagementSettings: (body: EngagementSettings) =>
 		call<{
 			daily_goal_questions: number;
+		daily_goal_mode: 'questions' | 'minutes';
+		available_minutes: number;
 			daily_goal_enabled: boolean;
 			streak_enabled: boolean;
 			qotd_enabled: boolean;
 			freezes: number;
 			qotd_exam_id: string | null;
 		}>('PUT', '/v1/me/engagement/settings', body),
-	answerQotd: (questionVersionId: string, chosenIndex: number) =>
+	answerQotd: (questionVersionId: string, chosenIndex: number, elapsedMs = 0) =>
 		call<{
 			correct: boolean;
 			correct_index: number;
@@ -742,7 +760,8 @@ export const Api = {
 			community_total: number;
 		}>('POST', '/v1/me/qotd/answers', {
 			question_version_id: questionVersionId,
-			chosen_index: chosenIndex
+			chosen_index: chosenIndex,
+			elapsed_ms: elapsedMs
 		}),
 	createSession: (body: {
 		preset: string;
@@ -876,11 +895,22 @@ export const Api = {
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
 	recordIntegrityEvent: (body: {
 		session_id: string;
-		signal_type: 'background' | 'window_blur' | 'fullscreen_exit' | 'clock_change';
+		signal_type:
+			| 'background'
+			| 'foreground'
+			| 'window_blur'
+			| 'fullscreen_exit'
+			| 'clock_change';
 		detail?: Record<string, number>;
 		client_time: string;
 	}) =>
-		call<{ recorded: true; event_id: string }>('POST', '/v1/integrity-events', body),
+		call<{
+			recorded: true;
+			event_id: string;
+			action: 'none' | 'warn' | 'auto_submitted';
+			away_seconds?: number;
+			receipt?: SubmitResult;
+		}>('POST', '/v1/integrity-events', body),
 	getSessionHint: (sid: string, itemIndex: number) =>
 		call<{ hint: string; assisted: true }>(
 			'GET',
@@ -1098,7 +1128,10 @@ export const Api = {
 			`/v1/competitions/${encodeURIComponent(competitionId)}/leaderboard`
 		),
 	startMock: (mockId: string) =>
-		call<{ session_id: string }>('POST', `/v1/mocks/${mockId}/start`),
+		call<{ session_id: string; late_sync_grace_seconds: number }>(
+			'POST',
+			`/v1/mocks/${mockId}/start`
+		),
 	answerableQuestions: () =>
 		call<{
 			questions: {

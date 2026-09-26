@@ -18,10 +18,17 @@
 	let qotdCurriculumError = $state('');
 	let qotdExamSelection = $state('');
 	let changingQotdExam = $state(false);
+	let qotdStartedAt = $state(0);
+	let qotdTimerQuestionId = $state('');
 	let answeringQotd = $state(false);
 	let qotdError = $state('');
 	let qotdResult = $state(null);
 	let dailyMinutes = $state(60);
+	let dailyGoalMode = $state('questions');
+	let savingAvailableMinutes = $state(false);
+	let availableMinutesError = $state('');
+	let updatingEngagement = $state(false);
+	let dailyGoalError = $state('');
 	let activityPreference = $state('any');
 	let studyTimeMultiplier = $state('1');
 	let planBusy = $state(false);
@@ -53,8 +60,19 @@
 
 	async function loadEngagement() {
 		try {
-			engagement = await Api.engagement();
+			const next = await Api.engagement();
+			const questionId = next.qotd?.question_version_id ?? '';
+			if (questionId && questionId !== qotdTimerQuestionId) {
+				qotdTimerQuestionId = questionId;
+				qotdStartedAt = Date.now();
+			} else if (!questionId) {
+				qotdTimerQuestionId = '';
+				qotdStartedAt = 0;
+			}
+			engagement = next;
 			qotdExamSelection = engagement.qotd.exam_id ?? '';
+			dailyMinutes = engagement.available_minutes;
+			dailyGoalMode = engagement.daily_goal.mode;
 		} catch {
 			engagement = null;
 		}
@@ -88,18 +106,51 @@
 	}
 
 	async function setEngagement(patch) {
+		if (updatingEngagement) return;
+		updatingEngagement = true;
+		if (patch.daily_goal_mode !== undefined) dailyGoalMode = patch.daily_goal_mode;
 		qotdError = '';
+		dailyGoalError = '';
 		try {
 			await Api.updateEngagementSettings(patch);
 			engagement = await Api.engagement();
 			qotdExamSelection = engagement.qotd.exam_id ?? '';
+			dailyMinutes = engagement.available_minutes;
+			dailyGoalMode = engagement.daily_goal.mode;
 			if (patch.qotd_enabled === true && curriculum.length === 0) {
 				qotdCurriculumLoading = true;
 				qotdCurriculumError = '';
 				await loadQotdCurriculum();
 			}
 		} catch (err) {
-			qotdError = err instanceof ApiError ? err.message : 'Could not update settings.';
+			const message = err instanceof ApiError ? err.message : 'Could not update settings.';
+			if (patch.daily_goal_mode !== undefined) {
+				dailyGoalError = message;
+				dailyGoalMode = engagement?.daily_goal?.mode ?? 'questions';
+			}
+			else qotdError = message;
+		} finally {
+			updatingEngagement = false;
+		}
+	}
+
+	async function saveAvailableMinutes() {
+		const value = Number(dailyMinutes);
+		if (!Number.isInteger(value) || value < 5 || value > 480) {
+			availableMinutesError = 'Enter a daily budget from 5 to 480 minutes.';
+			return;
+		}
+		if (savingAvailableMinutes) return;
+		savingAvailableMinutes = true;
+		availableMinutesError = '';
+		try {
+			await Api.updateEngagementSettings({ available_minutes: value });
+			await loadEngagement();
+		} catch (err) {
+			availableMinutesError =
+				err instanceof ApiError ? err.message : 'Could not save daily available minutes.';
+		} finally {
+			savingAvailableMinutes = false;
 		}
 	}
 
@@ -108,7 +159,14 @@
 		answeringQotd = true;
 		qotdError = '';
 		try {
-			qotdResult = await Api.answerQotd(engagement.qotd.question_version_id, index);
+			const elapsedMs = qotdStartedAt
+				? Math.max(0, Math.min(Date.now() - qotdStartedAt, 3_600_000))
+				: 0;
+			qotdResult = await Api.answerQotd(
+				engagement.qotd.question_version_id,
+				index,
+				elapsedMs
+			);
 			engagement = await Api.engagement();
 		} catch (err) {
 			qotdError = err instanceof ApiError ? err.message : 'Could not save your answer.';
@@ -315,12 +373,37 @@
 		{#if engagement.daily_goal.enabled}
 			<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
 				<strong data-testid="daily-goal">
-					Daily goal {engagement.daily_goal.answered_today}/{engagement.daily_goal.target}
+					{#if engagement.daily_goal.mode === 'minutes'}
+						Daily goal {engagement.daily_goal.minutes_today}/{engagement.daily_goal.target} minutes
+					{:else}
+						Daily goal {engagement.daily_goal.answered_today}/{engagement.daily_goal.target} questions
+					{/if}
 				</strong>
 				{#if engagement.daily_goal.met}
 					<span class="chip done" data-testid="goal-met">Met</span>
 				{/if}
 			</div>
+		{/if}
+		<label class="field" for="daily-goal-mode">
+			<span>Daily goal measured in</span>
+			<select
+				id="daily-goal-mode"
+				data-testid="daily-goal-mode"
+				bind:value={dailyGoalMode}
+				disabled={updatingEngagement}
+				onchange={(event) => setEngagement({ daily_goal_mode: event.currentTarget.value })}
+			>
+				<option value="questions">Questions answered</option>
+				<option value="minutes">Study minutes</option>
+			</select>
+		</label>
+		{#if engagement.daily_goal.mode === 'minutes'}
+			<p class="muted" data-testid="daily-goal-time-help">
+				Counts time recorded while answering completed practice questions and today's question.
+			</p>
+		{/if}
+		{#if dailyGoalError}
+			<p class="error-text" role="alert" data-testid="daily-goal-error">{dailyGoalError}</p>
 		{/if}
 		{#if engagement.streak.enabled}
 			<p class="muted" style="margin: var(--space-sm) 0;" data-testid="streak">
@@ -461,8 +544,13 @@
 					step="1"
 					bind:value={dailyMinutes}
 					aria-describedby="daily-minutes-help"
+					onchange={saveAvailableMinutes}
+					disabled={savingAvailableMinutes}
 				/>
-				<span id="daily-minutes-help">Use 5–480 minutes. Completed tasks do not use today's remaining budget.</span>
+				<span id="daily-minutes-help">Use 5–480 minutes. This is also your goal target in minutes mode.</span>
+				{#if availableMinutesError}
+					<span class="error-text" role="alert" data-testid="available-minutes-error">{availableMinutesError}</span>
+				{/if}
 			</label>
 			<button
 				class="btn primary"

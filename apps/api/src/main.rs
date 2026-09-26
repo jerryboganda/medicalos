@@ -70,6 +70,7 @@ async fn main() {
         public_app_url: std::env::var("PUBLIC_APP_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
     });
+    api::routes::integrity::spawn_auto_submit_worker(state.clone());
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("bind 8080");

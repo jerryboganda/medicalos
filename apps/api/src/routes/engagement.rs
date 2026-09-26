@@ -47,6 +47,22 @@ async fn engagement_global_enabled(state: &AppState) -> ApiResult<bool> {
     })
 }
 
+async fn recorded_answer_time_ms(state: &AppState, user_id: Uuid) -> ApiResult<i64> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        r#"SELECT COALESCE((
+               SELECT SUM(elapsed_ms)::BIGINT FROM attempts
+               WHERE user_id = $1 AND created_at::date = CURRENT_DATE
+                 AND chosen_index IS NOT NULL
+           ), 0) + COALESCE((
+               SELECT SUM(elapsed_ms)::BIGINT FROM qotd_answers
+               WHERE user_id = $1 AND day = CURRENT_DATE
+           ), 0)"#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?)
+}
+
 /// Roll today's attempt count into engagement_days and advance the streak
 /// once the goal is met. Freezes bridge a one-day gap (max 2 held).
 pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult<()> {
@@ -55,7 +71,8 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
     }
     ensure_engagement(state, user_id).await?;
     let settings = sqlx::query!(
-        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, freeze_bank
+        r#"SELECT daily_goal_questions, daily_goal_mode, daily_available_minutes,
+                  daily_goal_enabled, streak_enabled, freeze_bank
            FROM engagement_settings WHERE user_id = $1"#,
         user_id
     )
@@ -77,7 +94,12 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
     .fetch_one(&state.pool)
     .await?
     .n;
-    let met = answered >= settings.daily_goal_questions as i64;
+    let elapsed_ms = recorded_answer_time_ms(state, user_id).await?;
+    let met = if settings.daily_goal_mode == "minutes" {
+        elapsed_ms >= i64::from(settings.daily_available_minutes) * 60_000
+    } else {
+        answered >= i64::from(settings.daily_goal_questions)
+    };
     let today = sqlx::query!(
         r#"SELECT goal_met FROM engagement_days
            WHERE user_id = $1 AND day = CURRENT_DATE"#,
@@ -180,23 +202,33 @@ pub async fn engagement_status(
     ensure_engagement(&state, user.user_id).await?;
     record_daily_progress(&state, user.user_id).await?;
     let s = sqlx::query!(
-        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled, qotd_enabled,
-                  freeze_bank, qotd_exam_id
+        r#"SELECT daily_goal_questions, daily_goal_mode, daily_available_minutes,
+                  daily_goal_enabled, streak_enabled, qotd_enabled, freeze_bank, qotd_exam_id
            FROM engagement_settings WHERE user_id = $1"#,
         user.user_id
     )
     .fetch_one(&state.pool)
     .await?;
     let day = sqlx::query!(
-        r#"SELECT questions_answered, goal_met, streak_count FROM engagement_days
+        r#"SELECT questions_answered, streak_count FROM engagement_days
            WHERE user_id = $1 AND day = CURRENT_DATE"#,
         user.user_id
     )
     .fetch_optional(&state.pool)
     .await?;
     let answered_today = day.as_ref().map(|d| d.questions_answered).unwrap_or(0);
-    let goal_met = day.as_ref().map(|d| d.goal_met).unwrap_or(false);
     let streak = day.as_ref().map(|d| d.streak_count).unwrap_or(0);
+    let elapsed_ms = recorded_answer_time_ms(&state, user.user_id).await?;
+    let goal_met = if s.daily_goal_mode == "minutes" {
+        elapsed_ms >= i64::from(s.daily_available_minutes) * 60_000
+    } else {
+        i64::from(answered_today) >= i64::from(s.daily_goal_questions)
+    };
+    let (goal_target, goal_unit) = if s.daily_goal_mode == "minutes" {
+        (s.daily_available_minutes, "minutes")
+    } else {
+        (s.daily_goal_questions, "questions")
+    };
 
     let qotd = if global && s.qotd_enabled {
         qotd_payload(&state, user.user_id, s.qotd_exam_id).await?
@@ -206,10 +238,14 @@ pub async fn engagement_status(
 
     Ok(Json(json!({
         "enabled": global,
+        "available_minutes": s.daily_available_minutes,
         "daily_goal": {
             "enabled": s.daily_goal_enabled && global,
-            "target": s.daily_goal_questions,
+            "mode": s.daily_goal_mode,
+            "unit": goal_unit,
+            "target": goal_target,
             "answered_today": answered_today,
+            "minutes_today": elapsed_ms / 60_000,
             "met": goal_met,
         },
         "streak": {
@@ -430,6 +466,8 @@ async fn qotd_payload(
 pub struct QotdAnswerReq {
     pub question_version_id: Uuid,
     pub chosen_index: i32,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
 }
 
 pub async fn answer_qotd(
@@ -496,13 +534,18 @@ pub async fn answer_qotd(
             "chosen_index is out of range",
         ));
     }
+    let elapsed_ms = req
+        .elapsed_ms
+        .filter(|ms| (0..=3_600_000).contains(ms))
+        .unwrap_or(0);
     let inserted = sqlx::query!(
-        r#"INSERT INTO qotd_answers (user_id, day, question_version_id, chosen_index)
-           VALUES ($1, CURRENT_DATE, $2, $3)
+        r#"INSERT INTO qotd_answers (user_id, day, question_version_id, chosen_index, elapsed_ms)
+           VALUES ($1, CURRENT_DATE, $2, $3, $4)
            ON CONFLICT (user_id, day) DO NOTHING"#,
         user.user_id,
         req.question_version_id,
-        req.chosen_index
+        req.chosen_index,
+        elapsed_ms
     )
     .execute(&mut *tx)
     .await?;
@@ -548,6 +591,8 @@ where
 #[derive(Deserialize)]
 pub struct EngagementSettingsReq {
     pub daily_goal_questions: Option<i32>,
+    pub daily_goal_mode: Option<String>,
+    pub available_minutes: Option<i32>,
     pub daily_goal_enabled: Option<bool>,
     pub streak_enabled: Option<bool>,
     pub qotd_enabled: Option<bool>,
@@ -568,6 +613,25 @@ pub async fn update_engagement_settings(
         return Err(ApiError::unprocessable(
             "invalid_daily_goal",
             "daily goal must be 1-500 questions",
+        ));
+    }
+    if req
+        .daily_goal_mode
+        .as_deref()
+        .is_some_and(|mode| !matches!(mode, "questions" | "minutes"))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_daily_goal_mode",
+            "daily goal mode must be questions or minutes",
+        ));
+    }
+    if req
+        .available_minutes
+        .is_some_and(|minutes| !(5..=480).contains(&minutes))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_daily_availability",
+            "daily available minutes must be 5-480",
         ));
     }
 
@@ -610,14 +674,18 @@ pub async fn update_engagement_settings(
     sqlx::query!(
         r#"UPDATE engagement_settings SET
                daily_goal_questions = COALESCE($2, daily_goal_questions),
-               daily_goal_enabled = COALESCE($3, daily_goal_enabled),
-               streak_enabled = COALESCE($4, streak_enabled),
-               qotd_enabled = COALESCE($5, qotd_enabled),
-               qotd_exam_id = CASE WHEN $6 THEN $7 ELSE qotd_exam_id END,
+               daily_goal_mode = COALESCE($3, daily_goal_mode),
+               daily_available_minutes = COALESCE($4, daily_available_minutes),
+               daily_goal_enabled = COALESCE($5, daily_goal_enabled),
+               streak_enabled = COALESCE($6, streak_enabled),
+               qotd_enabled = COALESCE($7, qotd_enabled),
+               qotd_exam_id = CASE WHEN $8 THEN $9 ELSE qotd_exam_id END,
                updated_at = now()
            WHERE user_id = $1"#,
         user.user_id,
         req.daily_goal_questions,
+        req.daily_goal_mode.as_deref(),
+        req.available_minutes,
         req.daily_goal_enabled,
         req.streak_enabled,
         req.qotd_enabled,
@@ -627,8 +695,8 @@ pub async fn update_engagement_settings(
     .execute(&mut *tx)
     .await?;
     let s = sqlx::query!(
-        r#"SELECT daily_goal_questions, daily_goal_enabled, streak_enabled,
-                  qotd_enabled, freeze_bank, qotd_exam_id
+        r#"SELECT daily_goal_questions, daily_goal_mode, daily_available_minutes,
+                  daily_goal_enabled, streak_enabled, qotd_enabled, freeze_bank, qotd_exam_id
            FROM engagement_settings WHERE user_id = $1"#,
         user.user_id
     )
@@ -637,6 +705,8 @@ pub async fn update_engagement_settings(
     tx.commit().await?;
     Ok(Json(json!({
         "daily_goal_questions": s.daily_goal_questions,
+        "daily_goal_mode": s.daily_goal_mode,
+        "available_minutes": s.daily_available_minutes,
         "daily_goal_enabled": s.daily_goal_enabled,
         "streak_enabled": s.streak_enabled,
         "qotd_enabled": s.qotd_enabled,
