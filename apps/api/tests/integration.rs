@@ -21655,3 +21655,533 @@ async fn integrity_events_are_scoped_to_the_owning_learner() {
     .await;
     assert_eq!(status, StatusCode::OK, "{account_event}");
 }
+
+#[tokio::test]
+async fn retest_automatic_enrollment_on_practice_session_submission() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+
+    // Configure retest intervals via admin settings to [2, 5, 9] days.
+    // This verifies that automatic enrollment uses the configured first valid interval (2 days = 48h).
+    let (status, admin_patch) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            "/v1/admin/settings",
+            Some(&author),
+            Some(serde_json::json!({
+                "retest_intervals_days": [2, 5, 9]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{admin_patch}");
+
+    // Create a dedicated chapter for the test items under exam_id.
+    let (status, node) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/hierarchy",
+            Some(&author),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "kind": "chapter",
+                "name": "SR-08 Retest Enrollment Chapter",
+                "parent_id": ids.chapter1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{node}");
+    let test_chapter_id: Uuid = node["node_id"].as_str().unwrap().parse().unwrap();
+
+    async fn create_test_question(
+        app: Router,
+        author: &str,
+        reviewer: &str,
+        chapter_id: Uuid,
+        vignette: &str,
+        hint: Option<&str>,
+    ) -> Uuid {
+        let (status, created) = call(
+            app.clone(),
+            admin_req(
+                "POST",
+                "/v1/admin/questions",
+                Some(author),
+                Some(serde_json::json!({
+                    "chapter_id": chapter_id,
+                    "difficulty": "medium",
+                    "vignette": vignette,
+                    "lead_in": "Which mechanism applies?",
+                    "options": [
+                        {"text": "Option A (Correct)", "rationale": "Correct rationale."},
+                        {"text": "Option B (Wrong)", "rationale": "Distractor rationale."}
+                    ],
+                    "correct_index": 0,
+                    "key_learning_point": "Key learning point for SR-08 test.",
+                    "hint": hint,
+                    "source_ref": "SR-08 Fixture Reference"
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let vid: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
+        let (status, wf) = workflow(app.clone(), author, "submit", [vid]).await;
+        assert_eq!(status, StatusCode::OK, "{wf}");
+        let (status, wf) = workflow(app.clone(), reviewer, "approve", [vid]).await;
+        assert_eq!(status, StatusCode::OK, "{wf}");
+        let (status, wf) = workflow(app.clone(), reviewer, "publish", [vid]).await;
+        assert_eq!(status, StatusCode::OK, "{wf}");
+        vid
+    }
+
+    // Create 8 questions in test_chapter_id:
+    let q_no_attempt = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q1 no-attempt vignette", None).await;
+    let q_skip = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q2 skip vignette", None).await;
+    let q_wrong = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q3 wrong vignette", None).await;
+    let q_unsure = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q4 unsure vignette", None).await;
+    let q_assisted = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q5 assisted vignette", None).await;
+    let q_hint = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q6 hint vignette", Some("Tutor hint for Q6")).await;
+    let q_correct_sure = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q7 correct sure vignette", None).await;
+    let q_unpublished = create_test_question(app.clone(), &author, &reviewer, test_chapter_id, "Q8 unpublished vignette", None).await;
+
+    // Create a sibling variant in the same family as q_wrong in ids.chapter2:
+    let (status, created_variant) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/questions",
+            Some(&author),
+            Some(serde_json::json!({
+                "chapter_id": ids.chapter2,
+                "difficulty": "medium",
+                "vignette": "Q3 sibling variant vignette",
+                "lead_in": "Which mechanism applies?",
+                "options": [
+                    {"text": "Variant A (Correct)", "rationale": "Correct variant."},
+                    {"text": "Variant B (Wrong)", "rationale": "Wrong variant."}
+                ],
+                "correct_index": 0,
+                "key_learning_point": "Variant key point.",
+                "source_ref": "Variant Ref"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created_variant}");
+    let variant_id: Uuid = created_variant["version_id"].as_str().unwrap().parse().unwrap();
+    let (status, wf) = workflow(app.clone(), &author, "submit", [variant_id]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(app.clone(), &reviewer, "approve", [variant_id]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+    let (status, wf) = workflow(app.clone(), &reviewer, "publish", [variant_id]).await;
+    assert_eq!(status, StatusCode::OK, "{wf}");
+
+    sqlx::query(
+        r#"UPDATE questions SET family_id = (
+               SELECT q.family_id FROM questions q
+               JOIN question_versions qv ON qv.question_id = q.id
+               WHERE qv.id = $1)
+           WHERE id = (SELECT question_id FROM question_versions WHERE id = $2)"#,
+    )
+    .bind(q_wrong)
+    .bind(variant_id)
+    .execute(&state.pool)
+    .await
+    .expect("adopt family for variant");
+
+    // Start a tutor practice session with the 8 questions in test_chapter_id:
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": test_chapter_id,
+                "question_count": 8
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, detail) = call(
+        app.clone(),
+        request("GET", &format!("/v1/practice/sessions/{sid}"), Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let items = detail["items"].as_array().unwrap();
+    assert_eq!(items.len(), 8);
+
+    let get_item_idx = |target_id: Uuid| -> i16 {
+        items
+            .iter()
+            .find(|it| it["question_version_id"].as_str().unwrap() == target_id.to_string())
+            .unwrap()["item_index"]
+            .as_i64()
+            .unwrap() as i16
+    };
+
+    // 1. q_no_attempt: no answer submitted
+    // 2. q_skip: answer with chosen_index: null
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": get_item_idx(q_skip),
+                "chosen_index": null,
+                "idempotency_key": "ans-skip"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 3. q_wrong: answer with chosen_index: 1 (incorrect)
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": get_item_idx(q_wrong),
+                "chosen_index": 1,
+                "confidence": "sure",
+                "idempotency_key": "ans-wrong"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 4. q_unsure: correct chosen_index: 0, but confidence: "unsure"
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": get_item_idx(q_unsure),
+                "chosen_index": 0,
+                "confidence": "unsure",
+                "idempotency_key": "ans-unsure"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 5. q_assisted: correct chosen_index: 0, confidence: "sure", assisted: true
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": get_item_idx(q_assisted),
+                "chosen_index": 0,
+                "confidence": "sure",
+                "assisted": true,
+                "idempotency_key": "ans-assisted"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 6. q_hint: view hint, then answer correct, sure, assisted: false
+    let hint_idx = get_item_idx(q_hint);
+    let (status, hint_res) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}/items/{hint_idx}/hint"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hint_res}");
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": hint_idx,
+                "chosen_index": 0,
+                "confidence": "sure",
+                "assisted": false,
+                "idempotency_key": "ans-hint"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 7. q_correct_sure: correct, sure, unassisted, no hint
+    let (status, ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": get_item_idx(q_correct_sure),
+                "chosen_index": 0,
+                "confidence": "sure",
+                "assisted": false,
+                "idempotency_key": "ans-correct-sure"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ans}");
+
+    // 8. q_unpublished: unpublish it to 'draft' before session submission
+    sqlx::query("UPDATE question_versions SET status = 'draft' WHERE id = $1")
+        .bind(q_unpublished)
+        .execute(&state.pool)
+        .await
+        .expect("unpublish question to draft");
+
+    // Submit the session
+    let (status, submit_res) = call(
+        app.clone(),
+        request("POST", &format!("/v1/practice/sessions/{sid}/submit"), Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submit_res}");
+
+    let learner_id: Uuid = sqlx::query_scalar("SELECT user_id FROM practice_sessions WHERE id = $1")
+        .bind(sid)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+
+    let enrolled_cards = sqlx::query!(
+        r#"SELECT question_version_id, passes, due
+           FROM retest_cards
+           WHERE user_id = $1"#,
+        learner_id
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(enrolled_cards.len(), 6, "must enroll exactly the 6 missed items");
+    let card_vids: Vec<Uuid> = enrolled_cards.iter().map(|c| c.question_version_id).collect();
+    assert!(card_vids.contains(&q_no_attempt), "q_no_attempt must be enrolled");
+    assert!(card_vids.contains(&q_skip), "q_skip must be enrolled");
+    assert!(card_vids.contains(&q_wrong), "q_wrong must be enrolled");
+    assert!(card_vids.contains(&q_unsure), "q_unsure must be enrolled");
+    assert!(card_vids.contains(&q_assisted), "q_assisted must be enrolled");
+    assert!(card_vids.contains(&q_hint), "q_hint must be enrolled");
+    assert!(!card_vids.contains(&q_correct_sure), "correct sure unassisted must not be enrolled");
+    assert!(!card_vids.contains(&q_unpublished), "unpublished question must not be enrolled");
+
+    for card in &enrolled_cards {
+        assert_eq!(card.passes, 0, "initial passes must be 0");
+        let hours = (card.due - chrono::Utc::now()).num_hours();
+        assert!(
+            (47..=49).contains(&hours),
+            "card due at first configured interval (2 days / ~48h), got {hours}h"
+        );
+    }
+
+    // Prior to due time, GET /v1/me/retests should return none of these cards
+    let (status, queue_before) = call(
+        app.clone(),
+        request("GET", "/v1/me/retests", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue_before}");
+    assert!(queue_before["retests"].as_array().unwrap().is_empty(), "not due yet");
+
+    // Arrange due fixture: force cards due in the past
+    sqlx::query("UPDATE retest_cards SET due = now() - INTERVAL '1 minute' WHERE user_id = $1")
+        .bind(learner_id)
+        .execute(&state.pool)
+        .await
+        .expect("force due");
+
+    let (status, queue_after) = call(
+        app.clone(),
+        request("GET", "/v1/me/retests", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queue_after}");
+    let retests = queue_after["retests"].as_array().unwrap();
+    assert_eq!(retests.len(), 6, "all 6 enrolled items visible when due");
+
+    // Sibling variant preference for q_wrong
+    let wrong_card = retests
+        .iter()
+        .find(|i| i["card_version_id"] == serde_json::json!(format!("{q_wrong}")))
+        .expect("q_wrong in retest queue");
+    assert_eq!(wrong_card["served_variant"], true);
+    assert_eq!(wrong_card["question_version_id"], serde_json::json!(format!("{variant_id}")));
+    assert_eq!(wrong_card["passes"], 0);
+
+    // Other cards served without variant swap
+    let no_attempt_card = retests
+        .iter()
+        .find(|i| i["card_version_id"] == serde_json::json!(format!("{q_no_attempt}")))
+        .expect("q_no_attempt in retest queue");
+    assert_eq!(no_attempt_card["served_variant"], false);
+    assert_eq!(no_attempt_card["question_version_id"], serde_json::json!(format!("{q_no_attempt}")));
+    assert_eq!(no_attempt_card["passes"], 0);
+
+    // Duplicate submission: replaying submit leaves queue and due timestamps untouched
+    let due_before_dup: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT due FROM retest_cards WHERE user_id = $1 AND question_version_id = $2",
+    )
+    .bind(learner_id)
+    .bind(q_no_attempt)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+
+    let (status, dup_submit_res) = call(
+        app.clone(),
+        request("POST", &format!("/v1/practice/sessions/{sid}/submit"), Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dup_submit_res}");
+    assert_eq!(dup_submit_res, submit_res, "submission receipt matches");
+
+    let due_after_dup: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT due FROM retest_cards WHERE user_id = $1 AND question_version_id = $2",
+    )
+    .bind(learner_id)
+    .bind(q_no_attempt)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(due_before_dup, due_after_dup, "due time must not move on duplicate submit");
+
+    let count_after_dup: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM retest_cards WHERE user_id = $1",
+    )
+    .bind(learner_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(count_after_dup, 6, "card count unchanged on duplicate submit");
+
+    // Mock answer-edit semantics: changing an answer from wrong to correct sure unassisted before submit
+    // prevents enrollment.
+    let (status, mock_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "mock",
+                "chapter_id": test_chapter_id,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mock_session}");
+    let mock_sid: Uuid = mock_session["session_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, mock_detail) = call(
+        app.clone(),
+        request("GET", &format!("/v1/practice/sessions/{mock_sid}"), Some(&learner), None),
+    )
+    .await;
+    let mock_item = &mock_detail["items"][0];
+    let mock_vid: Uuid = mock_item["question_version_id"].as_str().unwrap().parse().unwrap();
+    let mock_correct_idx = sqlx::query_scalar::<_, i16>("SELECT correct_index FROM question_versions WHERE id = $1")
+        .bind(mock_vid)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    let mock_wrong_idx = if mock_correct_idx == 0 { 1 } else { 0 };
+
+    // Initially record wrong answer:
+    let (status, first_ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{mock_sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": mock_wrong_idx,
+                "confidence": "sure",
+                "idempotency_key": "mock-ans-1"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first_ans}");
+
+    // Edit answer to correct, sure, unassisted:
+    let (status, edit_ans) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{mock_sid}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": mock_correct_idx,
+                "confidence": "sure",
+                "assisted": false,
+                "idempotency_key": "mock-ans-2"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edit_ans}");
+    assert_eq!(edit_ans["answer_changed"], true);
+
+    // Delete existing card if mock_vid was previously enrolled:
+    sqlx::query("DELETE FROM retest_cards WHERE user_id = $1 AND question_version_id = $2")
+        .bind(learner_id)
+        .bind(mock_vid)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let (status, mock_submit) = call(
+        app.clone(),
+        request("POST", &format!("/v1/practice/sessions/{mock_sid}/submit"), Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mock_submit}");
+
+    let mock_card_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM retest_cards WHERE user_id = $1 AND question_version_id = $2)",
+    )
+    .bind(learner_id)
+    .bind(mock_vid)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert!(!mock_card_exists, "edited mock answer to correct sure unassisted must not be enrolled");
+}
+

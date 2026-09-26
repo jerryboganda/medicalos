@@ -39,11 +39,19 @@ fn valid_mastery_bands(values: &[i32]) -> bool {
         && values[1] <= 3000
 }
 
-fn valid_retest_intervals(values: &[i64]) -> bool {
+pub fn valid_retest_intervals(values: &[i64]) -> bool {
     !values.is_empty()
         && values.len() <= 20
         && values.iter().all(|days| (1..=3650).contains(days))
         && values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+pub fn effective_retest_intervals(values: Vec<i64>) -> Vec<i64> {
+    if valid_retest_intervals(&values) {
+        values
+    } else {
+        DEFAULT_RETEST_INTERVAL_DAYS.to_vec()
+    }
 }
 
 fn valid_competition_difficulty_points(values: &[i64]) -> bool {
@@ -160,7 +168,7 @@ fn bounded_i64(value: i64, default: i64, minimum: i64, maximum: i64) -> i64 {
     }
 }
 
-fn i64_list_or_default(value: Option<&Value>, default: &[i64]) -> Vec<i64> {
+pub fn i64_list_or_default(value: Option<&Value>, default: &[i64]) -> Vec<i64> {
     value
         .and_then(Value::as_array)
         .and_then(|values| values.iter().map(Value::as_i64).collect::<Option<Vec<_>>>())

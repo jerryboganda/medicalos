@@ -1471,6 +1471,66 @@ fn response_for_preset(
     }))
 }
 
+/// SR-08: enroll missed, skipped, unsure, and assisted questions from the submitted
+/// practice session into the learner's re-test queue at the configured first valid interval.
+/// Atomic with the open-to-submitted transition.
+async fn enroll_missed_questions_in_retest_queue(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    sid: Uuid,
+) -> ApiResult<()> {
+    let setting_val = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT value FROM app_settings WHERE key = 'retest_intervals_days'",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let intervals = crate::routes::settings::effective_retest_intervals(
+        crate::routes::settings::i64_list_or_default(
+            setting_val.as_ref(),
+            &crate::routes::settings::DEFAULT_RETEST_INTERVAL_DAYS,
+        ),
+    );
+    let first_interval_days = intervals[0];
+    let now = chrono::Utc::now();
+    let due = now + chrono::Duration::days(first_interval_days);
+
+    sqlx::query(
+        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
+           SELECT DISTINCT
+               $2 AS user_id,
+               qv.id AS question_version_id,
+               0 AS passes,
+               $3 AS due,
+               $4 AS updated_at
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           LEFT JOIN attempts a
+             ON a.session_id = si.session_id AND a.item_index = si.item_index
+           WHERE si.session_id = $1
+             AND qv.status = 'published'
+             AND (
+                 a.id IS NULL
+                 OR a.chosen_index IS NULL
+                 OR a.correct = FALSE
+                 OR a.confidence = 'unsure'
+                 OR a.assisted = TRUE
+                 OR si.hint_used = TRUE
+             )
+           ON CONFLICT (user_id, question_version_id) DO UPDATE SET
+               passes = 0,
+               due = EXCLUDED.due,
+               updated_at = EXCLUDED.updated_at"#,
+    )
+    .bind(sid)
+    .bind(user_id)
+    .bind(due)
+    .bind(now)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn submit(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -1566,6 +1626,7 @@ pub async fn submit(
         applied_completion = updated.rows_affected() > 0;
     }
     if applied_completion {
+        enroll_missed_questions_in_retest_queue(&mut *tx, user.user_id, sid).await?;
         agent::mark_linked_task_done_on(&mut tx, user.user_id, plan_task_key).await?;
     }
     tx.commit().await?;
