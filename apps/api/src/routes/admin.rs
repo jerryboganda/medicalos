@@ -2689,8 +2689,8 @@ pub async fn run_recovery_drill(
         crate::routes::packs::tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
     let mut items = Vec::with_capacity(rows.len());
     for r in &rows {
-        let resource = crate::routes::packs::build_pack_resource(
-            crate::routes::packs::PackQuestionData {
+        let resource =
+            crate::routes::packs::build_pack_resource(crate::routes::packs::PackQuestionData {
                 question_version_id: r.id,
                 vignette: r.vignette.clone(),
                 lead_in: r.lead_in.clone(),
@@ -2701,8 +2701,7 @@ pub async fn run_recovery_drill(
                 exam_tip: r.exam_tip.clone(),
                 source_ref: r.source_ref.clone(),
                 tutoring_cards: tutoring_cards.remove(&r.id).unwrap_or_default(),
-            },
-        )?;
+            })?;
         let checksum = resource.checksum.clone();
         items.push((r.id, checksum));
     }

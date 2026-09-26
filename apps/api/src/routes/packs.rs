@@ -562,9 +562,7 @@ pub(crate) struct PackQuestionData {
     pub(crate) tutoring_cards: Vec<crate::routes::program::TutoringCard>,
 }
 
-pub(crate) fn build_pack_resource(
-    question: PackQuestionData,
-) -> ApiResult<PackQuestionResource> {
+pub(crate) fn build_pack_resource(question: PackQuestionData) -> ApiResult<PackQuestionResource> {
     let PackQuestionData {
         question_version_id,
         vignette,
