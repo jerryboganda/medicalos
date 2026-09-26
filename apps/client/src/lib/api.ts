@@ -1,11 +1,18 @@
 import { auth, clearToken } from './auth.svelte';
+import type { ImageConceptLink } from './generated/image/ImageConceptLink';
+import type { Today } from './generated/today/Today';
 
-// Until ARCH-02 contract generation lands, this is the single hand-written
-// client for the endpoints the client app uses. It mirrors the API contract;
-// when the generated client arrives this file is replaced, not edited.
+// Keep transport and authentication here. Data contracts are exported from
+// Rust DTOs incrementally as ARCH-02 bindings are generated.
 // Production reaches the API same-origin through the /api/ prefix
 // (medicalos.polytronx.com/api/* -> the API container); local dev keeps
 // talking straight to the API host.
+export type { Today } from './generated/today/Today';
+export type { TodayTask } from './generated/today/TodayTask';
+export type { TodayRevision } from './generated/today/TodayRevision';
+export type { LearnerChapter } from './generated/today/LearnerChapter';
+export type { TodayRevisionBudget } from './generated/today/TodayRevisionBudget';
+export type { ImageConceptLink } from './generated/image/ImageConceptLink';
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -76,51 +83,6 @@ export interface AdminImportResult {
 	valid?: number;
 	issues?: { row: number; code: string; message: string }[];
 	created?: unknown[];
-}
-
-export interface TodayTask {
-	id: string;
-	task_key: string;
-	kind: string;
-	title: string;
-	chapter_id: string | null;
-	source_session_id: string | null;
-	question_count: number;
-	estimated_minutes: number;
-	status: string;
-	protected: boolean;
-}
-
-export interface TodayRevision {
-	id: string;
-	to_version: number;
-	reason_code: string;
-	explanation: string;
-	automatic: boolean;
-	undone: boolean;
-	deferred_tasks: string[];
-}
-
-export interface LearnerChapter {
-	chapter_id: string;
-	chapter_name: string;
-	mastery_index: number | null;
-	evidence_level: string;
-	independent_count: number;
-}
-
-export interface Today {
-	plan_id: string;
-	version: number;
-	tasks: TodayTask[];
-	revisions: TodayRevision[];
-	learner: LearnerChapter[];
-	revision_budget: {
-		automatic_used: number;
-		automatic_limit: number;
-		total_used: number;
-		total_limit: number;
-	};
 }
 
 export interface SessionItem {
@@ -573,6 +535,7 @@ export interface ImageCaseSummary {
 	kind: 'still' | 'stack';
 	modality: string | null;
 	images: { url: string; rights_ref: string }[];
+	concepts: ImageConceptLink[];
 	annotations: {
 		annotation_id: string;
 		image_index: number;
@@ -778,6 +741,17 @@ export const Api = {
 	imageCases: () => call<{ cases: ImageCaseSummary[] }>('GET', '/v1/me/image-cases'),
 	imageCase: (caseId: string) =>
 		call<ImageCaseDetail>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
+	adminImageCaseConcepts: (caseId: string) =>
+		call<{ case_id: string; concepts: ImageConceptLink[] }>(
+			'GET',
+			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/concepts`
+		),
+	setAdminImageCaseConcepts: (caseId: string, conceptIds: string[]) =>
+		call<{ case_id: string; concepts: ImageConceptLink[] }>(
+			'PUT',
+			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/concepts`,
+			{ concept_ids: conceptIds }
+		),
 	adminImageAnnotations: () =>
 		call<{ annotations: AdminImageAnnotation[] }>('GET', '/v1/admin/image-annotations'),
 	createImageAnnotation: (

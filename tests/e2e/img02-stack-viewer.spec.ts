@@ -20,7 +20,8 @@ test('learner navigates an ordered stack, reveals findings, and reads approved a
 					y_percent: 57,
 					body: 'Reviewer-approved teaching note.'
 				}
-			]
+			],
+			concepts: []
 		},
 		{
 			case_id: 'still-case',
@@ -28,7 +29,8 @@ test('learner navigates an ordered stack, reveals findings, and reads approved a
 			kind: 'still',
 			modality: 'XR',
 			images: [{ url: 'https://cdn.example.test/still.png', rights_ref: 'IMG-STILL' }],
-			annotations: []
+			annotations: [],
+			concepts: []
 		}
 	];
 	const findingsByCase: Record<string, { section: string; text: string }[]> = {
@@ -116,7 +118,8 @@ test('findings stay with their case when detail requests resolve out of order', 
 		kind: 'still',
 		modality: 'XR',
 		images: [{ url: `https://cdn.example.test/${case_id}.png`, rights_ref: 'IMG-RACE' }],
-		annotations: []
+		annotations: [],
+		concepts: []
 	}));
 	const findings: Record<string, { section: string; text: string }[]> = {
 		'first-case': [{ section: 'Impression', text: 'Findings for the first case.' }],
@@ -183,7 +186,8 @@ test('findings failures remain visible after the detail request is rejected', as
 						title: 'Revoked teaching case',
 						kind: 'still',
 						images: [{ url: 'https://cdn.example.test/revoked.png', rights_ref: 'IMG-REVOKED' }],
-						annotations: []
+						annotations: [],
+						concepts: []
 					}
 				]
 			})
@@ -240,7 +244,8 @@ test('editor submits an annotation and a reviewer makes one final decision', asy
 							{ url: 'https://cdn.example.test/review/one.png', rights_ref: 'IMG-REVIEW' },
 							{ url: 'https://cdn.example.test/review/two.png', rights_ref: 'IMG-REVIEW' }
 						],
-						annotations: []
+						annotations: [],
+						concepts: []
 					}
 				]
 			})
@@ -251,6 +256,20 @@ test('editor submits an annotation and a reviewer makes one final decision', asy
 			status: 200,
 			contentType: 'application/json',
 			body: JSON.stringify({ annotations })
+		})
+	);
+	await page.route('**/v1/admin/concepts', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ concepts: [] })
+		})
+	);
+	await page.route(`**/v1/admin/image-cases/${caseId}/concepts`, (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ case_id: caseId, concepts: [] })
 		})
 	);
 	await page.route(`**/v1/admin/image-cases/${caseId}/annotations`, async (route) => {
@@ -301,4 +320,111 @@ test('editor submits an annotation and a reviewer makes one final decision', asy
 	await approve.click();
 	expect(submittedDecision).toMatchObject({ decision: 'approved', note: 'Checked against the licensed teaching image.' });
 	await expect(page.getByTestId('image-annotation-pending-annotation')).toHaveCount(0);
+});
+
+test('editor maps an image case to a pinned concept version the learner can see', async ({ page }) => {
+	test.setTimeout(60_000);
+	const api = process.env.VITE_API_BASE ?? 'http://127.0.0.1:8080';
+	const admin = process.env.ADMIN_TOKEN;
+	if (!admin) throw new Error('E2E ADMIN_TOKEN is required for the real image-concept flow');
+	const suffix = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+	const email = `e2e-img04-${suffix}@example.test`;
+	const password = 'correct horse battery';
+	const register = await fetch(`${api}/v1/auth/register`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ email, password })
+	});
+	expect(register.ok).toBeTruthy();
+	const login = await fetch(`${api}/v1/auth/login`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ email, password })
+	});
+	expect(login.ok).toBeTruthy();
+	const { token } = await login.json();
+	const authHeaders = {
+		authorization: `Bearer ${token}`,
+		'content-type': 'application/json',
+		'x-admin-token': admin
+	};
+
+	const conceptResponse = await fetch(`${api}/v1/admin/concepts`, {
+		method: 'POST',
+		headers: authHeaders,
+		body: JSON.stringify({
+			canonical_key: `img04-e2e-${suffix}`,
+			display_name: 'Fictional thoracic landmark',
+			definition: 'Version one teaching description.'
+		})
+	});
+	expect(conceptResponse.ok).toBeTruthy();
+	const { concept_id: conceptId } = await conceptResponse.json();
+
+	const rightsRef = `IMG04-E2E-${suffix}`;
+	const rightsResponse = await fetch(`${api}/v1/admin/content-rights`, {
+		method: 'POST',
+		headers: authHeaders,
+		body: JSON.stringify({
+			ref_code: rightsRef,
+			licensor: 'Synthetic E2E fixture',
+			permitted_uses: ['display'],
+			valid_from: '2020-01-01'
+		})
+	});
+	expect(rightsResponse.ok).toBeTruthy();
+	const imageResponse = await fetch(`${api}/v1/admin/image-cases`, {
+		method: 'POST',
+		headers: authHeaders,
+		body: JSON.stringify({
+			title: `IMG-04 fixture ${suffix}`,
+			kind: 'still',
+			modality: 'XR',
+			images: [{ url: 'https://cdn.example.test/img04.png', rights_ref: rightsRef }],
+			findings: 'Synthetic educational finding.'
+		})
+	});
+	expect(imageResponse.ok).toBeTruthy();
+	const { case_id: caseId } = await imageResponse.json();
+
+	await page.addInitScript(
+		(values) => {
+			localStorage.setItem('mlos_token', values.token);
+			localStorage.setItem('mlos_admin', values.admin);
+		},
+		{ token, admin }
+	);
+	await page.goto('/admin/image-annotations');
+	await expect(page.getByTestId('image-concept-mapping')).toBeVisible();
+	await page.getByLabel('Image case').selectOption(caseId);
+	const conceptChoice = page.getByTestId(`image-concept-${conceptId}`);
+	await conceptChoice.check();
+	await page.getByRole('button', { name: 'Save concept links' }).click();
+	await expect(page.getByTestId('image-concept-mapping-message')).toContainText(/saved/i);
+
+	const newVersion = await fetch(`${api}/v1/admin/concepts/${conceptId}/versions`, {
+		method: 'POST',
+		headers: authHeaders,
+		body: JSON.stringify({
+			display_name: 'Revised fictional thoracic landmark',
+			definition: 'Version two teaching description.'
+		})
+	});
+	expect(newVersion.ok).toBeTruthy();
+
+	await page.goto('/imaging');
+	await page.getByTestId(`image-case-${caseId}`).click();
+	const linkedConcept = page.getByTestId('image-case-concepts');
+	await expect(linkedConcept).toContainText('Fictional thoracic landmark');
+	await expect(linkedConcept).toContainText('Version one teaching description.');
+	await expect(linkedConcept).toContainText('v1');
+	await expect(linkedConcept).not.toContainText('Revised fictional thoracic landmark');
+
+	for (const width of [320, 375, 414, 768]) {
+		await page.setViewportSize({ width, height: 812 });
+		const noHorizontalOverflow = await page.evaluate(
+			() => document.documentElement.scrollWidth <= window.innerWidth
+		);
+		expect(noHorizontalOverflow, `${width}px viewport`).toBe(true);
+	}
 });

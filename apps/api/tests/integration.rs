@@ -15677,6 +15677,230 @@ async fn library_media_and_image_cases_are_rights_checked() {
 }
 
 #[tokio::test]
+async fn img04_image_case_concept_links_pin_and_serve_the_selected_version() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let token = register_and_login(app.clone()).await;
+    seed::seed(&state.pool).await.expect("seed");
+
+    let (status, concept) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/concepts",
+            Some(&token),
+            Some(serde_json::json!({
+                "canonical_key": "img04-pinned-concept",
+                "display_name": "Fictional image concept v1",
+                "definition": "The first version of the teaching definition."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{concept}");
+    let concept_id = concept["concept_id"].as_str().unwrap();
+    let rights_ref = format!("IMG04-{}", Uuid::new_v4().simple()).to_ascii_uppercase();
+    let (status, rights) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/content-rights",
+            Some(&token),
+            Some(serde_json::json!({
+                "ref_code": rights_ref,
+                "licensor": "Synthetic fixture",
+                "permitted_uses": ["display"],
+                "valid_from": "2020-01-01"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rights}");
+
+    let (status, case) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/admin/image-cases",
+            Some(&token),
+            Some(serde_json::json!({
+                "title": "Fictional image concept fixture",
+                "kind": "still",
+                "images": [{
+                    "url": "https://cdn.example.test/img04-fixture.png",
+                    "rights_ref": rights_ref
+                }],
+                "findings": "Synthetic teaching finding."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{case}");
+    let case_id = case["case_id"].as_str().unwrap();
+
+    let (status, mapping) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": [concept_id] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapping}");
+    assert_eq!(mapping["concepts"][0]["version"], 1, "{mapping}");
+    let (status, audit) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/audit", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{audit}");
+    assert!(audit["events"].as_array().unwrap().iter().any(|event| {
+        event["action"] == "image_case_concepts_updated"
+            && event["entity_id"] == case_id
+            && event["new_value"]["after"][0]["version"] == 1
+    }));
+
+    let too_many_concepts = (0..51).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+    let (status, too_many) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": too_many_concepts })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{too_many}");
+    assert_eq!(too_many["error"]["code"], "too_many_image_concepts");
+
+    let (status, duplicate) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": [concept_id, concept_id] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{duplicate}");
+    assert_eq!(duplicate["error"]["code"], "duplicate_image_concepts");
+
+    let unknown_id = Uuid::new_v4();
+    let (status, unknown) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": [unknown_id] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{unknown}");
+    assert_eq!(unknown["error"]["code"], "image_concept_not_found");
+
+    let (status, updated) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/concepts/{concept_id}/versions"),
+            Some(&token),
+            Some(serde_json::json!({
+                "display_name": "Fictional image concept v2",
+                "definition": "The revised teaching definition."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+
+    let (status, editor_mapping) = call(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{editor_mapping}");
+    assert_eq!(
+        editor_mapping["concepts"][0]["display_name"],
+        "Fictional image concept v1"
+    );
+    assert_eq!(editor_mapping["concepts"][0]["version"], 1);
+
+    let (status, list) = call(
+        app.clone(),
+        request("GET", "/v1/me/image-cases", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let learner_case = list["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|image_case| image_case["case_id"] == case_id)
+        .expect("created image case");
+    assert_eq!(
+        learner_case["concepts"][0]["canonical_key"],
+        "img04-pinned-concept"
+    );
+    assert_eq!(
+        learner_case["concepts"][0]["display_name"],
+        "Fictional image concept v1"
+    );
+    assert_eq!(learner_case["concepts"][0]["version"], 1);
+
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/me/image-cases/{case_id}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["concepts"][0]["definition"],
+        "The first version of the teaching definition."
+    );
+
+    let (status, cleared) = call(
+        app.clone(),
+        admin_req(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": [] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert!(cleared["concepts"].as_array().unwrap().is_empty());
+
+    let (status, denied) = call(
+        app,
+        request(
+            "PUT",
+            &format!("/v1/admin/image-cases/{case_id}/concepts"),
+            Some(&token),
+            Some(serde_json::json!({ "concept_ids": [] })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+}
+
+#[tokio::test]
 async fn grow01_share_cards_are_honest_and_question_free() {
     let _g = LOCK.lock().await;
     let state = setup().await;

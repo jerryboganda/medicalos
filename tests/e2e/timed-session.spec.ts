@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 // session leaves time to verify integrity signals before auto-submit.
 
 const API = 'http://127.0.0.1:8080';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 async function expectIntegritySignal(
 	page: Page,
@@ -27,12 +28,8 @@ async function expectIntegritySignal(
 	});
 }
 
-test('timed session shows the server countdown and auto-submits', async ({
-	page
-}) => {
-	const email = `e2e-timed-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
-
-	// Arrange the account and the short timed session through the API.
+async function registerLearner(prefix: string) {
+	const email = `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
 	const register = await fetch(`${API}/v1/auth/register`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -44,7 +41,60 @@ test('timed session shows the server countdown and auto-submits', async ({
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ email, password: 'correct horse battery' })
 	});
+	expect(login.ok).toBeTruthy();
 	const { token } = await login.json();
+	return token as string;
+}
+
+async function startPolicyMockSession(
+	token: string,
+	policy: 'warn' | 'auto_submit'
+) {
+	if (!ADMIN_TOKEN) throw new Error('E2E ADMIN_TOKEN is required to create policy mocks');
+	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+	const [todayRes, examsRes] = await Promise.all([
+		fetch(`${API}/v1/me/today`, { headers: authHeaders }),
+		fetch(`${API}/v1/exams`, { headers: authHeaders })
+	]);
+	expect(todayRes.ok).toBeTruthy();
+	expect(examsRes.ok).toBeTruthy();
+	const today = await todayRes.json();
+	const exams = await examsRes.json();
+	const chapterId = today.tasks.find((task) => task.chapter_id)?.chapter_id;
+	const examId = exams.exams[0]?.exam_id;
+	if (!chapterId || !examId) throw new Error('E2E seed must provide a chapter and exam');
+
+	const created = await fetch(`${API}/v1/mocks`, {
+		method: 'POST',
+		headers: { ...authHeaders, 'x-admin-token': ADMIN_TOKEN },
+		body: JSON.stringify({
+			title: `Browser ${policy} fixture`,
+			exam_id: examId,
+			blueprint: [{ chapter_id: chapterId, count: 2 }],
+			time_limit_seconds: 180,
+			pass_mark_percent: 50,
+			attempts_allowed: 1,
+			late_sync_grace_seconds: 0,
+			integrity_policy: policy,
+			away_timeout_seconds: 15
+		})
+	});
+	expect(created.ok).toBeTruthy();
+	const { mock_id: mockId } = await created.json();
+	const started = await fetch(`${API}/v1/mocks/${mockId}/start`, {
+		method: 'POST',
+		headers: authHeaders
+	});
+	expect(started.ok).toBeTruthy();
+	const { session_id: sessionId } = await started.json();
+	return { sessionId: sessionId as string, authHeaders };
+}
+
+test('timed session shows the server countdown and auto-submits', async ({
+	page
+}) => {
+	// Arrange the account and the short timed session through the API.
+	const token = await registerLearner('e2e-timed');
 	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
 	const todayRes = await fetch(`${API}/v1/me/today`, { headers: authHeaders });
@@ -155,78 +205,120 @@ test('timed session shows the server countdown and auto-submits', async ({
 	await expect(page.getByTestId('results')).toContainText('not a prediction');
 });
 
-test('session UI displays the server auto-submit receipt after a return signal', async ({
+test('mock warning is server-enforced and integrity listeners stop after leaving', async ({
 	page
 }) => {
-	const email = `e2e-integrity-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
-	const register = await fetch(`${API}/v1/auth/register`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	expect(register.ok).toBeTruthy();
-	const login = await fetch(`${API}/v1/auth/login`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ email, password: 'correct horse battery' })
-	});
-	const { token } = await login.json();
-	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-	const todayRes = await fetch(`${API}/v1/me/today`, { headers: authHeaders });
-	const today = await todayRes.json();
-	const sessionRes = await fetch(`${API}/v1/practice/sessions`, {
-		method: 'POST',
-		headers: authHeaders,
-		body: JSON.stringify({
-			preset: 'timed',
-			chapter_id: today.tasks[0].chapter_id,
-			question_count: 2,
-			time_limit_seconds: 120
-		})
-	});
-	expect(sessionRes.ok).toBeTruthy();
-	const { session_id: sessionId } = await sessionRes.json();
-
-	let receipt: Record<string, unknown> | null = null;
-	let deliverReceipt = false;
-	await page.route('**/v1/integrity-events', async (route) => {
-		if (
-			route.request().postDataJSON()?.signal_type !== 'foreground' ||
-			!deliverReceipt ||
-			!receipt
-		) {
-			await route.continue();
-			return;
-		}
-		deliverReceipt = false;
-		const upstream = await route.fetch();
-		const body = await upstream.json();
-		await route.fulfill({
-			response: upstream,
-			json: { ...body, action: 'auto_submitted', receipt }
-		});
-	});
+	test.setTimeout(45_000);
+	const token = await registerLearner('e2e-integrity-warn');
+	const { sessionId, authHeaders } = await startPolicyMockSession(token, 'warn');
 	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
 	await page.goto(`/session/${sessionId}`);
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 
-	// Use the persisted API receipt while the page still holds its open session
-	// state, then exercise the same return-signal response path as a mock policy.
-	const submitted = await fetch(`${API}/v1/practice/sessions/${sessionId}/submit`, {
-		method: 'POST',
-		headers: authHeaders
+	const background = page.waitForResponse(
+		(response) =>
+			response.url().endsWith('/v1/integrity-events') &&
+			response.request().postDataJSON()?.signal_type === 'background'
+	);
+	await page.evaluate(() => {
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			value: 'hidden'
+		});
+		document.dispatchEvent(new Event('visibilitychange'));
 	});
-	expect(submitted.ok).toBeTruthy();
-	receipt = await submitted.json();
+	expect((await background).ok()).toBeTruthy();
+	await page.waitForTimeout(16_000);
 
 	const foreground = page.waitForResponse(
 		(response) =>
 			response.url().endsWith('/v1/integrity-events') &&
 			response.request().postDataJSON()?.signal_type === 'foreground'
 	);
-	deliverReceipt = true;
-	await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-	expect((await foreground).ok()).toBeTruthy();
+	await page.evaluate(() => {
+		Reflect.deleteProperty(document, 'visibilityState');
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	const warningResponse = await foreground;
+	expect(warningResponse.ok()).toBeTruthy();
+	const warning = await warningResponse.json();
+	expect(warning).toMatchObject({ recorded: true, action: 'warn' });
+	expect(warning.away_seconds).toBeGreaterThanOrEqual(15);
+	await expect(page.getByTestId('integrity-warning')).toContainText(/away for/i);
+
+	const session = await fetch(`${API}/v1/practice/sessions/${sessionId}`, {
+		headers: authHeaders
+	});
+	expect((await session.json()).status).toBe('open');
+
+	await page.getByRole('link', { name: 'Medical Learning OS' }).click();
+	await expect(page).toHaveURL(/\/today$/);
+	const staleListenerRequest = page
+		.waitForRequest(
+			(request) =>
+				request.url().endsWith('/v1/integrity-events') &&
+				request.postDataJSON()?.signal_type === 'window_blur',
+			{ timeout: 750 }
+		)
+		.then(
+			() => true,
+			() => false
+		);
+	await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+	expect(await staleListenerRequest).toBe(false);
+});
+
+test('mock auto-submit worker returns its real persisted receipt to the session', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	const token = await registerLearner('e2e-integrity-auto');
+	const { sessionId, authHeaders } = await startPolicyMockSession(token, 'auto_submit');
+	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await page.goto(`/session/${sessionId}`);
+	await expect(page.getByText(/Question 1 of/)).toBeVisible();
+
+	const background = page.waitForResponse(
+		(response) =>
+			response.url().endsWith('/v1/integrity-events') &&
+			response.request().postDataJSON()?.signal_type === 'background'
+	);
+	await page.evaluate(() => {
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			value: 'hidden'
+		});
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	expect((await background).ok()).toBeTruthy();
+
+	await expect
+		.poll(
+			async () => {
+				const response = await fetch(`${API}/v1/practice/sessions/${sessionId}`, {
+					headers: authHeaders
+				});
+				if (!response.ok) return `http_${response.status}`;
+				return (await response.json()).status;
+			},
+			{ timeout: 35_000, intervals: [500, 1000, 2000] }
+		)
+		.toBe('submitted');
+
+	const foreground = page.waitForResponse(
+		(response) =>
+			response.url().endsWith('/v1/integrity-events') &&
+			response.request().postDataJSON()?.signal_type === 'foreground'
+	);
+	await page.evaluate(() => {
+		Reflect.deleteProperty(document, 'visibilityState');
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	const response = await foreground;
+	expect(response.ok()).toBeTruthy();
+	const result = await response.json();
+	expect(result.action).toBe('auto_submitted');
+	expect(result.receipt).toBeTruthy();
 	await expect(page.getByTestId('results')).toBeVisible();
 	await expect(page.getByTestId('integrity-auto-submitted')).toContainText(/time-away limit/i);
 });

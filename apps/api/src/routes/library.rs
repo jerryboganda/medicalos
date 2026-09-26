@@ -10,6 +10,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::PgConnection;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -671,6 +672,11 @@ pub struct ImageCaseReq {
     pub modality: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct SetImageCaseConceptsReq {
+    pub concept_ids: Vec<Uuid>,
+}
+
 #[derive(Deserialize, serde::Serialize)]
 pub struct ImageRef {
     pub url: String,
@@ -846,6 +852,75 @@ struct ImageCaseRow {
     modality: Option<String>,
 }
 
+#[derive(Clone, serde::Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageConceptLink.ts",
+        rename = "ImageConceptLink"
+    )
+)]
+pub struct ImageConceptLink {
+    pub concept_id: Uuid,
+    pub canonical_key: String,
+    pub version: i32,
+    pub display_name: String,
+    pub definition: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ImageCaseConceptRow {
+    case_id: Uuid,
+    concept_id: Uuid,
+    canonical_key: String,
+    version: i32,
+    display_name: String,
+    definition: String,
+}
+
+impl From<ImageCaseConceptRow> for ImageConceptLink {
+    fn from(row: ImageCaseConceptRow) -> Self {
+        Self {
+            concept_id: row.concept_id,
+            canonical_key: row.canonical_key,
+            version: row.version,
+            display_name: row.display_name,
+            definition: row.definition,
+        }
+    }
+}
+
+async fn image_case_concepts_for_cases(
+    connection: &mut PgConnection,
+    case_ids: &[Uuid],
+) -> ApiResult<HashMap<Uuid, Vec<ImageConceptLink>>> {
+    if case_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query_as::<_, ImageCaseConceptRow>(
+        r#"SELECT link.case_id, link.concept_id, concept.canonical_key,
+                  cv.version, cv.display_name, cv.definition
+           FROM image_case_concepts link
+           JOIN concepts concept ON concept.id = link.concept_id
+           JOIN concept_versions cv
+             ON cv.concept_id = link.concept_id
+            AND cv.version = link.concept_version
+           WHERE link.case_id = ANY($1)
+           ORDER BY link.case_id, concept.canonical_key, link.concept_id"#,
+    )
+    .bind(case_ids)
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut by_case: HashMap<Uuid, Vec<ImageConceptLink>> = HashMap::new();
+    for row in rows {
+        let case_id = row.case_id;
+        by_case.entry(case_id).or_default().push(row.into());
+    }
+    Ok(by_case)
+}
+
 #[derive(sqlx::FromRow)]
 struct ApprovedImageAnnotation {
     case_id: Uuid,
@@ -896,6 +971,7 @@ pub async fn list_image_cases(
         })
         .collect::<Vec<_>>();
     let case_ids = cases.iter().map(|case| case.id).collect::<Vec<_>>();
+    let mut concepts_by_case = image_case_concepts_for_cases(&mut tx, &case_ids).await?;
     let approved = if case_ids.is_empty() {
         Vec::new()
     } else {
@@ -932,6 +1008,7 @@ pub async fn list_image_cases(
                 "kind": case.kind,
                 "images": case.images,
                 "modality": case.modality,
+                "concepts": concepts_by_case.remove(&case.id).unwrap_or_default(),
                 "annotations": by_case.remove(&case.id).unwrap_or_default(),
             })
         })
@@ -960,6 +1037,8 @@ pub async fn get_image_case(
         return Err(ApiError::not_found("image_case_not_found"));
     }
     require_display_rights(&mut tx, &images).await?;
+    let mut concepts_by_case = image_case_concepts_for_cases(&mut tx, &[case_id]).await?;
+    let concepts = concepts_by_case.remove(&case_id).unwrap_or_default();
     // IMG-02: only independently approved annotations reach learners.
     let annotations = sqlx::query_as::<_, ApprovedImageAnnotation>(
         r#"SELECT a.case_id, a.id, a.image_index, a.x_percent, a.y_percent, a.body
@@ -977,6 +1056,7 @@ pub async fn get_image_case(
         "kind": case.kind,
         "images": case.images,
         "modality": case.modality,
+        "concepts": concepts,
         // IMG-02: the explicit findings disclosure happens here, on request —
         // platform review does not establish clinical validity.
         "findings": case.findings_structured,
@@ -991,6 +1071,120 @@ pub async fn get_image_case(
     });
     tx.commit().await?;
     Ok(Json(detail))
+}
+
+// ---- IMG-04: version-pinned concept links ----------------------------------
+
+pub async fn admin_image_case_concepts(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(case_id): Path<Uuid>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let provided = headers
+        .get("x-admin-token")
+        .and_then(|value| value.to_str().ok());
+    state.require_admin(provided)?;
+    let case_exists = sqlx::query_scalar::<_, Uuid>("SELECT id FROM image_cases WHERE id = $1")
+        .bind(case_id)
+        .fetch_optional(&state.pool)
+        .await?;
+    if case_exists.is_none() {
+        return Err(ApiError::not_found("image_case_not_found"));
+    }
+    let mut connection = state.pool.acquire().await?;
+    let mut concepts_by_case = image_case_concepts_for_cases(&mut connection, &[case_id]).await?;
+    Ok(Json(json!({
+        "case_id": case_id,
+        "concepts": concepts_by_case.remove(&case_id).unwrap_or_default(),
+    })))
+}
+
+pub async fn set_admin_image_case_concepts(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(case_id): Path<Uuid>,
+    Json(mut req): Json<SetImageCaseConceptsReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let provided = headers
+        .get("x-admin-token")
+        .and_then(|value| value.to_str().ok());
+    state.require_admin(provided)?;
+    if req.concept_ids.len() > 50 {
+        return Err(ApiError::unprocessable(
+            "too_many_image_concepts",
+            "an image case may link to at most 50 concepts",
+        ));
+    }
+    req.concept_ids.sort_unstable();
+    if req.concept_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(ApiError::unprocessable(
+            "duplicate_image_concepts",
+            "concept_ids must not contain duplicates",
+        ));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let case_exists =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM image_cases WHERE id = $1 FOR UPDATE")
+            .bind(case_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if case_exists.is_none() {
+        return Err(ApiError::not_found("image_case_not_found"));
+    }
+    let mut before_by_case = image_case_concepts_for_cases(&mut tx, &[case_id]).await?;
+    let before = before_by_case.remove(&case_id).unwrap_or_default();
+    let concepts = sqlx::query_as::<_, ImageConceptLink>(
+        r#"SELECT concept.id AS concept_id, concept.canonical_key,
+                  cv.version, cv.display_name, cv.definition
+           FROM concepts concept
+           JOIN concept_versions cv
+             ON cv.concept_id = concept.id
+            AND cv.version = concept.current_version
+           WHERE concept.id = ANY($1)
+           ORDER BY concept.id
+           FOR SHARE OF concept, cv"#,
+    )
+    .bind(&req.concept_ids)
+    .fetch_all(&mut *tx)
+    .await?;
+    if concepts.len() != req.concept_ids.len() {
+        return Err(ApiError::unprocessable(
+            "image_concept_not_found",
+            "every concept_id must refer to an existing concept",
+        ));
+    }
+
+    sqlx::query("DELETE FROM image_case_concepts WHERE case_id = $1")
+        .bind(case_id)
+        .execute(&mut *tx)
+        .await?;
+    for concept in &concepts {
+        sqlx::query!(
+            "INSERT INTO image_case_concepts
+                (case_id, concept_id, concept_version, created_by)
+             VALUES ($1, $2, $3, $4)",
+            case_id,
+            concept.concept_id,
+            concept.version,
+            user.user_id
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    crate::routes::admin::audit(
+        &mut *tx,
+        user.user_id,
+        "image_case_concepts_updated",
+        "image_case",
+        case_id,
+        json!({ "before": before, "after": concepts }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "case_id": case_id, "concepts": concepts })))
 }
 
 // ---- IMG-02: annotation authoring and independent review --------------------

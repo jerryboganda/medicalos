@@ -1,4 +1,4 @@
-<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 -->
+<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
@@ -148,6 +148,21 @@
 				</div>
 				<span class="chip">Education mode</span>
 			</div>
+			{#if selectedCase.concepts.length > 0}
+				<section class="concept-links" aria-labelledby="study-concepts-heading" data-testid="image-case-concepts">
+					<h3 id="study-concepts-heading">Study concepts</h3>
+					<ul>
+						{#each selectedCase.concepts as concept (concept.concept_id)}
+							<li>
+								<strong>{concept.display_name}</strong>
+								<span>{concept.canonical_key} · v{concept.version}</span>
+								<p>{concept.definition}</p>
+							</li>
+						{/each}
+					</ul>
+					<p class="muted">These editorial links support study; they are not diagnostic conclusions.</p>
+				</section>
+			{/if}
 
 			<div class="image-controls" aria-label="Image controls">
 				<button
@@ -298,6 +313,33 @@
 <style>
 	.intro {
 		max-width: 72ch;
+	}
+	.concept-links {
+		margin-block: var(--space-lg);
+		padding: var(--space-md);
+		border-left: 2px solid var(--color-accent);
+		background: var(--color-surface-elevated);
+	}
+	.concept-links h3,
+	.concept-links p {
+		margin-block: 0 var(--space-sm);
+	}
+	.concept-links ul {
+		display: grid;
+		gap: var(--space-md);
+		margin: 0;
+		padding-left: var(--space-lg);
+	}
+	.concept-links li {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.concept-links li span {
+		display: block;
+		color: var(--color-text-secondary);
+	}
+	.concept-links li p {
+		margin-top: var(--space-xs);
 	}
 	.study-layout {
 		display: grid;

@@ -54,6 +54,26 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: Tests
         run: cargo test --workspace -- --test-threads=1
+      # ARCH-02: Rust DTOs own generated client contracts. Keep the first
+      # export bootstrap green, then reject any stale checked-in declarations.
+      - name: Export Rust-owned TypeScript contracts
+        env:
+          TS_RS_EXPORT_DIR: ${{ github.workspace }}/apps/client/src/lib/generated
+        run: cargo test -p api --lib --features type-export -- --test-threads=1
+      - name: Check generated TypeScript contracts are current
+        shell: bash
+        run: |
+          if [ -n "$(git ls-files apps/client/src/lib/generated)" ]; then
+            git diff --exit-code -- apps/client/src/lib/generated
+            test -z "$(git ls-files --others --exclude-standard -- apps/client/src/lib/generated)"
+          else
+            echo "::notice::ARCH-02 bindings are being bootstrapped from Rust DTOs."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch02-typescript-bindings
+          path: apps/client/src/lib/generated
+          include-hidden-files: true
       # Offline query cache: committed to the repo so Docker/release builds
       # compile the same checked queries without a live database.
       - name: Install sqlx-cli
@@ -73,12 +93,17 @@ jobs:
 
   client:
     # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)
+    needs: rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch02-typescript-bindings
+          path: apps/client/src/lib/generated
       - name: Install workspace dependencies
         run: npm install
       - name: Build client
@@ -101,6 +126,7 @@ jobs:
 
   e2e:
     # Browser end-to-end of the web build against the real API (§27.1)
+    needs: rust
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -119,6 +145,8 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/medos_ci
       VITE_API_BASE: http://127.0.0.1:8080
       MIN_TIME_LIMIT_SECONDS: "5"
+      # E2E-only token for creating policy-specific mock fixtures.
+      ADMIN_TOKEN: e2e-only-admin-token
       # CI-only fixture for offline-pack manifest signing; production uses the
       # VPS_PACK_SIGNING_KEY secret (docs/deployment/production.md).
       PACK_SIGNING_KEY: ci-only-pack-signing-key-0123456789abcdef
@@ -132,6 +160,10 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch02-typescript-bindings
+          path: apps/client/src/lib/generated
       - name: Apply schema (compile-time query checks need the live schema)
         run: |
           for f in apps/api/migrations/*.up.sql; do

@@ -354,6 +354,11 @@ pub async fn next_action(
 }
 
 #[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/TodayTask.ts", rename = "TodayTask")
+)]
 pub struct TaskView {
     id: Uuid,
     task_key: Uuid,
@@ -368,6 +373,11 @@ pub struct TaskView {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/TodayRevision.ts", rename = "TodayRevision")
+)]
 pub struct RevisionView {
     id: Uuid,
     to_version: i32,
@@ -379,6 +389,15 @@ pub struct RevisionView {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/LearnerChapter.ts",
+        rename = "LearnerChapter"
+    )
+)]
 pub struct LearnerChapter {
     chapter_id: Uuid,
     chapter_name: String,
@@ -386,10 +405,16 @@ pub struct LearnerChapter {
     /// never a prediction (ADR 0004, AI-02).
     mastery_index: Option<i32>,
     evidence_level: &'static str,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     independent_count: i64,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/Today.ts", rename = "Today")
+)]
 pub struct TodayResponse {
     plan_id: Uuid,
     version: i32,
@@ -400,8 +425,19 @@ pub struct TodayResponse {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/TodayRevisionBudget.ts",
+        rename = "TodayRevisionBudget"
+    )
+)]
 pub struct RevisionBudget {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     automatic_used: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     automatic_limit: i64,
     total_used: i32,
     total_limit: i32,

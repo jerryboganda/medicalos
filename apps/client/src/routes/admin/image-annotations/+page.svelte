@@ -1,4 +1,4 @@
-<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 -->
+<!-- Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
@@ -7,14 +7,22 @@
 		Api,
 		apiErrorMessage,
 		adminToken,
+		type AdminConcept,
 		type AdminImageAnnotation,
 		type ImageCaseSummary
 	} from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 
 	let cases = $state<ImageCaseSummary[]>([]);
+	let concepts = $state<AdminConcept[]>([]);
 	let annotations = $state<AdminImageAnnotation[]>([]);
 	let selectedCaseId = $state('');
+	let conceptCaseId = $state('');
+	let mappedConceptIds = $state<string[]>([]);
+	let mappingBusy = $state<'loading' | 'saving' | null>(null);
+	let mappingLoaded = $state(false);
+	let mappingError = $state('');
+	let mappingMessage = $state('');
 	let imageNumber = $state('1');
 	let xPercent = $state('50');
 	let yPercent = $state('50');
@@ -32,11 +40,13 @@
 		loading = true;
 		error = '';
 		try {
-			const [caseResponse, annotationResponse] = await Promise.all([
+			const [caseResponse, annotationResponse, conceptResponse] = await Promise.all([
 				Api.imageCases(),
-				Api.adminImageAnnotations()
+				Api.adminImageAnnotations(),
+				Api.adminConcepts()
 			]);
 			cases = caseResponse.cases;
+			concepts = conceptResponse.concepts;
 			annotations = annotationResponse.annotations.filter(
 				(annotation) => annotation.review_status === 'pending'
 			);
@@ -44,11 +54,63 @@
 				selectedCaseId = cases[0]?.case_id ?? '';
 				imageNumber = '1';
 			}
+			if (!conceptCaseId || !cases.some((study) => study.case_id === conceptCaseId)) {
+				conceptCaseId = cases[0]?.case_id ?? '';
+			}
+			await loadConceptMapping();
 		} catch (value) {
 			error = apiErrorMessage(value, 'The annotation workspace could not be loaded.');
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function loadConceptMapping() {
+		mappingError = '';
+		mappingMessage = '';
+		mappingLoaded = false;
+		if (!conceptCaseId) {
+			mappedConceptIds = [];
+			mappingLoaded = true;
+			return;
+		}
+		mappingBusy = 'loading';
+		mappedConceptIds = [];
+		try {
+			const response = await Api.adminImageCaseConcepts(conceptCaseId);
+			mappedConceptIds = response.concepts.map((concept) => concept.concept_id);
+			mappingLoaded = true;
+		} catch (value) {
+			mappingError = apiErrorMessage(value, 'Concept links could not be loaded.');
+		} finally {
+			mappingBusy = null;
+		}
+	}
+
+	async function saveConceptMapping() {
+		if (!conceptCaseId) return;
+		mappingBusy = 'saving';
+		mappingError = '';
+		mappingMessage = '';
+		try {
+			const response = await Api.setAdminImageCaseConcepts(conceptCaseId, mappedConceptIds);
+			const links = response.concepts;
+			mappedConceptIds = links.map((concept) => concept.concept_id);
+			mappingLoaded = true;
+			cases = cases.map((study) =>
+				study.case_id === conceptCaseId ? { ...study, concepts: links } : study
+			);
+			mappingMessage = 'Concept links saved at the displayed versions.';
+		} catch (value) {
+			mappingError = apiErrorMessage(value, 'Concept links could not be saved.');
+		} finally {
+			mappingBusy = null;
+		}
+	}
+
+	function selectConceptCase(event: Event) {
+		conceptCaseId = (event.currentTarget as HTMLSelectElement).value;
+		void loadConceptMapping();
 	}
 
 	async function submitAnnotation(event: SubmitEvent) {
@@ -126,6 +188,7 @@
 {:else}
 	{#if error}<p class="error-text" role="alert" data-testid="image-annotation-error">{error}</p>{/if}
 	{#if message}<p class="card success-text" role="status">{message}</p>{/if}
+	{#if mappingError}<p class="error-text" role="alert" data-testid="image-concept-mapping-error">{mappingError}</p>{/if}
 
 	<section class="card" aria-labelledby="annotation-create-heading">
 		<h2 id="annotation-create-heading">Add a teaching annotation</h2>
@@ -176,6 +239,64 @@
 					{saving ? 'Submitting…' : 'Submit annotation for review'}
 				</button>
 			</form>
+		{/if}
+	</section>
+
+	<section class="card concept-map" aria-labelledby="image-concept-heading" data-testid="image-concept-mapping">
+		<h2 id="image-concept-heading">Map study concepts</h2>
+		<p class="muted">
+			Link a licensed image case to curriculum concepts. Saving pins the selected concepts’ current versions;
+			these links support study and do not establish a diagnosis.
+		</p>
+		{#if cases.length === 0}
+			<p class="muted" data-testid="image-concept-empty">No image cases with active display rights are available.</p>
+		{:else}
+			<label class="field" for="image-concept-case">
+				<span>Image case</span>
+				<select id="image-concept-case" value={conceptCaseId} onchange={selectConceptCase} disabled={mappingBusy !== null}>
+					{#each cases as study (study.case_id)}
+						<option value={study.case_id}>{study.title}</option>
+					{/each}
+				</select>
+			</label>
+			{#if concepts.length === 0}
+				<p class="muted">Create a concept identity in the editorial console before mapping this case.</p>
+			{:else}
+				<fieldset class="concept-options" disabled={mappingBusy !== null}>
+					<legend>Concept identities</legend>
+					{#each concepts as concept (concept.concept_id)}
+						<label class="concept-option" for={`image-concept-${concept.concept_id}`}>
+							<input
+								id={`image-concept-${concept.concept_id}`}
+								data-testid={`image-concept-${concept.concept_id}`}
+								type="checkbox"
+								bind:group={mappedConceptIds}
+								value={concept.concept_id}
+							/>
+							<span>
+								<strong>{concept.display_name}</strong>
+								<small>{concept.canonical_key} · current version {concept.current_version}</small>
+							</span>
+						</label>
+					{/each}
+				</fieldset>
+				<button
+					class="btn primary"
+					type="button"
+					disabled={mappingBusy !== null || !mappingLoaded || !conceptCaseId}
+					data-testid="save-image-concept-links"
+					onclick={saveConceptMapping}
+				>
+					{mappingBusy === 'loading'
+						? 'Loading…'
+						: mappingBusy === 'saving'
+							? 'Saving…'
+							: 'Save concept links'}
+				</button>
+			{/if}
+		{/if}
+		{#if mappingMessage}
+			<p class="success-text" role="status" data-testid="image-concept-mapping-message">{mappingMessage}</p>
 		{/if}
 	</section>
 
@@ -263,6 +384,37 @@
 	}
 	.review-queue {
 		margin-top: var(--space-xl);
+	}
+	.concept-map {
+		margin-top: var(--space-xl);
+	}
+	.concept-options {
+		display: grid;
+		gap: var(--space-sm);
+		margin: var(--space-md) 0;
+		padding: 0;
+		border: 0;
+	}
+	.concept-options legend {
+		margin-bottom: var(--space-sm);
+		font-weight: 700;
+	}
+	.concept-option {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: start;
+		gap: var(--space-sm);
+		min-width: 0;
+		padding-block: var(--space-xs);
+	}
+	.concept-option span {
+		display: grid;
+		min-width: 0;
+		gap: var(--space-xs);
+		overflow-wrap: anywhere;
+	}
+	.concept-option small {
+		color: var(--color-text-secondary);
 	}
 	.review-item {
 		display: grid;

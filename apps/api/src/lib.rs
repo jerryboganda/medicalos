@@ -253,6 +253,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::library::create_image_annotation),
         )
         .route(
+            "/v1/admin/image-cases/{case_id}/concepts",
+            get(routes::library::admin_image_case_concepts)
+                .put(routes::library::set_admin_image_case_concepts),
+        )
+        .route(
             "/v1/admin/image-annotations",
             get(routes::library::list_image_annotations),
         )
@@ -907,6 +912,11 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/admin/image-cases/{case_id}/annotations",
             post(routes::library::create_image_annotation),
+        )
+        .route(
+            "/api/v1/admin/image-cases/{case_id}/concepts",
+            get(routes::library::admin_image_case_concepts)
+                .put(routes::library::set_admin_image_case_concepts),
         )
         .route(
             "/api/v1/admin/image-annotations",
