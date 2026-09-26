@@ -1719,12 +1719,19 @@ pub async fn psychometric_queue(
     )
 )]
 pub struct AdminDashboard {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     institutions: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     users: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     published_questions: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     articles: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     rights_records: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     open_incidents: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     coach_turns_last_30_days: i64,
 }
 

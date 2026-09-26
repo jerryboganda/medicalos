@@ -60,8 +60,9 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   branch-authored slices await final CI acceptance. Private-import contracts
   are authored in issue 37, administrator hierarchy/concept contracts in
   issue 38, administrator workflow/import/audit contracts in issue 39, and
-  pack lease revocation in issue 40, and image case administration requests
-  in issue 41. The API facade now uses generated request and response types;
+  pack lease revocation in issue 40, image case administration requests
+  in issue 41, and JSON numeric wire types in issue 42. The API facade now
+  uses generated request and response types;
   final generator-drift, client-build, and browser acceptance remain pending,
   so ARCH-02 stays in progress.
 - The image-case response slice preserves existing endpoint payloads and

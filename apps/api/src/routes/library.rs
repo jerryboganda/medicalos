@@ -47,7 +47,9 @@ pub struct ArticleCitation {
     )
 )]
 pub struct MediaCaptionCue {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub start_ms: u64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub end_ms: u64,
     pub text: String,
 }
@@ -63,6 +65,7 @@ pub struct MediaCaptionCue {
     )
 )]
 pub struct MediaChapterMarker {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub at_ms: u64,
     pub title: String,
 }
@@ -241,6 +244,7 @@ pub struct LibrarySearchResult {
     #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub effective_to: Option<chrono::NaiveDate>,
     pub as_of: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub score: i64,
     pub source_ref: String,
     pub excerpt: String,
