@@ -2974,21 +2974,24 @@ async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
     .execute(&state.pool)
     .await
     .expect("legacy timed session fixture");
-    sqlx::raw_sql(include_str!("../migrations/0055_ex08_policy_enforcement.down.sql"))
-        .execute(&state.pool)
-        .await
-        .expect("roll back EX-08 migration");
-    sqlx::raw_sql(include_str!("../migrations/0055_ex08_policy_enforcement.up.sql"))
-        .execute(&state.pool)
-        .await
-        .expect("replay EX-08 migration");
-    let legacy_grace: i32 = sqlx::query_scalar(
-        "SELECT late_sync_grace_seconds FROM practice_sessions WHERE id = $1",
-    )
-    .bind(legacy_session_id)
-    .fetch_one(&state.pool)
+    sqlx::raw_sql(include_str!(
+        "../migrations/0055_ex08_policy_enforcement.down.sql"
+    ))
+    .execute(&state.pool)
     .await
-    .expect("read preserved legacy grace");
+    .expect("roll back EX-08 migration");
+    sqlx::raw_sql(include_str!(
+        "../migrations/0055_ex08_policy_enforcement.up.sql"
+    ))
+    .execute(&state.pool)
+    .await
+    .expect("replay EX-08 migration");
+    let legacy_grace: i32 =
+        sqlx::query_scalar("SELECT late_sync_grace_seconds FROM practice_sessions WHERE id = $1")
+            .bind(legacy_session_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("read preserved legacy grace");
     assert_eq!(legacy_grace, 600);
 
     let (status, invalid) = call(
@@ -3021,11 +3024,7 @@ async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
         120,
     )
     .await;
-    let (status, listed) = call(
-        app.clone(),
-        request("GET", "/v1/mocks", Some(&token), None),
-    )
-    .await;
+    let (status, listed) = call(app.clone(), request("GET", "/v1/mocks", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     let config = listed["mocks"]
         .as_array()
@@ -3058,7 +3057,10 @@ async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
     .await
     .expect("read snapshotted policy");
     assert_eq!(session_policy.get::<i32, _>("late_sync_grace_seconds"), 120);
-    assert_eq!(session_policy.get::<String, _>("integrity_policy"), "log_only");
+    assert_eq!(
+        session_policy.get::<String, _>("integrity_policy"),
+        "log_only"
+    );
     assert_eq!(
         session_policy.get::<Option<i32>, _>("away_timeout_seconds"),
         None
@@ -3172,13 +3174,12 @@ async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
     assert_eq!(result["mock"]["late_sync_answers"], 2);
     assert_eq!(result["mock"]["ranked"], false);
     assert!(result["mock"]["percentile"].is_null());
-    let ranked = sqlx::query_scalar::<_, bool>(
-        "SELECT ranked FROM mock_attempts WHERE session_id = $1",
-    )
-    .bind(session_id)
-    .fetch_one(&state.pool)
-    .await
-    .expect("late attempt ranking state");
+    let ranked =
+        sqlx::query_scalar::<_, bool>("SELECT ranked FROM mock_attempts WHERE session_id = $1")
+            .bind(session_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("late attempt ranking state");
     assert!(!ranked);
 }
 
@@ -3212,7 +3213,11 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{warn_started}");
-    let warn_session: Uuid = warn_started["session_id"].as_str().unwrap().parse().unwrap();
+    let warn_session: Uuid = warn_started["session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let (status, _) = call(
         app.clone(),
         request(
@@ -3267,13 +3272,12 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     .await;
     assert_eq!(status, StatusCode::OK, "{duplicate_return}");
     assert_eq!(duplicate_return["action"], "none");
-    let warn_status: String = sqlx::query_scalar(
-        "SELECT status FROM practice_sessions WHERE id = $1",
-    )
-    .bind(warn_session)
-    .fetch_one(&state.pool)
-    .await
-    .expect("warning leaves session open");
+    let warn_status: String =
+        sqlx::query_scalar("SELECT status FROM practice_sessions WHERE id = $1")
+            .bind(warn_session)
+            .fetch_one(&state.pool)
+            .await
+            .expect("warning leaves session open");
     assert_eq!(warn_status, "open");
 
     let auto_mock = create_policy_mock(
@@ -3298,7 +3302,11 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{auto_started}");
-    let auto_session: Uuid = auto_started["session_id"].as_str().unwrap().parse().unwrap();
+    let auto_session: Uuid = auto_started["session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let (status, _) = call(
         app,
         request(
@@ -3338,13 +3346,12 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
         .get::<Option<Value>, _>("result_payload")
         .is_some());
     assert!(auto_result.get::<bool, _>("auto_submitted_by_policy"));
-    let submissions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mock_attempts WHERE session_id = $1",
-    )
-    .bind(auto_session)
-    .fetch_one(&state.pool)
-    .await
-    .expect("normal mock completion side effects run");
+    let submissions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mock_attempts WHERE session_id = $1")
+            .bind(auto_session)
+            .fetch_one(&state.pool)
+            .await
+            .expect("normal mock completion side effects run");
     assert_eq!(submissions, 1);
 
     let manual_mock = create_policy_mock(
@@ -3369,7 +3376,11 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{manual_started}");
-    let manual_session: Uuid = manual_started["session_id"].as_str().unwrap().parse().unwrap();
+    let manual_session: Uuid = manual_started["session_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let (status, _) = call(
         app.clone(),
         request(
@@ -10231,7 +10242,11 @@ async fn engagement_minutes_goal_counts_only_completed_answer_time() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad_availability}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{bad_availability}"
+    );
     assert_eq!(
         bad_availability["error"]["code"],
         "invalid_daily_availability"
@@ -10308,9 +10323,15 @@ async fn engagement_minutes_goal_counts_only_completed_answer_time() {
     .await;
     assert_eq!(status, StatusCode::OK, "{before_qotd}");
     assert_eq!(before_qotd["available_minutes"], 5, "{before_qotd}");
-    assert_eq!(before_qotd["daily_goal"]["mode"], "minutes", "{before_qotd}");
+    assert_eq!(
+        before_qotd["daily_goal"]["mode"], "minutes",
+        "{before_qotd}"
+    );
     assert_eq!(before_qotd["daily_goal"]["target"], 5, "{before_qotd}");
-    assert_eq!(before_qotd["daily_goal"]["minutes_today"], 4, "{before_qotd}");
+    assert_eq!(
+        before_qotd["daily_goal"]["minutes_today"], 4,
+        "{before_qotd}"
+    );
     assert_eq!(before_qotd["daily_goal"]["met"], false, "{before_qotd}");
 
     let qotd_id = before_qotd["qotd"]["question_version_id"]
@@ -10373,14 +10394,14 @@ async fn engagement_minutes_goal_counts_only_completed_answer_time() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{switched_mode}");
-    let (status, question_goal) = call(
-        app,
-        request("GET", "/v1/me/engagement", Some(&user), None),
-    )
-    .await;
+    let (status, question_goal) =
+        call(app, request("GET", "/v1/me/engagement", Some(&user), None)).await;
     assert_eq!(status, StatusCode::OK, "{question_goal}");
     assert_eq!(question_goal["daily_goal"]["met"], false, "{question_goal}");
-    assert_eq!(question_goal["daily_goal"]["answered_today"], 2, "{question_goal}");
+    assert_eq!(
+        question_goal["daily_goal"]["answered_today"], 2,
+        "{question_goal}"
+    );
     assert_eq!(question_goal["streak"]["count"], 1, "{question_goal}");
 }
 
@@ -10391,12 +10412,11 @@ async fn eng01_time_goal_migration_rolls_back_and_replays_with_defaults() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
     let user = register_and_login(app.clone()).await;
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users ORDER BY created_at DESC LIMIT 1",
-    )
-    .fetch_one(&state.pool)
-    .await
-    .expect("registered learner");
+    let user_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM users ORDER BY created_at DESC LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("registered learner");
 
     let (status, settings) = call(
         app,

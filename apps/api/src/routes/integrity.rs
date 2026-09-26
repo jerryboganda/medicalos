@@ -90,11 +90,10 @@ pub async fn record_integrity_event(
                     let already_auto_submitted: bool =
                         session.try_get("auto_submitted_by_policy")?;
                     let elapsed = if let Some(since) = since {
-                        let server_now: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
-                            "SELECT clock_timestamp()",
-                        )
-                        .fetch_one(&mut *tx)
-                        .await?;
+                        let server_now: chrono::DateTime<chrono::Utc> =
+                            sqlx::query_scalar("SELECT clock_timestamp()")
+                                .fetch_one(&mut *tx)
+                                .await?;
                         let elapsed = (server_now - since).num_seconds().max(0);
                         away_seconds = Some(elapsed);
                         Some(elapsed)
@@ -127,7 +126,6 @@ pub async fn record_integrity_event(
                 _ => {}
             }
         }
-
     }
     sqlx::query(
         "INSERT INTO integrity_events
@@ -220,7 +218,7 @@ pub async fn process_due_auto_submits(state: &Arc<AppState>) -> ApiResult<usize>
                 submitted += 1;
             }
             Err(error) => {
-                tracing::warn!(%error, %session_id, "could not auto-submit overdue mock");
+                tracing::warn!(?error, %session_id, "could not auto-submit overdue mock");
             }
         }
     }
@@ -234,7 +232,7 @@ pub fn spawn_auto_submit_worker(state: Arc<AppState>) {
         loop {
             ticks.tick().await;
             if let Err(error) = process_due_auto_submits(&state).await {
-                tracing::warn!(%error, "integrity auto-submit worker tick failed");
+                tracing::warn!(?error, "integrity auto-submit worker tick failed");
             }
         }
     });
