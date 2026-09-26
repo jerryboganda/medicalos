@@ -1,6 +1,6 @@
 # EX-07 — Mock test types and time analysis
 
-Status: ready-for-agent
+Status: authored (implementation and tests authored, CI acceptance pending)
 Requirement IDs: EX-07, QB-17, ADMIN-06
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§11.7, 19.5; `docs/requirements/traceability.md`
 

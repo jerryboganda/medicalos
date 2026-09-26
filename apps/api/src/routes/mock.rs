@@ -60,29 +60,82 @@ pub async fn create_mock(
             "mock_type must be full, mini, subject, system, chapter, grand_test, or final_assessment",
         ));
     }
+
+    let exam_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM exams WHERE id = $1)"
+    )
+    .bind(req.exam_id)
+    .fetch_one(&state.pool)
+    .await?;
+    if !exam_exists {
+        return Err(ApiError::unprocessable(
+            "invalid_exam_id",
+            "exam does not exist",
+        ));
+    }
+
     if req.blueprint.is_empty() || !req.blueprint.iter().all(|e| e.count >= 1 && e.count <= 200) {
         return Err(ApiError::unprocessable(
             "invalid_blueprint",
             "blueprint needs 1-200 questions per chapter entry",
         ));
     }
-    let pass_mark = req.pass_mark_percent.unwrap_or(50).clamp(1, 100);
-    let attempts = req.attempts_allowed.unwrap_or(1).clamp(1, 10);
+
+    let chapter_ids: Vec<Uuid> = req.blueprint.iter().map(|e| e.chapter_id).collect();
+    let unique_chapters: std::collections::HashSet<Uuid> = chapter_ids.iter().copied().collect();
+    let valid_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)::BIGINT FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'chapter' AND id = ANY($2)"
+    )
+    .bind(req.exam_id)
+    .bind(&chapter_ids)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if valid_count != unique_chapters.len() as i64 {
+        return Err(ApiError::unprocessable(
+            "invalid_blueprint_chapter",
+            "all blueprint chapters must exist, have kind 'chapter', and belong to the chosen exam",
+        ));
+    }
+
+    let pass_mark = match req.pass_mark_percent {
+        Some(p) if (1..=100).contains(&p) => p,
+        Some(_) => {
+            return Err(ApiError::unprocessable(
+                "pass_mark_out_of_range",
+                "pass_mark_percent must be 1..=100",
+            ));
+        }
+        None => 50,
+    };
+    let attempts = match req.attempts_allowed {
+        Some(a) if (1..=10).contains(&a) => a,
+        Some(_) => {
+            return Err(ApiError::unprocessable(
+                "attempts_out_of_range",
+                "attempts_allowed must be 1..=10",
+            ));
+        }
+        None => 1,
+    };
     if let Some(limit) = req.time_limit_seconds {
         if !(60..=28_800).contains(&limit) {
             return Err(ApiError::unprocessable(
                 "time_limit_out_of_range",
-                "mock time_limit_seconds must be 60..=28800",
+                "mock time_limit_seconds must be 60..=28800 (1 to 480 minutes)",
             ));
         }
     }
-    let late_sync_grace_seconds = req.late_sync_grace_seconds.unwrap_or(600);
-    if !(0..=600).contains(&late_sync_grace_seconds) {
-        return Err(ApiError::unprocessable(
-            "late_sync_grace_out_of_range",
-            "late_sync_grace_seconds must be 0..=600",
-        ));
-    }
+    let late_sync_grace_seconds = match req.late_sync_grace_seconds {
+        Some(grace) if (0..=600).contains(&grace) => grace,
+        Some(_) => {
+            return Err(ApiError::unprocessable(
+                "late_sync_grace_out_of_range",
+                "late_sync_grace_seconds must be 0..=600 (0 to 10 minutes)",
+            ));
+        }
+        None => 600,
+    };
     let integrity_policy = req.integrity_policy.as_deref().unwrap_or("log_only");
     if !matches!(integrity_policy, "log_only" | "warn" | "auto_submit") {
         return Err(ApiError::unprocessable(

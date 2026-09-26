@@ -436,10 +436,19 @@ export interface Note {
 	backlinks: { note_id: string; title: string }[];
 }
 
+export type MockType =
+	| 'full'
+	| 'mini'
+	| 'subject'
+	| 'system'
+	| 'chapter'
+	| 'grand_test'
+	| 'final_assessment';
+
 export interface MockTest {
 	mock_id: string;
 	title: string;
-	mock_type?: 'full' | 'mini' | 'subject' | 'system' | 'chapter' | 'grand_test' | 'final_assessment' | string;
+	mock_type: MockType;
 	pass_mark_percent: number;
 	attempts_allowed: number;
 	attempts_used: number;
@@ -457,6 +466,7 @@ export interface MockResult {
 	takers: number;
 	ranked: boolean;
 	late_sync_answers: number;
+	mock_type?: MockType;
 	total_time_seconds?: number;
 	avg_time_per_question_seconds?: number;
 	breakdown: { chapter: string; total: number; correct: number; time_seconds?: number }[];
@@ -1045,11 +1055,13 @@ export const Api = {
 			new: { card_id: string; front: string; back: string }[];
 			backlog_remaining: number;
 		}>('GET', '/v1/reviews/queue'),
+	listExams: () =>
+		call<{ exams: { exam_id: string; code: string; name: string }[] }>('GET', '/v1/exams'),
 	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
 	createMock: (body: {
 		title: string;
 		exam_id: string;
-		mock_type?: string;
+		mock_type?: MockType;
 		blueprint: { chapter_id: string; count: number }[];
 		time_limit_seconds?: number;
 		pass_mark_percent?: number;
@@ -1060,7 +1072,7 @@ export const Api = {
 	}) =>
 		call<{
 			mock_id: string;
-			mock_type: string;
+			mock_type: MockType;
 			late_sync_grace_seconds: number;
 			integrity_policy: string;
 			away_timeout_seconds: number | null;
@@ -1109,10 +1121,12 @@ export const Api = {
 			`/v1/competitions/${encodeURIComponent(competitionId)}/leaderboard`
 		),
 	startMock: (mockId: string) =>
-		call<{ session_id: string; late_sync_grace_seconds: number }>(
-			'POST',
-			`/v1/mocks/${mockId}/start`
-		),
+		call<{
+			session_id: string;
+			mock_type: MockType;
+			question_count: number;
+			late_sync_grace_seconds: number;
+		}>('POST', `/v1/mocks/${mockId}/start`),
 	answerableQuestions: () =>
 		call<{
 			questions: {

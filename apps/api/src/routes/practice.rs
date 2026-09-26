@@ -1719,9 +1719,12 @@ pub async fn submit(
     });
 
     if let Some(mock_id) = session.mock_id {
-        let mock = sqlx::query!("SELECT pass_mark_percent FROM mocks WHERE id = $1", mock_id)
-            .fetch_one(&state.pool)
-            .await?;
+        let mock = sqlx::query!(
+            "SELECT pass_mark_percent, mock_type FROM mocks WHERE id = $1",
+            mock_id
+        )
+        .fetch_one(&state.pool)
+        .await?;
         let passed = score >= mock.pass_mark_percent as i64;
         let late_sync_answers = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM attempts WHERE session_id = $1 AND offline_recorded_at IS NOT NULL",
@@ -1771,15 +1774,24 @@ pub async fn submit(
         )
         .bind(sid)
         .fetch_one(&state.pool)
-        .await?;
-        let answered_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM attempts WHERE session_id = $1 AND chosen_index IS NOT NULL",
+        .await?
+        .max(0);
+
+        let timing_stats = sqlx::query!(
+            r#"SELECT
+                COALESCE(SUM(elapsed_ms) / 1000, 0)::BIGINT AS "answered_time_seconds!",
+                COUNT(*)::BIGINT AS "timed_answered_count!"
+               FROM attempts
+               WHERE session_id = $1
+                 AND chosen_index IS NOT NULL
+                 AND elapsed_ms IS NOT NULL"#,
+            sid
         )
-        .bind(sid)
         .fetch_one(&state.pool)
         .await?;
-        let avg_time_per_question_seconds = if answered_count > 0 {
-            total_time_seconds / answered_count
+
+        let avg_time_per_question_seconds = if timing_stats.timed_answered_count > 0 {
+            (timing_stats.answered_time_seconds / timing_stats.timed_answered_count).max(0)
         } else {
             0
         };
@@ -1801,6 +1813,7 @@ pub async fn submit(
         .fetch_all(&state.pool)
         .await?;
         body["mock"] = serde_json::json!({
+            "mock_type": mock.mock_type,
             "score_percent": score,
             "passed": passed,
             "pass_mark_percent": mock.pass_mark_percent,
@@ -1814,7 +1827,7 @@ pub async fn submit(
                 "chapter": b.chapter_name,
                 "total": b.total,
                 "correct": b.correct,
-                "time_seconds": b.time_seconds,
+                "time_seconds": b.time_seconds.max(0),
             })).collect::<Vec<_>>(),
         });
     }

@@ -22021,8 +22021,13 @@ async fn mock_types_and_time_analysis() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
+    let initial_mocks_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mocks")
+        .fetch_one(&state.pool)
+        .await
+        .expect("mocks count");
+
     // 1. Validation reject: unsupported mock_type
-    let mut invalid_req = request(
+    let mut invalid_type_req = request(
         "POST",
         "/v1/mocks",
         Some(&token),
@@ -22037,14 +22042,182 @@ async fn mock_types_and_time_analysis() {
             "integrity_policy": "log_only"
         })),
     );
-    invalid_req
+    invalid_type_req
         .headers_mut()
         .insert("x-admin-token", "test-admin".parse().unwrap());
-    let (status, invalid_res) = call(app.clone(), invalid_req).await;
+    let (status, invalid_res) = call(app.clone(), invalid_type_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_res}");
     assert_eq!(invalid_res["error"]["code"], "invalid_mock_type");
 
-    // 2. Admin successfully creates a mock with mock_type: "mini"
+    // 2. Validation reject: wrong / non-existent exam ID
+    let random_exam_id = Uuid::new_v4();
+    let mut wrong_exam_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": random_exam_id,
+            "title": "Wrong Exam Mock",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 70,
+            "attempts_allowed": 2,
+            "integrity_policy": "log_only"
+        })),
+    );
+    wrong_exam_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, wrong_exam_res) = call(app.clone(), wrong_exam_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong_exam_res}");
+    assert_eq!(wrong_exam_res["error"]["code"], "invalid_exam_id");
+
+    // 3. Validation reject: non-chapter curriculum node (system node)
+    let system_node_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'system' LIMIT 1"
+    )
+    .bind(ids.exam_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("system node");
+
+    let mut non_chapter_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "System Node Blueprint Mock",
+            "blueprint": [{ "chapter_id": system_node_id, "count": 1 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 70,
+            "attempts_allowed": 2,
+            "integrity_policy": "log_only"
+        })),
+    );
+    non_chapter_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, non_ch_res) = call(app.clone(), non_chapter_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{non_ch_res}");
+    assert_eq!(non_ch_res["error"]["code"], "invalid_blueprint_chapter");
+
+    // 4. Validation reject: wrong-exam chapter ID (non-existent or other exam)
+    let random_chapter_id = Uuid::new_v4();
+    let mut wrong_ch_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Foreign Chapter Mock",
+            "blueprint": [{ "chapter_id": random_chapter_id, "count": 1 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 70,
+            "attempts_allowed": 2,
+            "integrity_policy": "log_only"
+        })),
+    );
+    wrong_ch_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, wrong_ch_res) = call(app.clone(), wrong_ch_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong_ch_res}");
+    assert_eq!(wrong_ch_res["error"]["code"], "invalid_blueprint_chapter");
+
+    // 5. Validation reject: field bounds without silent clamping
+    // 5a. Time limit bounds: < 60 or > 28800
+    let mut time_low_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Time Too Low",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "time_limit_seconds": 59
+        })),
+    );
+    time_low_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, time_low_res) = call(app.clone(), time_low_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(time_low_res["error"]["code"], "time_limit_out_of_range");
+
+    let mut time_high_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Time Too High",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "time_limit_seconds": 28801
+        })),
+    );
+    time_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, time_high_res) = call(app.clone(), time_high_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(time_high_res["error"]["code"], "time_limit_out_of_range");
+
+    // 5b. Attempts allowed: > 10 or < 1
+    let mut att_high_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Attempts Too High",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "attempts_allowed": 11
+        })),
+    );
+    att_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, att_res) = call(app.clone(), att_high_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(att_res["error"]["code"], "attempts_out_of_range");
+
+    // 5c. Pass mark: > 100
+    let mut pass_high_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Pass Mark High",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "pass_mark_percent": 105
+        })),
+    );
+    pass_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, pass_res) = call(app.clone(), pass_high_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(pass_res["error"]["code"], "pass_mark_out_of_range");
+
+    // 5d. Late sync grace: > 600
+    let mut grace_high_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Grace Too High",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "late_sync_grace_seconds": 601
+        })),
+    );
+    grace_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, grace_res) = call(app.clone(), grace_high_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(grace_res["error"]["code"], "late_sync_grace_out_of_range");
+
+    // Verify atomic rejection: no partial mock insert occurred during failed requests
+    let current_mocks_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mocks")
+        .fetch_one(&state.pool)
+        .await
+        .expect("mocks count");
+    assert_eq!(initial_mocks_count, current_mocks_count, "no partial mock insert occurred");
+
+    // 6. Admin successfully creates a mock with mock_type: "mini" and multi-chapter blueprint
     let mut create_req = request(
         "POST",
         "/v1/mocks",
@@ -22053,10 +22226,14 @@ async fn mock_types_and_time_analysis() {
             "exam_id": ids.exam_id,
             "title": "Mini Cardio Mock",
             "mock_type": "mini",
-            "blueprint": [{ "chapter_id": ids.chapter1, "count": 2 }],
+            "blueprint": [
+                { "chapter_id": ids.chapter1, "count": 2 },
+                { "chapter_id": ids.chapter2, "count": 1 }
+            ],
             "time_limit_seconds": 600,
             "pass_mark_percent": 50,
             "attempts_allowed": 1,
+            "late_sync_grace_seconds": 300,
             "integrity_policy": "log_only"
         })),
     );
@@ -22068,7 +22245,7 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(created["mock_type"], "mini");
     let mid: Uuid = created["mock_id"].as_str().unwrap().parse().unwrap();
 
-    // 3. GET /v1/mocks returns mock_type
+    // 7. GET /v1/mocks returns mock_type
     let (status, mocks) = call(
         app.clone(),
         request("GET", "/v1/mocks", Some(&token), None),
@@ -22082,7 +22259,7 @@ async fn mock_types_and_time_analysis() {
         .expect("mock in list");
     assert_eq!(our_mock["mock_type"], "mini");
 
-    // 4. Start the mock session
+    // 8. Start the mock session
     let (status, started) = call(
         app.clone(),
         request(
@@ -22095,9 +22272,11 @@ async fn mock_types_and_time_analysis() {
     .await;
     assert_eq!(status, StatusCode::OK, "{started}");
     assert_eq!(started["mock_type"], "mini");
+    assert_eq!(started["question_count"], 3);
     let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
 
-    // 5. Answer both questions
+    // 9. Answer with known elapsed_ms samples
+    // Item 0 (chapter1): 45_000 ms (45 seconds), answer chosen
     let (status, _) = call(
         app.clone(),
         request(
@@ -22108,6 +22287,7 @@ async fn mock_types_and_time_analysis() {
                 "item_index": 0,
                 "chosen_index": 0,
                 "confidence": "sure",
+                "elapsed_ms": 45_000,
                 "idempotency_key": "mini-item-1"
             })),
         ),
@@ -22115,6 +22295,7 @@ async fn mock_types_and_time_analysis() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    // Item 1 (chapter1): 15_000 ms (15 seconds), answer chosen
     let (status, _) = call(
         app.clone(),
         request(
@@ -22125,6 +22306,7 @@ async fn mock_types_and_time_analysis() {
                 "item_index": 1,
                 "chosen_index": 0,
                 "confidence": "sure",
+                "elapsed_ms": 15_000,
                 "idempotency_key": "mini-item-2"
             })),
         ),
@@ -22132,7 +22314,9 @@ async fn mock_types_and_time_analysis() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    // 6. Submit session and verify time analysis and mock_type
+    // Item 2 (chapter2): left unanswered / skipped
+
+    // 10. Submit session and verify exact mathematical metrics
     let (status, result) = call(
         app.clone(),
         request(
@@ -22146,13 +22330,28 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(status, StatusCode::OK, "{result}");
     let mock = result["mock"].as_object().expect("mock result object");
     assert_eq!(mock["mock_type"], "mini");
-    assert!(mock.contains_key("total_time_seconds"));
-    assert!(mock.contains_key("avg_time_per_question_seconds"));
+
+    // Total recorded elapsed: 45s + 15s = 60s
+    assert_eq!(mock["total_time_seconds"], 60);
+
+    // Average per answered question: (45s + 15s) / 2 = 30s (denominator excludes unanswered item 2)
+    assert_eq!(mock["avg_time_per_question_seconds"], 30);
+
+    // Chapter breakdown:
     let breakdown = mock["breakdown"].as_array().expect("breakdown array");
-    assert!(!breakdown.is_empty());
-    for chapter in breakdown {
-        assert!(chapter.get("time_seconds").is_some());
-    }
+    let ch1 = breakdown
+        .iter()
+        .find(|b| b["chapter"] == "Gloopoid Physiology")
+        .expect("chapter 1 breakdown");
+    assert_eq!(ch1["time_seconds"], 60);
+    assert_eq!(ch1["total"], 2);
+
+    let ch2 = breakdown
+        .iter()
+        .find(|b| b["chapter"] == "Glorbin Measurement")
+        .expect("chapter 2 breakdown");
+    assert_eq!(ch2["time_seconds"], 0);
+    assert_eq!(ch2["total"], 1);
 }
 
 

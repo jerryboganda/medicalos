@@ -16,7 +16,8 @@
 		type ScenarioAppealDecision,
 		type ScenarioAssessmentAppeal,
 		type ScenarioAssessmentAppealQueueItem,
-		type MockTest
+		type MockTest,
+		type MockType
 	} from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -180,9 +181,12 @@
 	let mocksBusy = $state(false);
 	let mocksError = $state('');
 	let mocksMessage = $state('');
+	let availableExams = $state<{ exam_id: string; code: string; name: string }[]>([]);
 	let mockExamId = $state('');
+	let mockExamChapters = $state<AdminCurriculumNode[]>([]);
+	let mockChaptersBusy = $state(false);
 	let mockTitle = $state('');
-	let mockType = $state<MockTest['mock_type']>('full');
+	let mockType = $state<MockType>('full');
 	let mockTimeLimitMinutes = $state(120);
 	let mockPassMarkPercent = $state(70);
 	let mockAttemptsAllowed = $state(1);
@@ -205,7 +209,8 @@
 				loadPendingAssessments(),
 				loadScenarioAssessmentAppeals(),
 				loadRuntimeSettings(),
-				loadMocks()
+				loadMocks(),
+				loadAvailableExams()
 			]);
 		}
 	}
@@ -988,11 +993,46 @@
 		}
 	}
 
+	async function loadAvailableExams() {
+		try {
+			const res = await Api.listExams();
+			availableExams = res.exams;
+			if (!mockExamId && availableExams.length > 0) {
+				mockExamId = availableExams[0].exam_id;
+				await loadMockExamChapters(mockExamId);
+			} else if (mockExamId) {
+				await loadMockExamChapters(mockExamId);
+			}
+		} catch {
+			/* fallback to manual exam entry if catalog fails */
+		}
+	}
+
+	async function loadMockExamChapters(eId: string) {
+		const targetId = eId.trim();
+		if (!targetId) {
+			mockExamChapters = [];
+			blueprintChapterId = '';
+			return;
+		}
+		mockChaptersBusy = true;
+		try {
+			const res = await Api.adminHierarchy(targetId);
+			mockExamChapters = res.nodes.filter((n) => n.kind === 'chapter');
+			if (mockExamChapters.length > 0 && !mockExamChapters.some((c) => c.id === blueprintChapterId)) {
+				blueprintChapterId = mockExamChapters[0].id;
+			}
+		} catch {
+			mockExamChapters = [];
+		} finally {
+			mockChaptersBusy = false;
+		}
+	}
+
 	function addBlueprintEntry() {
 		const cid = blueprintChapterId.trim();
 		if (!cid || blueprintCount < 1) return;
 		mockBlueprintEntries = [...mockBlueprintEntries, { chapter_id: cid, count: blueprintCount }];
-		blueprintChapterId = '';
 		blueprintCount = 10;
 	}
 
@@ -1003,7 +1043,39 @@
 	async function createMockTest(event: Event) {
 		event.preventDefault();
 		const eId = mockExamId.trim() || examId.trim();
-		if (!eId || !mockTitle.trim() || mockBlueprintEntries.length === 0 || mocksBusy) return;
+		if (!eId) {
+			mocksError = 'Please select or enter an Exam ID.';
+			return;
+		}
+		if (!mockTitle.trim()) {
+			mocksError = 'Mock title is required.';
+			return;
+		}
+		if (mockBlueprintEntries.length === 0) {
+			mocksError = 'At least one blueprint chapter entry is required.';
+			return;
+		}
+		if (mockTimeLimitMinutes < 1 || mockTimeLimitMinutes > 480) {
+			mocksError = 'Time limit must be between 1 and 480 minutes (60 to 28,800 seconds).';
+			return;
+		}
+		if (mockPassMarkPercent < 1 || mockPassMarkPercent > 100) {
+			mocksError = 'Pass mark must be between 1% and 100%.';
+			return;
+		}
+		if (mockAttemptsAllowed < 1 || mockAttemptsAllowed > 10) {
+			mocksError = 'Attempts allowed must be between 1 and 10.';
+			return;
+		}
+		if (mockLateSyncGraceMinutes < 0 || mockLateSyncGraceMinutes > 10) {
+			mocksError = 'Late sync grace must be between 0 and 10 minutes (0 to 600 seconds).';
+			return;
+		}
+		if (mockIntegrityPolicy !== 'log_only' && (mockAwayTimeoutSeconds < 15 || mockAwayTimeoutSeconds > 3600)) {
+			mocksError = 'Away timeout must be between 15 and 3600 seconds.';
+			return;
+		}
+		if (mocksBusy) return;
 		mocksBusy = true;
 		mocksError = '';
 		mocksMessage = '';
@@ -1015,7 +1087,7 @@
 				time_limit_seconds: mockTimeLimitMinutes * 60,
 				pass_mark_percent: mockPassMarkPercent,
 				attempts_allowed: mockAttemptsAllowed,
-				late_sync_grace_seconds: Math.min(mockLateSyncGraceMinutes * 60, 600),
+				late_sync_grace_seconds: mockLateSyncGraceMinutes * 60,
 				integrity_policy: mockIntegrityPolicy,
 				...(mockIntegrityPolicy === 'log_only' ? {} : { away_timeout_seconds: mockAwayTimeoutSeconds }),
 				blueprint: mockBlueprintEntries
@@ -2130,8 +2202,27 @@
 					<input id="mock-title" bind:value={mockTitle} placeholder="e.g. Cardiorespiratory Mock A" required data-testid="mock-title" />
 				</label>
 				<label class="field" for="mock-exam-id">
-					<span>Exam ID</span>
-					<input id="mock-exam-id" bind:value={mockExamId} placeholder={examId || 'Target exam UUID'} data-testid="mock-exam-id" />
+					<span>Target exam</span>
+					{#if availableExams.length > 0}
+						<select
+							id="mock-exam-id"
+							bind:value={mockExamId}
+							onchange={() => loadMockExamChapters(mockExamId)}
+							data-testid="mock-exam-id"
+						>
+							{#each availableExams as exam}
+								<option value={exam.exam_id}>{exam.name} ({exam.code})</option>
+							{/each}
+						</select>
+					{:else}
+						<input
+							id="mock-exam-id"
+							bind:value={mockExamId}
+							onblur={() => loadMockExamChapters(mockExamId)}
+							placeholder={examId || 'Target exam UUID'}
+							data-testid="mock-exam-id"
+						/>
+					{/if}
 				</label>
 				<label class="field" for="mock-type">
 					<span>Form type</span>
@@ -2146,20 +2237,20 @@
 					</select>
 				</label>
 				<label class="field" for="mock-time-limit">
-					<span>Time limit (minutes)</span>
-					<input id="mock-time-limit" type="number" min="1" max="1440" step="1" bind:value={mockTimeLimitMinutes} required data-testid="mock-time-limit" />
+					<span>Time limit (1–480 min)</span>
+					<input id="mock-time-limit" type="number" min="1" max="480" step="1" bind:value={mockTimeLimitMinutes} required data-testid="mock-time-limit" />
 				</label>
 				<label class="field" for="mock-pass-mark">
-					<span>Pass mark (%)</span>
+					<span>Pass mark (1–100%)</span>
 					<input id="mock-pass-mark" type="number" min="1" max="100" step="1" bind:value={mockPassMarkPercent} required data-testid="mock-pass-mark" />
 				</label>
 				<label class="field" for="mock-attempts">
-					<span>Attempts allowed</span>
-					<input id="mock-attempts" type="number" min="1" max="100" step="1" bind:value={mockAttemptsAllowed} required data-testid="mock-attempts" />
+					<span>Attempts allowed (1–10)</span>
+					<input id="mock-attempts" type="number" min="1" max="10" step="1" bind:value={mockAttemptsAllowed} required data-testid="mock-attempts" />
 				</label>
 				<label class="field" for="mock-grace-period">
-					<span>Late sync grace (minutes)</span>
-					<input id="mock-grace-period" type="number" min="0" max="60" step="1" bind:value={mockLateSyncGraceMinutes} required data-testid="mock-grace-period" />
+					<span>Late sync grace (0–10 min)</span>
+					<input id="mock-grace-period" type="number" min="0" max="10" step="1" bind:value={mockLateSyncGraceMinutes} required data-testid="mock-grace-period" />
 				</label>
 				<label class="field" for="mock-integrity">
 					<span>Integrity policy</span>
@@ -2179,15 +2270,32 @@
 
 			<fieldset class="rights-record" style="margin-top:var(--space-md);">
 				<legend>Blueprint chapters</legend>
-				<p class="muted">Add chapters and the question count to sample from each chapter.</p>
+				<p class="muted">Add chapters and the question count (1–200) to sample from each chapter.</p>
 				<div style="display:flex; gap:var(--space-sm); align-items:flex-end; flex-wrap:wrap;">
 					<label class="field" for="blueprint-chapter" style="flex:1; min-width:14rem;">
-						<span>Chapter ID</span>
-						<input id="blueprint-chapter" bind:value={blueprintChapterId} placeholder="Chapter UUID" data-testid="blueprint-chapter-id" />
+						<span>Curriculum chapter</span>
+						{#if mockExamChapters.length > 0}
+							<select
+								id="blueprint-chapter"
+								bind:value={blueprintChapterId}
+								data-testid="blueprint-chapter-select"
+							>
+								{#each mockExamChapters as chapter}
+									<option value={chapter.id}>{chapter.name}</option>
+								{/each}
+							</select>
+						{:else}
+							<input
+								id="blueprint-chapter"
+								bind:value={blueprintChapterId}
+								placeholder={mockChaptersBusy ? 'Loading chapters…' : 'Enter chapter UUID'}
+								data-testid="blueprint-chapter-id"
+							/>
+						{/if}
 					</label>
 					<label class="field" for="blueprint-count" style="width:8rem;">
-						<span>Count</span>
-						<input id="blueprint-count" type="number" min="1" max="500" step="1" bind:value={blueprintCount} data-testid="blueprint-count" />
+						<span>Count (1–200)</span>
+						<input id="blueprint-count" type="number" min="1" max="200" step="1" bind:value={blueprintCount} data-testid="blueprint-count" />
 					</label>
 					<button class="btn" type="button" onclick={addBlueprintEntry} disabled={!blueprintChapterId.trim()} data-testid="add-blueprint-entry">
 						Add chapter
@@ -2197,8 +2305,9 @@
 				{#if mockBlueprintEntries.length > 0}
 					<ul style="margin-top:var(--space-sm); list-style:none; padding:0;" data-testid="blueprint-entries">
 						{#each mockBlueprintEntries as entry, index}
+							{@const ch = mockExamChapters.find((c) => c.id === entry.chapter_id)}
 							<li style="display:flex; justify-content:space-between; align-items:center; padding:var(--space-xs) 0; border-bottom:1px solid var(--color-surface-elevated);" data-testid="blueprint-entry-item">
-								<span>Chapter <code>{entry.chapter_id}</code>: <strong>{entry.count} questions</strong></span>
+								<span><strong>{ch ? ch.name : `Chapter ${entry.chapter_id}`}</strong>: {entry.count} questions</span>
 								<button class="btn" type="button" onclick={() => removeBlueprintEntry(index)}>Remove</button>
 							</li>
 						{/each}
