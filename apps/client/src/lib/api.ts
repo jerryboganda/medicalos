@@ -4,6 +4,8 @@ import type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
 import type { ListNotesResponse } from './generated/notes/ListNotesResponse';
 import type { NoteRequest } from './generated/notes/NoteRequest';
 import type { UpdateNoteResponse } from './generated/notes/UpdateNoteResponse';
+import type { NextActionRecommendation } from './generated/today/NextActionRecommendation';
+import type { NextActionRequest } from './generated/today/NextActionRequest';
 import type { CreateMockRequest } from './generated/mock/CreateMockRequest';
 import type { CreateMockResponse } from './generated/mock/CreateMockResponse';
 import type { MockListResponse } from './generated/mock/MockListResponse';
@@ -73,6 +75,14 @@ export type { TodayTask } from './generated/today/TodayTask';
 export type { TodayRevision } from './generated/today/TodayRevision';
 export type { LearnerChapter } from './generated/today/LearnerChapter';
 export type { TodayRevisionBudget } from './generated/today/TodayRevisionBudget';
+export type { NextActionAllowance } from './generated/today/NextActionAllowance';
+export type { NextActionDeadlinePassed } from './generated/today/NextActionDeadlinePassed';
+export type { NextActionNoAction } from './generated/today/NextActionNoAction';
+export type { NextActionNoPlan } from './generated/today/NextActionNoPlan';
+export type { NextActionRecommendation } from './generated/today/NextActionRecommendation';
+export type { NextActionRequest } from './generated/today/NextActionRequest';
+export type { NextActionWithAction } from './generated/today/NextActionWithAction';
+export type { RecommendedAction } from './generated/today/RecommendedAction';
 export type { AdminDashboard } from './generated/admin/AdminDashboard';
 export type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 export type { AdminArticleSummary } from './generated/library/AdminArticleSummary';
@@ -260,38 +270,6 @@ export interface AdminImportResult {
 	valid?: number;
 	issues?: { row: number; code: string; message: string }[];
 	created?: unknown[];
-}
-
-export interface RecommendedAction {
-	task_id: string;
-	task_key: string;
-	kind: string;
-	title: string;
-	chapter_id: string | null;
-	source_session_id: string | null;
-	question_count: number;
-	estimated_minutes: number;
-	adjusted_estimated_minutes: number;
-	protected: boolean;
-	reason_code: string;
-	independent_count: number;
-}
-
-export interface NextActionRecommendation {
-	available_minutes: number;
-	activity_preference: 'any' | 'practice' | 'revision';
-	time_multiplier: number;
-	exam_date: string | null;
-	plan_id: string | null;
-	plan_version: number | null;
-	reason_code: string;
-	recommended_action: RecommendedAction | null;
-	allowance?: {
-		limit: number;
-		used: number;
-		remaining: number;
-		required?: number;
-	} | null;
 }
 
 export interface PrivateImportRight {
@@ -567,9 +545,9 @@ export const Api = {
 		call<{ token: string }>('POST', '/v1/auth/oidc/complete', { ticket }),
 	today: () => call<Today>('GET', '/v1/me/today'),
 	recommendNextAction: (
-		availableMinutes: number,
-		activityPreference: 'any' | 'practice' | 'revision' = 'any',
-		timeMultiplier = 1
+		availableMinutes: NextActionRequest['available_minutes'],
+		activityPreference: NonNullable<NextActionRequest['activity_preference']> = 'any',
+		timeMultiplier: NonNullable<NextActionRequest['time_multiplier']> = 1
 	) => {
 		const query = new URLSearchParams({
 			available_minutes: String(availableMinutes),

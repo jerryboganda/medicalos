@@ -15493,6 +15493,14 @@ async fn ai04_next_action_respects_time_evidence_and_current_plan() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{no_plan}");
+    assert_eq!(no_plan.as_object().unwrap().len(), 8);
+    assert_eq!(no_plan["available_minutes"], 60);
+    assert_eq!(no_plan["activity_preference"], "any");
+    assert_eq!(no_plan["time_multiplier"], 1.0);
+    assert!(no_plan["exam_date"].is_null());
+    assert!(no_plan["plan_id"].is_null());
+    assert!(no_plan["plan_version"].is_null());
+    assert!(no_plan.get("allowance").is_none());
     assert_eq!(no_plan["reason_code"], "no_current_plan");
     assert!(no_plan["recommended_action"].is_null());
     let plans_after_recommendation: i64 = sqlx::query_scalar(
@@ -15646,6 +15654,9 @@ async fn ai04_next_action_respects_time_evidence_and_current_plan() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{revision_pick}");
+    assert_eq!(revision_pick.as_object().unwrap().len(), 8);
+    assert!(revision_pick.get("allowance").is_none());
+    assert_eq!(revision_pick["recommended_action"].as_object().unwrap().len(), 12);
     assert_eq!(
         revision_pick["recommended_action"]["task_id"],
         revision_id.to_string()
@@ -16044,6 +16055,8 @@ async fn ai04_does_not_recommend_quarantined_practice_content() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{recommendation}");
+    assert_eq!(recommendation.as_object().unwrap().len(), 9);
+    assert!(recommendation["allowance"].is_null());
     assert_eq!(recommendation["reason_code"], "content_unavailable");
     assert!(recommendation["recommended_action"].is_null());
 }

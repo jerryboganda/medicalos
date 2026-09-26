@@ -16,11 +16,25 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionRequest.ts",
+        rename = "NextActionRequest"
+    )
+)]
 pub struct NextActionQuery {
     available_minutes: i32,
     #[serde(default = "default_activity_preference")]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"any\" | \"practice\" | \"revision\"", optional)
+    )]
     activity_preference: String,
     #[serde(default = "default_time_multiplier")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
     time_multiplier: f64,
 }
 
@@ -32,13 +46,186 @@ fn default_time_multiplier() -> f64 {
     1.0
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/RecommendedAction.ts",
+        rename = "RecommendedAction"
+    )
+)]
+pub struct RecommendedAction {
+    task_id: Uuid,
+    task_key: Uuid,
+    kind: String,
+    title: String,
+    chapter_id: Option<Uuid>,
+    source_session_id: Option<Uuid>,
+    question_count: i32,
+    estimated_minutes: i32,
+    adjusted_estimated_minutes: i32,
+    protected: bool,
+    reason_code: String,
+    independent_count: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionAllowance.ts",
+        rename = "NextActionAllowance"
+    )
+)]
+pub struct NextActionAllowance {
+    limit: i64,
+    used: i64,
+    remaining: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    required: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionDeadlinePassed.ts",
+        rename = "NextActionDeadlinePassed"
+    )
+)]
+pub struct NextActionDeadlinePassed {
+    available_minutes: i32,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"any\" | \"practice\" | \"revision\"")
+    )]
+    activity_preference: String,
+    time_multiplier: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    exam_date: Option<chrono::NaiveDate>,
+    reason_code: String,
+    recommended_action: Option<RecommendedAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    allowance: Option<NextActionAllowance>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionNoPlan.ts",
+        rename = "NextActionNoPlan"
+    )
+)]
+pub struct NextActionNoPlan {
+    available_minutes: i32,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"any\" | \"practice\" | \"revision\"")
+    )]
+    activity_preference: String,
+    time_multiplier: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    exam_date: Option<chrono::NaiveDate>,
+    plan_id: Option<Uuid>,
+    plan_version: Option<i32>,
+    reason_code: String,
+    recommended_action: Option<RecommendedAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    allowance: Option<NextActionAllowance>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionNoAction.ts",
+        rename = "NextActionNoAction"
+    )
+)]
+pub struct NextActionNoAction {
+    available_minutes: i32,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"any\" | \"practice\" | \"revision\"")
+    )]
+    activity_preference: String,
+    time_multiplier: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    exam_date: Option<chrono::NaiveDate>,
+    plan_id: Uuid,
+    plan_version: i32,
+    reason_code: String,
+    allowance: Option<NextActionAllowance>,
+    recommended_action: Option<RecommendedAction>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionWithAction.ts",
+        rename = "NextActionWithAction"
+    )
+)]
+pub struct NextActionWithAction {
+    available_minutes: i32,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"any\" | \"practice\" | \"revision\"")
+    )]
+    activity_preference: String,
+    time_multiplier: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    exam_date: Option<chrono::NaiveDate>,
+    plan_id: Uuid,
+    plan_version: i32,
+    reason_code: String,
+    recommended_action: RecommendedAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    allowance: Option<NextActionAllowance>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "today/NextActionRecommendation.ts",
+        rename = "NextActionRecommendation"
+    )
+)]
+pub enum NextActionRecommendation {
+    DeadlinePassed(NextActionDeadlinePassed),
+    NoPlan(NextActionNoPlan),
+    NoAction(NextActionNoAction),
+    WithAction(NextActionWithAction),
+}
+
 /// GET /v1/me/plan/next-action returns one bounded suggestion from the
 /// learner's current plan. It does not revise or otherwise mutate the plan.
 pub async fn next_action(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Query(query): Query<NextActionQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<NextActionRecommendation>> {
     if !(5..=480).contains(&query.available_minutes) {
         return Err(ApiError::unprocessable(
             "invalid_time_budget",
@@ -80,14 +267,17 @@ pub async fn next_action(
     .await?;
     let exam_date = goal.as_ref().and_then(|goal| goal.exam_date);
     if goal.as_ref().is_some_and(|goal| goal.deadline_passed) {
-        return Ok(Json(json!({
-            "available_minutes": query.available_minutes,
-            "activity_preference": query.activity_preference,
-            "time_multiplier": query.time_multiplier,
-            "exam_date": exam_date,
-            "reason_code": "exam_deadline_passed",
-            "recommended_action": null,
-        })));
+        return Ok(Json(NextActionRecommendation::DeadlinePassed(
+            NextActionDeadlinePassed {
+                available_minutes: query.available_minutes,
+                activity_preference: query.activity_preference,
+                time_multiplier: query.time_multiplier,
+                exam_date,
+                reason_code: "exam_deadline_passed".to_owned(),
+                recommended_action: None,
+                allowance: None,
+            },
+        )));
     }
 
     // A recommendation is strictly read-only: a missing cold-start plan is
@@ -101,15 +291,16 @@ pub async fn next_action(
     .fetch_optional(&state.pool)
     .await?;
     let Some(plan) = plan else {
-        return Ok(Json(json!({
-            "available_minutes": query.available_minutes,
-            "activity_preference": query.activity_preference,
-            "time_multiplier": query.time_multiplier,
-            "exam_date": exam_date,
-            "plan_id": null,
-            "plan_version": null,
-            "reason_code": "no_current_plan",
-            "recommended_action": null,
+        return Ok(Json(NextActionRecommendation::NoPlan(NextActionNoPlan {
+            available_minutes: query.available_minutes,
+            activity_preference: query.activity_preference,
+            time_multiplier: query.time_multiplier,
+            exam_date,
+            plan_id: None,
+            plan_version: None,
+            reason_code: "no_current_plan".to_owned(),
+            recommended_action: None,
+            allowance: None,
         })));
     };
 
@@ -287,14 +478,7 @@ pub async fn next_action(
         .or_else(|| candidates.first());
 
     let Some((task, adjusted_estimated_minutes)) = selected else {
-        return Ok(Json(json!({
-            "available_minutes": query.available_minutes,
-            "activity_preference": query.activity_preference,
-            "time_multiplier": query.time_multiplier,
-            "exam_date": exam_date,
-            "plan_id": plan.id,
-            "plan_version": plan.version,
-            "reason_code": if entitlement_blocked {
+        let reason_code = if entitlement_blocked {
                 "free_allowance_reached"
             } else if allowance_insufficient {
                 "free_allowance_insufficient"
@@ -304,18 +488,26 @@ pub async fn next_action(
                 "content_unavailable"
             } else {
                 "no_task_fits"
-            },
-            "allowance": if entitlement_blocked || allowance_insufficient {
-                Some(json!({
-                    "limit": free_daily_questions,
-                    "used": attempted_today,
-                    "remaining": remaining_free_questions,
-                    "required": practice_question_counts.iter().min(),
-                }))
-            } else {
-                None
-            },
-            "recommended_action": null,
+            }
+            .to_owned();
+        let allowance = (entitlement_blocked || allowance_insufficient).then(|| {
+            NextActionAllowance {
+                limit: free_daily_questions,
+                used: attempted_today,
+                remaining: remaining_free_questions,
+                required: practice_question_counts.iter().min().copied(),
+            }
+        });
+        return Ok(Json(NextActionRecommendation::NoAction(NextActionNoAction {
+            available_minutes: query.available_minutes,
+            activity_preference: query.activity_preference,
+            time_multiplier: query.time_multiplier,
+            exam_date,
+            plan_id: plan.id,
+            plan_version: plan.version,
+            reason_code,
+            allowance,
+            recommended_action: None,
         })));
     };
 
@@ -328,29 +520,33 @@ pub async fn next_action(
     } else {
         "current_plan_order"
     };
-    Ok(Json(json!({
-        "available_minutes": query.available_minutes,
-        "activity_preference": query.activity_preference,
-        "time_multiplier": query.time_multiplier,
-        "exam_date": exam_date,
-        "plan_id": plan.id,
-        "plan_version": plan.version,
-        "reason_code": reason_code,
-        "recommended_action": {
-            "task_id": task.id,
-            "task_key": task.task_key,
-            "kind": task.kind,
-            "title": task.title,
-            "chapter_id": task.chapter_id,
-            "source_session_id": task.source_session_id,
-            "question_count": task.question_count,
-            "estimated_minutes": task.estimated_minutes,
-            "adjusted_estimated_minutes": adjusted_estimated_minutes,
-            "protected": task.protected,
-            "reason_code": reason_code,
-            "independent_count": task.independent_count,
+    let recommendation = RecommendedAction {
+        task_id: task.id,
+        task_key: task.task_key,
+        kind: task.kind.clone(),
+        title: task.title.clone(),
+        chapter_id: task.chapter_id,
+        source_session_id: task.source_session_id,
+        question_count: task.question_count,
+        estimated_minutes: task.estimated_minutes,
+        adjusted_estimated_minutes,
+        protected: task.protected,
+        reason_code: reason_code.to_owned(),
+        independent_count: task.independent_count,
+    };
+    Ok(Json(NextActionRecommendation::WithAction(
+        NextActionWithAction {
+            available_minutes: query.available_minutes,
+            activity_preference: query.activity_preference,
+            time_multiplier: query.time_multiplier,
+            exam_date,
+            plan_id: plan.id,
+            plan_version: plan.version,
+            reason_code: reason_code.to_owned(),
+            recommended_action: recommendation,
+            allowance: None,
         },
-    })))
+    )))
 }
 
 #[derive(Serialize)]
