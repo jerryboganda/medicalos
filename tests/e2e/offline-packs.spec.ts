@@ -195,6 +195,12 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
   expect(resourceRequests[2]).toEqual([questionIds[25]]);
 
   await page.getByTestId('pack-open').click();
+  await expect
+    .poll(async () => {
+      if (await page.getByTestId('pack-question').isVisible()) return 'opened';
+      return (await page.getByTestId('pack-error').textContent()) ?? 'opening';
+    })
+    .toBe('opened');
   await expect(page.getByTestId('pack-question')).toContainText('Fictional practice case 1');
   await expect(page.getByTestId('pack-answer-reveal')).not.toHaveAttribute('open', '');
   await page.getByTestId('pack-answer-reveal').locator('summary').click();
