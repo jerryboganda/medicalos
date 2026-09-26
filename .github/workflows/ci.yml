@@ -40,17 +40,6 @@ jobs:
           targets: wasm32-unknown-unknown
       # Rust compile caching is mandatory under the compute rule (§27.1)
       - uses: Swatinem/rust-cache@v2
-      # Temporary bootstrap export: formatting is performed on the authorized
-      # CI runner, and its patch is downloaded and committed before strict CI.
-      - name: Export CI rustfmt patch
-        run: |
-          cargo fmt --all
-          git diff --binary -- '*.rs' > rustfmt.patch
-      - uses: actions/upload-artifact@v4
-        with:
-          name: temporary-rustfmt-patch
-          path: rustfmt.patch
-          retention-days: 1
       - name: Format
         run: cargo fmt --all -- --check
       # Compile-time-checked queries (§31.1) expand against the live schema.

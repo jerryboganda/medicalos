@@ -23,7 +23,11 @@ const MAX_BROWSER_PACK_QUESTIONS: i64 = 500;
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackManifestItem.ts", rename = "PackManifestItem")
+    ts(
+        export,
+        export_to = "packs/PackManifestItem.ts",
+        rename = "PackManifestItem"
+    )
 )]
 pub struct PackManifestItem {
     pub question_version_id: Uuid,
@@ -54,7 +58,11 @@ pub struct PackManifest {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackQuestionResource.ts", rename = "PackQuestionResource")
+    ts(
+        export,
+        export_to = "packs/PackQuestionResource.ts",
+        rename = "PackQuestionResource"
+    )
 )]
 pub struct PackQuestionResource {
     pub question_version_id: Uuid,
@@ -74,7 +82,11 @@ pub struct PackQuestionResource {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackResourcesRequest.ts", rename = "PackResourcesRequest")
+    ts(
+        export,
+        export_to = "packs/PackResourcesRequest.ts",
+        rename = "PackResourcesRequest"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct PackResourcesReq {
@@ -87,7 +99,11 @@ pub struct PackResourcesReq {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackResourcesResponse.ts", rename = "PackResourcesResponse")
+    ts(
+        export,
+        export_to = "packs/PackResourcesResponse.ts",
+        rename = "PackResourcesResponse"
+    )
 )]
 pub struct PackResourcesResponse {
     pub resources: Vec<PackQuestionResource>,
@@ -97,7 +113,11 @@ pub struct PackResourcesResponse {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackLeaseRequest.ts", rename = "PackLeaseRequest")
+    ts(
+        export,
+        export_to = "packs/PackLeaseRequest.ts",
+        rename = "PackLeaseRequest"
+    )
 )]
 #[serde(deny_unknown_fields)]
 pub struct LeaseReq {
@@ -111,7 +131,11 @@ pub struct LeaseReq {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackLeaseResponse.ts", rename = "PackLeaseResponse")
+    ts(
+        export,
+        export_to = "packs/PackLeaseResponse.ts",
+        rename = "PackLeaseResponse"
+    )
 )]
 pub struct PackLeaseResponse {
     pub lease_id: Uuid,
@@ -127,7 +151,11 @@ pub struct PackLeaseResponse {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackLeaseSummary.ts", rename = "PackLeaseSummary")
+    ts(
+        export,
+        export_to = "packs/PackLeaseSummary.ts",
+        rename = "PackLeaseSummary"
+    )
 )]
 pub struct PackLeaseSummary {
     pub lease_id: Uuid,
@@ -144,7 +172,11 @@ pub struct PackLeaseSummary {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "packs/PackLeaseListResponse.ts", rename = "PackLeaseListResponse")
+    ts(
+        export,
+        export_to = "packs/PackLeaseListResponse.ts",
+        rename = "PackLeaseListResponse"
+    )
 )]
 pub struct PackLeaseListResponse {
     pub leases: Vec<PackLeaseSummary>,
@@ -668,7 +700,11 @@ pub async fn pack_resources(
         ));
     }
     let mut seen_chapters = std::collections::HashSet::with_capacity(req.chapters.len());
-    if req.chapters.iter().any(|chapter| !seen_chapters.insert(*chapter)) {
+    if req
+        .chapters
+        .iter()
+        .any(|chapter| !seen_chapters.insert(*chapter))
+    {
         return Err(ApiError::unprocessable(
             "invalid_chapters",
             "chapter IDs must be unique",
@@ -681,7 +717,8 @@ pub async fn pack_resources(
             "pass 1-50 unique question version IDs per batch",
         ));
     }
-    let mut seen_questions = std::collections::HashSet::with_capacity(req.question_version_ids.len());
+    let mut seen_questions =
+        std::collections::HashSet::with_capacity(req.question_version_ids.len());
     if req
         .question_version_ids
         .iter()
@@ -734,30 +771,24 @@ pub async fn pack_resources(
         ));
     }
 
-    let answered = answered_tutor_question_ids(
-        &state.pool,
-        user.user_id,
-        &req.question_version_ids,
-    )
-    .await?;
+    let answered =
+        answered_tutor_question_ids(&state.pool, user.user_id, &req.question_version_ids).await?;
     let answered_ids: Vec<_> = answered.iter().copied().collect();
     let mut tutoring_cards = tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
     let mut resources = Vec::with_capacity(rows.len());
     for row in rows {
-        resources.push(
-            build_pack_resource(
-                row.id,
-                row.vignette,
-                row.lead_in,
-                row.difficulty,
-                row.options,
-                row.correct_index,
-                row.key_learning_point,
-                row.exam_tip,
-                row.source_ref,
-                tutoring_cards.remove(&row.id).unwrap_or_default(),
-            )?,
-        );
+        resources.push(build_pack_resource(
+            row.id,
+            row.vignette,
+            row.lead_in,
+            row.difficulty,
+            row.options,
+            row.correct_index,
+            row.key_learning_point,
+            row.exam_tip,
+            row.source_ref,
+            tutoring_cards.remove(&row.id).unwrap_or_default(),
+        )?);
     }
     Ok(Json(PackResourcesResponse { resources }))
 }

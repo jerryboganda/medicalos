@@ -394,9 +394,7 @@ async fn rubric_results(
                 assessment_status,
                 evidence: row.evidence,
                 score: row.score,
-                transcript_event_indexes: row
-                    .transcript_event_indexes
-                    .unwrap_or_else(|| json!([])),
+                transcript_event_indexes: row.transcript_event_indexes.unwrap_or_else(|| json!([])),
                 transcript_uncertain: row.transcript_uncertain.unwrap_or(false),
                 reviewed_at: row.created_at,
             })
@@ -473,10 +471,7 @@ pub async fn debrief(
         })
     })
     .transpose()?;
-    let consequential_use_status = match appeal
-        .as_ref()
-        .and_then(|appeal| appeal.decision)
-    {
+    let consequential_use_status = match appeal.as_ref().and_then(|appeal| appeal.decision) {
         Some(ScenarioAppealDecision::ReassessmentRequired) => {
             ScenarioConsequentialUseStatus::ReassessmentRequired
         }

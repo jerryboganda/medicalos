@@ -110,7 +110,11 @@ pub struct ScenarioTeamMember {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "scenario/ScenarioTeam.ts", rename = "ScenarioTeam")
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeam.ts",
+        rename = "ScenarioTeam"
+    )
 )]
 pub struct ScenarioTeam {
     run_id: Uuid,

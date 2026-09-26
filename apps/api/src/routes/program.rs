@@ -1753,11 +1753,7 @@ struct ScenarioRunView {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "scenario/ScenarioRun.ts",
-        rename = "ScenarioRun"
-    )
+    ts(export, export_to = "scenario/ScenarioRun.ts", rename = "ScenarioRun")
 )]
 pub struct ScenarioRun {
     run_id: Uuid,

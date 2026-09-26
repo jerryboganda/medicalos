@@ -24,7 +24,11 @@ const MAX_MEDIA_DURATION_MS: u64 = 86_400_000;
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "library/ArticleCitation.ts", rename = "ArticleCitation")
+    ts(
+        export,
+        export_to = "library/ArticleCitation.ts",
+        rename = "ArticleCitation"
+    )
 )]
 pub struct ArticleCitation {
     pub kind: String,
@@ -36,7 +40,11 @@ pub struct ArticleCitation {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "library/MediaCaptionCue.ts", rename = "MediaCaptionCue")
+    ts(
+        export,
+        export_to = "library/MediaCaptionCue.ts",
+        rename = "MediaCaptionCue"
+    )
 )]
 pub struct MediaCaptionCue {
     pub start_ms: u64,
@@ -48,7 +56,11 @@ pub struct MediaCaptionCue {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "library/MediaChapterMarker.ts", rename = "MediaChapterMarker")
+    ts(
+        export,
+        export_to = "library/MediaChapterMarker.ts",
+        rename = "MediaChapterMarker"
+    )
 )]
 pub struct MediaChapterMarker {
     pub at_ms: u64,
@@ -355,12 +367,17 @@ fn parse_article_date(value: Option<&str>) -> ApiResult<Option<chrono::NaiveDate
 fn library_scope(query: LibraryScopeQuery) -> ApiResult<LibraryScope> {
     let jurisdiction = normalize_jurisdiction(query.jurisdiction.as_deref())?;
     let as_of = match query.as_of.as_deref() {
-        Some(value) => chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(|_| {
-            ApiError::unprocessable("invalid_as_of_date", "as_of must use YYYY-MM-DD")
-        })?,
+        Some(value) => {
+            chrono::NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(|_| {
+                ApiError::unprocessable("invalid_as_of_date", "as_of must use YYYY-MM-DD")
+            })?
+        }
         None => chrono::Utc::now().date_naive(),
     };
-    Ok(LibraryScope { jurisdiction, as_of })
+    Ok(LibraryScope {
+        jurisdiction,
+        as_of,
+    })
 }
 
 fn valid_article_slug(slug: &str) -> bool {
@@ -425,7 +442,10 @@ fn clean_article_draft(
     let jurisdiction = normalize_jurisdiction(jurisdiction)?;
     let effective_from = parse_article_date(effective_from)?;
     let effective_to = parse_article_date(effective_to)?;
-    if effective_from.zip(effective_to).is_some_and(|(from, to)| from > to) {
+    if effective_from
+        .zip(effective_to)
+        .is_some_and(|(from, to)| from > to)
+    {
         return Err(ApiError::unprocessable(
             "invalid_effective_range",
             "effective_from must be on or before effective_to",
@@ -441,7 +461,10 @@ fn clean_article_draft(
         citation.kind = citation.kind.trim().to_ascii_lowercase();
         citation.anchor = clean_article_text(&citation.anchor, "citation anchor", 160)?;
         citation.target = clean_article_text(&citation.target, "citation target", 512)?;
-        if !matches!(citation.kind.as_str(), "source" | "page" | "figure" | "timestamp") {
+        if !matches!(
+            citation.kind.as_str(),
+            "source" | "page" | "figure" | "timestamp"
+        ) {
             return Err(ApiError::unprocessable(
                 "invalid_citation_kind",
                 "citation kind must be source, page, figure, or timestamp",
@@ -453,7 +476,10 @@ fn clean_article_draft(
                 "timestamp targets must use MM:SS or HH:MM:SS",
             ));
         }
-        if !body.to_lowercase().contains(&citation.anchor.to_lowercase()) {
+        if !body
+            .to_lowercase()
+            .contains(&citation.anchor.to_lowercase())
+        {
             return Err(ApiError::unprocessable(
                 "citation_anchor_not_found",
                 "each citation anchor must appear in the article body",
@@ -642,12 +668,10 @@ pub async fn create_article_version(
 ) -> ApiResult<Json<AdminArticleVersion>> {
     require_article_admin(&state, &headers)?;
     let mut tx = state.pool.begin().await?;
-    let exists = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM articles WHERE id = $1 FOR UPDATE",
-    )
-    .bind(article_id)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let exists = sqlx::query_scalar::<_, Uuid>("SELECT id FROM articles WHERE id = $1 FOR UPDATE")
+        .bind(article_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     if exists.is_none() {
         return Err(ApiError::not_found("article_not_found"));
     }
@@ -837,12 +861,11 @@ pub async fn publish_article_draft(
             "only a draft article version can be published",
         ));
     }
-    let citation_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM article_citations WHERE version_id = $1",
-    )
-    .bind(version_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let citation_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM article_citations WHERE version_id = $1")
+            .bind(version_id)
+            .fetch_one(&mut *tx)
+            .await?;
     sqlx::query("UPDATE article_versions SET status = 'published' WHERE id = $1")
         .bind(version_id)
         .execute(&mut *tx)
@@ -1063,18 +1086,16 @@ pub async fn search(
     .await?;
     let private_documents: Vec<PrivateDocumentSearchResult> = private_documents
         .into_iter()
-        .map(|document| {
-            PrivateDocumentSearchResult {
-                document_id: document.document_id,
-                content_type: "private_document".into(),
-                title: document.title,
-                media_type: document.media_type,
-                rights_ref: document.rights_ref,
-                sha256: document.sha256,
-                created_at: document.created_at.to_rfc3339(),
-                available: true,
-                excerpt: document.content.chars().take(200).collect(),
-            }
+        .map(|document| PrivateDocumentSearchResult {
+            document_id: document.document_id,
+            content_type: "private_document".into(),
+            title: document.title,
+            media_type: document.media_type,
+            rights_ref: document.rights_ref,
+            sha256: document.sha256,
+            created_at: document.created_at.to_rfc3339(),
+            available: true,
+            excerpt: document.content.chars().take(200).collect(),
         })
         .collect();
     Ok(Json(LibrarySearchResponse {
@@ -1449,10 +1470,8 @@ pub async fn media_list(state: &AppState, article_id: Uuid) -> ApiResult<Vec<Art
                 url: row.url,
                 kind: row.kind,
                 duration_seconds: row.duration_seconds,
-                captions: serde_json::from_value(row.captions)
-                    .map_err(|_| ApiError::internal())?,
-                chapters: serde_json::from_value(row.chapters)
-                    .map_err(|_| ApiError::internal())?,
+                captions: serde_json::from_value(row.captions).map_err(|_| ApiError::internal())?,
+                chapters: serde_json::from_value(row.chapters).map_err(|_| ApiError::internal())?,
                 rights_ref: row.rights_ref,
             })
         })
@@ -1507,7 +1526,10 @@ fn validate_media_metadata(req: &mut MediaReq) -> ApiResult<()> {
                 || chapter.at_ms >= MAX_MEDIA_DURATION_MS
                 || duration_ms.is_some_and(|duration| chapter.at_ms >= duration)
         })
-        || req.chapters.windows(2).any(|pair| pair[0].at_ms == pair[1].at_ms)
+        || req
+            .chapters
+            .windows(2)
+            .any(|pair| pair[0].at_ms == pair[1].at_ms)
     {
         return Err(ApiError::unprocessable(
             "invalid_media_chapters",
@@ -1522,12 +1544,12 @@ pub async fn attach_media(
     _user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(article_id): Path<Uuid>,
-    Json(req): Json<MediaReq>,
+    Json(mut req): Json<MediaReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
-    let url = req.url.trim();
-    let parsed_url = url::Url::parse(url).ok();
+    let url = req.url.trim().to_owned();
+    let parsed_url = url::Url::parse(&url).ok();
     if parsed_url.as_ref().is_none_or(|parsed| {
         parsed.scheme() != "https"
             || parsed.host_str().is_none()

@@ -671,7 +671,10 @@ async fn account_export_and_signed_pack_manifest() {
     );
     let public_key_bytes = hex_bytes(manifest["verification_key"].as_str().unwrap());
     let public_key = VerifyingKey::from_bytes(
-        public_key_bytes.as_slice().try_into().expect("32-byte public key"),
+        public_key_bytes
+            .as_slice()
+            .try_into()
+            .expect("32-byte public key"),
     )
     .expect("verification key");
     let signature_bytes = hex_bytes(sig);
@@ -717,13 +720,12 @@ async fn account_export_and_signed_pack_manifest() {
     assert_eq!(resource["question_version_id"], version_id.to_string());
     assert_eq!(resource["checksum"], item["checksum"]);
     assert_eq!(resource["tutoring_cards"].as_array().unwrap().len(), 5);
-    let repaired_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1",
-    )
-    .bind(version_id)
-    .fetch_one(&state.pool)
-    .await
-    .expect("repaired tutoring cache");
+    let repaired_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1")
+            .bind(version_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("repaired tutoring cache");
     assert_eq!(repaired_count, 5);
     let mut checksum_content = resource.clone();
     let checksum = checksum_content
@@ -790,9 +792,7 @@ fn hex_bytes(value: &str) -> Vec<u8> {
     value
         .as_bytes()
         .chunks_exact(2)
-        .map(|pair| {
-            u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).expect("hex byte")
-        })
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).expect("hex byte"))
         .collect()
 }
 
@@ -4741,17 +4741,19 @@ async fn admin_article_authoring_publishes_immutable_audited_versions() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_timestamp}");
-    assert_eq!(invalid_timestamp["error"]["code"], "invalid_citation_timestamp");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_timestamp}"
+    );
+    assert_eq!(
+        invalid_timestamp["error"]["code"],
+        "invalid_citation_timestamp"
+    );
 
     let (status, created) = call(
         app.clone(),
-        admin_req(
-            "POST",
-            "/v1/admin/articles",
-            Some(&token),
-            Some(create),
-        ),
+        admin_req("POST", "/v1/admin/articles", Some(&token), Some(create)),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
@@ -4759,9 +4761,7 @@ async fn admin_article_authoring_publishes_immutable_audited_versions() {
     assert_eq!(created["status"], "draft");
     let article_id: Uuid = created["article_id"].as_str().unwrap().parse().unwrap();
     let first_version_id: Uuid = created["version_id"].as_str().unwrap().parse().unwrap();
-    let first_version_path = format!(
-        "/v1/admin/articles/{article_id}/versions/{first_version_id}"
-    );
+    let first_version_path = format!("/v1/admin/articles/{article_id}/versions/{first_version_id}");
 
     let (status, hidden_draft) = call(
         app.clone(),
@@ -4861,9 +4861,8 @@ async fn admin_article_authoring_publishes_immutable_audited_versions() {
     assert_eq!(version2["version"], 2);
     assert_eq!(version2["status"], "draft");
     let second_version_id: Uuid = version2["version_id"].as_str().unwrap().parse().unwrap();
-    let second_version_path = format!(
-        "/v1/admin/articles/{article_id}/versions/{second_version_id}"
-    );
+    let second_version_path =
+        format!("/v1/admin/articles/{article_id}/versions/{second_version_id}");
 
     let (status, still_v1) = call(
         app.clone(),
@@ -4996,7 +4995,11 @@ async fn library_region_resolution_prefers_country_then_global_and_respects_date
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{pakistan_draft}");
-    let pakistan_version_id: Uuid = pakistan_draft["version_id"].as_str().unwrap().parse().unwrap();
+    let pakistan_version_id: Uuid = pakistan_draft["version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let pakistan_path = format!("/v1/admin/articles/{article_id}/versions/{pakistan_version_id}");
     let (status, _) = call(
         app.clone(),
@@ -5041,34 +5044,55 @@ async fn library_region_resolution_prefers_country_then_global_and_respects_date
     assert_eq!(default_scope["version"], 1);
     assert_eq!(default_scope["jurisdiction"], Value::Null);
 
-    let (status, exact_country) =
-        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-06-01")).await;
+    let (status, exact_country) = call(
+        app.clone(),
+        request_article("?jurisdiction=PK&as_of=2026-06-01"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{exact_country}");
     assert_eq!(exact_country["version"], 2);
     assert_eq!(exact_country["jurisdiction"], "PK");
 
-    let (status, fallback) =
-        call(app.clone(), request_article("?jurisdiction=IN&as_of=2026-06-01")).await;
+    let (status, fallback) = call(
+        app.clone(),
+        request_article("?jurisdiction=IN&as_of=2026-06-01"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{fallback}");
     assert_eq!(fallback["version"], 1);
     assert_eq!(fallback["jurisdiction"], Value::Null);
 
-    let (status, before_country_window) =
-        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-01-31")).await;
+    let (status, before_country_window) = call(
+        app.clone(),
+        request_article("?jurisdiction=PK&as_of=2026-01-31"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{before_country_window}");
     assert_eq!(before_country_window["version"], 1);
-    let (status, first_country_day) =
-        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-02-01")).await;
+    let (status, first_country_day) = call(
+        app.clone(),
+        request_article("?jurisdiction=PK&as_of=2026-02-01"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{first_country_day}");
     assert_eq!(first_country_day["version"], 2);
-    let (status, last_country_day) =
-        call(app.clone(), request_article("?jurisdiction=PK&as_of=2026-10-31")).await;
+    let (status, last_country_day) = call(
+        app.clone(),
+        request_article("?jurisdiction=PK&as_of=2026-10-31"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{last_country_day}");
     assert_eq!(last_country_day["version"], 2);
-    let (status, after_all_windows) =
-        call(app.clone(), request_article("?jurisdiction=PK&as_of=2027-01-01")).await;
+    let (status, after_all_windows) = call(
+        app.clone(),
+        request_article("?jurisdiction=PK&as_of=2027-01-01"),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{after_all_windows}");
-    assert_eq!(after_all_windows["error"]["code"], "article_not_available_for_region");
+    assert_eq!(
+        after_all_windows["error"]["code"],
+        "article_not_available_for_region"
+    );
 
     let (status, invalid_scope_date) = call(
         app.clone(),
@@ -5080,7 +5104,11 @@ async fn library_region_resolution_prefers_country_then_global_and_respects_date
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_scope_date}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_scope_date}"
+    );
     assert_eq!(invalid_scope_date["error"]["code"], "invalid_as_of_date");
 
     let (status, exact_search) = call(
@@ -5108,7 +5136,10 @@ async fn library_region_resolution_prefers_country_then_global_and_respects_date
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{no_wrong_country_match}");
-    assert!(no_wrong_country_match["results"].as_array().unwrap().is_empty());
+    assert!(no_wrong_country_match["results"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let (status, us_only) = call(
         app.clone(),
@@ -15964,7 +15995,11 @@ async fn library_media_and_image_cases_are_rights_checked() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_media_url}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_media_url}"
+    );
     assert_eq!(invalid_media_url["error"]["code"], "invalid_url");
 
     let (status, invalid_captions) = call(
@@ -15984,7 +16019,11 @@ async fn library_media_and_image_cases_are_rights_checked() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_captions}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_captions}"
+    );
     assert_eq!(invalid_captions["error"]["code"], "invalid_media_captions");
 
     let (status, duplicate_chapters) = call(
@@ -16007,8 +16046,15 @@ async fn library_media_and_image_cases_are_rights_checked() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{duplicate_chapters}");
-    assert_eq!(duplicate_chapters["error"]["code"], "invalid_media_chapters");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{duplicate_chapters}"
+    );
+    assert_eq!(
+        duplicate_chapters["error"]["code"],
+        "invalid_media_chapters"
+    );
 
     let (status, media) = call(
         app.clone(),
@@ -17443,7 +17489,10 @@ async fn analytics_stream_taxonomy_and_pseudonymity_enforced() {
         "open_incidents",
         "coach_turns_last_30_days",
     ] {
-        assert!(dash[field].as_i64().is_some_and(|count| count >= 0), "{field}: {dash}");
+        assert!(
+            dash[field].as_i64().is_some_and(|count| count >= 0),
+            "{field}: {dash}"
+        );
     }
 
     let (status, unauthenticated_dashboard) = call(
@@ -17451,7 +17500,11 @@ async fn analytics_stream_taxonomy_and_pseudonymity_enforced() {
         request("GET", "/v1/admin/dashboard", None, None),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "{unauthenticated_dashboard}");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "{unauthenticated_dashboard}"
+    );
 
     let (status, denied_dashboard) = call(
         app.clone(),
@@ -20176,7 +20229,10 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     .await;
     assert_eq!(status, StatusCode::OK, "{completed_run}");
     assert_eq!(completed_run["finished"], true);
-    assert!(completed_run["available_actions"].as_array().unwrap().is_empty());
+    assert!(completed_run["available_actions"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(completed_run["finished_at"].is_string());
     assert_eq!(completed_run["transcript"].as_array().unwrap().len(), 2);
     assert_eq!(completed_run["timeline"].as_array().unwrap().len(), 2);
@@ -20474,7 +20530,10 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
             "uncertainty_reason": null
         })
     );
-    assert!(debrief["transcript_corrections"].as_array().unwrap().is_empty());
+    assert!(debrief["transcript_corrections"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(debrief["appeal"].is_null());
     let rubric = debrief["rubric"].as_array().unwrap();
     assert_eq!(rubric.len(), 2);

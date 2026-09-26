@@ -2681,12 +2681,9 @@ pub async fn run_recovery_drill(
     .fetch_all(&state.pool)
     .await?;
     let question_ids: Vec<_> = rows.iter().map(|row| row.id).collect();
-    let answered = crate::routes::packs::answered_tutor_question_ids(
-        &state.pool,
-        user.user_id,
-        &question_ids,
-    )
-    .await?;
+    let answered =
+        crate::routes::packs::answered_tutor_question_ids(&state.pool, user.user_id, &question_ids)
+            .await?;
     let answered_ids: Vec<_> = answered.iter().copied().collect();
     let mut tutoring_cards =
         crate::routes::packs::tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
