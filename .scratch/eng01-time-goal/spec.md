@@ -1,6 +1,6 @@
 # ENG-01 — Declared-time daily goal
 
-Status: in-progress
+Status: CI-verified
 Requirement: ENG-01
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §§6.1, 17.2
 
@@ -58,3 +58,8 @@ The server reports the current mode, target, progress, and met state through the
 ## Further Notes
 
 This implements the “questions or minutes” choice in §17.2 and makes the existing daily availability control persistent. It does not by itself complete ENG-01; QOTD reminder scheduling and remote delivery remain separate work.
+
+## Implementation Record
+
+- 2026-09-26: API integration, migration rollback/replay, and Today browser coverage passed in GitHub Actions run [36215825107](https://github.com/jerryboganda/medicalos/actions/runs/36215825107) on commit `05601c5a8e4d8df4c8a28db263151d02b61828ff`. The response reports `met` against the current mode and target while preserving already-earned streak credit after settings change.
+- No deployment or production behavior change is implied by CI acceptance.

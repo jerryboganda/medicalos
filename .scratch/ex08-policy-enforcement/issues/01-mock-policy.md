@@ -1,8 +1,8 @@
 # EX-08 — Configurable mock grace and integrity policy
 
-Status: in-progress
+Status: ready-for-human
 Requirement IDs: EX-08
-Triage label: in-progress
+Triage label: ready-for-human
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §11.3; `.scratch/ex08-policy-enforcement/spec.md`
 
 ## Acceptance
@@ -45,3 +45,7 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §11.3; `.scratch/ex08-policy-en
 
 - 2026-09-26: Scope derived from §11.3's proposed practice grace and per-test
   log/warn/auto-submit policy. Competition's separate scoring path is excluded.
+- 2026-09-26: API integration, migration rollback/replay, and browser coverage
+  passed in GitHub Actions run [36215825107](https://github.com/jerryboganda/medicalos/actions/runs/36215825107)
+  on `05601c5a8e4d8df4c8a28db263151d02b61828ff`. Native attestation and
+  competition policy remain outside this issue.

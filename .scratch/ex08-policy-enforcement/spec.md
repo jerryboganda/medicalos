@@ -1,6 +1,6 @@
 # EX-08 Configurable mock grace and integrity policy
 
-Status: in-progress
+Status: CI-verified
 Requirement: EX-08
 
 ## Outcome
@@ -63,3 +63,8 @@ included in percentile ranking.
   learner left, detect screenshots or recording, or establish misconduct.
 - Native attestation, offline high-stakes assessment, institutional policy
   approval, and human review remain separate acceptance gates.
+
+## Implementation Record
+
+- 2026-09-26: API integration, migration rollback/replay, and browser warning/receipt coverage passed in GitHub Actions run [36215825107](https://github.com/jerryboganda/medicalos/actions/runs/36215825107) on commit `05601c5a8e4d8df4c8a28db263151d02b61828ff` (111 API integration tests and 55 Playwright E2E tests in the full suite).
+- Browser signals remain best-effort; this does not verify native device-clock resistance or competition-specific policy.
