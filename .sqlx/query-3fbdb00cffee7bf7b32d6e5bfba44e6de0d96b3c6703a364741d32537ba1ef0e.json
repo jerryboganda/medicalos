@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.vignette, qv.options\n           FROM question_versions qv\n           JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id\n           WHERE qv.id = $1 AND qv.status = 'published'\n             AND chapter.exam_id = $2 AND chapter.kind = 'chapter'\n             AND NOT EXISTS (\n                 SELECT 1 FROM reserved_questions rq\n                 WHERE rq.question_version_id = qv.id)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "options",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3fbdb00cffee7bf7b32d6e5bfba44e6de0d96b3c6703a364741d32537ba1ef0e"
+}

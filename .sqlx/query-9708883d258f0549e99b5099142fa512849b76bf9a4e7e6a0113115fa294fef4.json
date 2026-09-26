@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, deadline, preset, created_at,\n                per_question_seconds AS \"per_question_seconds?\",\n                late_sync_grace_seconds\n         FROM practice_sessions WHERE id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "deadline",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "preset",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "per_question_seconds?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "late_sync_grace_seconds",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "9708883d258f0549e99b5099142fa512849b76bf9a4e7e6a0113115fa294fef4"
+}

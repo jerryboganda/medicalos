@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE attempts\n                       SET chosen_index = $3, correct = $4,\n                           answer_changes = answer_changes + 1,\n                           assisted = assisted OR $5,\n                           offline_recorded_at = COALESCE(offline_recorded_at, $6)\n                       WHERE id = $2 AND session_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int2",
+        "Bool",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ddf151b5b54a52856cf7dca0f6934ed5d4917a4c8250c3c485e82692c5f53322"
+}

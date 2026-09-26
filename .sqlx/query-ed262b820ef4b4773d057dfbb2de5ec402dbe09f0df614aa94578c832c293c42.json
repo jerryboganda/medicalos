@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH eligible_questions AS (\n               SELECT qv.id, qv.chapter_id\n               FROM question_versions qv\n               WHERE qv.status = 'published'\n                 AND NOT EXISTS (\n                     SELECT 1 FROM question_reports r\n                     WHERE r.question_version_id = qv.id AND r.status = 'quarantined'\n                 )\n                 AND NOT EXISTS (\n                     SELECT 1 FROM reserved_questions rq\n                     WHERE rq.question_version_id = qv.id\n                 )\n                 AND EXISTS (\n                     SELECT 1 FROM content_rights rights\n                     WHERE rights.ref_code = UPPER(BTRIM(qv.rights_ref))\n                       AND rights.revoked_at IS NULL\n                       AND rights.valid_from <= CURRENT_DATE\n                       AND (rights.valid_to IS NULL OR rights.valid_to >= CURRENT_DATE)\n                       AND rights.permitted_uses @> '[\"display\"]'::jsonb\n                       AND (rights.audiences = '[]'::jsonb OR EXISTS (\n                           SELECT 1\n                           FROM jsonb_array_elements_text(rights.audiences) AS audiences(audience)\n                           WHERE LOWER(BTRIM(audiences.audience)) IN ('learners', 'all')\n                       ))\n                       -- No seat-allocation ledger exists, so capped grants fail closed.\n                       AND rights.seat_limit IS NULL\n                       AND rights.asset_refs @> jsonb_build_array(qv.source_ref)\n                       AND NOT EXISTS (\n                           SELECT 1\n                           FROM unnest(qv.source_refs || qv.media_refs) AS refs(asset_ref)\n                           WHERE NOT (rights.asset_refs @> jsonb_build_array(refs.asset_ref))\n                       )\n                 )\n           )\n           SELECT t.id, t.task_key, t.kind, t.title, t.chapter_id, t.source_session_id,\n                  t.question_count, t.estimated_minutes, t.protected,\n                  CASE t.kind\n                      WHEN 'practice' THEN (\n                          SELECT COUNT(*)\n                          FROM eligible_questions qv\n                          WHERE qv.chapter_id = t.chapter_id\n                      )\n                      WHEN 'revision' THEN (\n                          SELECT COUNT(DISTINCT qv.id)\n                          FROM eligible_questions qv\n                          WHERE t.source_session_id IS NOT NULL\n                            AND EXISTS (\n                                SELECT 1 FROM practice_sessions source\n                                WHERE source.id = t.source_session_id\n                                  AND source.user_id = $1 AND source.status = 'submitted'\n                            )\n                            AND (\n                                EXISTS (\n                                    SELECT 1 FROM attempts a\n                                    WHERE a.session_id = t.source_session_id\n                                      AND a.question_version_id = qv.id\n                                      AND (a.correct = FALSE OR a.chosen_index IS NULL)\n                                )\n                                OR EXISTS (\n                                    SELECT 1 FROM session_items si\n                                    WHERE si.session_id = t.source_session_id\n                                      AND si.question_version_id = qv.id\n                                      AND NOT EXISTS (\n                                          SELECT 1 FROM attempts a\n                                          WHERE a.session_id = si.session_id\n                                            AND a.item_index = si.item_index\n                                      )\n                                )\n                            )\n                      )\n                      ELSE 0\n                  END AS \"eligible_question_count!\",\n                  COALESCE(evidence.independent_count, 0) AS \"independent_count!\",\n                  COALESCE(evidence.correct_count, 0) AS \"correct_count!\"\n           FROM plan_tasks t\n           LEFT JOIN LATERAL (\n               SELECT COUNT(*) AS independent_count,\n                      COUNT(*) FILTER (WHERE a.correct = TRUE) AS correct_count\n               FROM attempts a\n               JOIN question_versions qv ON qv.id = a.question_version_id\n               WHERE a.user_id = $1 AND qv.chapter_id = t.chapter_id\n                 AND a.assisted = FALSE AND a.correct IS NOT NULL\n           ) evidence ON TRUE\n           WHERE t.plan_id = $2 AND t.status = 'pending'\n           ORDER BY t.created_at, t.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_key",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "chapter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "question_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "estimated_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "protected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "eligible_question_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "independent_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "correct_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ed262b820ef4b4773d057dfbb2de5ec402dbe09f0df614aa94578c832c293c42"
+}

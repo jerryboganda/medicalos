@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO question_versions\n            (id, question_id, version, status, chapter_id, difficulty, vignette,\n             lead_in, options, correct_index, key_learning_point, exam_tip,\n              hint, high_yield, source_ref, created_by, tags, source_refs, media_refs, rights_ref)\n            SELECT $1, q.id, $3, 'draft', qv.chapter_id, $4, $5, $6, $7, $8,\n                   $9, $10, $11, $12, $13, $14,\n                    COALESCE($15, qv.tags), COALESCE($16, qv.source_refs), COALESCE($17, qv.media_refs),\n                    COALESCE($18, qv.rights_ref)\n            FROM questions q\n            JOIN question_versions qv ON qv.question_id = q.id\n            WHERE q.id = $2\n            ORDER BY qv.version DESC\n            LIMIT 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int2",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "10c6c82bfa3195424eed12c48d7cf8fff5c8bd109c30e8b99bb0c4327f94fa74"
+}

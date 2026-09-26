@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO image_case_concepts\n                (case_id, concept_id, concept_version, created_by)\n             VALUES ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4e5495eab1b935c75537a0cc65d6207c205cde0e39c5d29eff018c5a9844b6b"
+}

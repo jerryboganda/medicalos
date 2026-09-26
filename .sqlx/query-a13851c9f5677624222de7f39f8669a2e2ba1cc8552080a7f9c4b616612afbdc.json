@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options,\n                  qv.correct_index, qv.key_learning_point, qv.exam_tip, qv.source_ref\n           FROM question_versions qv\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE qv.id = ANY($1) AND qv.chapter_id = ANY($2)\n             AND c.exam_id = $3 AND qv.status = 'published'\n           ORDER BY qv.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "exam_tip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_ref",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a13851c9f5677624222de7f39f8669a2e2ba1cc8552080a7f9c4b616612afbdc"
+}

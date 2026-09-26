@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.correct_index, jsonb_array_length(qv.options) AS \"n!\"\n           FROM question_versions qv\n           JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id\n           WHERE qv.id = $1 AND qv.status = 'published'\n             AND chapter.exam_id = $2 AND chapter.kind = 'chapter'\n             AND NOT EXISTS (\n                 SELECT 1 FROM reserved_questions rq\n                 WHERE rq.question_version_id = qv.id)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "9a59a4d7c66d79c1bb769e82f1b5bf0e9145ad7d0a265678ee3cde34f627f7da"
+}

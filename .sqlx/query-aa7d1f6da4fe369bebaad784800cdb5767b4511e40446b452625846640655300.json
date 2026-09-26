@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.question_id, qv.id AS version_id, qv.vignette, qv.status,\n                  qv.difficulty, qv.source_ref, qv.rights_ref, qv.tags, qv.source_refs,\n                  qv.media_refs, c.name AS chapter_name\n           FROM question_versions qv\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE qv.status = COALESCE($2, qv.status)\n             AND qv.vignette ILIKE $1\n             AND ($3::UUID IS NULL OR qv.chapter_id = $3)\n           ORDER BY qv.question_id, qv.version\n           LIMIT 50",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "rights_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_refs",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "media_refs",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "chapter_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "aa7d1f6da4fe369bebaad784800cdb5767b4511e40446b452625846640655300"
+}

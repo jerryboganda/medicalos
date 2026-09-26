@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, blueprint, time_limit_seconds, late_sync_grace_seconds,\n                integrity_policy, away_timeout_seconds FROM mocks WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "blueprint",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "time_limit_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "late_sync_grace_seconds",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "integrity_policy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "away_timeout_seconds",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9f79fbd6763bb6fa52058e386cac4f72cf0ffca507bc3ce21751ce06fddece2f"
+}

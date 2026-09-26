@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE engagement_settings SET\n               daily_goal_questions = COALESCE($2, daily_goal_questions),\n               daily_goal_mode = COALESCE($3, daily_goal_mode),\n               daily_available_minutes = COALESCE($4, daily_available_minutes),\n               daily_goal_enabled = COALESCE($5, daily_goal_enabled),\n               streak_enabled = COALESCE($6, streak_enabled),\n               qotd_enabled = COALESCE($7, qotd_enabled),\n               qotd_exam_id = CASE WHEN $8 THEN $9 ELSE qotd_exam_id END,\n               updated_at = now()\n           WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Text",
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d13cdaff5946bffdbe35c421b5de60eefa653330c7b745d6ee64de4b2adaeba3"
+}

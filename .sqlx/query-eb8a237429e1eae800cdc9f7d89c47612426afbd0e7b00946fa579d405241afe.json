@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.case_id, c.title AS case_title, a.image_index,\n                  a.x_percent, a.y_percent, a.body, a.created_at,\n                  r.decision AS \"decision?\", r.note AS \"note?\",\n                  r.created_at AS \"reviewed_at?\"\n           FROM image_case_annotations a\n           JOIN image_cases c ON c.id = a.case_id\n           LEFT JOIN image_case_annotation_reviews r ON r.annotation_id = a.id\n           WHERE r.annotation_id IS NULL\n           ORDER BY a.created_at, a.id LIMIT 200",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "case_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "case_title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "image_index",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "x_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "y_percent",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "decision?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "note?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "reviewed_at?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "eb8a237429e1eae800cdc9f7d89c47612426afbd0e7b00946fa579d405241afe"
+}

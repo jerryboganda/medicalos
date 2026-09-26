@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qotd_answers (user_id, day, question_version_id, chosen_index, elapsed_ms)\n           VALUES ($1, CURRENT_DATE, $2, $3, $4)\n           ON CONFLICT (user_id, day) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "54b238b143781ca05d91fc8d8e0e32b6a5114cd8afa282579fc88aca4ff1c2b6"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT question_version_id FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3a6eda3330931036119c708dd580f4d07657effa86a9d5a10e5aa51ea87a3a40"
+}

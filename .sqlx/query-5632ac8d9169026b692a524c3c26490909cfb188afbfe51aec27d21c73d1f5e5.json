@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT questions_answered, streak_count FROM engagement_days\n           WHERE user_id = $1 AND day = CURRENT_DATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "questions_answered",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "streak_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5632ac8d9169026b692a524c3c26490909cfb188afbfe51aec27d21c73d1f5e5"
+}
