@@ -160,7 +160,9 @@ test('editor creates, revises, publishes, and keeps published versions immutable
 
 	await page.getByTestId('article-publish').click();
 	await expect(page.getByText('source-linked-guideline · version 1')).toBeVisible();
-	await expect(page.getByText('published', { exact: true })).toBeVisible();
+	await expect(
+		page.getByTestId('admin-article-source-linked-guideline-v1').getByText('published', { exact: true })
+	).toBeVisible();
 	await expect(page.getByTestId('article-published-body')).toContainText('version one');
 	await expect(page.getByTestId('article-publish')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'New revision' })).toBeVisible();
@@ -171,7 +173,7 @@ test('editor creates, revises, publishes, and keeps published versions immutable
 	await expect(page.getByTestId('article-body')).toHaveValue(
 		'Recommendation: the saved draft is version one.'
 	);
-	await expect(page.getByTestId('article-citation')).toContainText('page 12');
+	await expect(page.getByLabel('Target')).toHaveValue('page 12');
 
 	for (const width of [320, 375, 414, 768, 1280]) {
 		await page.setViewportSize({ width, height: 900 });
@@ -275,7 +277,7 @@ test('learner searches by country/date, reads global fallback as text, and gets 
 	await page.getByTestId('library-reader-scope-guideline').click();
 
 	await expect(page.getByTestId('library-article')).toBeVisible();
-	await expect(page.getByText('Global guidance', { exact: true })).toBeVisible();
+	await expect(page.getByTestId('library-article').locator('.scope-result')).toContainText('Global guidance');
 	await expect(page.getByText(/Global guidance is shown/)).toBeVisible();
 	await expect(page.getByTestId('article-body')).toContainText('<script>window.studyContentRan = true</script>');
 	await expect(page.locator('.article-body script')).toHaveCount(0);

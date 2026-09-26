@@ -74,6 +74,7 @@ function signedManifest() {
     items,
     manifest_version: 4,
     canonical_format: 'medical-os-pack-manifest-v4',
+    item_checksum_algorithm: 'sha256(medical-os-resource-canonical-v1)',
     algorithm: 'ed25519',
     key_id: keyId,
     verification_key: publicKeyHex,
