@@ -6492,7 +6492,13 @@ async fn pregen_tutoring_generated_and_cached() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .map(|item| {
+            item["question_version_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
         .collect();
     let (status, before_answer_resources) = pack_resources(
         app.clone(),
@@ -6736,7 +6742,13 @@ async fn pregen_tutoring_generated_and_cached() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .map(|item| {
+            item["question_version_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
         .collect();
     let (status, timed_resources) = pack_resources(
         app.clone(),
