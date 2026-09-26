@@ -657,9 +657,14 @@ pub enum ImageFindingsReq {
 }
 
 #[derive(Deserialize, serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "image/ImageFinding.ts", rename = "ImageFinding")
+)]
 pub struct ImageFinding {
-    section: String,
-    text: String,
+    pub section: String,
+    pub text: String,
 }
 
 #[derive(Deserialize)]
@@ -677,7 +682,12 @@ pub struct SetImageCaseConceptsReq {
     pub concept_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize, serde::Serialize)]
+#[derive(Clone, Deserialize, serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "image/ImageRef.ts", rename = "ImageRef")
+)]
 pub struct ImageRef {
     pub url: String,
     pub rights_ref: String,
@@ -870,6 +880,221 @@ pub struct ImageConceptLink {
     pub definition: String,
 }
 
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "image/ImageCaseKind.ts", rename = "ImageCaseKind")
+)]
+pub enum ImageCaseKind {
+    Still,
+    Stack,
+}
+
+impl TryFrom<String> for ImageCaseKind {
+    type Error = ApiError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "still" => Ok(Self::Still),
+            "stack" => Ok(Self::Stack),
+            _ => Err(ApiError::internal()),
+        }
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseAnnotation.ts",
+        rename = "ImageCaseAnnotation"
+    )
+)]
+pub struct ImageCaseAnnotation {
+    pub annotation_id: Uuid,
+    pub image_index: i32,
+    pub x_percent: f64,
+    pub y_percent: f64,
+    pub body: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseSummary.ts",
+        rename = "ImageCaseSummary"
+    )
+)]
+pub struct ImageCaseSummary {
+    pub case_id: Uuid,
+    pub title: String,
+    pub kind: ImageCaseKind,
+    pub images: Vec<ImageRef>,
+    pub modality: Option<String>,
+    pub concepts: Vec<ImageConceptLink>,
+    pub annotations: Vec<ImageCaseAnnotation>,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseDetail.ts",
+        rename = "ImageCaseDetail"
+    )
+)]
+pub struct ImageCaseDetail {
+    #[serde(flatten)]
+    pub summary: ImageCaseSummary,
+    pub findings: Vec<ImageFinding>,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseListResponse.ts",
+        rename = "ImageCaseListResponse"
+    )
+)]
+pub struct ImageCaseListResponse {
+    pub cases: Vec<ImageCaseSummary>,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseConceptsResponse.ts",
+        rename = "ImageCaseConceptsResponse"
+    )
+)]
+pub struct ImageCaseConceptsResponse {
+    pub case_id: Uuid,
+    pub concepts: Vec<ImageConceptLink>,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/PendingImageAnnotationStatus.ts",
+        rename = "PendingImageAnnotationStatus"
+    )
+)]
+pub enum PendingImageAnnotationStatus {
+    Pending,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageAnnotationDecision.ts",
+        rename = "ImageAnnotationDecision"
+    )
+)]
+pub enum ImageAnnotationDecision {
+    Approved,
+    Rejected,
+}
+
+impl ImageAnnotationDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/AdminImageAnnotation.ts",
+        rename = "AdminImageAnnotation"
+    )
+)]
+pub struct AdminImageAnnotation {
+    pub annotation_id: Uuid,
+    pub case_id: Uuid,
+    pub case_title: String,
+    pub image_index: i32,
+    pub x_percent: f64,
+    pub y_percent: f64,
+    pub body: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub review_status: PendingImageAnnotationStatus,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/AdminImageAnnotationListResponse.ts",
+        rename = "AdminImageAnnotationListResponse"
+    )
+)]
+pub struct AdminImageAnnotationListResponse {
+    pub annotations: Vec<AdminImageAnnotation>,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageAnnotationCreatedResponse.ts",
+        rename = "ImageAnnotationCreatedResponse"
+    )
+)]
+pub struct ImageAnnotationCreatedResponse {
+    pub annotation_id: Uuid,
+    pub review_status: PendingImageAnnotationStatus,
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageAnnotationReviewResponse.ts",
+        rename = "ImageAnnotationReviewResponse"
+    )
+)]
+pub struct ImageAnnotationReviewResponse {
+    pub annotation_id: Uuid,
+    pub decision: ImageAnnotationDecision,
+    pub review_status: ImageAnnotationDecision,
+}
+
 #[derive(sqlx::FromRow)]
 struct ImageCaseConceptRow {
     case_id: Uuid,
@@ -931,10 +1156,22 @@ struct ApprovedImageAnnotation {
     body: String,
 }
 
+impl From<ApprovedImageAnnotation> for ImageCaseAnnotation {
+    fn from(annotation: ApprovedImageAnnotation) -> Self {
+        Self {
+            annotation_id: annotation.id,
+            image_index: annotation.image_index,
+            x_percent: annotation.x_percent,
+            y_percent: annotation.y_percent,
+            body: annotation.body,
+        }
+    }
+}
+
 pub async fn list_image_cases(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ImageCaseListResponse>> {
     let mut tx = state.pool.begin().await?;
     // Hold shared locks until this response is fully read so a concurrent
     // license revocation cannot commit between the rights check and delivery.
@@ -963,14 +1200,17 @@ pub async fn list_image_cases(
         .into_iter()
         .filter_map(|row| {
             let images: Vec<ImageRef> = serde_json::from_value(row.images.clone()).ok()?;
-            (!images.is_empty()
-                && images.iter().all(|image| {
-                    active_refs.contains(&image.rights_ref.trim().to_ascii_uppercase())
-                }))
-            .then_some(row)
+            if images.is_empty()
+                || images.iter().any(|image| {
+                    !active_refs.contains(&image.rights_ref.trim().to_ascii_uppercase())
+                })
+            {
+                return None;
+            }
+            Some((row, images))
         })
         .collect::<Vec<_>>();
-    let case_ids = cases.iter().map(|case| case.id).collect::<Vec<_>>();
+    let case_ids = cases.iter().map(|(case, _)| case.id).collect::<Vec<_>>();
     let mut concepts_by_case = image_case_concepts_for_cases(&mut tx, &case_ids).await?;
     let approved = if case_ids.is_empty() {
         Vec::new()
@@ -988,40 +1228,38 @@ pub async fn list_image_cases(
         .fetch_all(&mut *tx)
         .await?
     };
-    let mut by_case: std::collections::HashMap<Uuid, Vec<serde_json::Value>> =
+    let mut by_case: std::collections::HashMap<Uuid, Vec<ImageCaseAnnotation>> =
         std::collections::HashMap::new();
     for annotation in approved {
-        by_case.entry(annotation.case_id).or_default().push(json!({
-            "annotation_id": annotation.id,
-            "image_index": annotation.image_index,
-            "x_percent": annotation.x_percent,
-            "y_percent": annotation.y_percent,
-            "body": annotation.body,
-        }));
+        by_case
+            .entry(annotation.case_id)
+            .or_default()
+            .push(annotation.into());
     }
     let cases = cases
         .into_iter()
-        .map(|case| {
-            json!({
-                "case_id": case.id,
-                "title": case.title,
-                "kind": case.kind,
-                "images": case.images,
-                "modality": case.modality,
-                "concepts": concepts_by_case.remove(&case.id).unwrap_or_default(),
-                "annotations": by_case.remove(&case.id).unwrap_or_default(),
+        .map(|(case, images)| -> ApiResult<ImageCaseSummary> {
+            let case_id = case.id;
+            Ok(ImageCaseSummary {
+                case_id,
+                title: case.title,
+                kind: case.kind.try_into()?,
+                images,
+                modality: case.modality,
+                concepts: concepts_by_case.remove(&case_id).unwrap_or_default(),
+                annotations: by_case.remove(&case_id).unwrap_or_default(),
             })
         })
-        .collect::<Vec<_>>();
+        .collect::<ApiResult<Vec<_>>>()?;
     tx.commit().await?;
-    Ok(Json(json!({ "cases": cases })))
+    Ok(Json(ImageCaseListResponse { cases }))
 }
 
 pub async fn get_image_case(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Path(case_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ImageCaseDetail>> {
     let mut tx = state.pool.begin().await?;
     let case = sqlx::query_as::<_, ImageCaseRow>(
         r#"SELECT id, title, kind, images, findings_structured, modality
@@ -1050,25 +1288,20 @@ pub async fn get_image_case(
     .bind(case_id)
     .fetch_all(&mut *tx)
     .await?;
-    let detail = json!({
-        "case_id": case.id,
-        "title": case.title,
-        "kind": case.kind,
-        "images": case.images,
-        "modality": case.modality,
-        "concepts": concepts,
-        // IMG-02: the explicit findings disclosure happens here, on request —
-        // platform review does not establish clinical validity.
-        "findings": case.findings_structured,
-        "annotations": annotations.iter().map(|annotation| json!({
-                "annotation_id": annotation.id,
-                "image_index": annotation.image_index,
-                "x_percent": annotation.x_percent,
-                "y_percent": annotation.y_percent,
-                "body": annotation.body,
-            }))
-            .collect::<Vec<_>>(),
-    });
+    let summary = ImageCaseSummary {
+        case_id: case.id,
+        title: case.title,
+        kind: case.kind.try_into()?,
+        images,
+        modality: case.modality,
+        concepts,
+        annotations: annotations.into_iter().map(Into::into).collect(),
+    };
+    // IMG-02: findings are disclosed on request; platform review does not
+    // establish clinical validity.
+    let findings: Vec<ImageFinding> =
+        serde_json::from_value(case.findings_structured).map_err(|_| ApiError::internal())?;
+    let detail = ImageCaseDetail { summary, findings };
     tx.commit().await?;
     Ok(Json(detail))
 }
@@ -1080,7 +1313,7 @@ pub async fn admin_image_case_concepts(
     _user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(case_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ImageCaseConceptsResponse>> {
     let provided = headers
         .get("x-admin-token")
         .and_then(|value| value.to_str().ok());
@@ -1094,10 +1327,10 @@ pub async fn admin_image_case_concepts(
     }
     let mut connection = state.pool.acquire().await?;
     let mut concepts_by_case = image_case_concepts_for_cases(&mut connection, &[case_id]).await?;
-    Ok(Json(json!({
-        "case_id": case_id,
-        "concepts": concepts_by_case.remove(&case_id).unwrap_or_default(),
-    })))
+    Ok(Json(ImageCaseConceptsResponse {
+        case_id,
+        concepts: concepts_by_case.remove(&case_id).unwrap_or_default(),
+    }))
 }
 
 pub async fn set_admin_image_case_concepts(
@@ -1106,7 +1339,7 @@ pub async fn set_admin_image_case_concepts(
     headers: axum::http::HeaderMap,
     Path(case_id): Path<Uuid>,
     Json(mut req): Json<SetImageCaseConceptsReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ImageCaseConceptsResponse>> {
     let provided = headers
         .get("x-admin-token")
         .and_then(|value| value.to_str().ok());
@@ -1184,7 +1417,7 @@ pub async fn set_admin_image_case_concepts(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "case_id": case_id, "concepts": concepts })))
+    Ok(Json(ImageCaseConceptsResponse { case_id, concepts }))
 }
 
 // ---- IMG-02: annotation authoring and independent review --------------------
@@ -1212,7 +1445,7 @@ pub async fn create_image_annotation(
     headers: axum::http::HeaderMap,
     Path(case_id): Path<Uuid>,
     Json(req): Json<ImageAnnotationReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<ImageAnnotationCreatedResponse>)> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     if req.image_index < 0 {
@@ -1278,7 +1511,10 @@ pub async fn create_image_annotation(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "annotation_id": id, "review_status": "pending" })),
+        Json(ImageAnnotationCreatedResponse {
+            annotation_id: id,
+            review_status: PendingImageAnnotationStatus::Pending,
+        }),
     ))
 }
 
@@ -1286,7 +1522,7 @@ pub async fn list_image_annotations(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminImageAnnotationListResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let rows = sqlx::query!(
@@ -1302,23 +1538,21 @@ pub async fn list_image_annotations(
     )
     .fetch_all(&state.pool)
     .await?;
-    let annotations: Vec<serde_json::Value> = rows
+    let annotations = rows
         .iter()
-        .map(|r| {
-            json!({
-                "annotation_id": r.id,
-                "case_id": r.case_id,
-                "case_title": r.case_title,
-                "image_index": r.image_index,
-                "x_percent": r.x_percent,
-                "y_percent": r.y_percent,
-                "body": r.body,
-                "created_at": r.created_at,
-                "review_status": "pending",
-            })
+        .map(|r| AdminImageAnnotation {
+            annotation_id: r.id,
+            case_id: r.case_id,
+            case_title: r.case_title.clone(),
+            image_index: r.image_index,
+            x_percent: r.x_percent,
+            y_percent: r.y_percent,
+            body: r.body.clone(),
+            created_at: r.created_at.to_owned(),
+            review_status: PendingImageAnnotationStatus::Pending,
         })
         .collect();
-    Ok(Json(json!({ "annotations": annotations })))
+    Ok(Json(AdminImageAnnotationListResponse { annotations }))
 }
 
 #[derive(Deserialize)]
@@ -1334,15 +1568,19 @@ pub async fn review_image_annotation(
     headers: axum::http::HeaderMap,
     Path(annotation_id): Path<Uuid>,
     Json(req): Json<ImageAnnotationReviewReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ImageAnnotationReviewResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
-    if !matches!(req.decision.as_str(), "approved" | "rejected") {
-        return Err(ApiError::unprocessable(
-            "invalid_decision",
-            "decision must be approved or rejected",
-        ));
-    }
+    let decision = match req.decision.as_str() {
+        "approved" => ImageAnnotationDecision::Approved,
+        "rejected" => ImageAnnotationDecision::Rejected,
+        _ => {
+            return Err(ApiError::unprocessable(
+                "invalid_decision",
+                "decision must be approved or rejected",
+            ));
+        }
+    };
     let note = req.note.trim();
     if note.is_empty() || note.chars().count() > 500 || contains_markup_tag(note) {
         return Err(ApiError::unprocessable(
@@ -1390,7 +1628,7 @@ pub async fn review_image_annotation(
     )
     .bind(annotation_id)
     .bind(user.user_id)
-    .bind(&req.decision)
+    .bind(decision.as_str())
     .bind(note)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1406,13 +1644,13 @@ pub async fn review_image_annotation(
         "image_case_annotation_reviewed",
         "image_case_annotation",
         annotation_id,
-        json!({ "decision": req.decision }),
+        json!({ "decision": decision.as_str() }),
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "annotation_id": annotation_id,
-        "decision": req.decision,
-        "review_status": req.decision,
-    })))
+    Ok(Json(ImageAnnotationReviewResponse {
+        annotation_id,
+        decision,
+        review_status: decision,
+    }))
 }

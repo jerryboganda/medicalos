@@ -38,9 +38,14 @@ and keep ARCH-02 open until every client-consumed contract is generated.
 - The initial vertical slices cover `TodayResponse` and the IMG-04
   `ImageConceptLink` DTO. Other client-consumed contracts remain hand-written
   and keep ARCH-02 in progress.
+- The next vertical slice covers the learner image-case and admin annotation
+  response DTO family; it preserves existing endpoint payloads and rights gates.
 - Run the generator in the Rust GitHub Actions job. Once the bootstrap files
   are checked in, CI fails on tracked or untracked generated-file drift. Client
   and browser builds consume the same generated artifact.
+- When a later DTO family adds new files, a marked `codex/*` push may produce
+  the artifact while the pull-request drift gate remains active. The generated
+  files must be checked in and pass a normal push and PR run before acceptance.
 - Keep numeric wire values as TypeScript `number` when the JSON API emits
   numeric values and the domain bounds keep them within JavaScript's safe
   integer range.

@@ -15750,6 +15750,7 @@ async fn img04_image_case_concept_links_pin_and_serve_the_selected_version() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{mapping}");
+    assert_eq!(mapping["case_id"], case_id, "{mapping}");
     assert_eq!(mapping["concepts"][0]["version"], 1, "{mapping}");
     let (status, audit) = call(
         app.clone(),
@@ -15830,6 +15831,7 @@ async fn img04_image_case_concept_links_pin_and_serve_the_selected_version() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{editor_mapping}");
+    assert_eq!(editor_mapping["case_id"], case_id, "{editor_mapping}");
     assert_eq!(
         editor_mapping["concepts"][0]["display_name"],
         "Fictional image concept v1"
@@ -15848,6 +15850,12 @@ async fn img04_image_case_concept_links_pin_and_serve_the_selected_version() {
         .iter()
         .find(|image_case| image_case["case_id"] == case_id)
         .expect("created image case");
+    assert_eq!(learner_case["kind"], "still", "{learner_case}");
+    assert!(learner_case["modality"].is_null(), "{learner_case}");
+    assert_eq!(
+        learner_case["images"][0]["rights_ref"], rights_ref,
+        "{learner_case}"
+    );
     assert_eq!(
         learner_case["concepts"][0]["canonical_key"],
         "img04-pinned-concept"
@@ -15869,6 +15877,8 @@ async fn img04_image_case_concept_links_pin_and_serve_the_selected_version() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["case_id"], case_id, "{detail}");
+    assert_eq!(detail["kind"], "still", "{detail}");
     assert_eq!(
         detail["concepts"][0]["definition"],
         "The first version of the teaching definition."
@@ -16419,6 +16429,11 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["case_id"], case_id, "{detail}");
+    assert_eq!(detail["title"], "Annotation fixture", "{detail}");
+    assert_eq!(detail["kind"], "still", "{detail}");
+    assert_eq!(detail["modality"], "XR", "{detail}");
+    assert_eq!(detail["images"][0]["rights_ref"], "IMG02-ANNOTATION-RIGHTS");
     assert_eq!(detail["findings"][0]["section"], "Findings", "{detail}");
     assert_eq!(
         detail["findings"][0]["text"], "Fixture finding.",
@@ -16477,6 +16492,7 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{annotation}");
+    assert_eq!(annotation["review_status"], "pending", "{annotation}");
     let annotation_id = annotation["annotation_id"].as_str().unwrap();
 
     let (status, pending) = call(
@@ -16491,6 +16507,13 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
         "{pending}"
     );
     assert_eq!(pending["annotations"][0]["review_status"], "pending");
+    assert_eq!(pending["annotations"][0]["case_id"], case_id);
+    assert_eq!(
+        pending["annotations"][0]["case_title"],
+        "Annotation fixture"
+    );
+    assert_eq!(pending["annotations"][0]["image_index"], 0);
+    assert!(pending["annotations"][0]["created_at"].as_str().is_some());
 
     let (status, before_review) = call(
         app.clone(),
@@ -16498,6 +16521,8 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{before_review}");
+    assert_eq!(before_review["cases"][0]["kind"], "still");
+    assert_eq!(before_review["cases"][0]["modality"], "XR");
     assert_eq!(
         before_review["cases"][0]["annotations"]
             .as_array()
@@ -16565,6 +16590,7 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
     assert_eq!(decision["decision"], "approved");
+    assert_eq!(decision["review_status"], "approved");
 
     let (status, after_review) = call(
         app.clone(),
@@ -16574,6 +16600,7 @@ async fn img02_image_annotations_need_independent_review_and_hide_pending_work()
     assert_eq!(status, StatusCode::OK, "{after_review}");
     let visible = &after_review["cases"][0]["annotations"];
     assert_eq!(visible.as_array().unwrap().len(), 1, "{after_review}");
+    assert_eq!(visible[0]["annotation_id"], annotation_id);
     assert_eq!(visible[0]["image_index"], 0);
     assert_eq!(visible[0]["x_percent"], 35.5);
     assert_eq!(visible[0]["y_percent"], 62.25);

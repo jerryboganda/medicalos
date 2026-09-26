@@ -1,5 +1,10 @@
 import { auth, clearToken } from './auth.svelte';
-import type { ImageConceptLink } from './generated/image/ImageConceptLink';
+import type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
+import type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
+import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
+import type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
+import type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
+import type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
 import type { Today } from './generated/today/Today';
 
 // Keep transport and authentication here. Data contracts are exported from
@@ -13,6 +18,20 @@ export type { TodayRevision } from './generated/today/TodayRevision';
 export type { LearnerChapter } from './generated/today/LearnerChapter';
 export type { TodayRevisionBudget } from './generated/today/TodayRevisionBudget';
 export type { ImageConceptLink } from './generated/image/ImageConceptLink';
+export type { AdminImageAnnotation } from './generated/image/AdminImageAnnotation';
+export type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
+export type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
+export type { ImageAnnotationDecision } from './generated/image/ImageAnnotationDecision';
+export type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
+export type { ImageCaseAnnotation } from './generated/image/ImageCaseAnnotation';
+export type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
+export type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
+export type { ImageCaseKind } from './generated/image/ImageCaseKind';
+export type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
+export type { ImageCaseSummary } from './generated/image/ImageCaseSummary';
+export type { ImageFinding } from './generated/image/ImageFinding';
+export type { ImageRef } from './generated/image/ImageRef';
+export type { PendingImageAnnotationStatus } from './generated/image/PendingImageAnnotationStatus';
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -529,27 +548,6 @@ export interface OidcProviderUpdate {
 	enabled: boolean;
 }
 
-export interface ImageCaseSummary {
-	case_id: string;
-	title: string;
-	kind: 'still' | 'stack';
-	modality: string | null;
-	images: { url: string; rights_ref: string }[];
-	concepts: ImageConceptLink[];
-	annotations: {
-		annotation_id: string;
-		image_index: number;
-		x_percent: number;
-		y_percent: number;
-		body: string;
-	}[];
-}
-
-export interface ImageFinding {
-	section: string;
-	text: string;
-}
-
 export interface AdminSettings {
 	mastery_bands: number[];
 	community_min_sample: number;
@@ -632,22 +630,6 @@ export interface CompetitionLeaderboard {
 		is_me: boolean;
 		prize_eligible: boolean;
 	}[];
-}
-
-export interface ImageCaseDetail extends ImageCaseSummary {
-	findings: ImageFinding[];
-}
-
-export interface AdminImageAnnotation {
-	annotation_id: string;
-	case_id: string;
-	case_title: string;
-	image_index: number;
-	x_percent: number;
-	y_percent: number;
-	body: string;
-	created_at: string;
-	review_status: 'pending';
 }
 
 export const Api = {
@@ -738,27 +720,27 @@ export const Api = {
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
 	listScenarios: () => call<{ scenarios: ScenarioSummary[] }>('GET', '/v1/scenarios'),
-	imageCases: () => call<{ cases: ImageCaseSummary[] }>('GET', '/v1/me/image-cases'),
+	imageCases: () => call<ImageCaseListResponse>('GET', '/v1/me/image-cases'),
 	imageCase: (caseId: string) =>
 		call<ImageCaseDetail>('GET', `/v1/me/image-cases/${encodeURIComponent(caseId)}`),
 	adminImageCaseConcepts: (caseId: string) =>
-		call<{ case_id: string; concepts: ImageConceptLink[] }>(
+		call<ImageCaseConceptsResponse>(
 			'GET',
 			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/concepts`
 		),
 	setAdminImageCaseConcepts: (caseId: string, conceptIds: string[]) =>
-		call<{ case_id: string; concepts: ImageConceptLink[] }>(
+		call<ImageCaseConceptsResponse>(
 			'PUT',
 			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/concepts`,
 			{ concept_ids: conceptIds }
 		),
 	adminImageAnnotations: () =>
-		call<{ annotations: AdminImageAnnotation[] }>('GET', '/v1/admin/image-annotations'),
+		call<AdminImageAnnotationListResponse>('GET', '/v1/admin/image-annotations'),
 	createImageAnnotation: (
 		caseId: string,
 		body: { image_index: number; x_percent: number; y_percent: number; body: string }
 	) =>
-		call<{ annotation_id: string; review_status: 'pending' }>(
+		call<ImageAnnotationCreatedResponse>(
 			'POST',
 			`/v1/admin/image-cases/${encodeURIComponent(caseId)}/annotations`,
 			body
@@ -768,7 +750,7 @@ export const Api = {
 		decision: 'approved' | 'rejected',
 		note: string
 	) =>
-		call<{ annotation_id: string; decision: 'approved' | 'rejected' }>(
+		call<ImageAnnotationReviewResponse>(
 			'POST',
 			`/v1/admin/image-annotations/${encodeURIComponent(annotationId)}/review`,
 			{ decision, note }
