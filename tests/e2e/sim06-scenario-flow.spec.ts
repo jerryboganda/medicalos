@@ -4,6 +4,14 @@ test('learner follows an authored station and explores a read-only alternate tim
 	const runId = '22222222-2222-4222-8222-222222222222';
 	let events: string[] = [];
 	let replayBody: Record<string, unknown> | undefined;
+	const transcriptCorrection = {
+		event_index: 0,
+		original_event: 'ask_symptom_onset',
+		corrected_text: 'Asked about symptom onset more clearly.',
+		corrected_by: '00000000-0000-4000-8000-000000000001',
+		created_at: '2026-09-23T10:01:00Z'
+	};
+	let includeTranscriptCorrection = true;
 
 	await page.addInitScript(() => localStorage.setItem('mlos_token', 'e2e-learner-token'));
 	await page.route('**/v1/scenarios', async (route) => {
@@ -102,6 +110,7 @@ test('learner follows an authored station and explores a read-only alternate tim
 				started_at: '2026-09-23T09:50:00Z',
 				finished_at: '2026-09-23T10:00:00Z',
 				rubric: [],
+				transcript_corrections: includeTranscriptCorrection ? [transcriptCorrection] : [],
 				consequential_use_status: 'not_authorized_by_assessment',
 				appeal: null
 			})
@@ -137,11 +146,19 @@ test('learner follows an authored station and explores a read-only alternate tim
 	await page.getByTestId('scenario-action-ask_symptom_onset').click();
 	await page.getByTestId('scenario-action-finish').click();
 	await expect(page.getByTestId('scenario-timeline')).toContainText('Event 1: ask symptom onset');
+	await expect(page.getByTestId('scenario-transcript-corrections')).toContainText('Event 1');
+	await expect(page.getByTestId('scenario-transcript-corrections')).toContainText('ask symptom onset');
+	await expect(page.getByTestId('scenario-transcript-corrections')).toContainText('Asked about symptom onset more clearly.');
 	await page.getByLabel('Alternate actions, one per line').fill('finish');
 	await page.getByTestId('counterfactual-submit').click();
 	await expect(page.getByTestId('counterfactual-result')).toContainText('Event 1: finish');
 	await expect(page.getByTestId('scenario-timeline')).toContainText('Event 1: ask symptom onset');
 	expect(replayBody?.events).toEqual(['finish']);
+
+	includeTranscriptCorrection = false;
+	await page.reload();
+	await expect(page.getByTestId('scenario-transcript-corrections')).toHaveCount(0);
+	await expect(page.getByTestId('scenario-timeline')).toContainText('Event 1: ask symptom onset');
 
 	for (const width of [320, 375, 414, 768]) {
 		await page.setViewportSize({ width, height: 812 });

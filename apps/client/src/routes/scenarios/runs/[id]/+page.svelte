@@ -309,6 +309,22 @@
 			{/if}
 		</section>
 
+		{#if debrief.transcript_corrections.length > 0}
+			<section class="transcript-corrections" aria-labelledby="transcript-corrections-heading" data-testid="scenario-transcript-corrections">
+				<h2 id="transcript-corrections-heading">Transcript corrections</h2>
+				<p class="muted">These corrections add context. The original transcript and timeline remain unchanged.</p>
+				<ol>
+					{#each debrief.transcript_corrections as correction (correction.event_index)}
+						<li>
+							<strong>Event {correction.event_index + 1}</strong>
+							<p><span class="muted">Original:</span> {correction.original_event.replaceAll('_', ' ')}</p>
+							<p><span class="muted">Corrected:</span> {correction.corrected_text}</p>
+						</li>
+					{/each}
+				</ol>
+			</section>
+		{/if}
+
 		<section aria-labelledby="station-rubric-heading">
 			<h2 id="station-rubric-heading">Examiner rubric</h2>
 			<p class="muted">This supervised learning record does not establish clinical competence or authorize independent practice.</p>
@@ -399,6 +415,8 @@
 {/if}
 
 <style>
+	/* Hallmark · macrostructure: single-column debrief flow · tone: calm utilitarian · anchor hue: violet · genre: atmospheric */
+	/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V3 */
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
@@ -408,6 +426,19 @@
 	.timeline,
 	.rubric-list {
 		padding-left: var(--space-lg);
+	}
+
+	.transcript-corrections {
+		margin-block: var(--space-lg);
+	}
+
+	.transcript-corrections li {
+		margin-block: var(--space-md);
+	}
+
+	.transcript-corrections p {
+		margin-block: var(--space-xs);
+		overflow-wrap: anywhere;
 	}
 
 	.timeline li,
