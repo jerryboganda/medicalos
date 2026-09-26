@@ -5,11 +5,17 @@ import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnot
 import type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConceptsResponse';
 import type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
 import type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
+import type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
+import type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
+import type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
+import type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
-import type { Today } from './generated/today/Today';
 import type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
+import type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
+import type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
 import type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
+import type { Today } from './generated/today/Today';
 
 // Keep transport and authentication here. Data contracts are exported from
 // Rust DTOs incrementally as ARCH-02 bindings are generated.
@@ -39,7 +45,13 @@ export type { PendingImageAnnotationStatus } from './generated/image/PendingImag
 export type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
 export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
+export type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
+export type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
+export type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
+export type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
 export type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
+export type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
+export type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
 export type { ScenarioTeamMember } from './generated/scenario/ScenarioTeamMember';
 export type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 const BASE: string =
@@ -323,20 +335,6 @@ export interface ScenarioRun {
 	started_at: string;
 	finished_at: string | null;
 	finished: boolean;
-}
-
-export interface ScenarioHandover {
-	handover_id: string;
-	from_role: ScenarioTeamRole;
-	to_role: ScenarioTeamRole;
-	situation: string;
-	background: string;
-	assessment: string;
-	recommendation: string;
-	created_at: string;
-	acknowledged: boolean;
-	acknowledged_at: string | null;
-	can_ack: boolean;
 }
 
 export interface ScenarioDebrief {
@@ -751,19 +749,19 @@ export const Api = {
 	getScenarioTeam: (runId: string) =>
 		call<ScenarioTeam>('GET', `/v1/scenarios/runs/${encodeURIComponent(runId)}/team`),
 	createScenarioTeamInvite: (runId: string, role: Exclude<ScenarioTeamRole, 'team_lead'>) =>
-		call<{ invite_code: string; role: ScenarioTeamRole; expires_at: string }>(
+		call<ScenarioTeamInviteCreatedResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/team/invites`,
 			{ role }
 		),
 	joinScenarioTeam: (inviteCode: string) =>
-		call<{ run_id: string; member_id: string; role: ScenarioTeamRole }>(
+		call<ScenarioTeamJoinResponse>(
 			'POST',
 			'/v1/scenario-team-invites/join',
 			{ invite_code: inviteCode }
 		),
 	listScenarioHandovers: (runId: string) =>
-		call<{ handovers: ScenarioHandover[] }>(
+		call<ScenarioHandoversResponse>(
 			'GET',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers`
 		),
@@ -773,13 +771,13 @@ export const Api = {
 			recipient_member_id: string;
 		}
 	) =>
-		call<{ handover_id: string }>(
+		call<ScenarioHandoverCreatedResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers`,
 			body
 		),
 	acknowledgeScenarioHandover: (runId: string, handoverId: string) =>
-		call<{ handover_id: string; acknowledged: true }>(
+		call<ScenarioHandoverAcknowledgedResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers/${encodeURIComponent(handoverId)}/ack`
 		),

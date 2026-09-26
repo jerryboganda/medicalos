@@ -69,14 +69,24 @@ pub enum ScenarioTeamRole {
     Observer,
 }
 
-fn parse_team_role(role: &str) -> ApiResult<ScenarioTeamRole> {
-    match role {
-        "team_lead" => Ok(ScenarioTeamRole::TeamLead),
-        "history_taker" => Ok(ScenarioTeamRole::HistoryTaker),
-        "scribe" => Ok(ScenarioTeamRole::Scribe),
-        "observer" => Ok(ScenarioTeamRole::Observer),
-        _ => Err(ApiError::internal()),
+impl ScenarioTeamRole {
+    fn parse(role: &str) -> Option<Self> {
+        match role {
+            "team_lead" => Some(Self::TeamLead),
+            "history_taker" => Some(Self::HistoryTaker),
+            "scribe" => Some(Self::Scribe),
+            "observer" => Some(Self::Observer),
+            _ => None,
+        }
     }
+
+    fn is_invitable(&self) -> bool {
+        matches!(self, Self::HistoryTaker | Self::Scribe | Self::Observer)
+    }
+}
+
+fn parse_team_role(role: &str) -> ApiResult<ScenarioTeamRole> {
+    ScenarioTeamRole::parse(role).ok_or_else(ApiError::internal)
 }
 
 #[derive(Serialize)]
@@ -107,6 +117,109 @@ pub struct ScenarioTeam {
     current_role: ScenarioTeamRole,
     current_member_id: Uuid,
     members: Vec<ScenarioTeamMember>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamInviteCreatedResponse.ts",
+        rename = "ScenarioTeamInviteCreatedResponse"
+    )
+)]
+pub struct ScenarioTeamInviteCreatedResponse {
+    invite_code: String,
+    role: ScenarioTeamRole,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    expires_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamJoinResponse.ts",
+        rename = "ScenarioTeamJoinResponse"
+    )
+)]
+pub struct ScenarioTeamJoinResponse {
+    run_id: Uuid,
+    member_id: Uuid,
+    role: ScenarioTeamRole,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioHandover.ts",
+        rename = "ScenarioHandover"
+    )
+)]
+pub struct ScenarioHandover {
+    handover_id: Uuid,
+    from_role: ScenarioTeamRole,
+    to_role: ScenarioTeamRole,
+    situation: String,
+    background: String,
+    assessment: String,
+    recommendation: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: DateTime<Utc>,
+    acknowledged: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    acknowledged_at: Option<DateTime<Utc>>,
+    can_ack: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioHandoversResponse.ts",
+        rename = "ScenarioHandoversResponse"
+    )
+)]
+pub struct ScenarioHandoversResponse {
+    handovers: Vec<ScenarioHandover>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioHandoverCreatedResponse.ts",
+        rename = "ScenarioHandoverCreatedResponse"
+    )
+)]
+pub struct ScenarioHandoverCreatedResponse {
+    handover_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioHandoverAcknowledgedResponse.ts",
+        rename = "ScenarioHandoverAcknowledgedResponse"
+    )
+)]
+pub struct ScenarioHandoverAcknowledgedResponse {
+    handover_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    acknowledged: bool,
 }
 
 pub async fn list_team(
@@ -160,13 +273,15 @@ pub async fn create_invite(
     user: AuthUser,
     Path(run_id): Path<Uuid>,
     Json(req): Json<CreateTeamInviteReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
-    if !matches!(req.role.as_str(), "history_taker" | "scribe" | "observer") {
-        return Err(ApiError::unprocessable(
-            "invalid_scenario_team_role",
-            "role must be history_taker, scribe, or observer",
-        ));
-    }
+) -> ApiResult<(StatusCode, Json<ScenarioTeamInviteCreatedResponse>)> {
+    let response_role = ScenarioTeamRole::parse(&req.role)
+        .filter(ScenarioTeamRole::is_invitable)
+        .ok_or_else(|| {
+            ApiError::unprocessable(
+                "invalid_scenario_team_role",
+                "role must be history_taker, scribe, or observer",
+            )
+        })?;
     let mut tx = state.pool.begin().await?;
     let run = sqlx::query_as::<_, TeamRun>(
         "SELECT user_id AS owner_id, finished_at FROM scenario_runs WHERE id = $1 FOR UPDATE",
@@ -234,7 +349,11 @@ pub async fn create_invite(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"invite_code": code, "role": req.role, "expires_at": expires_at})),
+        Json(ScenarioTeamInviteCreatedResponse {
+            invite_code: code,
+            role: response_role,
+            expires_at,
+        }),
     ))
 }
 
@@ -256,7 +375,7 @@ pub async fn join_invite(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<JoinTeamInviteReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<ScenarioTeamJoinResponse>)> {
     let code = Uuid::parse_str(req.invite_code.trim())
         .map_err(|_| ApiError::not_found("scenario_team_invite_not_found"))?
         .simple()
@@ -271,6 +390,7 @@ pub async fn join_invite(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("scenario_team_invite_not_found"))?;
+    let response_role = parse_team_role(&invite.role)?;
     if invite.accepted_at.is_some() {
         return Err(ApiError::conflict(
             "scenario_team_invite_used",
@@ -358,7 +478,11 @@ pub async fn join_invite(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"run_id": invite.run_id, "member_id": member_id, "role": invite.role})),
+        Json(ScenarioTeamJoinResponse {
+            run_id: invite.run_id,
+            member_id,
+            role: response_role,
+        }),
     ))
 }
 
@@ -384,7 +508,7 @@ pub async fn create_handover(
     user: AuthUser,
     Path(run_id): Path<Uuid>,
     Json(req): Json<CreateHandoverReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<ScenarioHandoverCreatedResponse>)> {
     if ![
         &req.situation,
         &req.background,
@@ -468,7 +592,7 @@ pub async fn create_handover(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"handover_id": handover_id})),
+        Json(ScenarioHandoverCreatedResponse { handover_id }),
     ))
 }
 
@@ -490,7 +614,7 @@ pub async fn list_handovers(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(run_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioHandoversResponse>> {
     role_for(&state.pool, run_id, user.user_id)
         .await?
         .ok_or_else(|| ApiError::not_found("run_not_found"))?;
@@ -514,19 +638,25 @@ pub async fn list_handovers(
     .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({"handovers": rows.into_iter().map(|row| json!({
-		"handover_id": row.handover_id,
-		"from_role": row.from_role,
-		"to_role": row.to_role,
-		"situation": row.situation,
-		"background": row.background,
-		"assessment": row.assessment,
-		"recommendation": row.recommendation,
-		"created_at": row.created_at,
-		"acknowledged": row.acknowledged_at.is_some(),
-		"acknowledged_at": row.acknowledged_at,
-		"can_ack": row.can_ack,
-	})).collect::<Vec<_>>()})))
+    let handovers = rows
+        .into_iter()
+        .map(|row| {
+            Ok(ScenarioHandover {
+                handover_id: row.handover_id,
+                from_role: parse_team_role(&row.from_role)?,
+                to_role: parse_team_role(&row.to_role)?,
+                situation: row.situation,
+                background: row.background,
+                assessment: row.assessment,
+                recommendation: row.recommendation,
+                created_at: row.created_at,
+                acknowledged: row.acknowledged_at.is_some(),
+                acknowledged_at: row.acknowledged_at,
+                can_ack: row.can_ack,
+            })
+        })
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(Json(ScenarioHandoversResponse { handovers }))
 }
 
 #[derive(sqlx::FromRow)]
@@ -538,7 +668,7 @@ pub async fn acknowledge_handover(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path((run_id, handover_id)): Path<(Uuid, Uuid)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioHandoverAcknowledgedResponse>> {
     let mut tx = state.pool.begin().await?;
     let recipient = sqlx::query_as::<_, HandoverRecipient>(
         r#"SELECT member.user_id FROM scenario_handovers handover
@@ -580,7 +710,8 @@ pub async fn acknowledge_handover(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(
-        json!({"handover_id": handover_id, "acknowledged": true}),
-    ))
+    Ok(Json(ScenarioHandoverAcknowledgedResponse {
+        handover_id,
+        acknowledged: true,
+    }))
 }

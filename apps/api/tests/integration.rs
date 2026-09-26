@@ -20018,6 +20018,7 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     assert!(initial_team["current_member_id"].as_str().is_some());
     assert_eq!(initial_team["members"].as_array().unwrap().len(), 1);
     assert_eq!(initial_team["members"][0].as_object().unwrap().len(), 3);
+    assert!(initial_team["members"][0]["member_id"].as_str().is_some());
     assert_eq!(initial_team["members"][0]["role"], "team_lead");
     assert!(initial_team["members"][0]["joined_at"].is_string());
     assert!(initial_team["members"][0].get("user_id").is_none());
@@ -20033,9 +20034,11 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{owner_invite}");
+    assert_eq!(owner_invite.as_object().unwrap().len(), 3);
     let invite_code = owner_invite["invite_code"].as_str().unwrap();
     assert_eq!(invite_code.len(), 32);
     assert_eq!(owner_invite["role"], "history_taker");
+    assert!(owner_invite["expires_at"].is_string());
     let (status, joined) = call(
         app.clone(),
         request(
@@ -20047,6 +20050,9 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{joined}");
+    assert_eq!(joined.as_object().unwrap().len(), 3);
+    assert_eq!(joined["run_id"], run_id);
+    assert!(joined["member_id"].as_str().is_some());
     assert_eq!(joined["role"], "history_taker");
     let (status, invite_reuse) = call(
         app.clone(),
@@ -20160,6 +20166,7 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{handover}");
+    assert_eq!(handover.as_object().unwrap().len(), 1);
     let handover_id = handover["handover_id"].as_str().unwrap();
     let (status, observer_ack) = call(
         app.clone(),
@@ -20172,6 +20179,8 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{observer_ack}");
+    assert_eq!(observer_ack.as_object().unwrap().len(), 2);
+    assert_eq!(observer_ack["handover_id"], handover_id);
     assert_eq!(observer_ack["acknowledged"], true);
     let (status, duplicate_ack) = call(
         app.clone(),
@@ -20207,6 +20216,10 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{handovers}");
+    assert_eq!(handovers.as_object().unwrap().len(), 1);
+    assert_eq!(handovers["handovers"][0].as_object().unwrap().len(), 11);
+    assert!(handovers["handovers"][0]["created_at"].is_string());
+    assert!(handovers["handovers"][0]["acknowledged_at"].is_string());
     assert_eq!(
         handovers["handovers"][0]["situation"],
         "Fictional patient with a new symptom pattern."
