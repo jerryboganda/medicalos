@@ -194,11 +194,17 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
   expect(resourceRequests.map((batch) => batch.length)).toEqual([25, 1, 1]);
   expect(resourceRequests[2]).toEqual([questionIds[25]]);
 
+  const openPageErrors: string[] = [];
+  page.on('pageerror', (cause) => openPageErrors.push(cause.message));
   await page.getByTestId('pack-open').click();
   await expect
     .poll(async () => {
       if (await page.getByTestId('pack-question').isVisible()) return 'opened';
-      return (await page.getByTestId('pack-error').textContent()) ?? 'opening';
+      const error = page.getByTestId('pack-error');
+      const reader = page.locator('.reader');
+      const errorText = (await error.count()) ? await error.textContent() : 'none';
+      const readerText = (await reader.count()) ? await reader.innerText() : 'absent';
+      return `opening; error=${errorText}; reader=${readerText.replace(/\s+/g, ' ').slice(0, 240)}; pageerror=${openPageErrors.at(-1) ?? 'none'}`;
     })
     .toBe('opened');
   await expect(page.getByTestId('pack-question')).toContainText('Fictional practice case 1');
