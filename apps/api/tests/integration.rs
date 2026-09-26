@@ -19164,3 +19164,87 @@ async fn lib07_extraction_reports_expose_gaps_and_require_distinct_review() {
         "{unexpected_field}"
     );
 }
+
+#[tokio::test]
+async fn integrity_events_are_scoped_to_the_owning_learner() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let owner = register_and_login(app.clone()).await;
+    let other_learner = register_and_login(app.clone()).await;
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&owner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": ids.chapter1,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let session_id = session["session_id"].as_str().expect("session id");
+
+    let event = serde_json::json!({
+        "session_id": session_id,
+        "signal_type": "clock_change"
+    });
+    let (status, own_event) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&owner),
+            Some(event.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own_event}");
+
+    let (foreign_status, foreign_event) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&other_learner),
+            Some(event),
+        ),
+    )
+    .await;
+    let (missing_status, missing_event) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&other_learner),
+            Some(serde_json::json!({
+                "session_id": Uuid::new_v4(),
+                "signal_type": "clock_change"
+            })),
+        ),
+    )
+    .await;
+
+    assert_eq!(foreign_status, StatusCode::NOT_FOUND, "{foreign_event}");
+    assert_eq!(missing_status, StatusCode::NOT_FOUND, "{missing_event}");
+    assert_eq!(foreign_event["error"]["code"], "session_not_found");
+    assert_eq!(missing_event["error"]["code"], "session_not_found");
+
+    let (status, account_event) = call(
+        app,
+        request(
+            "POST",
+            "/v1/integrity-events",
+            Some(&other_learner),
+            Some(serde_json::json!({ "signal_type": "second_session" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{account_event}");
+}
