@@ -18,6 +18,7 @@ use crate::state::AppState;
 const PRIVATE_IMPORT_MAX_BYTES: usize = 1024 * 1024;
 const PRIVATE_IMPORT_MAX_DOCUMENTS: i64 = 25;
 const PRIVATE_IMPORT_MAX_TOTAL_BYTES: i64 = 10 * 1024 * 1024;
+const MAX_MEDIA_DURATION_MS: u64 = 86_400_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize, sqlx::FromRow)]
 #[cfg_attr(
@@ -29,6 +30,46 @@ pub struct ArticleCitation {
     pub kind: String,
     pub anchor: String,
     pub target: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "library/MediaCaptionCue.ts", rename = "MediaCaptionCue")
+)]
+pub struct MediaCaptionCue {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "library/MediaChapterMarker.ts", rename = "MediaChapterMarker")
+)]
+pub struct MediaChapterMarker {
+    pub at_ms: u64,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "library/ArticleMedia.ts", rename = "ArticleMedia")
+)]
+pub struct ArticleMedia {
+    pub media_id: Uuid,
+    pub url: String,
+    #[cfg_attr(feature = "type-export", ts(type = "\"audio\" | \"video\""))]
+    pub kind: String,
+    pub duration_seconds: Option<i32>,
+    pub captions: Vec<MediaCaptionCue>,
+    pub chapters: Vec<MediaChapterMarker>,
+    pub rights_ref: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,8 +295,7 @@ pub struct LibraryArticleResponse {
     #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub effective_to: Option<chrono::NaiveDate>,
     pub citations: Vec<ArticleCitation>,
-    #[cfg_attr(feature = "type-export", ts(type = "unknown"))]
-    pub media: serde_json::Value,
+    pub media: Vec<ArticleMedia>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1393,7 +1433,7 @@ pub async fn delete_private_import(
 
 // ---- LIB-08: media with captions and chapters (rights reference required) ----
 
-pub async fn media_list(state: &AppState, article_id: Uuid) -> ApiResult<serde_json::Value> {
+pub async fn media_list(state: &AppState, article_id: Uuid) -> ApiResult<Vec<ArticleMedia>> {
     let rows = sqlx::query!(
         r#"SELECT id, url, kind, duration_seconds AS "duration_seconds?",
                   captions, chapters, rights_ref
@@ -1402,18 +1442,21 @@ pub async fn media_list(state: &AppState, article_id: Uuid) -> ApiResult<serde_j
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(json!(rows
-        .iter()
-        .map(|r| json!({
-            "media_id": r.id,
-            "url": r.url,
-            "kind": r.kind,
-            "duration_seconds": r.duration_seconds,
-            "captions": r.captions,
-            "chapters": r.chapters,
-            "rights_ref": r.rights_ref,
-        }))
-        .collect::<Vec<_>>()))
+    rows.into_iter()
+        .map(|row| {
+            Ok(ArticleMedia {
+                media_id: row.id,
+                url: row.url,
+                kind: row.kind,
+                duration_seconds: row.duration_seconds,
+                captions: serde_json::from_value(row.captions)
+                    .map_err(|_| ApiError::internal())?,
+                chapters: serde_json::from_value(row.chapters)
+                    .map_err(|_| ApiError::internal())?,
+                rights_ref: row.rights_ref,
+            })
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -1422,10 +1465,56 @@ pub struct MediaReq {
     pub kind: String, // audio | video
     pub duration_seconds: Option<i32>,
     #[serde(default)]
-    pub captions: serde_json::Value,
+    pub captions: Vec<MediaCaptionCue>,
     #[serde(default)]
-    pub chapters: serde_json::Value,
+    pub chapters: Vec<MediaChapterMarker>,
     pub rights_ref: Option<String>,
+}
+
+fn validate_media_metadata(req: &mut MediaReq) -> ApiResult<()> {
+    if req
+        .duration_seconds
+        .is_some_and(|seconds| !(1..=86_400).contains(&seconds))
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_media_duration",
+            "duration_seconds must be between 1 and 86400",
+        ));
+    }
+    let duration_ms = req.duration_seconds.map(|seconds| seconds as u64 * 1000);
+    if req.captions.len() > 500
+        || req.captions.iter().any(|cue| {
+            cue.start_ms >= cue.end_ms
+                || cue.end_ms > MAX_MEDIA_DURATION_MS
+                || cue.text.trim().is_empty()
+                || cue.text.len() > 2_000
+                || cue.text.contains('\0')
+                || duration_ms.is_some_and(|duration| cue.end_ms > duration)
+        })
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_media_captions",
+            "captions need non-empty text, valid increasing times, and at most 500 cues",
+        ));
+    }
+    req.captions.sort_by_key(|cue| (cue.start_ms, cue.end_ms));
+
+    req.chapters.sort_by_key(|chapter| chapter.at_ms);
+    if req.chapters.len() > 100
+        || req.chapters.iter().any(|chapter| {
+            chapter.title.trim().is_empty()
+                || chapter.title.len() > 200
+                || chapter.at_ms >= MAX_MEDIA_DURATION_MS
+                || duration_ms.is_some_and(|duration| chapter.at_ms >= duration)
+        })
+        || req.chapters.windows(2).any(|pair| pair[0].at_ms == pair[1].at_ms)
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_media_chapters",
+            "chapters need unique in-range times and non-empty titles, with at most 100 markers",
+        ));
+    }
+    Ok(())
 }
 
 pub async fn attach_media(
@@ -1438,10 +1527,16 @@ pub async fn attach_media(
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let url = req.url.trim();
-    if url.is_empty() || !url.starts_with("https://") {
+    let parsed_url = url::Url::parse(url).ok();
+    if parsed_url.as_ref().is_none_or(|parsed| {
+        parsed.scheme() != "https"
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+    }) {
         return Err(ApiError::unprocessable(
             "invalid_url",
-            "media url must be an https URL",
+            "media url must be a credential-free https URL",
         ));
     }
     if !matches!(req.kind.as_str(), "audio" | "video") {
@@ -1450,12 +1545,7 @@ pub async fn attach_media(
             "kind must be audio or video",
         ));
     }
-    if !req.captions.is_array() || !req.chapters.is_array() {
-        return Err(ApiError::unprocessable(
-            "invalid_media_lists",
-            "captions and chapters must be arrays",
-        ));
-    }
+    validate_media_metadata(&mut req)?;
     let rights_ref = req
         .rights_ref
         .map(|r| r.trim().to_string())
@@ -1472,6 +1562,8 @@ pub async fn attach_media(
         .ok_or_else(|| ApiError::not_found("article_not_found"))?;
     let _ = exists;
     let id = Uuid::new_v4();
+    let captions = serde_json::to_value(req.captions).map_err(|_| ApiError::internal())?;
+    let chapters = serde_json::to_value(req.chapters).map_err(|_| ApiError::internal())?;
     sqlx::query!(
         "INSERT INTO media_assets
            (id, article_id, url, kind, duration_seconds, captions, chapters, rights_ref)
@@ -1481,8 +1573,8 @@ pub async fn attach_media(
         url,
         req.kind,
         req.duration_seconds,
-        req.captions,
-        req.chapters,
+        captions,
+        chapters,
         rights_ref
     )
     .execute(&state.pool)

@@ -615,6 +615,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v2/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
         )
+        .route(
+            "/v2/packs/{exam_id}/resources",
+            post(routes::packs::pack_resources),
+        )
         .route("/v1/packs/lease", post(routes::packs::create_lease))
         .route("/v1/me/packs", get(routes::packs::list_leases))
         .route(
@@ -1294,6 +1298,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v2/packs/{exam_id}/manifest",
             get(routes::packs::pack_manifest),
+        )
+        .route(
+            "/api/v2/packs/{exam_id}/resources",
+            post(routes::packs::pack_resources),
         )
         .route("/api/v1/packs/lease", post(routes::packs::create_lease))
         .route("/api/v1/me/packs", get(routes::packs::list_leases))

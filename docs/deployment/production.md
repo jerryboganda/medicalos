@@ -29,7 +29,7 @@ Built by GitHub Actions only (AGENTS.md compute policy — the VPS never builds)
 | `PUBLIC_API_BASE_URL` | `https://medicalos.polytronx.com/api` in production | Public API prefix used to derive OIDC callback URLs |
 | `PUBLIC_APP_URL` | `https://medicalos.polytronx.com` in production | Browser origin used for OIDC handoff |
 | `OIDC_CREDENTIAL_KEY` | unset | Optional encryption key for institution OIDC client secrets; provision as GitHub secret `VPS_OIDC_CREDENTIAL_KEY` |
-| `PACK_SIGNING_KEY` | — (required) | Private HMAC key for offline-pack manifests; provision as GitHub secret `VPS_PACK_SIGNING_KEY` with at least 32 non-whitespace bytes |
+| `PACK_SIGNING_KEY` | — (required) | Private secret deriving lease-bound Ed25519 offline-pack signatures (legacy v1 remains HMAC); provision as GitHub secret `VPS_PACK_SIGNING_KEY` with at least 32 non-whitespace bytes |
 
 GitHub repo-level secrets: `VPS_HOST`, `VPS_USER`,
 `VPS_SSH_KEY`, `VPS_DATABASE_URL`, and `VPS_PACK_SIGNING_KEY`.

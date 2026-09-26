@@ -26,8 +26,17 @@ fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
 
 // ---- AI-18: pre-generated tutoring ------------------------------------------
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "packs/TutoringCard.ts", rename = "TutoringCard")
+)]
 pub struct TutoringCard {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"explain\" | \"why_wrong\" | \"compare\" | \"mnemonic\" | \"test_me\"")
+    )]
     pub prompt_type: String,
     pub content: String,
     pub source_ref: String,

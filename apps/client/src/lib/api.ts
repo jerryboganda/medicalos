@@ -37,6 +37,14 @@ import type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/Sce
 import type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
 import type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 import type { Today } from './generated/today/Today';
+import type { PackLeaseListResponse } from './generated/packs/PackLeaseListResponse';
+import type { PackLeaseRequest } from './generated/packs/PackLeaseRequest';
+import type { PackLeaseResponse } from './generated/packs/PackLeaseResponse';
+import type { PackManifest } from './generated/packs/PackManifest';
+import type { PackQuestionResource } from './generated/packs/PackQuestionResource';
+import type { PackResourcesRequest } from './generated/packs/PackResourcesRequest';
+import type { PackResourcesResponse } from './generated/packs/PackResourcesResponse';
+import type { TutoringCard } from './generated/packs/TutoringCard';
 
 // Keep transport and authentication here. Data contracts are exported from
 // Rust DTOs incrementally as ARCH-02 bindings are generated.
@@ -60,6 +68,9 @@ export type { LibrarySearchResult } from './generated/library/LibrarySearchResul
 export type { UpdateArticleDraftRequest } from './generated/library/UpdateArticleDraftRequest';
 export type { PublishArticleResponse } from './generated/library/PublishArticleResponse';
 export type { PrivateDocumentSearchResult } from './generated/library/PrivateDocumentSearchResult';
+export type { ArticleMedia } from './generated/library/ArticleMedia';
+export type { MediaCaptionCue } from './generated/library/MediaCaptionCue';
+export type { MediaChapterMarker } from './generated/library/MediaChapterMarker';
 export type { ImageConceptLink } from './generated/image/ImageConceptLink';
 export type { AdminImageAnnotation } from './generated/image/AdminImageAnnotation';
 export type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
@@ -107,6 +118,17 @@ export type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/Sce
 export type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
 export type { ScenarioTeamMember } from './generated/scenario/ScenarioTeamMember';
 export type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
+export type { PackLeaseListResponse } from './generated/packs/PackLeaseListResponse';
+export type { PackLeaseRequest } from './generated/packs/PackLeaseRequest';
+export type { PackLeaseResponse } from './generated/packs/PackLeaseResponse';
+export type { PackLeaseSummary } from './generated/packs/PackLeaseSummary';
+export type { PackManifest } from './generated/packs/PackManifest';
+export type { PackManifestItem } from './generated/packs/PackManifestItem';
+export type { PackQuestionResource } from './generated/packs/PackQuestionResource';
+export type { PackResourcesRequest } from './generated/packs/PackResourcesRequest';
+export type { PackResourcesResponse } from './generated/packs/PackResourcesResponse';
+export type { QuestionOption } from './generated/packs/QuestionOption';
+export type { TutoringCard } from './generated/packs/TutoringCard';
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -244,12 +266,6 @@ export interface NextActionRecommendation {
 		remaining: number;
 		required?: number;
 	} | null;
-}
-
-export interface TutoringCard {
-	prompt_type: 'explain' | 'why_wrong' | 'compare' | 'mnemonic' | 'test_me';
-	content: string;
-	source_ref: string;
 }
 
 export interface PrivateImportRight {
@@ -668,6 +684,27 @@ export const Api = {
 		plan_task_key?: string;
 		time_limit_seconds?: number;
 	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
+	createPackLease: (body: PackLeaseRequest) =>
+		call<PackLeaseResponse>('POST', '/v1/packs/lease', body),
+	packManifest: (examId: string, chapters: string[], deviceId: string) => {
+		const query = new URLSearchParams({ chapters: chapters.join(','), device_id: deviceId });
+		return call<PackManifest>(
+			'GET',
+			`/v2/packs/${encodeURIComponent(examId)}/manifest?${query.toString()}`
+		);
+	},
+	packResources: (
+		examId: string,
+		body: PackResourcesRequest
+	) =>
+		call<PackResourcesResponse>(
+			'POST',
+			`/v2/packs/${encodeURIComponent(examId)}/resources`,
+			body
+		),
+	revokePackLease: (leaseId: string) =>
+		call<{ revoked: boolean }>('DELETE', `/v1/packs/lease/${encodeURIComponent(leaseId)}`),
+	listPackLeases: () => call<PackLeaseListResponse>('GET', '/v1/me/packs'),
 	listScenarios: () => call<ScenarioListResponse>('GET', '/v1/scenarios'),
 	imageCases: () => call<ImageCaseListResponse>('GET', '/v1/me/image-cases'),
 	imageCase: (caseId: string) =>

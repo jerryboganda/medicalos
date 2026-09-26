@@ -11,6 +11,7 @@ use axum::response::IntoResponse;
 use axum::Router;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -21,38 +22,6 @@ use uuid::Uuid;
 use api::{router, schema, seed, state::AppState};
 
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-#[derive(serde::Deserialize, serde::Serialize)]
-struct TutoringCardFixture {
-    prompt_type: String,
-    content: String,
-    source_ref: String,
-}
-
-fn test_hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
-    const BLOCK: usize = 64;
-    let mut key = key.to_vec();
-    if key.len() > BLOCK {
-        key = Sha256::digest(&key).to_vec();
-    }
-    key.resize(BLOCK, 0);
-    let mut inner = Sha256::new();
-    for byte in &key {
-        inner.update([*byte ^ 0x36]);
-    }
-    inner.update(message);
-    let inner_hash = inner.finalize();
-    let mut outer = Sha256::new();
-    for byte in &key {
-        outer.update([*byte ^ 0x5c]);
-    }
-    outer.update(inner_hash);
-    outer
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
 
 #[derive(Clone)]
 struct OidcTestProvider {
@@ -625,8 +594,7 @@ async fn account_export_and_signed_pack_manifest() {
     assert!(legacy_manifest["items"][0].get("tutoring_cards").is_none());
     assert!(legacy_manifest["signature"].is_string());
 
-    // OFF-01: manifest for the answered chapter is signed; the signature
-    // verifies against a recomputed HMAC of the canonical listing.
+    // OFF-01: the lease-bound manifest is publicly verifiable offline.
     sqlx::query!("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
         .execute(&state.pool)
         .await
@@ -676,9 +644,10 @@ async fn account_export_and_signed_pack_manifest() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{manifest}");
-    assert_eq!(manifest["algorithm"], "hmac-sha256");
+    assert_eq!(manifest["algorithm"], "ed25519");
+    assert_eq!(manifest["manifest_version"], 4);
     let sig = manifest["signature"].as_str().unwrap();
-    assert_eq!(sig.len(), 64, "sha256 hmac is 64 hex chars");
+    assert_eq!(sig.len(), 128, "Ed25519 signature is 64 bytes");
     assert_eq!(manifest["items"].as_array().unwrap().len(), 1);
 
     let item = &manifest["items"][0];
@@ -687,40 +656,118 @@ async fn account_export_and_signed_pack_manifest() {
         .unwrap()
         .parse()
         .unwrap();
-    let question_checksum: String = sqlx::query_scalar(
-        "SELECT encode(sha256((vignette || lead_in)::bytea), 'hex')
-         FROM question_versions WHERE id = $1",
+    let chapter_ids = vec![ids.chapter3];
+    let canonical = format!(
+        "medical-os-pack-manifest-v4\nexam {}\ndevice {}\nchapters {}\n{} {}\n",
+        ids.exam_id,
+        serde_json::to_string("export-device").unwrap(),
+        chapter_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        version_id,
+        item["checksum"].as_str().unwrap()
+    );
+    let public_key_bytes = hex_bytes(manifest["verification_key"].as_str().unwrap());
+    let public_key = VerifyingKey::from_bytes(
+        public_key_bytes.as_slice().try_into().expect("32-byte public key"),
+    )
+    .expect("verification key");
+    let signature_bytes = hex_bytes(sig);
+    let signature = Signature::from_slice(&signature_bytes).expect("64-byte signature");
+    public_key
+        .verify(canonical.as_bytes(), &signature)
+        .expect("manifest signature verifies");
+    let key_id = Sha256::digest(&public_key_bytes)
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(manifest["key_id"], key_id);
+    let tampered = format!("{canonical}TAMPERED");
+    assert!(public_key.verify(tampered.as_bytes(), &signature).is_err());
+
+    // Existing published versions can repair an incomplete legacy tutoring
+    // cache when an offline resource batch needs it.
+    sqlx::query!(
+        "DELETE FROM pregen_tutoring WHERE question_version_id = $1 AND prompt_type = 'compare'",
+        version_id
+    )
+    .execute(&state.pool)
+    .await
+    .expect("remove one cached tutoring card");
+
+    let (status, resources) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({
+                "device_id": "export-device",
+                "chapters": [ids.chapter3],
+                "question_version_ids": [version_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resources}");
+    let resource = &resources["resources"][0];
+    assert_eq!(resource["question_version_id"], version_id.to_string());
+    assert_eq!(resource["checksum"], item["checksum"]);
+    assert_eq!(resource["tutoring_cards"].as_array().unwrap().len(), 5);
+    let repaired_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1",
     )
     .bind(version_id)
     .fetch_one(&state.pool)
     .await
-    .expect("question checksum");
-    let cards: Vec<TutoringCardFixture> =
-        serde_json::from_value(item["tutoring_cards"].clone()).expect("tutoring cards");
-    let mut content_hash = Sha256::new();
-    content_hash.update(question_checksum.as_bytes());
-    content_hash.update([0]);
-    content_hash.update(serde_json::to_vec(&cards).expect("serialized cards"));
-    let expected_item_checksum = content_hash
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    assert_eq!(item["checksum"], expected_item_checksum);
+    .expect("repaired tutoring cache");
+    assert_eq!(repaired_count, 5);
+    let mut checksum_content = resource.clone();
+    let checksum = checksum_content
+        .as_object_mut()
+        .unwrap()
+        .remove("checksum")
+        .unwrap();
+    let expected_checksum = hex_string(&Sha256::digest(
+        canonical_test_value(&checksum_content).as_bytes(),
+    ));
+    assert_eq!(checksum, expected_checksum);
 
-    let canonical = format!(
-        "medical-os-pack-manifest-v3\nexam {}\ndevice {}\nchapters {}\n{} {}\n",
-        ids.exam_id,
-        serde_json::to_string("export-device").unwrap(),
-        ids.chapter3,
-        version_id,
-        expected_item_checksum
-    );
-    let signing_key = b"0123456789abcdef0123456789abcdef";
-    assert_eq!(sig, test_hmac_sha256_hex(signing_key, canonical.as_bytes()));
+    let (status, wrong_device_resources) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({
+                "device_id": "other-device",
+                "chapters": [ids.chapter3],
+                "question_version_ids": [version_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{wrong_device_resources}");
 
-    let tampered = format!("{canonical}TAMPERED");
-    assert_ne!(sig, test_hmac_sha256_hex(signing_key, tampered.as_bytes()));
+    let too_many_ids = (0..51).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+    let (status, too_many) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({
+                "device_id": "export-device",
+                "chapters": [ids.chapter3],
+                "question_version_ids": too_many_ids
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{too_many}");
 
     // Empty chapter list is refused.
     let (status, _) = call(
@@ -737,6 +784,51 @@ async fn account_export_and_signed_pack_manifest() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+fn hex_bytes(value: &str) -> Vec<u8> {
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).expect("hex byte")
+        })
+        .collect()
+}
+
+fn hex_string(value: &[u8]) -> String {
+    value.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn canonical_test_value(value: &Value) -> String {
+    match value {
+        Value::Null => "z;".into(),
+        Value::Bool(false) => "f;".into(),
+        Value::Bool(true) => "t;".into(),
+        Value::Number(number) => format!("n{number};"),
+        Value::String(string) => format!("s{}:{};", string.len(), hex_string(string.as_bytes())),
+        Value::Array(values) => format!(
+            "a{}:{}",
+            values.len(),
+            values.iter().map(canonical_test_value).collect::<String>()
+        ),
+        Value::Object(values) => {
+            let mut entries: Vec<_> = values.iter().collect();
+            entries.sort_by(|(left, _), (right, _)| left.as_bytes().cmp(right.as_bytes()));
+            format!(
+                "o{}:{}",
+                entries.len(),
+                entries
+                    .into_iter()
+                    .map(|(key, value)| format!(
+                        "{}{}",
+                        canonical_test_value(&Value::String(key.clone())),
+                        canonical_test_value(value)
+                    ))
+                    .collect::<String>()
+            )
+        }
+    }
 }
 
 #[tokio::test]
@@ -6466,10 +6558,10 @@ async fn pregen_tutoring_generated_and_cached() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{manifest}");
-    assert_eq!(manifest["manifest_version"], 3);
+    assert_eq!(manifest["manifest_version"], 4);
     assert_eq!(manifest["device_id"], "device-a");
     let pack_item = &manifest["items"][0];
-    assert_eq!(pack_item["tutoring_cards"].as_array().unwrap().len(), 5);
+    assert!(pack_item.get("tutoring_cards").is_none());
     let first_checksum = pack_item["checksum"].as_str().unwrap().to_string();
     let first_signature = manifest["signature"].as_str().unwrap().to_string();
 
@@ -15857,6 +15949,66 @@ async fn library_media_and_image_cases_are_rights_checked() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"]["code"], "rights_ref_required", "{body}");
+
+    let (status, invalid_media_url) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/media"),
+            Some(&token),
+            Some(serde_json::json!({
+                "url": "https://user:password@cdn.example.test/lecture.mp4",
+                "kind": "video",
+                "rights_ref": "LIC-2026-014"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_media_url}");
+    assert_eq!(invalid_media_url["error"]["code"], "invalid_url");
+
+    let (status, invalid_captions) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/media"),
+            Some(&token),
+            Some(serde_json::json!({
+                "url": "https://cdn.example.test/lecture.mp4",
+                "kind": "video",
+                "duration_seconds": 600,
+                "captions": [{"start_ms": 2000, "end_ms": 1000, "text": "Invalid timing"}],
+                "chapters": [],
+                "rights_ref": "LIC-2026-014"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_captions}");
+    assert_eq!(invalid_captions["error"]["code"], "invalid_media_captions");
+
+    let (status, duplicate_chapters) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/articles/{article_id}/media"),
+            Some(&token),
+            Some(serde_json::json!({
+                "url": "https://cdn.example.test/lecture.mp4",
+                "kind": "video",
+                "duration_seconds": 600,
+                "captions": [],
+                "chapters": [
+                    {"at_ms": 1000, "title": "One"},
+                    {"at_ms": 1000, "title": "Duplicate"}
+                ],
+                "rights_ref": "LIC-2026-014"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{duplicate_chapters}");
+    assert_eq!(duplicate_chapters["error"]["code"], "invalid_media_chapters");
 
     let (status, media) = call(
         app.clone(),

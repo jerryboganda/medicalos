@@ -9,6 +9,11 @@ use uuid::Uuid;
 use crate::error::{ApiError, ApiResult};
 
 #[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "packs/QuestionOption.ts", rename = "QuestionOption")
+)]
 pub struct QuestionOption {
     pub text: String,
     pub rationale: String,

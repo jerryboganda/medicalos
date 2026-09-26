@@ -8,6 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use calamine::Reader;
+use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
@@ -2660,9 +2661,8 @@ pub async fn run_recovery_drill(
             "supported drills: manifest_signature",
         ));
     }
-    // Build the canonical manifest exactly as packs.rs does, sign it, then
-    // re-verify: a passing drill proves the recovery verification path works
-    // on real published content; the tamper proof proves it can fail.
+    // Build the canonical manifest exactly as packs.rs does, then verify it
+    // using the public key as the browser does offline.
     let chapter_ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT id FROM curriculum_nodes
          WHERE exam_id = $1 AND kind = 'chapter' ORDER BY id",
@@ -2671,8 +2671,8 @@ pub async fn run_recovery_drill(
     .fetch_all(&state.pool)
     .await?;
     let rows = sqlx::query!(
-        r#"SELECT id, chapter_id,
-                  encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
+        r#"SELECT id, vignette, lead_in, difficulty, options,
+                  correct_index, key_learning_point, exam_tip, source_ref
            FROM question_versions
            WHERE chapter_id = ANY($1) AND status = 'published'
            ORDER BY chapter_id, id"#,
@@ -2680,10 +2680,31 @@ pub async fn run_recovery_drill(
     )
     .fetch_all(&state.pool)
     .await?;
+    let question_ids: Vec<_> = rows.iter().map(|row| row.id).collect();
+    let answered = crate::routes::packs::answered_tutor_question_ids(
+        &state.pool,
+        user.user_id,
+        &question_ids,
+    )
+    .await?;
+    let answered_ids: Vec<_> = answered.iter().copied().collect();
+    let mut tutoring_cards =
+        crate::routes::packs::tutoring_cards_for_questions(&state.pool, &answered_ids).await?;
     let mut items = Vec::with_capacity(rows.len());
     for r in &rows {
-        let cards = crate::routes::program::ensure_pregen(&state.pool, r.id).await?;
-        let checksum = crate::routes::packs::item_checksum(&r.checksum, &cards)?;
+        let resource = crate::routes::packs::build_pack_resource(
+            r.id,
+            r.vignette.clone(),
+            r.lead_in.clone(),
+            r.difficulty.clone(),
+            r.options.clone(),
+            r.correct_index,
+            r.key_learning_point.clone(),
+            r.exam_tip.clone(),
+            r.source_ref.clone(),
+            tutoring_cards.remove(&r.id).unwrap_or_default(),
+        )?;
+        let checksum = resource.checksum.clone();
         items.push((r.id, checksum));
     }
     let canonical = crate::routes::packs::manifest_canonical(
@@ -2692,17 +2713,23 @@ pub async fn run_recovery_drill(
         &chapter_ids,
         &items,
     )?;
-    let key = crate::routes::packs::signing_key(&state)?;
-    let signature = crate::routes::packs::hmac_sha256_hex(key, canonical.as_bytes());
-    let verify_ok = signature == crate::routes::packs::hmac_sha256_hex(key, canonical.as_bytes());
+    let signer = crate::routes::packs::ed25519_signing_key(&state)?;
+    let signature = signer.sign(canonical.as_bytes());
+    let verify_ok = signer
+        .verifying_key()
+        .verify(canonical.as_bytes(), &signature)
+        .is_ok();
     let tamper = format!("{canonical}TAMPERED");
-    let tamper_detected =
-        signature != crate::routes::packs::hmac_sha256_hex(key, tamper.as_bytes());
+    let tamper_detected = signer
+        .verifying_key()
+        .verify(tamper.as_bytes(), &signature)
+        .is_err();
     let pass = verify_ok && tamper_detected && !rows.is_empty();
     let evidence = json!({
         "items": rows.len(),
         "signature_verified": verify_ok,
         "tamper_detected": tamper_detected,
+        "algorithm": "ed25519",
     });
     let drill_id = Uuid::new_v4();
     sqlx::query!(

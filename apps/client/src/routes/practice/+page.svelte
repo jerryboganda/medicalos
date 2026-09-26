@@ -638,6 +638,7 @@
 	<div class="card">
 		<h2>Study tools</h2>
 		<p style="margin:0;">
+			<a class="btn" href={`${base}/offline`} data-testid="nav-offline-packs">Offline packs</a>
 			<a class="btn" href={`${base}/review`}>Review flashcards</a>
 			<a class="btn" href={`${base}/coach`}>Ask the Coach</a>
 			<a class="btn" href={`${base}/notes`}>My notes</a>

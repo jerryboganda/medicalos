@@ -22,7 +22,7 @@ pub struct AppState {
     /// §23: when set, the OpenAI-compatible adapter routes complex turns.
     pub openai_api_key: Option<String>,
     pub openai_base_url: String,
-    /// OFF-01: HMAC key signing offline pack manifests.
+    /// OFF-01: private secret deriving the lease-bound public-key pack signer.
     pub pack_signing_key: Option<String>,
     /// Encryption key for per-institution OIDC client secrets. Omit to allow public clients only.
     pub oidc_credential_key: Option<String>,

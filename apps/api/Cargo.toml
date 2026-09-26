@@ -24,6 +24,7 @@ sha2 = { workspace = true }
 url = { workspace = true }
 openidconnect = { workspace = true }
 chacha20poly1305 = { workspace = true }
+ed25519-dalek = { workspace = true }
 tower-http = { workspace = true }
 calamine = "0.36.1"
 csv = "1.4.0"

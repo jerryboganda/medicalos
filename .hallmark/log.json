@@ -1,6 +1,22 @@
 [
   {
     "date": "2026-09-26",
+    "macrostructure": "Long Document (published article reader with native media section)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "timed caption track and seekable chapter list",
+    "variation": "rights references stay visible beside native audio/video controls",
+    "brief": "LIB-08 article media playback"
+  },
+  {
+    "date": "2026-09-26",
+    "macrostructure": "App Shell (offline pack manager) + Long Document (question reader)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "exam-scoped chapter downloads, resumable capacity states, encrypted saved packs, and a one-question reader",
+    "brief": "OFF-01 resumable, signed offline practice packs"
+  },
+  {
+    "date": "2026-09-26",
     "macrostructure": "Workbench (article index and editor) + Long Document (library reader)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
     "enrichment": "none",
@@ -197,5 +213,13 @@
     "enrichment": "none",
     "variation": "opt-in recurring event cards lead into one server-timed question at a time; exam-scoped weekly cohorts show private standings and one-click opt-in",
     "brief": "COMP-01/02/03 recurring competition series and weekly leagues"
+  },
+  {
+    "date": "2026-09-26",
+    "macrostructure": "Long Document (source-linked article reading column)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "native audio/video controls, timed captions, transcript, and chapter navigation",
+    "variation": "stream rights-referenced media only on demand; keep offline packs limited to licensed question resources",
+    "brief": "LIB-08 article media player"
   }
 ]

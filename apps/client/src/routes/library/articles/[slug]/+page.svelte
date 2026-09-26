@@ -2,18 +2,20 @@
 	/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V5
 	 * macrostructure: Long Document · scope controls followed by one source-linked reading column
 	 * theme: Midnight-equivalent (owner-locked) · variation: persistent country/date context above the article
-	 * motion: cut · contrast: pass (40–41) · mobile: pending final E2E (34, 49, 50–57)
+	 * motion: cut · contrast: pass (40–41) · mobile: CI viewport gate authored; final run pending
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { goto } from '$app/navigation';
-	import { Api, ApiError, type LibraryArticleResponse } from '$lib/api';
+	import { Api, ApiError, type ArticleMedia, type LibraryArticleResponse } from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 
 	let slug = $state('');
 	let jurisdiction = $state('');
 	let asOf = $state('');
 	let article = $state<LibraryArticleResponse | null>(null);
+	let captionTrackUrls = $state<Record<string, string>>({});
+	let mediaElements: Record<string, HTMLMediaElement | undefined> = {};
 	let loading = $state(false);
 	let error = $state('');
 
@@ -21,17 +23,63 @@
 		return new Date().toISOString().slice(0, 10);
 	}
 
+	function mediaTime(milliseconds: number): string {
+		const totalSeconds = Math.floor(milliseconds / 1000);
+		const hours = Math.floor(totalSeconds / 3600);
+		const minutes = Math.floor((totalSeconds % 3600) / 60);
+		const seconds = totalSeconds % 60;
+		return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+	}
+
+	function captionVtt(media: ArticleMedia): string {
+		const cues = media.captions.map((cue, index) => {
+			const text = cue.text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replace(/\r?\n+/g, ' ');
+			return `${index + 1}\n${mediaTime(cue.start_ms)}.${(cue.start_ms % 1000).toString().padStart(3, '0')} --> ${mediaTime(cue.end_ms)}.${(cue.end_ms % 1000).toString().padStart(3, '0')}\n${text}`;
+		});
+		return `WEBVTT\n\n${cues.join('\n\n')}\n`;
+	}
+
+	function updateCaptionTracks(media: ArticleMedia[]) {
+		for (const objectUrl of Object.values(captionTrackUrls)) URL.revokeObjectURL(objectUrl);
+		const next: Record<string, string> = {};
+		for (const item of media) {
+			if (item.captions.length) {
+				next[item.media_id] = URL.createObjectURL(
+					new Blob([captionVtt(item)], { type: 'text/vtt' })
+				);
+			}
+		}
+		captionTrackUrls = next;
+	}
+
+	function seekMedia(mediaId: string, atMs: number) {
+		const player = mediaElements[mediaId];
+		if (!player) return;
+		player.focus();
+		const seek = () => {
+			player.currentTime = atMs / 1000;
+		};
+		if (player.readyState === HTMLMediaElement.HAVE_NOTHING) {
+			player.addEventListener('loadedmetadata', seek, { once: true });
+			player.load();
+			return;
+		}
+		seek();
+	}
+
 	async function loadArticle() {
 		if (!slug) return;
 		loading = true;
 		error = '';
 		article = null;
+		updateCaptionTracks([]);
 		try {
 			const selectedJurisdiction = jurisdiction.trim().toUpperCase();
 			article = await Api.libraryArticle(slug, {
 				jurisdiction: selectedJurisdiction || undefined,
 				as_of: asOf || utcToday()
 			});
+			updateCaptionTracks(article.media);
 		} catch (value) {
 			error =
 				value instanceof ApiError && value.status === 404
@@ -75,6 +123,8 @@
 		asOf = params.get('as_of') ?? utcToday();
 		void loadArticle();
 	});
+
+	onDestroy(() => updateCaptionTracks([]));
 </script>
 
 <svelte:head>
@@ -149,6 +199,94 @@
 			Published content is not represented as clinically reviewed.
 		</p>
 		<pre class="article-body" data-testid="article-body">{article.body}</pre>
+
+		{#if article.media.length > 0}
+			<section class="article-media" aria-labelledby="article-media-heading" data-testid="article-media">
+				<h2 id="article-media-heading">Audio and video</h2>
+				{#each article.media as media (media.media_id)}
+					<section class="media-item" data-testid={`article-media-${media.media_id}`}>
+						<h3>{media.kind === 'video' ? 'Video' : 'Audio'}</h3>
+						{#if media.kind === 'video'}
+							<video
+								bind:this={mediaElements[media.media_id]}
+								class="media-player"
+								controls
+								preload="none"
+								src={media.url}
+								data-testid={`article-media-player-${media.media_id}`}
+							>
+								{#if captionTrackUrls[media.media_id]}
+									<track
+										kind="captions"
+										srclang="und"
+										label="Captions"
+										src={captionTrackUrls[media.media_id]}
+										default
+										data-testid={`article-media-captions-${media.media_id}`}
+									/>
+								{/if}
+								Your browser cannot play this video.
+							</video>
+						{:else if media.kind === 'audio'}
+							<audio
+								bind:this={mediaElements[media.media_id]}
+								class="media-player"
+								controls
+								preload="none"
+								src={media.url}
+								data-testid={`article-media-player-${media.media_id}`}
+							>
+								{#if captionTrackUrls[media.media_id]}
+									<track
+										kind="captions"
+										srclang="und"
+										label="Captions"
+										src={captionTrackUrls[media.media_id]}
+										default
+										data-testid={`article-media-captions-${media.media_id}`}
+									/>
+								{/if}
+								Your browser cannot play this audio.
+							</audio>
+						{/if}
+						{#if media.captions.length > 0}
+							<div class="media-transcript" data-testid={`article-media-transcript-${media.media_id}`}>
+								<h4>Transcript</h4>
+								<ol>
+									{#each media.captions as cue, index (index)}
+										<li><time>{mediaTime(cue.start_ms)}</time> {cue.text}</li>
+									{/each}
+								</ol>
+							</div>
+						{/if}
+						{#if media.chapters.length > 0}
+							<nav aria-label={`${media.kind} chapters`}>
+								<h4>Chapters</h4>
+								<ol class="media-chapters">
+									{#each media.chapters as chapter, index (index)}
+										<li>
+											<button
+												class="linklike"
+												type="button"
+												aria-label={`Start ${chapter.title} at ${mediaTime(chapter.at_ms)}`}
+												data-testid={`article-media-chapter-${media.media_id}-${chapter.at_ms}`}
+												onclick={() => seekMedia(media.media_id, chapter.at_ms)}
+											>
+												<time>{mediaTime(chapter.at_ms)}</time> · {chapter.title}
+											</button>
+										</li>
+									{/each}
+								</ol>
+							</nav>
+						{/if}
+						<p class="muted" data-testid={`article-media-rights-${media.media_id}`}>
+							Rights reference: {media.rights_ref}
+						</p>
+					</section>
+				{/each}
+				<p class="muted">Media files are not saved in offline packs.</p>
+			</section>
+		{/if}
 
 		{#if article.citations.length > 0}
 			<section class="citation-section" aria-labelledby="article-citations-heading">
@@ -247,6 +385,60 @@
 		line-height: 1.75;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
+	}
+
+	.article-media {
+		display: grid;
+		gap: var(--space-lg);
+		margin-block: var(--space-xl);
+	}
+
+	.article-media > h2,
+	.media-item h3,
+	.media-transcript h4,
+	.media-item nav h4 {
+		margin-block: 0 var(--space-sm);
+	}
+
+	.media-item {
+		display: grid;
+		gap: var(--space-md);
+		min-width: 0;
+		padding: var(--space-lg);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-card);
+		background: var(--color-surface);
+	}
+
+	.media-player {
+		display: block;
+		width: 100%;
+		max-width: 100%;
+		border-radius: var(--radius-control);
+		background: var(--color-canvas);
+	}
+
+	.media-transcript,
+	.media-chapters {
+		min-width: 0;
+		padding-left: var(--space-xl);
+	}
+
+	.media-transcript li,
+	.media-chapters li {
+		margin-block: var(--space-xs);
+		overflow-wrap: anywhere;
+	}
+
+	.media-transcript time,
+	.media-chapters time {
+		color: var(--color-text-secondary);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.media-chapters button {
+		min-height: 44px;
+		text-align: left;
 	}
 
 	.citation-section {

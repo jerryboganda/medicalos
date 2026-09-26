@@ -64,4 +64,4 @@ Live surfaces (2026-09-19, owner-directed):
 | `VPS_USER` | `root` |
 | `VPS_SSH_KEY` | Private key matching the VPS `authorized_keys` |
 | `VPS_DATABASE_URL` | `PLATFORM_PG_URL` value from the provisioned env file |
-| `VPS_PACK_SIGNING_KEY` | Private random key used to sign offline-pack manifests (minimum 32 non-whitespace bytes) |
+| `VPS_PACK_SIGNING_KEY` | Private random secret deriving lease-bound Ed25519 offline-pack signatures (minimum 32 non-whitespace bytes; legacy v1 uses HMAC) |

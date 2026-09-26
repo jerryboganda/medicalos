@@ -23,12 +23,17 @@ must not expose cards.
 - A tutor session returns cards only for eligible questions. The session UI
   offers one-tap display after the learner answers and retains the cards in
   its local session cache so the same help remains available offline.
-- The v2 signed pack manifest requires a paid, active, device-bound lease and
-  covers exact cached tutoring-card content in its signature. It includes cards
-  only after that learner has answered the matching question in tutor mode;
-  timed-only and reserved questions that prohibit AI do not include cards.
+- The lease-bound manifest requires a paid, active, device-bound lease and
+  signs a checksum of the complete resource. The encrypted resource batch
+  includes tutoring cards only after that learner has answered the matching
+  question in tutor mode; timed-only and AI-restricted reserved questions do
+  not include them.
 - The v1 metadata-only manifest contract remains compatible and never returns
   tutoring cards.
+- The browser verifies a publicly verifiable Ed25519 signature and complete
+  resource checksums before saving encrypted IndexedDB batches.
+- Batch downloads resume from the verified items already stored. Browser
+  storage remains best effort and high-stakes assessments stay online.
 - API startup rejects a missing or weak `PACK_SIGNING_KEY`; production deploy
   passes a private value from `VPS_PACK_SIGNING_KEY` without logging it.
 - Generated cards are grounded in reviewed question fields. Medical reviewer
@@ -50,13 +55,15 @@ sampling remains pending until real reviewer evidence is recorded.
   first needs them.
 - Answered tutor feedback and session reloads return source-linked cards;
   timed sessions and AI-restricted reserved questions do not expose them.
-- The signed pack manifest contains the cards and hashes their exact content.
+- Manifest v4 binds complete question resources and eligible cards to a
+  publicly verifiable Ed25519 signature; encrypted resource batches must
+  match signed checksums before browser storage.
 - The session UI offers the five one-tap actions and keeps received cards in
   the local session draft. API/browser/pack coverage passed in GitHub Actions
   run 36159484978; medical reviewer sampling remains an external gate.
-- The v1 metadata-only contract is preserved. The v2 manifest is lease-,
-  device-, and answered-tutor-scoped, and its regression test recomputes the
-  exact item hash and HMAC.
+- The v1 metadata-only contract is preserved. The v4 manifest is lease- and
+  device-scoped and signs complete resources with Ed25519 so the browser can
+  verify it offline. Medical reviewer sampling remains an external gate.
 - Runtime signing now fails closed without a non-whitespace key of at least 32
   bytes. Production CI requires the owner-configured `VPS_PACK_SIGNING_KEY`;
   no deployment has been run in this continuation.
