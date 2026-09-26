@@ -201,6 +201,34 @@ async fn register_and_login(app: Router) -> String {
     v["token"].as_str().expect("token").to_string()
 }
 
+async fn register(app: Router, prefix: String) -> (Uuid, String) {
+    let email = format!("{prefix}-{}@example.test", Uuid::new_v4());
+    let (status, registered) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "register: {registered}");
+    let user_id: Uuid = registered["user_id"].as_str().unwrap().parse().unwrap();
+    let (status, login) = call(
+        app,
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "login: {login}");
+    (user_id, login["token"].as_str().unwrap().to_string())
+}
+
 #[tokio::test]
 async fn xp_competitions_coverage_flow() {
     let _g = LOCK.lock().await;
@@ -12972,34 +13000,6 @@ async fn community_groups_duels_and_integrity_gated_prizes() {
     let ids = seed::seed(&state.pool).await.expect("seed");
 
     // Register with explicit ids: duels and assertions need user references.
-    let register = |app: Router, prefix: String| async move {
-        let email = format!("{prefix}-{}@example.test", Uuid::new_v4());
-        let (status, reg) = call(
-            app.clone(),
-            request(
-                "POST",
-                "/v1/auth/register",
-                None,
-                Some(serde_json::json!({"email": email, "password": "longenough"})),
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{reg}");
-        let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
-        let (status, login) = call(
-            app.clone(),
-            request(
-                "POST",
-                "/v1/auth/login",
-                None,
-                Some(serde_json::json!({"email": email, "password": "longenough"})),
-            ),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{login}");
-        let token = login["token"].as_str().unwrap().to_string();
-        (user_id, token)
-    };
     let (_alice_id, alice) = register(app.clone(), "alice".into()).await;
     let (bob_id, bob) = register(app.clone(), "bob".into()).await;
     let (_, carol) = register(app.clone(), "carol".into()).await;
@@ -16636,36 +16636,6 @@ async fn grow01_share_cards_are_honest_and_question_free() {
     let ids = seed::seed(&state.pool).await.expect("seed");
 
     // Register explicitly: the share fixtures need the learner's user id.
-    let register = |app: Router, tag: String| {
-        let email = format!("share-{tag}-{}@example.test", Uuid::new_v4());
-        async move {
-            let (status, reg) = call(
-                app.clone(),
-                request(
-                    "POST",
-                    "/v1/auth/register",
-                    None,
-                    Some(serde_json::json!({"email": email, "password": "longenough"})),
-                ),
-            )
-            .await;
-            assert_eq!(status, StatusCode::OK, "{reg}");
-            let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
-            let (status, login) = call(
-                app.clone(),
-                request(
-                    "POST",
-                    "/v1/auth/login",
-                    None,
-                    Some(serde_json::json!({"email": email, "password": "longenough"})),
-                ),
-            )
-            .await;
-            assert_eq!(status, StatusCode::OK, "{login}");
-            let token = login["token"].as_str().unwrap().to_string();
-            (user_id, token)
-        }
-    };
     let (learner_id, token) = register(app.clone(), "learner".into()).await;
     let (rival_id, _rival_token) = register(app.clone(), "rival".into()).await;
 
