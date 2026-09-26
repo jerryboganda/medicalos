@@ -684,7 +684,7 @@ async fn account_export_and_signed_pack_manifest() {
         .unwrap()
         .parse()
         .unwrap();
-    let chapter_ids = vec![ids.chapter3];
+    let chapter_ids = [ids.chapter3];
     let canonical = format!(
         "medical-os-pack-manifest-v4\nexam {}\ndevice {}\nchapters {}\n{} {}\n",
         ids.exam_id,
@@ -819,7 +819,9 @@ async fn account_export_and_signed_pack_manifest() {
 fn hex_bytes(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).expect("hex byte"))
         .collect()
 }
