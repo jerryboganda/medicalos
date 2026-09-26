@@ -18,3 +18,6 @@ Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §11.3; `.scratch/ex08-integrity
 
 - 2026-09-26: Found during the production-readiness audit. The handler accepts
   a caller-supplied session ID and inserts it without an ownership check.
+- 2026-09-26: The regression test failed on commit `6257ffc` because a foreign
+  session returned `recorded: true`. Added an owner-scoped lookup before insert;
+  GitHub Actions verification is pending.

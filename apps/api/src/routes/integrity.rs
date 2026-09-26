@@ -45,6 +45,19 @@ pub async fn record_integrity_event(
             format!("signal_type must be one of: {}", VALID_SIGNALS.join(", ")),
         ));
     }
+    if let Some(session_id) = req.session_id {
+        let session_is_owned = sqlx::query!(
+            "SELECT id FROM practice_sessions WHERE id = $1 AND user_id = $2",
+            session_id,
+            user.user_id
+        )
+        .fetch_optional(&state.pool)
+        .await?
+        .is_some();
+        if !session_is_owned {
+            return Err(ApiError::not_found("session_not_found"));
+        }
+    }
     let id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO integrity_events
