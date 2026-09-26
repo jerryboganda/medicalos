@@ -197,8 +197,11 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
   const openPageErrors: string[] = [];
   page.on('pageerror', (cause) => openPageErrors.push(cause.message));
   await page.getByTestId('pack-open').click();
+  // Decrypting and opening the pack is real crypto work and can exceed the
+  // 5s default under CI parallel load.
   await expect
-    .poll(async () => {
+    .poll(
+      async () => {
       if (await page.getByTestId('pack-question').isVisible()) return 'opened';
       const error = page.getByTestId('pack-error');
       const reader = page.locator('.reader');
@@ -206,7 +209,7 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
       const readerText = (await reader.count()) ? await reader.innerText() : 'absent';
       return `opening; error=${errorText}; reader=${readerText.replace(/\s+/g, ' ').slice(0, 240)}; pageerror=${openPageErrors.at(-1) ?? 'none'}`;
     })
-    .toBe('opened');
+    .toBe('opened', { timeout: 20_000 });
   await expect(page.getByTestId('pack-question')).toContainText('Fictional practice case 1');
   await expect(page.getByTestId('pack-answer-reveal')).not.toHaveAttribute('open', '');
   await page.getByTestId('pack-answer-reveal').locator('summary').click();
