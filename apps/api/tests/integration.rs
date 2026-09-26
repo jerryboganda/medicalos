@@ -229,6 +229,30 @@ async fn register(app: Router, prefix: String) -> (Uuid, String) {
     (user_id, login["token"].as_str().unwrap().to_string())
 }
 
+async fn pack_resources(
+    app: Router,
+    exam_id: Uuid,
+    token: &str,
+    device_id: &str,
+    chapters: &[Uuid],
+    question_version_ids: &[Uuid],
+) -> (StatusCode, Value) {
+    call(
+        app,
+        request(
+            "POST",
+            &format!("/v2/packs/{exam_id}/resources"),
+            Some(token),
+            Some(serde_json::json!({
+                "device_id": device_id,
+                "chapters": chapters,
+                "question_version_ids": question_version_ids
+            })),
+        ),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn xp_competitions_coverage_flow() {
     let _g = LOCK.lock().await;
@@ -6461,10 +6485,30 @@ async fn pregen_tutoring_generated_and_cached() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{before_tutor_answer}");
-    assert!(before_tutor_answer["items"][0]["tutoring_cards"]
+    assert!(before_tutor_answer["items"][0]
+        .get("tutoring_cards")
+        .is_none());
+    let manifest_question_ids: Vec<Uuid> = before_tutor_answer["items"]
         .as_array()
         .unwrap()
-        .is_empty());
+        .iter()
+        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let (status, before_answer_resources) = pack_resources(
+        app.clone(),
+        ids.exam_id,
+        &token,
+        "device-a",
+        &[ids.chapter3],
+        &manifest_question_ids,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{before_answer_resources}");
+    assert!(before_answer_resources["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|resource| resource["tutoring_cards"].as_array().unwrap().is_empty()));
 
     // A tutor answer receives its cards with the immediate feedback; the
     // session detail also restores them after a reload.
@@ -6508,6 +6552,23 @@ async fn pregen_tutoring_generated_and_cached() {
     .await;
     assert_eq!(status, StatusCode::OK, "{answered}");
     assert_eq!(answered["tutoring_cards"].as_array().unwrap().len(), 5);
+    let (status, answered_resources) = pack_resources(
+        app.clone(),
+        ids.exam_id,
+        &token,
+        "device-a",
+        &[ids.chapter3],
+        &manifest_question_ids,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answered_resources}");
+    assert_eq!(
+        answered_resources["resources"][0]["tutoring_cards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
 
     let (status, timed) = call(
         app.clone(),
@@ -6671,11 +6732,27 @@ async fn pregen_tutoring_generated_and_cached() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{timed_chapter_manifest}");
-    assert!(timed_chapter_manifest["items"]
+    let timed_question_ids: Vec<Uuid> = timed_chapter_manifest["items"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|item| item["tutoring_cards"].as_array().unwrap().is_empty()));
+        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let (status, timed_resources) = pack_resources(
+        app.clone(),
+        ids.exam_id,
+        &token,
+        "device-b",
+        &[ids.chapter1],
+        &timed_question_ids,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timed_resources}");
+    assert!(timed_resources["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|resource| resource["tutoring_cards"].as_array().unwrap().is_empty()));
 
     sqlx::query(
         "UPDATE pregen_tutoring SET content = 'changed cache content'
@@ -12264,7 +12341,18 @@ async fn reserved_family_form_session_and_ai_gate() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{manifest}");
-    assert!(manifest["items"][0]["tutoring_cards"]
+    assert!(manifest["items"][0].get("tutoring_cards").is_none());
+    let (status, reserved_resources) = pack_resources(
+        app.clone(),
+        ids.exam_id,
+        &reviewer,
+        "reserved-device",
+        &[chapter_id],
+        &[vid],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reserved_resources}");
+    assert!(reserved_resources["resources"][0]["tutoring_cards"]
         .as_array()
         .unwrap()
         .is_empty());
