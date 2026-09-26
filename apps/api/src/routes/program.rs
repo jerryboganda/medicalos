@@ -1908,6 +1908,15 @@ pub async fn list_scenarios(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioStartRequest.ts",
+        rename = "ScenarioStartRequest"
+    )
+)]
 pub struct StartScenarioReq {
     pub scenario_slug: String,
 }
@@ -2074,6 +2083,15 @@ pub async fn get_scenario_run(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioEventRequest.ts",
+        rename = "ScenarioEventRequest"
+    )
+)]
 pub struct ScenarioEventReq {
     pub event: String,
 }

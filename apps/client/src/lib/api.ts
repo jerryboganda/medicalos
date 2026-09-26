@@ -115,10 +115,12 @@ import type { ImageCaseConceptsResponse } from './generated/image/ImageCaseConce
 import type { ImageCaseDetail } from './generated/image/ImageCaseDetail';
 import type { ImageCaseListResponse } from './generated/image/ImageCaseListResponse';
 import type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
+import type { ScenarioHandoverCreateRequest } from './generated/scenario/ScenarioHandoverCreateRequest';
 import type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
 import type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
 import type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
 import type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
+import type { ScenarioCounterfactualReplayRequest } from './generated/scenario/ScenarioCounterfactualReplayRequest';
 import type { ScenarioAssessmentAppeal } from './generated/scenario/ScenarioAssessmentAppeal';
 import type { ScenarioAssessmentAppealCreatedResponse } from './generated/scenario/ScenarioAssessmentAppealCreatedResponse';
 import type { ScenarioAssessmentAppealQueueResponse } from './generated/scenario/ScenarioAssessmentAppealQueueResponse';
@@ -131,13 +133,17 @@ import type { ScenarioAssessmentReceipt } from './generated/scenario/ScenarioAss
 import type { ScenarioAssessmentRequest } from './generated/scenario/ScenarioAssessmentRequest';
 import type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 import type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
+import type { ScenarioEventRequest } from './generated/scenario/ScenarioEventRequest';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
 import type { ScenarioRun } from './generated/scenario/ScenarioRun';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
+import type { ScenarioStartRequest } from './generated/scenario/ScenarioStartRequest';
 import type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
 import type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
 import type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
+import type { ScenarioTeamInviteRequest } from './generated/scenario/ScenarioTeamInviteRequest';
 import type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
+import type { ScenarioTeamJoinRequest } from './generated/scenario/ScenarioTeamJoinRequest';
 import type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 
 import type { Today } from './generated/today/Today';
@@ -475,23 +481,29 @@ export type { ScenarioAssessmentStatus } from './generated/scenario/ScenarioAsse
 export type { ScenarioCriterionAssessment } from './generated/scenario/ScenarioCriterionAssessment';
 export type { ScenarioCounterfactualEvent } from './generated/scenario/ScenarioCounterfactualEvent';
 export type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
+export type { ScenarioCounterfactualReplayRequest } from './generated/scenario/ScenarioCounterfactualReplayRequest';
 export type { ScenarioConsequentialUseStatus } from './generated/scenario/ScenarioConsequentialUseStatus';
 export type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 export type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
+export type { ScenarioEventRequest } from './generated/scenario/ScenarioEventRequest';
 export type { ScenarioRubricResult } from './generated/scenario/ScenarioRubricResult';
 export type { ScenarioRubricStatus } from './generated/scenario/ScenarioRubricStatus';
 export type { ScenarioRun } from './generated/scenario/ScenarioRun';
 export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
+export type { ScenarioStartRequest } from './generated/scenario/ScenarioStartRequest';
 export type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
 export type { ScenarioTranscriptCorrection } from './generated/scenario/ScenarioTranscriptCorrection';
 export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
 export type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
+export type { ScenarioHandoverCreateRequest } from './generated/scenario/ScenarioHandoverCreateRequest';
 export type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
 export type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
 export type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
 export type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
 export type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
+export type { ScenarioTeamInviteRequest } from './generated/scenario/ScenarioTeamInviteRequest';
 export type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
+export type { ScenarioTeamJoinRequest } from './generated/scenario/ScenarioTeamJoinRequest';
 export type { ScenarioTeamMember } from './generated/scenario/ScenarioTeamMember';
 export type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 export type { PackLeaseListResponse } from './generated/packs/PackLeaseListResponse';
@@ -764,7 +776,11 @@ export const Api = {
 			{ decision, note } satisfies ImageAnnotationReviewRequest
 		),
 	startScenario: (scenarioSlug: string) =>
-		call<ScenarioStartResponse>('POST', '/v1/scenarios/runs', { scenario_slug: scenarioSlug }),
+		call<ScenarioStartResponse>(
+			'POST',
+			'/v1/scenarios/runs',
+			{ scenario_slug: scenarioSlug } satisfies ScenarioStartRequest
+		),
 	getScenarioRun: (runId: string) =>
 		call<ScenarioRun>('GET', `/v1/scenarios/runs/${encodeURIComponent(runId)}`),
 	getScenarioTeam: (runId: string) =>
@@ -773,13 +789,13 @@ export const Api = {
 		call<ScenarioTeamInviteCreatedResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/team/invites`,
-			{ role }
+			{ role } satisfies ScenarioTeamInviteRequest
 		),
 	joinScenarioTeam: (inviteCode: string) =>
 		call<ScenarioTeamJoinResponse>(
 			'POST',
 			'/v1/scenario-team-invites/join',
-			{ invite_code: inviteCode }
+			{ invite_code: inviteCode } satisfies ScenarioTeamJoinRequest
 		),
 	listScenarioHandovers: (runId: string) =>
 		call<ScenarioHandoversResponse>(
@@ -788,9 +804,7 @@ export const Api = {
 		),
 	createScenarioHandover: (
 		runId: string,
-		body: Pick<ScenarioHandover, 'situation' | 'background' | 'assessment' | 'recommendation'> & {
-			recipient_member_id: string;
-		}
+		body: ScenarioHandoverCreateRequest
 	) =>
 		call<ScenarioHandoverCreatedResponse>(
 			'POST',
@@ -802,11 +816,11 @@ export const Api = {
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers/${encodeURIComponent(handoverId)}/ack`
 		),
-	advanceScenario: (runId: string, event: string) =>
+	advanceScenario: (runId: string, event: ScenarioEventRequest['event']) =>
 		call<ScenarioEventResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/events`,
-			{ event }
+			{ event } satisfies ScenarioEventRequest
 		),
 	getScenarioDebrief: (runId: string) =>
 		call<ScenarioDebrief>(
@@ -819,11 +833,11 @@ export const Api = {
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/appeals`,
 			body
 		),
-	replayScenario: (runId: string, events: string[]) =>
+	replayScenario: (runId: string, events: ScenarioCounterfactualReplayRequest['events']) =>
 		call<ScenarioCounterfactualReplay>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/counterfactual`,
-			{ events }
+			{ events } satisfies ScenarioCounterfactualReplayRequest
 		),
 	listScenarioAssessmentAppeals: () =>
 		call<ScenarioAssessmentAppealQueueResponse>(

@@ -61,7 +61,8 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   are authored in issue 37, administrator hierarchy/concept contracts in
   issue 38, administrator workflow/import/audit contracts in issue 39, and
   pack lease revocation in issue 40, image case administration requests
-  in issue 41, and JSON numeric wire types in issue 42. The API facade now
+  in issue 41, JSON numeric wire types in issue 42, and remaining scenario
+  request contracts in issue 43. The API facade now
   uses generated request and response types;
   final generator-drift, client-build, and browser acceptance remain pending,
   so ARCH-02 stays in progress.

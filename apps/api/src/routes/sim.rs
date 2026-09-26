@@ -513,6 +513,15 @@ pub async fn debrief(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioCounterfactualReplayRequest.ts",
+        rename = "ScenarioCounterfactualReplayRequest"
+    )
+)]
 pub struct CounterfactualReplayReq {
     pub events: Vec<String>,
 }
