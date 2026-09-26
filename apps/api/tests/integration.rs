@@ -3016,8 +3016,7 @@ async fn ex08_mock_policy_snapshots_and_late_answers_are_unranked() {
     let mock_id = create_policy_mock(
         app.clone(),
         &token,
-        ids.exam_id,
-        ids.chapter1,
+        &ids,
         "Late upload fixture",
         "log_only",
         None,
@@ -3194,8 +3193,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     let warn_mock = create_policy_mock(
         app.clone(),
         &token,
-        ids.exam_id,
-        ids.chapter1,
+        &ids,
         "Warning fixture",
         "warn",
         Some(15),
@@ -3283,8 +3281,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     let auto_mock = create_policy_mock(
         app.clone(),
         &token,
-        ids.exam_id,
-        ids.chapter1,
+        &ids,
         "Auto-submit fixture",
         "auto_submit",
         Some(15),
@@ -3357,8 +3354,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     let manual_mock = create_policy_mock(
         app.clone(),
         &token,
-        ids.exam_id,
-        ids.chapter1,
+        &ids,
         "Manual submission fixture",
         "auto_submit",
         Some(15),
@@ -3541,8 +3537,7 @@ fn admin_req(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) 
 async fn create_policy_mock(
     app: Router,
     token: &str,
-    exam_id: Uuid,
-    chapter_id: Uuid,
+    ids: &seed::SeedIds,
     title: &str,
     integrity_policy: &str,
     away_timeout_seconds: Option<i32>,
@@ -3556,8 +3551,8 @@ async fn create_policy_mock(
             Some(token),
             Some(serde_json::json!({
                 "title": title,
-                "exam_id": exam_id,
-                "blueprint": [{"chapter_id": chapter_id, "count": 2}],
+                "exam_id": ids.exam_id,
+                "blueprint": [{"chapter_id": ids.chapter1, "count": 2}],
                 "time_limit_seconds": 60,
                 "integrity_policy": integrity_policy,
                 "away_timeout_seconds": away_timeout_seconds,
