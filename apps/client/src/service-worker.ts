@@ -1,7 +1,6 @@
 /// <reference lib="webworker" />
 
-import { base } from '$app/paths';
-import { build, files, version } from '$service-worker';
+import { base, build, files, version } from '$service-worker';
 
 const SHELL_CACHE = `medical-os-shell-${version}`;
 const STATIC_CACHE = `medical-os-static-${version}`;
