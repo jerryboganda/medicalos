@@ -1,9 +1,9 @@
 # ARCH-02 — Scenario discovery and start response contracts
 
-Status: in-progress
-Triage label: ready-for-agent
+Status: ready-for-agent
 Requirement IDs: ARCH-02, SIM-01, SIM-02, SIM-05
 Source: `.scratch/arch02-typescript-contracts/spec.md`; `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §14
+Implementation state: DTOs and client imports committed; final CI acceptance is deferred until the remaining implementation slices are complete.
 
 ## Problem Statement
 
