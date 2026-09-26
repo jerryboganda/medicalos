@@ -1527,25 +1527,64 @@ pub async fn submit_transcript_correction(
     ))
 }
 
-pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<serde_json::Value> {
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTimelineEvent.ts",
+        rename = "ScenarioTimelineEvent"
+    )
+)]
+pub struct ScenarioTimelineEvent {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    index: usize,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    sequence: usize,
+    from: Option<String>,
+    on: Option<String>,
+    to: Option<String>,
+    actor_role: Option<String>,
+    uncertain: bool,
+    uncertainty_reason: Option<String>,
+}
+
+pub(crate) fn transcript_timeline(transcript: &serde_json::Value) -> Vec<ScenarioTimelineEvent> {
     transcript
         .as_array()
         .into_iter()
         .flatten()
         .enumerate()
-        .map(|(index, event)| {
-            json!({
-                "index": index,
-                "sequence": index + 1,
-                "from": event.get("from").and_then(serde_json::Value::as_str),
-                "on": event.get("on").and_then(serde_json::Value::as_str),
-                "to": event.get("to").and_then(serde_json::Value::as_str),
-                "actor_role": event.get("actor_role").and_then(serde_json::Value::as_str),
-                // SIM-03: authored text-mode uncertainty travels with the
-                // event so the learner and examiner see it before feedback.
-                "uncertain": event.get("uncertain").and_then(serde_json::Value::as_bool).unwrap_or(false),
-                "uncertainty_reason": event.get("uncertainty_reason").and_then(serde_json::Value::as_str),
-            })
+        .map(|(index, event)| ScenarioTimelineEvent {
+            index,
+            sequence: index + 1,
+            from: event
+                .get("from")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            on: event
+                .get("on")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            to: event
+                .get("to")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            actor_role: event
+                .get("actor_role")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            // SIM-03: authored text-mode uncertainty travels with the
+            // event so the learner and examiner see it before feedback.
+            uncertain: event
+                .get("uncertain")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            uncertainty_reason: event
+                .get("uncertainty_reason")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
         })
         .collect()
 }
@@ -1701,11 +1740,55 @@ struct ScenarioRunView {
     state_machine: serde_json::Value,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioRun.ts",
+        rename = "ScenarioRun"
+    )
+)]
+pub struct ScenarioRun {
+    run_id: Uuid,
+    scenario: String,
+    scenario_version: i32,
+    current_state: String,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown[]"))]
+    transcript: serde_json::Value,
+    timeline: Vec<ScenarioTimelineEvent>,
+    available_actions: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    started_at: DateTime<Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    finished_at: Option<DateTime<Utc>>,
+    finished: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioEventResponse.ts",
+        rename = "ScenarioEventResponse"
+    )
+)]
+pub struct ScenarioEventResponse {
+    run_id: Uuid,
+    current_state: String,
+    finished: bool,
+    available_actions: Vec<String>,
+    timeline: Vec<ScenarioTimelineEvent>,
+}
+
 pub async fn get_scenario_run(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(run_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioRun>> {
     let run = sqlx::query_as::<_, ScenarioRunView>(
         r#"SELECT scenario.title, run.current_state, run.transcript, run.started_at,
 		          run.finished_at, version.version, version.state_machine
@@ -1724,20 +1807,24 @@ pub async fn get_scenario_run(
     .await?
     .ok_or_else(|| ApiError::not_found("run_not_found"))?;
     let finished = run.finished_at.is_some();
-    Ok(Json(json!({
-        "run_id": run_id,
-        "scenario": run.title,
-        "scenario_version": run.version,
-        "current_state": run.current_state,
-        "transcript": run.transcript,
-        "timeline": transcript_timeline(&run.transcript),
-        "available_actions": if finished { Vec::<String>::new() } else {
-            scenario_events(&run.state_machine, Some(&run.current_state))
-        },
-        "started_at": run.started_at,
-        "finished_at": run.finished_at,
-        "finished": finished,
-    })))
+    let available_actions = if finished {
+        Vec::new()
+    } else {
+        scenario_events(&run.state_machine, Some(&run.current_state))
+    };
+    let timeline = transcript_timeline(&run.transcript);
+    Ok(Json(ScenarioRun {
+        run_id,
+        scenario: run.title,
+        scenario_version: run.version,
+        current_state: run.current_state,
+        transcript: run.transcript,
+        timeline,
+        available_actions,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        finished,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1750,7 +1837,7 @@ pub async fn scenario_event(
     user: AuthUser,
     Path(run_id): Path<Uuid>,
     Json(req): Json<ScenarioEventReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioEventResponse>> {
     #[derive(sqlx::FromRow)]
     struct ScenarioEventState {
         current_state: String,
@@ -1841,15 +1928,18 @@ pub async fn scenario_event(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "run_id": run_id,
-        "current_state": next,
-        "finished": finished,
-        "available_actions": if finished { Vec::<String>::new() } else {
-            scenario_events(&run.state_machine, Some(&next))
-        },
-        "timeline": transcript_timeline(&transcript)
-    })))
+    let available_actions = if finished {
+        Vec::new()
+    } else {
+        scenario_events(&run.state_machine, Some(&next))
+    };
+    Ok(Json(ScenarioEventResponse {
+        run_id,
+        current_state: next,
+        finished,
+        available_actions,
+        timeline: transcript_timeline(&transcript),
+    }))
 }
 
 // ---- CORE-04: institution-scoped audit export (§18.3) -----------------------

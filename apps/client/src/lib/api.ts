@@ -9,8 +9,11 @@ import type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
 import type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
 import type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
 import type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
+import type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+import type { ScenarioRun } from './generated/scenario/ScenarioRun';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
+import type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
 import type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
 import type { ScenarioTeamInviteCreatedResponse } from './generated/scenario/ScenarioTeamInviteCreatedResponse';
 import type { ScenarioTeamJoinResponse } from './generated/scenario/ScenarioTeamJoinResponse';
@@ -43,7 +46,10 @@ export type { ImageFinding } from './generated/image/ImageFinding';
 export type { ImageRef } from './generated/image/ImageRef';
 export type { PendingImageAnnotationStatus } from './generated/image/PendingImageAnnotationStatus';
 export type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+export type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
+export type { ScenarioRun } from './generated/scenario/ScenarioRun';
 export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
+export type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
 export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
 export type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
 export type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
@@ -311,30 +317,6 @@ export interface AdminScenarioAssessment {
 		transcript_uncertain: boolean;
 		reviewed_at: string | null;
 	}[];
-}
-
-export interface ScenarioTimelineEvent {
-	index: number;
-	sequence: number;
-	from: string;
-	on: string;
-	to: string;
-	actor_role?: ScenarioTeamRole | null;
-	terminal?: boolean;
-}
-
-export interface ScenarioRun {
-	run_id: string;
-	scenario: string;
-	scenario_slug?: string;
-	scenario_version: number;
-	current_state: string;
-	transcript: ScenarioTimelineEvent[];
-	timeline: ScenarioTimelineEvent[];
-	available_actions: string[];
-	started_at: string;
-	finished_at: string | null;
-	finished: boolean;
 }
 
 export interface ScenarioDebrief {
@@ -782,7 +764,7 @@ export const Api = {
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/handovers/${encodeURIComponent(handoverId)}/ack`
 		),
 	advanceScenario: (runId: string, event: string) =>
-		call<Pick<ScenarioRun, 'run_id' | 'current_state' | 'finished' | 'available_actions' | 'timeline'>>(
+		call<ScenarioEventResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/events`,
 			{ event }

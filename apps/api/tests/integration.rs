@@ -19312,8 +19312,21 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{active_run}");
+    assert_eq!(active_run.as_object().unwrap().len(), 10);
+    assert_eq!(active_run["run_id"], run_id);
+    assert_eq!(active_run["scenario"], "Evidence test station");
+    assert_eq!(active_run["scenario_version"], 1);
+    assert_eq!(active_run["current_state"], "start");
     assert_eq!(active_run["finished"], false);
+    assert!(active_run["transcript"].as_array().unwrap().is_empty());
     assert_eq!(active_run["timeline"].as_array().unwrap().len(), 0);
+    assert!(active_run["available_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "finish"));
+    assert!(active_run["started_at"].is_string());
+    assert!(active_run["finished_at"].is_null());
 
     let version_path = format!(
         "/v1/admin/scenarios/{}/versions",
@@ -19409,7 +19422,28 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{action_event}");
+    assert_eq!(action_event.as_object().unwrap().len(), 5);
+    assert_eq!(action_event["run_id"], run_id);
     assert_eq!(action_event["current_state"], "start");
+    assert_eq!(action_event["finished"], false);
+    assert!(action_event["available_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action == "finish"));
+    assert_eq!(
+        action_event["timeline"][0],
+        serde_json::json!({
+            "index": 0,
+            "sequence": 1,
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead",
+            "uncertain": false,
+            "uncertainty_reason": null
+        })
+    );
 
     let (status, finished) = call(
         app.clone(),
@@ -19422,6 +19456,70 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{finished}");
+    assert_eq!(finished.as_object().unwrap().len(), 5);
+    assert_eq!(finished["finished"], true);
+    assert!(finished["available_actions"].as_array().unwrap().is_empty());
+    assert_eq!(finished["timeline"].as_array().unwrap().len(), 2);
+    let (status, completed_run) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/scenarios/runs/{run_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed_run}");
+    assert_eq!(completed_run["finished"], true);
+    assert!(completed_run["available_actions"].as_array().unwrap().is_empty());
+    assert!(completed_run["finished_at"].is_string());
+    assert_eq!(completed_run["transcript"].as_array().unwrap().len(), 2);
+    assert_eq!(completed_run["timeline"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        completed_run["transcript"][0],
+        serde_json::json!({
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead"
+        })
+    );
+    assert_eq!(
+        completed_run["transcript"][1],
+        serde_json::json!({
+            "from": "start",
+            "on": "finish",
+            "to": "complete",
+            "actor_role": "team_lead"
+        })
+    );
+    assert_eq!(
+        completed_run["timeline"][0],
+        serde_json::json!({
+            "index": 0,
+            "sequence": 1,
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead",
+            "uncertain": false,
+            "uncertainty_reason": null
+        })
+    );
+    assert_eq!(
+        completed_run["timeline"][1],
+        serde_json::json!({
+            "index": 1,
+            "sequence": 2,
+            "from": "start",
+            "on": "finish",
+            "to": "complete",
+            "actor_role": "team_lead",
+            "uncertain": false,
+            "uncertainty_reason": null
+        })
+    );
 
     let (status, unassessed_appeal) = call(
         app.clone(),
