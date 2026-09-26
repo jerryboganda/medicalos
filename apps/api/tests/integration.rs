@@ -20488,11 +20488,18 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{pending}");
-    assert!(pending["runs"]
-        .as_array()
-        .unwrap()
+    assert_eq!(pending.as_object().unwrap().len(), 1);
+    let pending_runs = pending["runs"].as_array().unwrap();
+    assert_eq!(pending_runs.len(), 1);
+    let pending_run = pending_runs
         .iter()
-        .any(|run| run["run_id"] == run_id));
+        .find(|run| run["run_id"] == run_id)
+        .unwrap();
+    assert_eq!(pending_run.as_object().unwrap().len(), 5);
+    assert_eq!(pending_run["scenario"], "Evidence test station");
+    assert_eq!(pending_run["scenario_version"], 1);
+    assert!(pending_run["finished_at"].as_str().is_some());
+    assert_eq!(pending_run["criterion_count"], 2);
 
     let (status, self_assessment) = call(
         app.clone(),
@@ -20516,7 +20523,21 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{before}");
+    assert_eq!(before.as_object().unwrap().len(), 7);
     assert_eq!(before["run_id"], run_id);
+    assert_eq!(before["scenario"], "Evidence test station");
+    assert_eq!(before["scenario_version"], 1);
+    assert!(before["started_at"].as_str().is_some());
+    assert!(before["finished_at"].as_str().is_some());
+    assert_eq!(
+        before["transcript"][0],
+        serde_json::json!({
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead"
+        })
+    );
     assert!(before.get("learner_id").is_none());
     assert_eq!(before["rubric"].as_array().unwrap().len(), 2);
     assert!(before["rubric"]
@@ -20547,12 +20568,24 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
                 "criterion_key":"physical_exam",
                 "assessment_status":"not_assessed",
                 "score":null,
-                "evidence":"No physical examination action was observed.",
-                "transcript_event_indexes":[],
-                "transcript_uncertain":false
+                "evidence":"No physical examination action was observed."
             }
         ]
     });
+    let mut explicit_null_default = assessment.clone();
+    explicit_null_default["criteria"][1]["transcript_uncertain"] = serde_json::Value::Null;
+    let (status, explicit_null) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &assessment_path,
+            Some(&reviewer),
+            Some(explicit_null_default),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{explicit_null}");
+
     let (status, invalid_evidence) = call(
         app.clone(),
         admin_req(
@@ -20595,6 +20628,7 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{recorded}");
+    assert_eq!(recorded.as_object().unwrap().len(), 2);
     assert_eq!(recorded["recorded_criteria"], 2);
     assert_eq!(recorded["not_assessed"], 1);
     let (status, no_longer_pending) = call(

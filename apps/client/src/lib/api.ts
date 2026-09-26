@@ -25,10 +25,13 @@ import type { ScenarioAssessmentAppealQueueResponse } from './generated/scenario
 import type { ScenarioAssessmentAppealRequest } from './generated/scenario/ScenarioAssessmentAppealRequest';
 import type { ScenarioAssessmentAppealReviewRequest } from './generated/scenario/ScenarioAssessmentAppealReviewRequest';
 import type { ScenarioAssessmentAppealReviewResponse } from './generated/scenario/ScenarioAssessmentAppealReviewResponse';
+import type { AdminScenarioAssessment } from './generated/scenario/AdminScenarioAssessment';
+import type { PendingScenarioAssessmentsResponse } from './generated/scenario/PendingScenarioAssessmentsResponse';
+import type { ScenarioAssessmentReceipt } from './generated/scenario/ScenarioAssessmentReceipt';
+import type { ScenarioAssessmentRequest } from './generated/scenario/ScenarioAssessmentRequest';
 import type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 import type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
-import type { ScenarioRubricResult } from './generated/scenario/ScenarioRubricResult';
 import type { ScenarioRun } from './generated/scenario/ScenarioRun';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 import type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
@@ -97,6 +100,13 @@ export type { ScenarioAssessmentAppealQueueResponse } from './generated/scenario
 export type { ScenarioAssessmentAppealRequest } from './generated/scenario/ScenarioAssessmentAppealRequest';
 export type { ScenarioAssessmentAppealReviewRequest } from './generated/scenario/ScenarioAssessmentAppealReviewRequest';
 export type { ScenarioAssessmentAppealReviewResponse } from './generated/scenario/ScenarioAssessmentAppealReviewResponse';
+export type { AdminScenarioAssessment } from './generated/scenario/AdminScenarioAssessment';
+export type { PendingScenarioAssessment } from './generated/scenario/PendingScenarioAssessment';
+export type { PendingScenarioAssessmentsResponse } from './generated/scenario/PendingScenarioAssessmentsResponse';
+export type { ScenarioAssessmentReceipt } from './generated/scenario/ScenarioAssessmentReceipt';
+export type { ScenarioAssessmentRequest } from './generated/scenario/ScenarioAssessmentRequest';
+export type { ScenarioAssessmentStatus } from './generated/scenario/ScenarioAssessmentStatus';
+export type { ScenarioCriterionAssessment } from './generated/scenario/ScenarioCriterionAssessment';
 export type { ScenarioCounterfactualEvent } from './generated/scenario/ScenarioCounterfactualEvent';
 export type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
 export type { ScenarioConsequentialUseStatus } from './generated/scenario/ScenarioConsequentialUseStatus';
@@ -340,24 +350,6 @@ export interface AdminExtractionReport {
 		note: string | null;
 		reviewed_at: string | null;
 	} | null;
-}
-
-export interface PendingScenarioAssessment {
-	run_id: string;
-	scenario: string;
-	scenario_version: number;
-	finished_at: string;
-	criterion_count: number;
-}
-
-export interface AdminScenarioAssessment {
-	run_id: string;
-	scenario: string;
-	scenario_version: number;
-	transcript: { from: string; on: string; to: string; actor_role?: ScenarioTeamRole | null }[];
-	started_at: string;
-	finished_at: string;
-	rubric: ScenarioRubricResult[];
 }
 
 export interface AdminConcept {
@@ -947,7 +939,7 @@ export const Api = {
 	listExtractionReports: () =>
 		call<{ reports: AdminExtractionReport[] }>('GET', '/v1/admin/library/extraction-reports'),
 	pendingScenarioAssessments: () =>
-		call<{ runs: PendingScenarioAssessment[] }>(
+		call<PendingScenarioAssessmentsResponse>(
 			'GET',
 			'/v1/admin/scenarios/runs/pending-assessment'
 		),
@@ -958,18 +950,9 @@ export const Api = {
 		),
 	recordScenarioAssessment: (
 		runId: string,
-		body: {
-			criteria: {
-				criterion_key: string;
-				assessment_status: 'assessed' | 'not_assessed';
-				score: number | null;
-				evidence: string;
-				transcript_event_indexes: number[];
-				transcript_uncertain: boolean;
-			}[];
-		}
+		body: ScenarioAssessmentRequest
 	) =>
-		call<{ recorded_criteria: number; not_assessed: number }>(
+		call<ScenarioAssessmentReceipt>(
 			'POST',
 			`/v1/admin/scenarios/runs/${encodeURIComponent(runId)}/assessment`,
 			body
