@@ -155,7 +155,7 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
       body: JSON.stringify({ session_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' })
     });
   });
-  await page.route('**/v2/packs/*/manifest', (route) =>
+  await page.route('**/v2/packs/*/manifest*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', async (route) => {
@@ -318,7 +318,7 @@ test('browser quota exhaustion keeps the pack incomplete and reports the limit',
       })
     })
   );
-  await page.route('**/v2/packs/*/manifest', (route) =>
+  await page.route('**/v2/packs/*/manifest*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', (route) => {
@@ -379,7 +379,7 @@ test('invalid manifest signatures are rejected before any question resource is d
       })
     })
   );
-  await page.route('**/v2/packs/*/manifest', (route) =>
+  await page.route('**/v2/packs/*/manifest*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', async (route) => {

@@ -61,6 +61,7 @@ test('learner submits an appeal and sees its independent-review status', async (
 				available_actions: [],
 				started_at: '2026-09-24T07:00:00Z',
 				finished_at: '2026-09-24T07:05:00Z',
+				transcript_corrections: [],
 				rubric: assessedRubric,
 				consequential_use_status: appeal?.decision === 'reassessment_required' ? 'reassessment_required' : 'not_authorized_by_assessment',
 				appeal

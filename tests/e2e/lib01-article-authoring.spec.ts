@@ -159,7 +159,8 @@ test('editor creates, revises, publishes, and keeps published versions immutable
 	expect(savedPayload?.body).toContain('saved draft is version one');
 
 	await page.getByTestId('article-publish').click();
-	await expect(page.getByText('Published · version 1')).toBeVisible();
+	await expect(page.getByText('source-linked-guideline · version 1')).toBeVisible();
+	await expect(page.getByText('published', { exact: true })).toBeVisible();
 	await expect(page.getByTestId('article-published-body')).toContainText('version one');
 	await expect(page.getByTestId('article-publish')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'New revision' })).toBeVisible();
@@ -274,7 +275,7 @@ test('learner searches by country/date, reads global fallback as text, and gets 
 	await page.getByTestId('library-reader-scope-guideline').click();
 
 	await expect(page.getByTestId('library-article')).toBeVisible();
-	await expect(page.getByText('Global guidance')).toBeVisible();
+	await expect(page.getByText('Global guidance', { exact: true })).toBeVisible();
 	await expect(page.getByText(/Global guidance is shown/)).toBeVisible();
 	await expect(page.getByTestId('article-body')).toContainText('<script>window.studyContentRan = true</script>');
 	await expect(page.locator('.article-body script')).toHaveCount(0);
