@@ -1,8 +1,8 @@
 -- ENG-01: select one stable, published QOTD question per exam and database day.
 ALTER TABLE engagement_settings
-    ADD COLUMN qotd_exam_id UUID REFERENCES exams(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS qotd_exam_id UUID REFERENCES exams(id) ON DELETE SET NULL;
 
-CREATE TABLE qotd_daily_questions (
+CREATE TABLE IF NOT EXISTS qotd_daily_questions (
     exam_id UUID NOT NULL REFERENCES exams(id) ON DELETE RESTRICT,
     day DATE NOT NULL,
     question_version_id UUID NOT NULL REFERENCES question_versions(id) ON DELETE RESTRICT,
