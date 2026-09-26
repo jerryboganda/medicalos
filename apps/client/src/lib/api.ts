@@ -8,6 +8,8 @@ import type { ImageCaseListResponse } from './generated/image/ImageCaseListRespo
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 import type { Today } from './generated/today/Today';
+import type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
+import type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 
 // Keep transport and authentication here. Data contracts are exported from
 // Rust DTOs incrementally as ARCH-02 bindings are generated.
@@ -37,6 +39,9 @@ export type { PendingImageAnnotationStatus } from './generated/image/PendingImag
 export type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
 export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
+export type { ScenarioTeam } from './generated/scenario/ScenarioTeam';
+export type { ScenarioTeamMember } from './generated/scenario/ScenarioTeamMember';
+export type { ScenarioTeamRole } from './generated/scenario/ScenarioTeamRole';
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -318,21 +323,6 @@ export interface ScenarioRun {
 	started_at: string;
 	finished_at: string | null;
 	finished: boolean;
-}
-
-export type ScenarioTeamRole = 'team_lead' | 'history_taker' | 'scribe' | 'observer';
-
-export interface ScenarioTeamMember {
-	member_id: string;
-	role: ScenarioTeamRole;
-	joined_at: string;
-}
-
-export interface ScenarioTeam {
-	run_id: string;
-	current_role: ScenarioTeamRole;
-	current_member_id: string;
-	members: ScenarioTeamMember[];
 }
 
 export interface ScenarioHandover {

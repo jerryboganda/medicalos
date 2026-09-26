@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 use std::sync::Arc;
@@ -45,17 +45,75 @@ struct TeamRun {
 }
 
 #[derive(sqlx::FromRow)]
-struct TeamMember {
+struct TeamMemberRow {
     member_id: Uuid,
     role: String,
     joined_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamRole.ts",
+        rename = "ScenarioTeamRole"
+    )
+)]
+pub enum ScenarioTeamRole {
+    TeamLead,
+    HistoryTaker,
+    Scribe,
+    Observer,
+}
+
+fn parse_team_role(role: &str) -> ApiResult<ScenarioTeamRole> {
+    match role {
+        "team_lead" => Ok(ScenarioTeamRole::TeamLead),
+        "history_taker" => Ok(ScenarioTeamRole::HistoryTaker),
+        "scribe" => Ok(ScenarioTeamRole::Scribe),
+        "observer" => Ok(ScenarioTeamRole::Observer),
+        _ => Err(ApiError::internal()),
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamMember.ts",
+        rename = "ScenarioTeamMember"
+    )
+)]
+pub struct ScenarioTeamMember {
+    member_id: Uuid,
+    role: ScenarioTeamRole,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    joined_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "scenario/ScenarioTeam.ts", rename = "ScenarioTeam")
+)]
+pub struct ScenarioTeam {
+    run_id: Uuid,
+    current_role: ScenarioTeamRole,
+    current_member_id: Uuid,
+    members: Vec<ScenarioTeamMember>,
 }
 
 pub async fn list_team(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(run_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioTeam>> {
     let current_role = role_for(&state.pool, run_id, user.user_id)
         .await?
         .ok_or_else(|| ApiError::not_found("run_not_found"))?;
@@ -67,23 +125,29 @@ pub async fn list_team(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(ApiError::internal)?;
-    let members = sqlx::query_as::<_, TeamMember>(
+    let members = sqlx::query_as::<_, TeamMemberRow>(
         "SELECT id AS member_id, role, joined_at FROM scenario_team_members
 		 WHERE run_id = $1 ORDER BY joined_at, id",
     )
     .bind(run_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "run_id": run_id,
-        "current_role": current_role,
-        "current_member_id": current_member_id,
-        "members": members.into_iter().map(|member| json!({
-            "member_id": member.member_id,
-            "role": member.role,
-            "joined_at": member.joined_at,
-        })).collect::<Vec<_>>(),
-    })))
+    let members = members
+        .into_iter()
+        .map(|member| {
+            Ok(ScenarioTeamMember {
+                member_id: member.member_id,
+                role: parse_team_role(&member.role)?,
+                joined_at: member.joined_at,
+            })
+        })
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(Json(ScenarioTeam {
+        run_id,
+        current_role: parse_team_role(&current_role)?,
+        current_member_id,
+        members,
+    }))
 }
 
 #[derive(Deserialize)]

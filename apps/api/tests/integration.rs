@@ -20012,8 +20012,14 @@ async fn sim08_team_invites_attribute_actions_and_record_handovers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{initial_team}");
+    assert_eq!(initial_team.as_object().unwrap().len(), 4);
+    assert_eq!(initial_team["run_id"], run_id);
     assert_eq!(initial_team["current_role"], "team_lead");
+    assert!(initial_team["current_member_id"].as_str().is_some());
     assert_eq!(initial_team["members"].as_array().unwrap().len(), 1);
+    assert_eq!(initial_team["members"][0].as_object().unwrap().len(), 3);
+    assert_eq!(initial_team["members"][0]["role"], "team_lead");
+    assert!(initial_team["members"][0]["joined_at"].is_string());
     assert!(initial_team["members"][0].get("user_id").is_none());
 
     let (status, owner_invite) = call(
