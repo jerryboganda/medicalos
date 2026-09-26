@@ -1053,19 +1053,36 @@ pub async fn hint(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerRequest.ts",
+        rename = "AnswerRequest"
+    )
+)]
 pub struct AnswerReq {
     pub item_index: i16,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chosen_index: Option<i16>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"sure\" | \"unsure\"", optional = nullable)
+    )]
     pub confidence: Option<String>,
     /// QB-04: client-declared assistance (in-session tools). The server also
     /// marks answers assisted when a coach turn preceded them on the question.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub assisted: Option<bool>,
     pub idempotency_key: String,
     /// QB-17: client-measured time on item. Server clamps; absent stays
     /// null (never synthesized).
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub elapsed_ms: Option<i64>,
     /// Local timestamp for a queued practice answer. A late upload is accepted
     /// only within the practice grace window and is always assisted evidence.
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub client_recorded_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 

@@ -1092,6 +1092,8 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
             Some(serde_json::json!({"item_index": 0, "chosen_index": chosen,
+                                   "confidence": "sure", "assisted": false,
+                                   "elapsed_ms": 125, "client_recorded_at": null,
                                    "idempotency_key": key})),
         )
     };

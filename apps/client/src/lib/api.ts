@@ -6,6 +6,7 @@ import type { StartMockResponse } from './generated/mock/StartMockResponse';
 import type { SubmitResult } from './generated/mock/SubmitResult';
 import type { CreateSessionResponse } from './generated/practice/CreateSessionResponse';
 import type { CreateSessionRequest } from './generated/practice/CreateSessionRequest';
+import type { AnswerRequest } from './generated/practice/AnswerRequest';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -163,6 +164,7 @@ export type { CreateSessionItem } from './generated/practice/CreateSessionItem';
 export type { CreateSessionResponse } from './generated/practice/CreateSessionResponse';
 export type { BlueprintSlice } from './generated/practice/BlueprintSlice';
 export type { CreateSessionRequest } from './generated/practice/CreateSessionRequest';
+export type { AnswerRequest } from './generated/practice/AnswerRequest';
 export type { SessionOption } from './generated/practice/SessionOption';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
@@ -836,17 +838,8 @@ export const Api = {
 			'/v1/calculators/convert',
 			body
 		),
-	answer: (
-		sid: string,
-		body: {
-			item_index: number;
-			chosen_index: number | null;
-			idempotency_key: string;
-			elapsed_ms?: number;
-			assisted?: boolean;
-			client_recorded_at?: string;
-		}
-	) => call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
+	answer: (sid: string, body: AnswerRequest) =>
+		call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
 	submit: (sid: string) => call<SubmitReceipt>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
 		call<{ plan_version: number }>(
