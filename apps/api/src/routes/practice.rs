@@ -16,28 +16,61 @@ use crate::seed::QuestionOption;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/BlueprintSlice.ts",
+        rename = "BlueprintSlice"
+    )
+)]
 pub struct BlueprintSlice {
     pub chapter_id: Uuid,
     pub count: i32,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionRequest.ts",
+        rename = "CreateSessionRequest"
+    )
+)]
 pub struct CreateSessionReq {
     pub preset: String,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chapter_id: Option<Uuid>,
     /// QB-06 targeted pool: several chapters at once (overrides chapter_id).
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chapter_ids: Option<Vec<Uuid>>,
     /// QB-07 blueprint-balanced random pool; counts are exact per chapter.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub blueprint: Option<Vec<BlueprintSlice>>,
     /// QB-06 pool filter: any (default) | unseen | incorrect | marked.
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"any\" | \"unseen\" | \"incorrect\" | \"marked\"",
+            optional = nullable
+        )
+    )]
     pub source: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub question_count: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub source_session_id: Option<Uuid>,
     /// AI-08: stable identity for a task launched from today's plan.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub plan_task_key: Option<Uuid>,
     /// EX-08: required for the timed preset, validated server-side.
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub time_limit_seconds: Option<i64>,
     /// QB-03: optional per-question budget for untimed sessions (seconds).
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub per_question_seconds: Option<i64>,
 }
 

@@ -40,9 +40,10 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   contracts, administrator assessment request/response contracts, and the
   EX-07 mock and timed-submit DTOs are also generated from Rust; those slices
   are authored on this branch and await final CI acceptance. The practice
-  session-creation response is authored in issue 11 on this branch and awaits
-  final CI acceptance. Other client-consumed request and response families
-  remain handwritten, so ARCH-02 stays in progress.
+  session-creation response is authored in issue 11, and its request is
+  authored in issue 12 on this branch; both await final CI acceptance. Other
+  client-consumed request and response families remain handwritten, so
+  ARCH-02 stays in progress.
 - The image-case response slice preserves existing endpoint payloads and
   rights and review gates; its evidence is recorded in
   `issues/02-image-case-contracts.md`.

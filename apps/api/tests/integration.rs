@@ -1012,8 +1012,10 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             Some(&token),
             Some(serde_json::json!({
                 "preset": "tutor", "chapter_id": chapter1,
+                "source": null, "source_session_id": null,
                 "question_count": task_question_count,
-                "plan_task_key": task_key
+                "plan_task_key": task_key, "time_limit_seconds": null,
+                "per_question_seconds": null
             })),
         ),
     )
