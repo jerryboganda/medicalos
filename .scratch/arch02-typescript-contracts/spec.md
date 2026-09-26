@@ -37,10 +37,11 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   generated types but may not restate their fields.
 - The completed slices cover Today, the IMG-04 `ImageConceptLink` DTO, and
   learner image-case/admin annotation response DTOs. Scenario workflow
-  contracts and the administrator assessment request/response contracts are
-  also generated from Rust; the latter is authored on this branch and awaits
-  final CI acceptance. Other client-consumed request and response families
-  remain hand-written, so ARCH-02 stays in progress.
+  contracts, administrator assessment request/response contracts, and the
+  EX-07 mock and timed-submit DTOs are also generated from Rust; the latter two
+  slices are authored on this branch and await final CI acceptance. Other
+  client-consumed request and response families remain handwritten, so ARCH-02
+  stays in progress.
 - The image-case response slice preserves existing endpoint payloads and
   rights and review gates; its evidence is recorded in
   `issues/02-image-case-contracts.md`.
@@ -75,4 +76,6 @@ and keep ARCH-02 open until every client-consumed contract is generated.
 ## Further Notes
 
 The generator choice and package facts are recorded in
-`research.md`. See issue `issues/01-today-contracts.md` for the active slice.
+`research.md`. See issue `issues/01-today-contracts.md` for the original
+slice and `issues/10-ex07-mock-and-submit-contracts.md` for the mock and
+submit contracts.

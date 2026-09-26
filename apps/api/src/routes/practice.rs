@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::agent;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::routes::mock::MockType;
 use crate::seed::QuestionOption;
 use crate::state::AppState;
 
@@ -1531,6 +1532,108 @@ async fn enroll_missed_questions_in_retest_queue(
     Ok(())
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/SubmitTimeItem.ts",
+        rename = "SubmitTimeItem"
+    )
+)]
+pub struct SubmitTimeItem {
+    item_index: i16,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    elapsed_ms: Option<i64>,
+    answer_changes: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/SubmitTime.ts", rename = "SubmitTime")
+)]
+pub struct SubmitTime {
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    duration_seconds: Option<i64>,
+    items: Vec<SubmitTimeItem>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/MockResultBreakdown.ts",
+        rename = "MockResultBreakdown"
+    )
+)]
+pub struct MockResultBreakdown {
+    chapter: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    total: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    correct: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    time_seconds: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/MockResult.ts", rename = "MockResult")
+)]
+pub struct MockResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    mock_type: Option<MockType>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    score_percent: i64,
+    passed: bool,
+    pass_mark_percent: i32,
+    percentile: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    takers: i64,
+    ranked: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    late_sync_answers: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    total_time_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    avg_time_per_question_seconds: Option<i64>,
+    breakdown: Vec<MockResultBreakdown>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/SubmitResult.ts", rename = "SubmitResult")
+)]
+pub struct SubmitResult {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    total: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    correct: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    incorrect: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    skipped: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    score: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    expected_score: Option<i64>,
+    mock: Option<MockResult>,
+    time: SubmitTime,
+}
+
 pub async fn submit(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -1693,30 +1796,28 @@ pub async fn submit(
     )
     .fetch_all(&state.pool)
     .await?;
-    let time_items: Vec<serde_json::Value> = item_timings
+    let time_items: Vec<SubmitTimeItem> = item_timings
         .iter()
-        .map(|t| {
-            serde_json::json!({
-                "item_index": t.item_index,
-                "elapsed_ms": t.elapsed_ms,
-                "answer_changes": t.answer_changes,
-            })
+        .map(|t| SubmitTimeItem {
+            item_index: t.item_index,
+            elapsed_ms: t.elapsed_ms,
+            answer_changes: t.answer_changes,
         })
         .collect();
 
-    let mut body = serde_json::json!({
-        "total": totals.total,
-        "correct": totals.correct,
-        "incorrect": totals.incorrect,
-        "skipped": totals.skipped,
-        "score": score,
-        "expected_score": expected_score,
-        "mock": null,
-        "time": {
-            "duration_seconds": duration_seconds,
-            "items": time_items,
+    let mut body = SubmitResult {
+        total: totals.total,
+        correct: totals.correct,
+        incorrect: totals.incorrect,
+        skipped: totals.skipped,
+        score,
+        expected_score,
+        mock: None,
+        time: SubmitTime {
+            duration_seconds,
+            items: time_items,
         },
-    });
+    };
 
     if let Some(mock_id) = session.mock_id {
         let mock = sqlx::query!(
@@ -1812,23 +1913,26 @@ pub async fn submit(
         )
         .fetch_all(&state.pool)
         .await?;
-        body["mock"] = serde_json::json!({
-            "mock_type": mock.mock_type,
-            "score_percent": score,
-            "passed": passed,
-            "pass_mark_percent": mock.pass_mark_percent,
-            "percentile": percentile,
-            "takers": takers,
-            "ranked": ranked,
-            "late_sync_answers": late_sync_answers,
-            "total_time_seconds": total_time_seconds,
-            "avg_time_per_question_seconds": avg_time_per_question_seconds,
-            "breakdown": breakdown.iter().map(|b| serde_json::json!({
-                "chapter": b.chapter_name,
-                "total": b.total,
-                "correct": b.correct,
-                "time_seconds": b.time_seconds.max(0),
-            })).collect::<Vec<_>>(),
+        body.mock = Some(MockResult {
+            mock_type: Some(MockType::from_wire(&mock.mock_type).ok_or_else(ApiError::internal)?),
+            score_percent: score,
+            passed,
+            pass_mark_percent: mock.pass_mark_percent,
+            percentile,
+            takers,
+            ranked,
+            late_sync_answers,
+            total_time_seconds: Some(total_time_seconds),
+            avg_time_per_question_seconds: Some(avg_time_per_question_seconds),
+            breakdown: breakdown
+                .into_iter()
+                .map(|b| MockResultBreakdown {
+                    chapter: b.chapter_name,
+                    total: b.total,
+                    correct: b.correct,
+                    time_seconds: Some(b.time_seconds.max(0)),
+                })
+                .collect(),
         });
     }
 
@@ -1839,7 +1943,7 @@ pub async fn submit(
          RETURNING result_payload::text",
     )
     .bind(sid)
-    .bind(body)
+    .bind(serde_json::to_value(body).map_err(|_| ApiError::internal())?)
     .bind(user.user_id)
     .fetch_optional(&state.pool)
     .await?

@@ -1,4 +1,9 @@
 import { auth, clearToken } from './auth.svelte';
+import type { CreateMockRequest } from './generated/mock/CreateMockRequest';
+import type { CreateMockResponse } from './generated/mock/CreateMockResponse';
+import type { MockListResponse } from './generated/mock/MockListResponse';
+import type { StartMockResponse } from './generated/mock/StartMockResponse';
+import type { SubmitResult } from './generated/mock/SubmitResult';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -139,6 +144,22 @@ export type { PackResourcesRequest } from './generated/packs/PackResourcesReques
 export type { PackResourcesResponse } from './generated/packs/PackResourcesResponse';
 export type { QuestionOption } from './generated/packs/QuestionOption';
 export type { TutoringCard } from './generated/packs/TutoringCard';
+export type { CreateMockRequest } from './generated/mock/CreateMockRequest';
+export type { CreateMockResponse } from './generated/mock/CreateMockResponse';
+export type { MockBlueprintEntry } from './generated/mock/MockBlueprintEntry';
+export type { MockIntegrityPolicy } from './generated/mock/MockIntegrityPolicy';
+export type { MockListResponse } from './generated/mock/MockListResponse';
+export type { MockResult } from './generated/mock/MockResult';
+export type { MockResultBreakdown } from './generated/mock/MockResultBreakdown';
+export type { MockTest } from './generated/mock/MockTest';
+export type { MockType } from './generated/mock/MockType';
+export type { StartMockResponse } from './generated/mock/StartMockResponse';
+export type { SubmitResult } from './generated/mock/SubmitResult';
+export type { SubmitTime } from './generated/mock/SubmitTime';
+export type { SubmitTimeItem } from './generated/mock/SubmitTimeItem';
+
+export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
+	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
 const BASE: string =
 	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
 
@@ -409,16 +430,6 @@ export interface AnswerResult {
 	tutoring_cards?: TutoringCard[];
 }
 
-export interface SubmitResult {
-	total: number;
-	correct: number;
-	incorrect: number;
-	skipped: number;
-	score: number;
-	expected_score: number | null;
-	mock: MockResult | null;
-}
-
 export interface Note {
 	note_id: string;
 	title: string;
@@ -426,42 +437,6 @@ export interface Note {
 	source_question_version_id: string | null;
 	updated_at: string;
 	backlinks: { note_id: string; title: string }[];
-}
-
-export type MockType =
-	| 'full'
-	| 'mini'
-	| 'subject'
-	| 'system'
-	| 'chapter'
-	| 'grand_test'
-	| 'final_assessment';
-
-export interface MockTest {
-	mock_id: string;
-	title: string;
-	mock_type: MockType;
-	pass_mark_percent: number;
-	attempts_allowed: number;
-	attempts_used: number;
-	time_limit_seconds: number | null;
-	late_sync_grace_seconds: number;
-	integrity_policy: 'log_only' | 'warn' | 'auto_submit';
-	away_timeout_seconds: number | null;
-}
-
-export interface MockResult {
-	score_percent: number;
-	passed: boolean;
-	pass_mark_percent: number;
-	percentile: number | null;
-	takers: number;
-	ranked: boolean;
-	late_sync_answers: number;
-	mock_type?: MockType;
-	total_time_seconds?: number;
-	avg_time_per_question_seconds?: number;
-	breakdown: { chapter: string; total: number; correct: number; time_seconds?: number }[];
 }
 
 export interface EngagementQotd {
@@ -844,7 +819,7 @@ export const Api = {
 			event_id: string;
 			action: 'none' | 'warn' | 'auto_submitted';
 			away_seconds?: number;
-			receipt?: SubmitResult;
+			receipt?: SubmitReceipt;
 		}>('POST', '/v1/integrity-events', body),
 	getSessionHint: (sid: string, itemIndex: number) =>
 		call<{ hint: string; assisted: true }>(
@@ -874,7 +849,7 @@ export const Api = {
 			client_recorded_at?: string;
 		}
 	) => call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
-	submit: (sid: string) => call<SubmitResult>('POST', `/v1/practice/sessions/${sid}/submit`),
+	submit: (sid: string) => call<SubmitReceipt>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
 		call<{ plan_version: number }>(
 			'POST',
@@ -1040,26 +1015,9 @@ export const Api = {
 		}>('GET', '/v1/reviews/queue'),
 	listExams: () =>
 		call<{ exams: { exam_id: string; code: string; name: string }[] }>('GET', '/v1/exams'),
-	listMocks: () => call<{ mocks: MockTest[] }>('GET', '/v1/mocks'),
-	createMock: (body: {
-		title: string;
-		exam_id: string;
-		mock_type?: MockType;
-		blueprint: { chapter_id: string; count: number }[];
-		time_limit_seconds?: number;
-		pass_mark_percent?: number;
-		attempts_allowed?: number;
-		late_sync_grace_seconds?: number;
-		integrity_policy?: 'log_only' | 'warn' | 'auto_submit';
-		away_timeout_seconds?: number;
-	}) =>
-		call<{
-			mock_id: string;
-			mock_type: MockType;
-			late_sync_grace_seconds: number;
-			integrity_policy: string;
-			away_timeout_seconds: number | null;
-		}>('POST', '/v1/mocks', body),
+	listMocks: () => call<MockListResponse>('GET', '/v1/mocks'),
+	createMock: (body: CreateMockRequest) =>
+		call<CreateMockResponse>('POST', '/v1/mocks', body),
 	listCompetitions: () =>
 		call<{ competitions: CompetitionSummary[] }>('GET', '/v1/competitions'),
 	competitionLeague: (examId: string) =>
@@ -1104,12 +1062,7 @@ export const Api = {
 			`/v1/competitions/${encodeURIComponent(competitionId)}/leaderboard`
 		),
 	startMock: (mockId: string) =>
-		call<{
-			session_id: string;
-			mock_type: MockType;
-			question_count: number;
-			late_sync_grace_seconds: number;
-		}>('POST', `/v1/mocks/${mockId}/start`),
+		call<StartMockResponse>('POST', `/v1/mocks/${mockId}/start`),
 	answerableQuestions: () =>
 		call<{
 			questions: {

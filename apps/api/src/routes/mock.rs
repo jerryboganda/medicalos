@@ -6,7 +6,8 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -16,23 +17,168 @@ use crate::routes::practice::PoolQuestion;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/CreateMockRequest.ts",
+        rename = "CreateMockRequest"
+    )
+)]
 pub struct CreateMockReq {
     pub title: String,
     pub exam_id: Uuid,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(as = "Option<MockType>", optional = nullable)
+    )]
     pub mock_type: Option<String>,
     pub blueprint: Vec<BlueprintEntry>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub time_limit_seconds: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub pass_mark_percent: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub attempts_allowed: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub late_sync_grace_seconds: Option<i32>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(as = "Option<MockIntegrityPolicy>", optional = nullable)
+    )]
     pub integrity_policy: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub away_timeout_seconds: Option<i32>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/MockBlueprintEntry.ts",
+        rename = "MockBlueprintEntry"
+    )
+)]
 pub struct BlueprintEntry {
     pub chapter_id: Uuid,
     pub count: i32,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/MockType.ts", rename = "MockType")
+)]
+pub enum MockType {
+    Full,
+    Mini,
+    Subject,
+    System,
+    Chapter,
+    GrandTest,
+    FinalAssessment,
+}
+
+impl MockType {
+    pub(crate) fn from_wire(value: &str) -> Option<Self> {
+        parse_wire_enum(value)
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/MockIntegrityPolicy.ts",
+        rename = "MockIntegrityPolicy"
+    )
+)]
+pub enum MockIntegrityPolicy {
+    LogOnly,
+    Warn,
+    AutoSubmit,
+}
+
+fn parse_wire_enum<T: DeserializeOwned>(value: &str) -> Option<T> {
+    serde_json::from_value(serde_json::Value::String(value.to_owned())).ok()
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/CreateMockResponse.ts",
+        rename = "CreateMockResponse"
+    )
+)]
+pub struct CreateMockResponse {
+    mock_id: Uuid,
+    mock_type: MockType,
+    late_sync_grace_seconds: i32,
+    integrity_policy: MockIntegrityPolicy,
+    away_timeout_seconds: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/MockTest.ts", rename = "MockTest")
+)]
+pub struct MockTest {
+    mock_id: Uuid,
+    title: String,
+    mock_type: MockType,
+    pass_mark_percent: i32,
+    attempts_allowed: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    attempts_used: i64,
+    time_limit_seconds: Option<i32>,
+    late_sync_grace_seconds: i32,
+    integrity_policy: MockIntegrityPolicy,
+    away_timeout_seconds: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/MockListResponse.ts",
+        rename = "MockListResponse"
+    )
+)]
+pub struct MockListResponse {
+    mocks: Vec<MockTest>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/StartMockResponse.ts",
+        rename = "StartMockResponse"
+    )
+)]
+pub struct StartMockResponse {
+    session_id: Uuid,
+    mock_type: MockType,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    question_count: usize,
+    late_sync_grace_seconds: i32,
 }
 
 pub async fn create_mock(
@@ -40,7 +186,7 @@ pub async fn create_mock(
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateMockReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateMockResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_admin(provided)?;
     let title = req.title.trim();
@@ -51,15 +197,12 @@ pub async fn create_mock(
         ));
     }
     let mock_type = req.mock_type.as_deref().unwrap_or("full");
-    if !matches!(
-        mock_type,
-        "full" | "mini" | "subject" | "system" | "chapter" | "grand_test" | "final_assessment"
-    ) {
-        return Err(ApiError::unprocessable(
+    let mock_type_contract = MockType::from_wire(mock_type).ok_or_else(|| {
+        ApiError::unprocessable(
             "invalid_mock_type",
             "mock_type must be full, mini, subject, system, chapter, grand_test, or final_assessment",
-        ));
-    }
+        )
+    })?;
 
     let exam_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM exams WHERE id = $1)"
@@ -137,15 +280,15 @@ pub async fn create_mock(
         None => 600,
     };
     let integrity_policy = req.integrity_policy.as_deref().unwrap_or("log_only");
-    if !matches!(integrity_policy, "log_only" | "warn" | "auto_submit") {
-        return Err(ApiError::unprocessable(
+    let integrity_policy_contract = parse_wire_enum(integrity_policy).ok_or_else(|| {
+        ApiError::unprocessable(
             "invalid_integrity_policy",
             "integrity_policy must be log_only, warn, or auto_submit",
-        ));
-    }
-    let away_timeout_seconds = match (integrity_policy, req.away_timeout_seconds) {
-        ("log_only", None) => None,
-        ("log_only", Some(_)) => {
+        )
+    })?;
+    let away_timeout_seconds = match (integrity_policy_contract, req.away_timeout_seconds) {
+        (MockIntegrityPolicy::LogOnly, None) => None,
+        (MockIntegrityPolicy::LogOnly, Some(_)) => {
             return Err(ApiError::unprocessable(
                 "unexpected_away_timeout",
                 "log_only policy does not accept away_timeout_seconds",
@@ -183,19 +326,19 @@ pub async fn create_mock(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(serde_json::json!({
-        "mock_id": mock_id,
-        "mock_type": mock_type,
-        "late_sync_grace_seconds": late_sync_grace_seconds,
-        "integrity_policy": integrity_policy,
-        "away_timeout_seconds": away_timeout_seconds,
-    })))
+    Ok(Json(CreateMockResponse {
+        mock_id,
+        mock_type: mock_type_contract,
+        late_sync_grace_seconds,
+        integrity_policy: integrity_policy_contract,
+        away_timeout_seconds,
+    }))
 }
 
 pub async fn list_mocks(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MockListResponse>> {
     let rows = sqlx::query!(
         r#"SELECT m.id, m.title, m.pass_mark_percent, m.attempts_allowed,
                   m.time_limit_seconds, m.late_sync_grace_seconds,
@@ -207,24 +350,25 @@ pub async fn list_mocks(
     )
     .fetch_all(&state.pool)
     .await?;
-    let mocks: Vec<serde_json::Value> = rows
+    let mocks: Vec<MockTest> = rows
         .into_iter()
         .map(|m| {
-            serde_json::json!({
-                "mock_id": m.id,
-                "title": m.title,
-                "mock_type": m.mock_type,
-                "pass_mark_percent": m.pass_mark_percent,
-                "attempts_allowed": m.attempts_allowed,
-                "attempts_used": m.used,
-                "time_limit_seconds": m.time_limit_seconds,
-                "late_sync_grace_seconds": m.late_sync_grace_seconds,
-                "integrity_policy": m.integrity_policy,
-                "away_timeout_seconds": m.away_timeout_seconds,
+            Ok(MockTest {
+                mock_id: m.id,
+                title: m.title,
+                mock_type: MockType::from_wire(&m.mock_type).ok_or_else(ApiError::internal)?,
+                pass_mark_percent: m.pass_mark_percent,
+                attempts_allowed: m.attempts_allowed,
+                attempts_used: m.used,
+                time_limit_seconds: m.time_limit_seconds,
+                late_sync_grace_seconds: m.late_sync_grace_seconds,
+                integrity_policy: parse_wire_enum(&m.integrity_policy)
+                    .ok_or_else(ApiError::internal)?,
+                away_timeout_seconds: m.away_timeout_seconds,
             })
         })
-        .collect();
-    Ok(Json(serde_json::json!({ "mocks": mocks })))
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(Json(MockListResponse { mocks }))
 }
 
 /// Freeze the form (EX-03): pick against the blueprint once, snapshot the
@@ -234,7 +378,7 @@ pub async fn start_mock(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(mid): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<StartMockResponse>> {
     let mock = sqlx::query!(
         "SELECT id, blueprint, time_limit_seconds, late_sync_grace_seconds,
                 integrity_policy, away_timeout_seconds, mock_type FROM mocks WHERE id = $1",
@@ -243,6 +387,7 @@ pub async fn start_mock(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("mock_not_found"))?;
+    let mock_type = MockType::from_wire(&mock.mock_type).ok_or_else(ApiError::internal)?;
     let blueprint_json = mock.blueprint;
     let time_limit_seconds = mock.time_limit_seconds;
     let late_sync_grace_seconds = mock.late_sync_grace_seconds;
@@ -360,10 +505,10 @@ pub async fn start_mock(
         .execute(&state.pool)
         .await?;
     }
-    Ok(Json(serde_json::json!({
-        "session_id": sid,
-        "mock_type": mock.mock_type,
-        "question_count": pool_questions.len(),
-        "late_sync_grace_seconds": late_sync_grace_seconds,
-    })))
+    Ok(Json(StartMockResponse {
+        session_id: sid,
+        mock_type,
+        question_count: pool_questions.len(),
+        late_sync_grace_seconds,
+    }))
 }

@@ -151,6 +151,20 @@ async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     (status, v)
 }
 
+fn assert_json_keys(value: &Value, expected: &[&str]) {
+    let actual = value
+        .as_object()
+        .expect("JSON object")
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = expected
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(actual, expected, "{value}");
+}
+
 async fn call_text(app: Router, req: Request<Body>) -> (StatusCode, String) {
     let resp = app.oneshot(req).await.expect("oneshot");
     let status = resp.status();
@@ -1105,6 +1119,34 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
         replayed, result,
         "the replayed receipt matches the original"
     );
+
+    // Old receipts are replayed as stored, even when they predate the current DTO.
+    let legacy_receipt = serde_json::json!({
+        "total": 2,
+        "correct": 1,
+        "incorrect": 0,
+        "skipped": 1,
+        "score": 50,
+        "mock": null
+    });
+    sqlx::query("UPDATE practice_sessions SET result_payload = $2 WHERE id = $1")
+        .bind(sid)
+        .bind(&legacy_receipt)
+        .execute(&state.pool)
+        .await
+        .expect("store legacy receipt fixture");
+    let (status, legacy_replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{legacy_replay}");
+    assert_eq!(legacy_replay, legacy_receipt);
 
     // Plan: cold-start task done; a justified, persisted revision exists.
     let (status, today) = call(
@@ -22306,6 +22348,45 @@ async fn mock_types_and_time_analysis() {
         .expect("mocks count");
     assert_eq!(initial_mocks_count, current_mocks_count, "no partial mock insert occurred");
 
+    // Null matches Serde Option semantics and keeps the API defaults intact.
+    let mut nullable_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Nullable Mock Defaults",
+            "blueprint": [{ "chapter_id": ids.chapter1, "count": 1 }],
+            "mock_type": null,
+            "time_limit_seconds": null,
+            "pass_mark_percent": null,
+            "attempts_allowed": null,
+            "late_sync_grace_seconds": null,
+            "integrity_policy": null,
+            "away_timeout_seconds": null
+        })),
+    );
+    nullable_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, nullable_created) = call(app.clone(), nullable_req).await;
+    assert_eq!(status, StatusCode::OK, "{nullable_created}");
+    assert_json_keys(
+        &nullable_created,
+        &[
+            "mock_id",
+            "mock_type",
+            "late_sync_grace_seconds",
+            "integrity_policy",
+            "away_timeout_seconds",
+        ],
+    );
+    assert_eq!(nullable_created["mock_type"], "full");
+    assert_eq!(nullable_created["late_sync_grace_seconds"], 600);
+    assert_eq!(nullable_created["integrity_policy"], "log_only");
+    assert!(nullable_created["away_timeout_seconds"].is_null());
+    let nullable_mock_id: Uuid = nullable_created["mock_id"].as_str().unwrap().parse().unwrap();
+
     // 6. Admin successfully creates a mock with mock_type: "mini" and multi-chapter blueprint
     let mut create_req = request(
         "POST",
@@ -22331,7 +22412,20 @@ async fn mock_types_and_time_analysis() {
         .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, created) = call(app.clone(), create_req).await;
     assert_eq!(status, StatusCode::OK, "{created}");
+    assert_json_keys(
+        &created,
+        &[
+            "mock_id",
+            "mock_type",
+            "late_sync_grace_seconds",
+            "integrity_policy",
+            "away_timeout_seconds",
+        ],
+    );
     assert_eq!(created["mock_type"], "mini");
+    assert_eq!(created["late_sync_grace_seconds"], 300);
+    assert_eq!(created["integrity_policy"], "log_only");
+    assert!(created["away_timeout_seconds"].is_null());
     let mid: Uuid = created["mock_id"].as_str().unwrap().parse().unwrap();
 
     // 7. GET /v1/mocks returns mock_type
@@ -22341,12 +22435,38 @@ async fn mock_types_and_time_analysis() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{mocks}");
+    assert_json_keys(&mocks, &["mocks"]);
     let mock_list = mocks["mocks"].as_array().unwrap();
+    let nullable_mock = mock_list
+        .iter()
+        .find(|m| m["mock_id"] == serde_json::json!(nullable_mock_id.to_string()))
+        .expect("nullable mock in list");
+    assert_eq!(nullable_mock["pass_mark_percent"], 50);
+    assert_eq!(nullable_mock["attempts_allowed"], 1);
+    assert!(nullable_mock["time_limit_seconds"].is_null());
+    assert_eq!(nullable_mock["late_sync_grace_seconds"], 600);
     let our_mock = mock_list
         .iter()
         .find(|m| m["mock_id"] == serde_json::json!(mid.to_string()))
         .expect("mock in list");
+    assert_json_keys(
+        our_mock,
+        &[
+            "mock_id",
+            "title",
+            "mock_type",
+            "pass_mark_percent",
+            "attempts_allowed",
+            "attempts_used",
+            "time_limit_seconds",
+            "late_sync_grace_seconds",
+            "integrity_policy",
+            "away_timeout_seconds",
+        ],
+    );
     assert_eq!(our_mock["mock_type"], "mini");
+    assert_eq!(our_mock["attempts_used"], 0);
+    assert_eq!(our_mock["integrity_policy"], "log_only");
 
     // 8. Start the mock session
     let (status, started) = call(
@@ -22360,6 +22480,15 @@ async fn mock_types_and_time_analysis() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{started}");
+    assert_json_keys(
+        &started,
+        &[
+            "session_id",
+            "mock_type",
+            "question_count",
+            "late_sync_grace_seconds",
+        ],
+    );
     assert_eq!(started["mock_type"], "mini");
     assert_eq!(started["question_count"], 3);
     let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
@@ -22417,7 +22546,50 @@ async fn mock_types_and_time_analysis() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
+    assert_json_keys(
+        &result,
+        &[
+            "total",
+            "correct",
+            "incorrect",
+            "skipped",
+            "score",
+            "expected_score",
+            "mock",
+            "time",
+        ],
+    );
+    let time = result["time"].as_object().expect("time analysis object");
+    assert_json_keys(&result["time"], &["duration_seconds", "items"]);
+    let time_items = time["items"].as_array().expect("item timings");
+    assert_eq!(time_items.len(), 3);
+    let first_timing = time_items
+        .iter()
+        .find(|item| item["item_index"] == 0)
+        .expect("first item timing");
+    assert_json_keys(
+        first_timing,
+        &["item_index", "elapsed_ms", "answer_changes"],
+    );
+    assert_eq!(first_timing["elapsed_ms"], 45_000);
+    assert_eq!(first_timing["answer_changes"], 0);
     let mock = result["mock"].as_object().expect("mock result object");
+    assert_json_keys(
+        &result["mock"],
+        &[
+            "mock_type",
+            "score_percent",
+            "passed",
+            "pass_mark_percent",
+            "percentile",
+            "takers",
+            "ranked",
+            "late_sync_answers",
+            "total_time_seconds",
+            "avg_time_per_question_seconds",
+            "breakdown",
+        ],
+    );
     assert_eq!(mock["mock_type"], "mini");
 
     // Total recorded elapsed: 45s + 15s = 60s
@@ -22432,6 +22604,7 @@ async fn mock_types_and_time_analysis() {
         .iter()
         .find(|b| b["chapter"] == "Gloopoid Physiology")
         .expect("chapter 1 breakdown");
+    assert_json_keys(ch1, &["chapter", "total", "correct", "time_seconds"]);
     assert_eq!(ch1["time_seconds"], 60);
     assert_eq!(ch1["total"], 2);
 
@@ -22439,6 +22612,7 @@ async fn mock_types_and_time_analysis() {
         .iter()
         .find(|b| b["chapter"] == "Glorbin Measurement")
         .expect("chapter 2 breakdown");
+    assert_json_keys(ch2, &["chapter", "total", "correct", "time_seconds"]);
     assert_eq!(ch2["time_seconds"], 0);
     assert_eq!(ch2["total"], 1);
 }
