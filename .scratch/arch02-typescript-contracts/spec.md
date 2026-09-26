@@ -35,11 +35,13 @@ and keep ARCH-02 open until every client-consumed contract is generated.
 - Store generated declarations under the client library's generated folder.
 - Keep the hand-written HTTP transport in `api.ts`; it may import and re-export
   generated types but may not restate their fields.
-- The initial vertical slices cover `TodayResponse` and the IMG-04
-  `ImageConceptLink` DTO. Other client-consumed contracts remain hand-written
-  and keep ARCH-02 in progress.
-- The next vertical slice covers the learner image-case and admin annotation
-  response DTO family; it preserves existing endpoint payloads and rights gates.
+- The completed slices cover Today, the IMG-04 `ImageConceptLink` DTO, and
+  learner image-case/admin annotation response DTOs. Other client-consumed
+  request and response families remain hand-written, so ARCH-02 stays in
+  progress.
+- The image-case response slice preserves existing endpoint payloads and
+  rights and review gates; its evidence is recorded in
+  `issues/02-image-case-contracts.md`.
 - Run the generator in the Rust GitHub Actions job. Once the bootstrap files
   are checked in, CI fails on tracked or untracked generated-file drift. Client
   and browser builds consume the same generated artifact.

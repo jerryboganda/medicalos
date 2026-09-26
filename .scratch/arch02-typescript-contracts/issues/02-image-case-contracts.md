@@ -1,6 +1,6 @@
 # ARCH-02 — Generate image-case response contracts
 
-Status: in-progress
+Status: complete
 Triage label: ready-for-agent
 Requirement IDs: ARCH-02, IMG-01, IMG-02, IMG-04
 Source: `.scratch/arch02-typescript-contracts/spec.md`; `.scratch/img04-anatomy-linkage/spec.md`
@@ -86,3 +86,10 @@ review gates.
 IMG-04's `ImageConceptLink` is already generated. This issue migrates the
 remaining image-case response DTOs while ARCH-02 stays open for other client
 contract families.
+
+## Acceptance evidence
+
+- GitHub Actions push [run 36223707295](https://github.com/jerryboganda/medicalos/actions/runs/36223707295) and PR [run 36223709097](https://github.com/jerryboganda/medicalos/actions/runs/36223709097) passed on `7dffa02d5d8d0eec5b29bf73c9d44f3e96956c84`.
+- The suite passed 112 API integration tests, 19 other Rust tests, 23 Rust-owned TypeScript export tests, and 57 Playwright E2E tests. Formatting, Clippy, dependency/license checks, SQLx query-cache generation, WASM, generated-file drift, client, and site gates also passed.
+- The follow-up push and PR runs both enforced the checked-in generated-file drift gate. No endpoint, rights, or review behavior changed.
+- This closes the image-case response DTO slice only; ARCH-02 remains in progress for other client-consumed API contracts.
