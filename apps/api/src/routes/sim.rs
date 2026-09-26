@@ -16,6 +16,204 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioRubricStatus.ts",
+        rename = "ScenarioRubricStatus"
+    )
+)]
+pub enum ScenarioRubricStatus {
+    Assessed,
+    NotAssessed,
+    LegacyUnverified,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAppealStatus.ts",
+        rename = "ScenarioAppealStatus"
+    )
+)]
+pub enum ScenarioAppealStatus {
+    Open,
+    Reviewed,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAppealDecision.ts",
+        rename = "ScenarioAppealDecision"
+    )
+)]
+pub enum ScenarioAppealDecision {
+    Confirmed,
+    ReassessmentRequired,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioConsequentialUseStatus.ts",
+        rename = "ScenarioConsequentialUseStatus"
+    )
+)]
+pub enum ScenarioConsequentialUseStatus {
+    ReassessmentRequired,
+    NotAuthorizedByAssessment,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioRubricResult.ts",
+        rename = "ScenarioRubricResult"
+    )
+)]
+pub struct ScenarioRubricResult {
+    criterion_key: String,
+    label: String,
+    max_score: f32,
+    assessment_status: ScenarioRubricStatus,
+    evidence: Option<String>,
+    score: Option<f32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number[]"))]
+    transcript_event_indexes: serde_json::Value,
+    transcript_uncertain: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTranscriptCorrection.ts",
+        rename = "ScenarioTranscriptCorrection"
+    )
+)]
+pub struct ScenarioTranscriptCorrection {
+    event_index: i32,
+    original_event: String,
+    corrected_text: String,
+    corrected_by: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAppealSummary.ts",
+        rename = "ScenarioAppealSummary"
+    )
+)]
+pub struct ScenarioAppealSummary {
+    appeal_id: Uuid,
+    reason: String,
+    status: ScenarioAppealStatus,
+    decision: Option<ScenarioAppealDecision>,
+    rationale: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioDebrief.ts",
+        rename = "ScenarioDebrief"
+    )
+)]
+pub struct ScenarioDebrief {
+    scenario: String,
+    scenario_version: i32,
+    final_state: String,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown[]"))]
+    transcript: serde_json::Value,
+    timeline: Vec<crate::routes::program::ScenarioTimelineEvent>,
+    transcript_corrections: Vec<ScenarioTranscriptCorrection>,
+    available_actions: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    started_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    rubric: Vec<ScenarioRubricResult>,
+    appeal: Option<ScenarioAppealSummary>,
+    consequential_use_status: ScenarioConsequentialUseStatus,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioCounterfactualEvent.ts",
+        rename = "ScenarioCounterfactualEvent"
+    )
+)]
+pub struct ScenarioCounterfactualEvent {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    index: usize,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    sequence: usize,
+    from: String,
+    on: String,
+    to: String,
+    terminal: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioCounterfactualReplay.ts",
+        rename = "ScenarioCounterfactualReplay"
+    )
+)]
+pub struct ScenarioCounterfactualReplay {
+    run_id: Uuid,
+    scenario_version: i32,
+    original_timeline: Vec<crate::routes::program::ScenarioTimelineEvent>,
+    counterfactual_timeline: Vec<ScenarioCounterfactualEvent>,
+    final_state: String,
+    terminal: bool,
+}
+
 #[derive(sqlx::FromRow)]
 struct ScenarioDebriefRow {
     current_state: String,
@@ -45,7 +243,7 @@ async fn rubric_results(
     state: &AppState,
     run_id: Uuid,
     scenario_version_id: Uuid,
-) -> ApiResult<Vec<serde_json::Value>> {
+) -> ApiResult<Vec<ScenarioRubricResult>> {
     let rows = sqlx::query_as::<_, RubricResultRow>(
         r#"SELECT r.criterion_key, r.label, r.max_score,
                   e.assessment_status, e.evidence, e.score,
@@ -60,22 +258,31 @@ async fn rubric_results(
     .bind(scenario_version_id)
     .fetch_all(&state.pool)
     .await?;
-    Ok(rows
+    let results = rows
         .into_iter()
         .map(|row| {
-            json!({
-                "criterion_key": row.criterion_key,
-                "label": row.label,
-                "max_score": row.max_score,
-                "assessment_status": row.assessment_status.unwrap_or_else(|| "not_assessed".into()),
-                "evidence": row.evidence,
-                "score": row.score,
-                "transcript_event_indexes": row.transcript_event_indexes.unwrap_or_else(|| json!([])),
-                "transcript_uncertain": row.transcript_uncertain.unwrap_or(false),
-                "reviewed_at": row.created_at,
+            let assessment_status = match row.assessment_status.as_deref() {
+                None | Some("not_assessed") => ScenarioRubricStatus::NotAssessed,
+                Some("assessed") => ScenarioRubricStatus::Assessed,
+                Some("legacy_unverified") => ScenarioRubricStatus::LegacyUnverified,
+                Some(_) => return Err(ApiError::internal()),
+            };
+            Ok(ScenarioRubricResult {
+                criterion_key: row.criterion_key,
+                label: row.label,
+                max_score: row.max_score,
+                assessment_status,
+                evidence: row.evidence,
+                score: row.score,
+                transcript_event_indexes: row
+                    .transcript_event_indexes
+                    .unwrap_or_else(|| json!([])),
+                transcript_uncertain: row.transcript_uncertain.unwrap_or(false),
+                reviewed_at: row.created_at,
             })
         })
-        .collect())
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(results)
 }
 
 #[derive(sqlx::FromRow)]
@@ -92,7 +299,7 @@ pub async fn debrief(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(run_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioDebrief>> {
     let run = sqlx::query_as::<_, ScenarioDebriefRow>(
         r#"SELECT r.current_state, r.transcript, r.started_at, r.finished_at,
                   s.title, sv.version, r.scenario_version_id, sv.state_machine
@@ -123,56 +330,71 @@ pub async fn debrief(
     .fetch_optional(&state.pool)
     .await?
     .map(|appeal| {
-        json!({
-            "appeal_id": appeal.appeal_id,
-            "reason": appeal.reason,
-            "status": if appeal.decision.is_some() { "reviewed" } else { "open" },
-            "decision": appeal.decision,
-            "rationale": appeal.rationale,
-            "created_at": appeal.created_at,
-            "reviewed_at": appeal.reviewed_at,
+        let (decision, status) = match appeal.decision.as_deref() {
+            None => (None, ScenarioAppealStatus::Open),
+            Some("confirmed") => (
+                Some(ScenarioAppealDecision::Confirmed),
+                ScenarioAppealStatus::Reviewed,
+            ),
+            Some("reassessment_required") => (
+                Some(ScenarioAppealDecision::ReassessmentRequired),
+                ScenarioAppealStatus::Reviewed,
+            ),
+            Some(_) => return Err(ApiError::internal()),
+        };
+        Ok(ScenarioAppealSummary {
+            appeal_id: appeal.appeal_id,
+            reason: appeal.reason,
+            status,
+            decision,
+            rationale: appeal.rationale,
+            created_at: appeal.created_at,
+            reviewed_at: appeal.reviewed_at,
         })
-    });
+    })
+    .transpose()?;
     let consequential_use_status = match appeal
         .as_ref()
-        .and_then(|appeal| appeal.get("decision"))
-        .and_then(serde_json::Value::as_str)
+        .and_then(|appeal| appeal.decision)
     {
-        Some("reassessment_required") => "reassessment_required",
-        _ => "not_authorized_by_assessment",
+        Some(ScenarioAppealDecision::ReassessmentRequired) => {
+            ScenarioConsequentialUseStatus::ReassessmentRequired
+        }
+        _ => ScenarioConsequentialUseStatus::NotAuthorizedByAssessment,
     };
-    Ok(Json(json!({
-        "scenario": run.title,
-        "scenario_version": run.version,
-        "final_state": run.current_state,
-        "transcript": run.transcript,
-        "timeline": crate::routes::program::transcript_timeline(&run.transcript),
-        "transcript_corrections": sqlx::query!(
-            r#"SELECT event_index, original_event, corrected_text, corrected_by, created_at
-               FROM scenario_transcript_corrections
-               WHERE run_id = $1 ORDER BY event_index"#,
-            run_id
-        )
-        .fetch_all(&state.pool)
-        .await?
-        .iter()
-        .map(|c| {
-            json!({
-                "event_index": c.event_index,
-                "original_event": c.original_event,
-                "corrected_text": c.corrected_text,
-                "corrected_by": c.corrected_by,
-                "created_at": c.created_at,
-            })
-        })
-        .collect::<Vec<_>>(),
-        "available_actions": crate::routes::program::scenario_events(&run.state_machine, None),
-        "started_at": run.started_at,
-        "finished_at": run.finished_at,
-        "rubric": rubric,
-        "appeal": appeal,
-        "consequential_use_status": consequential_use_status,
-    })))
+    let transcript_corrections = sqlx::query!(
+        r#"SELECT event_index, original_event, corrected_text, corrected_by, created_at
+           FROM scenario_transcript_corrections
+           WHERE run_id = $1 ORDER BY event_index"#,
+        run_id
+    )
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .map(|correction| ScenarioTranscriptCorrection {
+        event_index: correction.event_index,
+        original_event: correction.original_event,
+        corrected_text: correction.corrected_text,
+        corrected_by: correction.corrected_by,
+        created_at: correction.created_at,
+    })
+    .collect();
+    let timeline = crate::routes::program::transcript_timeline(&run.transcript);
+    let available_actions = crate::routes::program::scenario_events(&run.state_machine, None);
+    Ok(Json(ScenarioDebrief {
+        scenario: run.title,
+        scenario_version: run.version,
+        final_state: run.current_state,
+        transcript: run.transcript,
+        timeline,
+        transcript_corrections,
+        available_actions,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        rubric,
+        appeal,
+        consequential_use_status,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -193,7 +415,7 @@ pub async fn counterfactual_replay(
     user: AuthUser,
     Path(run_id): Path<Uuid>,
     Json(req): Json<CounterfactualReplayReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioCounterfactualReplay>> {
     if req.events.is_empty()
         || req.events.len() > 100
         || req.events.iter().any(|event| {
@@ -260,24 +482,26 @@ pub async fn counterfactual_replay(
                 )
             })?;
         let terminal = terminal_states.contains(next.as_str());
-        timeline.push(json!({
-            "index": index,
-            "sequence": index + 1,
-            "from": current.clone(),
-            "on": action,
-            "to": next.clone(),
-            "terminal": terminal,
-        }));
+        timeline.push(ScenarioCounterfactualEvent {
+            index,
+            sequence: index + 1,
+            from: current.clone(),
+            on: action.to_string(),
+            to: next.clone(),
+            terminal,
+        });
         current = next;
     }
-    Ok(Json(json!({
-        "run_id": run_id,
-        "scenario_version": run.version,
-        "original_timeline": crate::routes::program::transcript_timeline(&run.transcript),
-        "counterfactual_timeline": timeline,
-        "final_state": current,
-        "terminal": terminal_states.contains(current.as_str()),
-    })))
+    let original_timeline = crate::routes::program::transcript_timeline(&run.transcript);
+    let terminal = terminal_states.contains(current.as_str());
+    Ok(Json(ScenarioCounterfactualReplay {
+        run_id,
+        scenario_version: run.version,
+        original_timeline,
+        counterfactual_timeline: timeline,
+        final_state: current,
+        terminal,
+    }))
 }
 
 #[derive(sqlx::FromRow)]

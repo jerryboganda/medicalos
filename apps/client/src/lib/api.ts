@@ -9,8 +9,11 @@ import type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
 import type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
 import type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
 import type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
+import type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
+import type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 import type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+import type { ScenarioRubricResult } from './generated/scenario/ScenarioRubricResult';
 import type { ScenarioRun } from './generated/scenario/ScenarioRun';
 import type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 import type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
@@ -46,10 +49,20 @@ export type { ImageFinding } from './generated/image/ImageFinding';
 export type { ImageRef } from './generated/image/ImageRef';
 export type { PendingImageAnnotationStatus } from './generated/image/PendingImageAnnotationStatus';
 export type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
+export type { ScenarioAppealSummary } from './generated/scenario/ScenarioAppealSummary';
+export type { ScenarioAppealDecision } from './generated/scenario/ScenarioAppealDecision';
+export type { ScenarioAppealStatus } from './generated/scenario/ScenarioAppealStatus';
+export type { ScenarioCounterfactualEvent } from './generated/scenario/ScenarioCounterfactualEvent';
+export type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
+export type { ScenarioConsequentialUseStatus } from './generated/scenario/ScenarioConsequentialUseStatus';
+export type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 export type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
+export type { ScenarioRubricResult } from './generated/scenario/ScenarioRubricResult';
+export type { ScenarioRubricStatus } from './generated/scenario/ScenarioRubricStatus';
 export type { ScenarioRun } from './generated/scenario/ScenarioRun';
 export type { ScenarioStartResponse } from './generated/scenario/ScenarioStartResponse';
 export type { ScenarioTimelineEvent } from './generated/scenario/ScenarioTimelineEvent';
+export type { ScenarioTranscriptCorrection } from './generated/scenario/ScenarioTranscriptCorrection';
 export type { ScenarioSummary } from './generated/scenario/ScenarioSummary';
 export type { ScenarioHandover } from './generated/scenario/ScenarioHandover';
 export type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/ScenarioHandoverAcknowledgedResponse';
@@ -306,48 +319,7 @@ export interface AdminScenarioAssessment {
 	transcript: { from: string; on: string; to: string; actor_role?: ScenarioTeamRole | null }[];
 	started_at: string;
 	finished_at: string;
-	rubric: {
-		criterion_key: string;
-		label: string;
-		max_score: number;
-		assessment_status: 'assessed' | 'not_assessed' | 'legacy_unverified';
-		evidence: string | null;
-		score: number | null;
-		transcript_event_indexes: number[];
-		transcript_uncertain: boolean;
-		reviewed_at: string | null;
-	}[];
-}
-
-export interface ScenarioDebrief {
-	scenario: string;
-	scenario_version: number;
-	final_state: string;
-	transcript: ScenarioTimelineEvent[];
-	timeline: ScenarioTimelineEvent[];
-	available_actions: string[];
-	started_at: string;
-	finished_at: string;
-	rubric: AdminScenarioAssessment['rubric'];
-	consequential_use_status: 'reassessment_required' | 'not_authorized_by_assessment';
-	appeal: {
-		appeal_id: string;
-		reason: string;
-		status: 'open' | 'reviewed';
-		decision: 'confirmed' | 'reassessment_required' | null;
-		rationale: string | null;
-		created_at: string;
-		reviewed_at: string | null;
-	} | null;
-}
-
-export interface ScenarioCounterfactualReplay {
-	run_id: string;
-	scenario_version: number;
-	original_timeline: ScenarioTimelineEvent[];
-	counterfactual_timeline: ScenarioTimelineEvent[];
-	final_state: string;
-	terminal: boolean;
+	rubric: ScenarioRubricResult[];
 }
 
 export interface ScenarioAssessmentAppealQueueItem {

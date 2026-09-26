@@ -16221,6 +16221,7 @@ async fn sim03_text_mode_transcript_uncertainty_supports_correction_and_evidence
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{correction}");
+    assert_eq!(correction.as_object().unwrap().len(), 4);
     assert_eq!(correction["original_event"], "probe_history");
     let (status, duplicate) = call(
         app.clone(),
@@ -16270,6 +16271,11 @@ async fn sim03_text_mode_transcript_uncertainty_supports_correction_and_evidence
     assert_eq!(status, StatusCode::OK, "{debrief}");
     let corrections = debrief["transcript_corrections"].as_array().unwrap();
     assert_eq!(corrections.len(), 1);
+    assert_eq!(corrections[0].as_object().unwrap().len(), 5);
+    assert!(corrections[0]["event_index"].is_number());
+    assert!(corrections[0]["original_event"].is_string());
+    assert!(corrections[0]["corrected_by"].is_string());
+    assert!(corrections[0]["created_at"].is_string());
     assert_eq!(
         corrections[0]["corrected_text"],
         "ask about symptom duration and severity"
@@ -19549,10 +19555,33 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay.as_object().unwrap().len(), 6);
     assert_eq!(replay["scenario_version"], 1);
     assert_eq!(replay["final_state"], "complete");
-    assert_eq!(replay["counterfactual_timeline"][0]["on"], "finish");
-    assert_eq!(replay["counterfactual_timeline"][0]["sequence"], 1);
+    assert_eq!(
+        replay["original_timeline"][0],
+        serde_json::json!({
+            "index": 0,
+            "sequence": 1,
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead",
+            "uncertain": false,
+            "uncertainty_reason": null
+        })
+    );
+    assert_eq!(
+        replay["counterfactual_timeline"][0],
+        serde_json::json!({
+            "index": 0,
+            "sequence": 1,
+            "from": "start",
+            "on": "finish",
+            "to": "complete",
+            "terminal": true
+        })
+    );
     assert_eq!(replay["original_timeline"].as_array().unwrap().len(), 2);
     let (status, replay_after_terminal) = call(
         app.clone(),
@@ -19625,6 +19654,13 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
         .iter()
         .all(|criterion| criterion["assessment_status"] == "not_assessed"
             && criterion["score"] == serde_json::Value::Null));
+    assert_eq!(before["rubric"][0].as_object().unwrap().len(), 9);
+    assert_eq!(before["rubric"][0]["evidence"], serde_json::Value::Null);
+    assert_eq!(before["rubric"][0]["reviewed_at"], serde_json::Value::Null);
+    assert!(before["rubric"][0]["transcript_event_indexes"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let assessment = serde_json::json!({
         "criteria": [
@@ -19714,13 +19750,37 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{debrief}");
+    assert_eq!(debrief.as_object().unwrap().len(), 12);
     assert!(debrief["finished_at"].as_str().is_some());
     assert_eq!(debrief["scenario_version"], 1);
     assert_eq!(debrief["timeline"].as_array().unwrap().len(), 2);
-    assert_eq!(debrief["timeline"][0]["index"], 0);
-    assert_eq!(debrief["timeline"][0]["sequence"], 1);
-    assert_eq!(debrief["transcript"][0]["on"], "ask_symptom_onset");
+    assert_eq!(
+        debrief["transcript"][0],
+        serde_json::json!({
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead"
+        })
+    );
+    assert_eq!(
+        debrief["timeline"][0],
+        serde_json::json!({
+            "index": 0,
+            "sequence": 1,
+            "from": "start",
+            "on": "ask_symptom_onset",
+            "to": "start",
+            "actor_role": "team_lead",
+            "uncertain": false,
+            "uncertainty_reason": null
+        })
+    );
+    assert!(debrief["transcript_corrections"].as_array().unwrap().is_empty());
+    assert!(debrief["appeal"].is_null());
     let rubric = debrief["rubric"].as_array().unwrap();
+    assert_eq!(rubric.len(), 2);
+    assert_eq!(rubric[0].as_object().unwrap().len(), 9);
     let history = rubric
         .iter()
         .find(|criterion| criterion["criterion_key"] == "focused_history")
@@ -19735,6 +19795,12 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
         .unwrap();
     assert_eq!(physical_exam["assessment_status"], "not_assessed");
     assert_eq!(physical_exam["score"], serde_json::Value::Null);
+    assert!(physical_exam["transcript_event_indexes"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(physical_exam["transcript_uncertain"], false);
+    assert!(physical_exam["reviewed_at"].is_string());
     assert_eq!(
         physical_exam["evidence"],
         "No physical examination action was observed."
@@ -19755,6 +19821,21 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     assert_eq!(status, StatusCode::CREATED, "{appeal}");
     assert_eq!(appeal["status"], "open");
     let appeal_id = appeal["appeal_id"].as_str().unwrap();
+    let (status, open_debrief) = call(
+        app.clone(),
+        request("GET", &debrief_path, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{open_debrief}");
+    assert_eq!(open_debrief["appeal"].as_object().unwrap().len(), 7);
+    assert_eq!(open_debrief["appeal"]["status"], "open");
+    assert_eq!(open_debrief["appeal"]["decision"], serde_json::Value::Null);
+    assert_eq!(open_debrief["appeal"]["rationale"], serde_json::Value::Null);
+    assert!(open_debrief["appeal"]["created_at"].is_string());
+    assert_eq!(
+        open_debrief["appeal"]["reviewed_at"],
+        serde_json::Value::Null
+    );
     let (status, duplicate_appeal) = call(
         app.clone(),
         request(
@@ -19843,11 +19924,14 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{reviewed_debrief}");
+    assert_eq!(reviewed_debrief["appeal"].as_object().unwrap().len(), 7);
     assert_eq!(reviewed_debrief["appeal"]["status"], "reviewed");
     assert_eq!(
         reviewed_debrief["appeal"]["decision"],
         "reassessment_required"
     );
+    assert!(reviewed_debrief["appeal"]["rationale"].is_string());
+    assert!(reviewed_debrief["appeal"]["reviewed_at"].is_string());
     assert_eq!(
         reviewed_debrief["consequential_use_status"],
         "reassessment_required"
