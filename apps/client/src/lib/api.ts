@@ -7,6 +7,7 @@ import type { SubmitResult } from './generated/mock/SubmitResult';
 import type { CreateSessionResponse } from './generated/practice/CreateSessionResponse';
 import type { CreateSessionRequest } from './generated/practice/CreateSessionRequest';
 import type { AnswerRequest } from './generated/practice/AnswerRequest';
+import type { AnswerResponse } from './generated/practice/AnswerResponse';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -165,6 +166,9 @@ export type { CreateSessionResponse } from './generated/practice/CreateSessionRe
 export type { BlueprintSlice } from './generated/practice/BlueprintSlice';
 export type { CreateSessionRequest } from './generated/practice/CreateSessionRequest';
 export type { AnswerRequest } from './generated/practice/AnswerRequest';
+export type { AnswerFeedbackResponse } from './generated/practice/AnswerFeedbackResponse';
+export type { AnswerRecordedResponse } from './generated/practice/AnswerRecordedResponse';
+export type { AnswerResponse } from './generated/practice/AnswerResponse';
 export type { SessionOption } from './generated/practice/SessionOption';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
@@ -427,16 +431,6 @@ export interface PracticeSession {
 	deadline: string | null;
 	server_now: string | null;
 	items: SessionItem[];
-}
-
-export interface AnswerResult {
-	already_recorded: boolean;
-	correct: boolean | null;
-	correct_index: number;
-	options: { text: string; rationale: string }[];
-	key_learning_point: string;
-	exam_tip: string | null;
-	tutoring_cards?: TutoringCard[];
 }
 
 export interface Note {
@@ -839,7 +833,7 @@ export const Api = {
 			body
 		),
 	answer: (sid: string, body: AnswerRequest) =>
-		call<AnswerResult>('POST', `/v1/practice/sessions/${sid}/answers`, body),
+		call<AnswerResponse>('POST', `/v1/practice/sessions/${sid}/answers`, body),
 	submit: (sid: string) => call<SubmitReceipt>('POST', `/v1/practice/sessions/${sid}/submit`),
 	undo: (planId: string, revisionId: string) =>
 		call<{ plan_version: number }>(

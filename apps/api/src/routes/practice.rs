@@ -1086,13 +1086,70 @@ pub struct AnswerReq {
     pub client_recorded_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerRecordedResponse.ts",
+        rename = "AnswerRecordedResponse"
+    )
+)]
+pub struct AnswerRecordedResponse {
+    already_recorded: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    recorded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "true", optional))]
+    answer_changed: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerFeedbackResponse.ts",
+        rename = "AnswerFeedbackResponse"
+    )
+)]
+pub struct AnswerFeedbackResponse {
+    already_recorded: bool,
+    correct: Option<bool>,
+    correct_index: i16,
+    options: Vec<QuestionOption>,
+    key_learning_point: String,
+    exam_tip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    tutoring_cards: Option<Vec<crate::routes::program::TutoringCard>>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerResponse.ts",
+        rename = "AnswerResponse"
+    )
+)]
+pub enum AnswerResponse {
+    Feedback(AnswerFeedbackResponse),
+    Recorded(AnswerRecordedResponse),
+}
+
 async fn replay_answer(
     state: &AppState,
     sid: Uuid,
     preset: &str,
     status: &str,
     idempotency_key: &str,
-) -> ApiResult<Option<Json<serde_json::Value>>> {
+) -> ApiResult<Option<Json<AnswerResponse>>> {
     let replay = sqlx::query!(
         r#"SELECT a.question_version_id, a.chosen_index, a.correct, qv.correct_index, qv.options,
                   qv.key_learning_point, qv.exam_tip, qv.status AS question_status
@@ -1129,7 +1186,7 @@ pub async fn answer(
     user: AuthUser,
     Path(sid): Path<Uuid>,
     Json(req): Json<AnswerReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     apply_answer(&state, user.user_id, sid, req).await
 }
 
@@ -1142,7 +1199,7 @@ pub async fn apply_answer(
     user_id: Uuid,
     sid: Uuid,
     req: AnswerReq,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     let session = sqlx::query!(
         "SELECT status, deadline, preset, created_at,
                 per_question_seconds AS \"per_question_seconds?\",
@@ -1248,15 +1305,16 @@ pub async fn apply_answer(
                 )
                 .execute(&state.pool)
                 .await?;
-                return Ok(Json(serde_json::json!({
-                    "already_recorded": true,
-                    "recorded": true,
-                    "answer_changed": true,
+                return Ok(Json(AnswerResponse::Recorded(AnswerRecordedResponse {
+                    already_recorded: true,
+                    recorded: true,
+                    answer_changed: Some(true),
                 })));
             }
-            return Ok(Json(serde_json::json!({
-                "already_recorded": true,
-                "recorded": true,
+            return Ok(Json(AnswerResponse::Recorded(AnswerRecordedResponse {
+                already_recorded: true,
+                recorded: true,
+                answer_changed: None,
             })));
         }
         return Err(ApiError::conflict(
@@ -1542,22 +1600,24 @@ fn response_for_preset(
     options: &serde_json::Value,
     key_learning_point: String,
     exam_tip: Option<String>,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<AnswerResponse> {
     if matches!(preset, "mock" | "timed") {
-        return Ok(serde_json::json!({
-            "already_recorded": already,
-            "recorded": true,
+        return Ok(AnswerResponse::Recorded(AnswerRecordedResponse {
+            already_recorded: already,
+            recorded: true,
+            answer_changed: None,
         }));
     }
     let opts: Vec<QuestionOption> =
         serde_json::from_value(options.clone()).map_err(|_| ApiError::internal())?;
-    Ok(serde_json::json!({
-        "already_recorded": already,
-        "correct": correct,
-        "correct_index": correct_index,
-        "options": opts,
-        "key_learning_point": key_learning_point,
-        "exam_tip": exam_tip,
+    Ok(AnswerResponse::Feedback(AnswerFeedbackResponse {
+        already_recorded: already,
+        correct,
+        correct_index,
+        options: opts,
+        key_learning_point,
+        exam_tip,
+        tutoring_cards: None,
     }))
 }
 
@@ -2054,7 +2114,7 @@ async fn response_for_question(
     options: &serde_json::Value,
     key_learning_point: String,
     exam_tip: Option<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     let mut effective_question_version_id = question_version_id;
     let mut effective_question_status = question_status.to_owned();
     let mut effective_correct_index = correct_index;
@@ -2110,10 +2170,12 @@ async fn response_for_question(
         effective_exam_tip,
     )?;
     if preset == "tutor" && effective_question_status == "published" {
-        response["tutoring_cards"] = serde_json::json!(
-            crate::routes::program::ensure_pregen(&state.pool, effective_question_version_id,)
-                .await?
-        );
+        if let AnswerResponse::Feedback(response) = &mut response {
+            response.tutoring_cards = Some(
+                crate::routes::program::ensure_pregen(&state.pool, effective_question_version_id)
+                    .await?,
+            );
+        }
     }
     Ok(Json(response))
 }

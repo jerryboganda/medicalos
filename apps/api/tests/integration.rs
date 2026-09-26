@@ -1033,7 +1033,9 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     }
     assert!(session["per_question_seconds"].is_null());
     let fixture_questions = sqlx::query(
-        "SELECT id, vignette, lead_in, difficulty, options FROM question_versions WHERE id = ANY($1)",
+        r#"SELECT id, vignette, lead_in, difficulty, options, correct_index,
+                  key_learning_point, exam_tip
+           FROM question_versions WHERE id = ANY($1)"#,
     )
     .bind(seed_ids.question_versions[..2].to_vec())
     .fetch_all(&state.pool)
@@ -1097,22 +1099,58 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
                                    "idempotency_key": key})),
         )
     };
-    // Find the correct index by trying: the fixture option 0 of each question
-    // is not guaranteed correct; use the API's own feedback to detect it is
-    // well-formed, then assert on structure rather than key correctness.
+    // Option zero is not correct for every seeded question, so compare the
+    // feedback with the matching seeded answer key below.
     let (status, ans) = call(app.clone(), answer_req("key-1", 0)).await;
     assert_eq!(status, StatusCode::OK, "{ans}");
+    assert_json_keys(
+        &ans,
+        &[
+            "already_recorded",
+            "correct",
+            "correct_index",
+            "options",
+            "key_learning_point",
+            "exam_tip",
+            "tutoring_cards",
+        ],
+    );
     assert_eq!(ans["already_recorded"], false);
-    assert!(ans["correct"].is_boolean());
-    assert!(ans["correct_index"].is_i64());
-    assert!(ans["options"].as_array().unwrap()[0]["rationale"].is_string());
-    assert!(ans["key_learning_point"].is_string());
+    let answered_id: Uuid = session_items[0]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let answered_fixture = fixture_questions
+        .iter()
+        .find(|row| row.get::<Uuid, _>("id") == answered_id)
+        .expect("answered item comes from the seeded chapter pool");
+    let correct_index = answered_fixture.get::<i16, _>("correct_index");
+    assert_eq!(ans["correct"], serde_json::json!(correct_index == 0));
+    assert_eq!(ans["correct_index"], serde_json::json!(correct_index));
+    assert_eq!(
+        ans["options"],
+        answered_fixture.get::<Value, _>("options")
+    );
+    for option in ans["options"].as_array().unwrap() {
+        assert_json_keys(option, &["text", "rationale"]);
+    }
+    assert_eq!(
+        ans["key_learning_point"].as_str(),
+        Some(answered_fixture.get::<&str, _>("key_learning_point"))
+    );
+    assert_eq!(
+        ans["exam_tip"],
+        serde_json::json!(answered_fixture.get::<Option<String>, _>("exam_tip"))
+    );
+    assert!(ans["tutoring_cards"].as_array().is_some());
 
     // Replay the same key: same answer, no duplicate attempt.
     let (status, replay) = call(app.clone(), answer_req("key-1", 0)).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
-    assert_eq!(replay["already_recorded"], true);
-    assert_eq!(replay["correct"], ans["correct"]);
+    let mut expected_replay = ans.clone();
+    expected_replay["already_recorded"] = serde_json::json!(true);
+    assert_eq!(replay, expected_replay);
     let attempts = sqlx::query("SELECT COUNT(*) AS n FROM attempts WHERE session_id = $1")
         .bind(sid)
         .fetch_one(&state.pool)
@@ -9194,6 +9232,15 @@ async fn phase2_pools_marks_timing_insights() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{ans}");
+        if expect_change {
+            assert_json_keys(&ans, &["already_recorded", "recorded", "answer_changed"]);
+            assert_eq!(ans["already_recorded"], true);
+            assert_eq!(ans["answer_changed"], true);
+        } else {
+            assert_json_keys(&ans, &["already_recorded", "recorded"]);
+            assert_eq!(ans["already_recorded"], false);
+        }
+        assert_eq!(ans["recorded"], true);
         assert_eq!(
             ans["answer_changed"].as_bool().unwrap_or(false),
             expect_change,

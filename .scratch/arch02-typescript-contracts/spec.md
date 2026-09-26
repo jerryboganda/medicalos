@@ -42,9 +42,9 @@ and keep ARCH-02 open until every client-consumed contract is generated.
   are authored on this branch and await final CI acceptance. The practice
   session-creation response is authored in issue 11, and its request is
   authored in issue 12 on this branch; both await final CI acceptance. The
-  practice answer request is authored in issue 13 and also awaits CI. Other
-  client-consumed request and response families remain handwritten, so ARCH-02
-  stays in progress.
+  practice answer request and response are authored in issues 13 and 14 and
+  also await CI. Other client-consumed request and response families remain
+  handwritten, so ARCH-02 stays in progress.
 - The image-case response slice preserves existing endpoint payloads and
   rights and review gates; its evidence is recorded in
   `issues/02-image-case-contracts.md`.
