@@ -67,6 +67,7 @@ migrations!(
     "0050_comp02_scoring_leaderboard",
     "0051_community_post_reports",
     "0052_competition_series_leagues",
+    "0053_eng01_shared_qotd",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
