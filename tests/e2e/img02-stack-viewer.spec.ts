@@ -298,7 +298,7 @@ test('editor submits an annotation and a reviewer makes one final decision', asy
 	});
 	await page.goto('/admin/image-annotations');
 	await expect(page.getByRole('heading', { name: 'Image annotation review' })).toBeVisible();
-	await page.getByLabel('Case').selectOption(caseId);
+	await page.locator('#annotation-case').selectOption(caseId);
 	await page.getByLabel('Image number').fill('2');
 	await page.getByLabel('Horizontal position (%)').fill('30');
 	await page.getByLabel('Vertical position (%)').fill('64');
