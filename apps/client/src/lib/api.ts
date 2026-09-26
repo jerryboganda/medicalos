@@ -1,4 +1,9 @@
 import { auth, clearToken } from './auth.svelte';
+import type { CreateNoteResponse } from './generated/notes/CreateNoteResponse';
+import type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
+import type { ListNotesResponse } from './generated/notes/ListNotesResponse';
+import type { NoteRequest } from './generated/notes/NoteRequest';
+import type { UpdateNoteResponse } from './generated/notes/UpdateNoteResponse';
 import type { CreateMockRequest } from './generated/mock/CreateMockRequest';
 import type { CreateMockResponse } from './generated/mock/CreateMockResponse';
 import type { MockListResponse } from './generated/mock/MockListResponse';
@@ -175,6 +180,13 @@ export type { SessionItem } from './generated/practice/SessionItem';
 export type { SessionReportReceipt } from './generated/practice/SessionReportReceipt';
 export type { SessionReportStatus } from './generated/practice/SessionReportStatus';
 export type { SessionOption } from './generated/practice/SessionOption';
+export type { Note } from './generated/notes/Note';
+export type { NoteBacklink } from './generated/notes/NoteBacklink';
+export type { NoteRequest } from './generated/notes/NoteRequest';
+export type { CreateNoteResponse } from './generated/notes/CreateNoteResponse';
+export type { UpdateNoteResponse } from './generated/notes/UpdateNoteResponse';
+export type { ListNotesResponse } from './generated/notes/ListNotesResponse';
+export type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
 	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
@@ -390,15 +402,6 @@ export interface AdminReport {
 	acknowledgements_on_time: boolean;
 	resolution_overdue: boolean;
 	quarantined: boolean;
-}
-
-export interface Note {
-	note_id: string;
-	title: string;
-	body: string;
-	source_question_version_id: string | null;
-	updated_at: string;
-	backlinks: { note_id: string; title: string }[];
 }
 
 export interface EngagementQotd {
@@ -1037,16 +1040,23 @@ export const Api = {
 			`/v1/coach/history?question_version_id=${vid}`
 		),
 	createNote: (title: string, body: string, sourceQuestionVersionId?: string) =>
-		call<{ note_id: string; updated_at: string }>('POST', '/v1/notes', {
-			title,
-			body,
-			...(sourceQuestionVersionId
-				? { source_question_version_id: sourceQuestionVersionId }
-				: {})
-		}),
-	updateNote: (noteId: string, body: { title?: string; body?: string; base_updated_at?: string }) =>
-		call<{ updated_at: string }>('PATCH', `/v1/notes/${encodeURIComponent(noteId)}`, body),
-	listNotes: () => call<{ notes: Note[] }>('GET', '/v1/notes'),
+		call<CreateNoteResponse>(
+			'POST',
+			'/v1/notes',
+			{
+				title,
+				body,
+				...(sourceQuestionVersionId
+					? { source_question_version_id: sourceQuestionVersionId }
+					: {})
+			} satisfies NoteRequest
+		),
+	updateNote: (
+		noteId: string,
+		body: Pick<NoteRequest, 'title' | 'body' | 'base_updated_at'>
+	) =>
+		call<UpdateNoteResponse>('PATCH', `/v1/notes/${encodeURIComponent(noteId)}`, body),
+	listNotes: () => call<ListNotesResponse>('GET', '/v1/notes'),
 	myMarks: () =>
 		call<{ marks: { question_version_id: string; marked_at: string }[] }>(
 			'GET',
@@ -1057,7 +1067,7 @@ export const Api = {
 	unmarkQuestion: (versionId: string) =>
 		call<{ marked: boolean }>('DELETE', `/v1/questions/${encodeURIComponent(versionId)}/mark`),
 	deleteNote: (noteId: string) =>
-		call<{ deleted: boolean }>('DELETE', `/v1/notes/${noteId}`),
+		call<DeleteNoteResponse>('DELETE', `/v1/notes/${noteId}`),
 	librarySearch: (q: string, scope: { jurisdiction?: string; as_of?: string } = {}) => {
 		const params = new URLSearchParams({ q });
 		if (scope.jurisdiction) params.set('jurisdiction', scope.jurisdiction);

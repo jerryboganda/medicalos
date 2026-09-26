@@ -5030,6 +5030,8 @@ async fn notes_crud_links_export_and_isolation() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{n1}");
+    assert_eq!(n1.as_object().unwrap().len(), 2);
+    assert!(n1["updated_at"].as_str().is_some());
     let id1: Uuid = n1["note_id"].as_str().unwrap().parse().unwrap();
     let (_status, n2) = call(
         app.clone(),
@@ -5042,7 +5044,7 @@ async fn notes_crud_links_export_and_isolation() {
     )
     .await;
     let id2: Uuid = n2["note_id"].as_str().unwrap().parse().unwrap();
-    let (_, _) = call(
+    let (status, linked) = call(
         app.clone(),
         request(
             "POST",
@@ -5052,7 +5054,7 @@ async fn notes_crud_links_export_and_isolation() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{linked}");
 
     // Update, list with backlinks.
     let (status, upd) = call(
@@ -5066,15 +5068,26 @@ async fn notes_crud_links_export_and_isolation() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{upd}");
+    assert_eq!(upd.as_object().unwrap().len(), 1);
+    assert!(upd["updated_at"].as_str().is_some());
     let (status, list) = call(app.clone(), request("GET", "/v1/notes", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list.as_object().unwrap().len(), 1);
     let notes = list["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 2);
     let with_links = notes
         .iter()
         .find(|n| n["note_id"] == n1["note_id"])
         .unwrap();
+    assert_eq!(with_links.as_object().unwrap().len(), 6);
+    assert_eq!(with_links["title"], "Loop rule");
+    assert_eq!(with_links["body"], "Negative feedback suppresses upstream.");
+    assert!(with_links["source_question_version_id"].is_null());
     assert_eq!(with_links["backlinks"].as_array().unwrap().len(), 1);
+    let backlink = &with_links["backlinks"][0];
+    assert_eq!(backlink.as_object().unwrap().len(), 2);
+    assert_eq!(backlink["note_id"], n2["note_id"]);
+    assert_eq!(backlink["title"], "Linked note");
 
     // Isolation: the other learner sees nothing, cannot delete.
     let (_status, other_list) =
@@ -5097,12 +5110,13 @@ async fn notes_crud_links_export_and_isolation() {
     assert_eq!(export["notes"].as_array().unwrap().len(), 2);
 
     // Delete works for the owner.
-    let (status, _) = call(
+    let (status, deleted) = call(
         app.clone(),
         request("DELETE", &format!("/v1/notes/{id1}"), Some(&token), None),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(deleted, serde_json::json!({"deleted": true}));
 }
 
 #[tokio::test]
