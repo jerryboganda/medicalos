@@ -4,6 +4,7 @@ import type { CreateMockResponse } from './generated/mock/CreateMockResponse';
 import type { MockListResponse } from './generated/mock/MockListResponse';
 import type { StartMockResponse } from './generated/mock/StartMockResponse';
 import type { SubmitResult } from './generated/mock/SubmitResult';
+import type { CreateSessionResponse } from './generated/practice/CreateSessionResponse';
 import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminArticleListResponse } from './generated/library/AdminArticleListResponse';
 import type { AdminArticleVersion } from './generated/library/AdminArticleVersion';
@@ -157,6 +158,9 @@ export type { StartMockResponse } from './generated/mock/StartMockResponse';
 export type { SubmitResult } from './generated/mock/SubmitResult';
 export type { SubmitTime } from './generated/mock/SubmitTime';
 export type { SubmitTimeItem } from './generated/mock/SubmitTimeItem';
+export type { CreateSessionItem } from './generated/practice/CreateSessionItem';
+export type { CreateSessionResponse } from './generated/practice/CreateSessionResponse';
+export type { SessionOption } from './generated/practice/SessionOption';
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
 	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
@@ -663,7 +667,7 @@ export const Api = {
 		source_session_id?: string;
 		plan_task_key?: string;
 		time_limit_seconds?: number;
-	}) => call<{ session_id: string }>('POST', '/v1/practice/sessions', body),
+	}) => call<CreateSessionResponse>('POST', '/v1/practice/sessions', body),
 	createPackLease: (body: PackLeaseRequest) =>
 		call<PackLeaseResponse>('POST', '/v1/packs/lease', body),
 	packManifest: (examId: string, chapters: string[], deviceId: string) => {

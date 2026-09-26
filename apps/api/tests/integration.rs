@@ -968,7 +968,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     let _g = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
-    seed::seed(&state.pool).await.expect("seed");
+    let seed_ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
 
     // Cold start: a modest plan exists before any evidence (AI-02).
@@ -1019,13 +1019,69 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
-    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
-    assert_eq!(
-        session["items"].as_array().unwrap().len(),
-        task_question_count as usize
+    assert_json_keys(
+        &session,
+        &["session_id", "items", "per_question_seconds"],
     );
-    // No answer keys or rationales before answering (§11.3).
-    assert!(session["items"][0]["options"][0].get("rationale").is_none());
+    let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
+    let session_items = session["items"].as_array().unwrap();
+    assert_eq!(session_items.len(), task_question_count as usize);
+    for (index, item) in session_items.iter().enumerate() {
+        assert_eq!(item["item_index"].as_i64(), Some(index as i64));
+    }
+    assert!(session["per_question_seconds"].is_null());
+    let fixture_questions = sqlx::query(
+        "SELECT id, vignette, lead_in, difficulty, options FROM question_versions WHERE id = ANY($1)",
+    )
+    .bind(seed_ids.question_versions[..2].to_vec())
+    .fetch_all(&state.pool)
+    .await
+    .expect("load seeded session questions");
+    assert_eq!(fixture_questions.len(), 2);
+    let served_ids: Vec<Uuid> = session_items
+        .iter()
+        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert!(seed_ids.question_versions[..2]
+        .iter()
+        .all(|fixture_id| served_ids.contains(fixture_id)));
+    for item in session_items {
+        assert_json_keys(
+            item,
+            &[
+                "item_index",
+                "question_version_id",
+                "vignette",
+                "lead_in",
+                "difficulty",
+                "options",
+            ],
+        );
+        let question_version_id: Uuid = item["question_version_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let fixture = fixture_questions
+            .iter()
+            .find(|row| row.get::<Uuid, _>("id") == question_version_id)
+            .expect("session item comes from the seeded chapter pool");
+        assert_eq!(item["vignette"].as_str(), Some(fixture.get::<&str, _>("vignette")));
+        assert_eq!(item["lead_in"].as_str(), Some(fixture.get::<&str, _>("lead_in")));
+        assert_eq!(
+            item["difficulty"].as_str(),
+            Some(fixture.get::<&str, _>("difficulty"))
+        );
+        let expected_options: Value = fixture.get("options");
+        let actual_options = item["options"].as_array().unwrap();
+        let expected_options = expected_options.as_array().unwrap();
+        assert_eq!(actual_options.len(), expected_options.len());
+        for (actual, expected) in actual_options.iter().zip(expected_options) {
+            // No answer keys or rationales before answering (§11.3).
+            assert_json_keys(actual, &["text"]);
+            assert_eq!(actual["text"], expected["text"]);
+        }
+    }
 
     // Answer item 0 correctly, with an idempotency key.
     let answer_req = |key: &str, chosen: i16| {

@@ -42,13 +42,52 @@ pub struct CreateSessionReq {
 }
 
 #[derive(Serialize)]
-struct ItemPayload {
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionOption.ts",
+        rename = "SessionOption"
+    )
+)]
+pub struct SessionOption {
+    text: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionItem.ts",
+        rename = "CreateSessionItem"
+    )
+)]
+pub struct CreateSessionItem {
     item_index: i16,
     question_version_id: Uuid,
     vignette: String,
     lead_in: String,
     difficulty: String,
-    options: Vec<serde_json::Value>,
+    options: Vec<SessionOption>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionResponse.ts",
+        rename = "CreateSessionResponse"
+    )
+)]
+pub struct CreateSessionResponse {
+    session_id: Uuid,
+    items: Vec<CreateSessionItem>,
+    per_question_seconds: Option<i32>,
 }
 
 pub(crate) struct PoolQuestion {
@@ -155,7 +194,7 @@ async fn insert_session(
     per_question_seconds: Option<i32>,
     plan_task_key: Option<Uuid>,
     pool_questions: &[PoolQuestion],
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateSessionResponse>> {
     // EX-08: the server issues the deadline — the client never sets it, and
     // answer acceptance is checked against it server-side.
     let deadline = time_limit_seconds
@@ -200,7 +239,7 @@ async fn insert_session(
         .await?;
         let opts: Vec<QuestionOption> =
             serde_json::from_value(q.options.clone()).map_err(|_| ApiError::internal())?;
-        items.push(ItemPayload {
+        items.push(CreateSessionItem {
             item_index: idx,
             question_version_id: q.id,
             vignette: q.vignette.clone(),
@@ -209,23 +248,23 @@ async fn insert_session(
             // §11.3: no answer keys or rationales before they are permitted.
             options: opts
                 .into_iter()
-                .map(|o| serde_json::json!({"text": o.text}))
+                .map(|o| SessionOption { text: o.text })
                 .collect(),
         });
     }
     tx.commit().await?;
-    Ok(Json(serde_json::json!({
-        "session_id": sid,
-        "items": items,
-        "per_question_seconds": per_question_seconds,
-    })))
+    Ok(Json(CreateSessionResponse {
+        session_id: sid,
+        items,
+        per_question_seconds,
+    }))
 }
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CreateSessionReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateSessionResponse>> {
     let free_daily_questions = crate::routes::settings::current_bounded_i64(
         &state.pool,
         "free_daily_questions",
