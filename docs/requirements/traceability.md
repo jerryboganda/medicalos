@@ -157,7 +157,7 @@ Spanning IDs starting in Phase 1: PROT-01 (capture protection + watermark, compl
 | OFF-03 | Note conflicts and versioned plan resolution | tested (stale base_updated_at → 409 with server_updated_at; corrected base applies and advances) | run 35728441244 |
 | OFF-04 | Offline entitlement and freshness disclosure | tested (free tier honest 403 + entitlement details; paid lease with rotating pack_key, content_as_of freshness, revoke) | run 35728441244 |
 | LIB-09 | Licensed offline media packages | not-started | — |
-| IMG-05 | Low-device-capability fallbacks | not-started | — |
+| IMG-05 | Low-device-capability fallbacks | in-progress (the current image viewer is already a lightweight browser-native still-image path: it renders one selected stack frame at a time and has no canvas, WebGL, or volume decoder; this code and its stack-navigation browser coverage are unchanged from full CI run 36245924351; low-end reference-device performance acceptance remains open under UX-03/TRUST-06) | apps/client/src/routes/imaging/+page.svelte; tests/e2e/img02-stack-viewer.spec.ts; run 36245924351 |
 | UX-03 | Client performance budgets on reference devices (completes) | not-started | — |
 | TRUST-06 | Accessibility and device-matrix testing (completes) | not-started | — |
 | PROT-01 | Capture protection per platform + text-surface watermark (completes) | not-started | — |
