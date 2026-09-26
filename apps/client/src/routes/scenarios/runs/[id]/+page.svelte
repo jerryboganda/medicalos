@@ -155,7 +155,7 @@
 		appealBusy = true;
 		appealError = '';
 		try {
-			await Api.appealScenarioAssessment(runId, appealReason.trim());
+			await Api.appealScenarioAssessment(runId, { reason: appealReason.trim() });
 			debrief = await Api.getScenarioDebrief(runId);
 			appealReason = '';
 		} catch (err) {

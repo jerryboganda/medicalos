@@ -10,6 +10,12 @@ import type { ScenarioHandoverAcknowledgedResponse } from './generated/scenario/
 import type { ScenarioHandoverCreatedResponse } from './generated/scenario/ScenarioHandoverCreatedResponse';
 import type { ScenarioHandoversResponse } from './generated/scenario/ScenarioHandoversResponse';
 import type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
+import type { ScenarioAssessmentAppeal } from './generated/scenario/ScenarioAssessmentAppeal';
+import type { ScenarioAssessmentAppealCreatedResponse } from './generated/scenario/ScenarioAssessmentAppealCreatedResponse';
+import type { ScenarioAssessmentAppealQueueResponse } from './generated/scenario/ScenarioAssessmentAppealQueueResponse';
+import type { ScenarioAssessmentAppealRequest } from './generated/scenario/ScenarioAssessmentAppealRequest';
+import type { ScenarioAssessmentAppealReviewRequest } from './generated/scenario/ScenarioAssessmentAppealReviewRequest';
+import type { ScenarioAssessmentAppealReviewResponse } from './generated/scenario/ScenarioAssessmentAppealReviewResponse';
 import type { ScenarioDebrief } from './generated/scenario/ScenarioDebrief';
 import type { ScenarioEventResponse } from './generated/scenario/ScenarioEventResponse';
 import type { ScenarioListResponse } from './generated/scenario/ScenarioListResponse';
@@ -52,6 +58,13 @@ export type { ScenarioListResponse } from './generated/scenario/ScenarioListResp
 export type { ScenarioAppealSummary } from './generated/scenario/ScenarioAppealSummary';
 export type { ScenarioAppealDecision } from './generated/scenario/ScenarioAppealDecision';
 export type { ScenarioAppealStatus } from './generated/scenario/ScenarioAppealStatus';
+export type { ScenarioAssessmentAppeal } from './generated/scenario/ScenarioAssessmentAppeal';
+export type { ScenarioAssessmentAppealCreatedResponse } from './generated/scenario/ScenarioAssessmentAppealCreatedResponse';
+export type { ScenarioAssessmentAppealQueueItem } from './generated/scenario/ScenarioAssessmentAppealQueueItem';
+export type { ScenarioAssessmentAppealQueueResponse } from './generated/scenario/ScenarioAssessmentAppealQueueResponse';
+export type { ScenarioAssessmentAppealRequest } from './generated/scenario/ScenarioAssessmentAppealRequest';
+export type { ScenarioAssessmentAppealReviewRequest } from './generated/scenario/ScenarioAssessmentAppealReviewRequest';
+export type { ScenarioAssessmentAppealReviewResponse } from './generated/scenario/ScenarioAssessmentAppealReviewResponse';
 export type { ScenarioCounterfactualEvent } from './generated/scenario/ScenarioCounterfactualEvent';
 export type { ScenarioCounterfactualReplay } from './generated/scenario/ScenarioCounterfactualReplay';
 export type { ScenarioConsequentialUseStatus } from './generated/scenario/ScenarioConsequentialUseStatus';
@@ -320,20 +333,6 @@ export interface AdminScenarioAssessment {
 	started_at: string;
 	finished_at: string;
 	rubric: ScenarioRubricResult[];
-}
-
-export interface ScenarioAssessmentAppealQueueItem {
-	appeal_id: string;
-	run_id: string;
-	scenario: string;
-	scenario_version: number;
-	reason: string;
-	created_at: string;
-}
-
-export interface ScenarioAssessmentAppeal extends ScenarioAssessmentAppealQueueItem {
-	timeline: ScenarioTimelineEvent[];
-	rubric: AdminScenarioAssessment['rubric'];
 }
 
 export interface AdminConcept {
@@ -746,11 +745,11 @@ export const Api = {
 			'GET',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/debrief`
 		),
-	appealScenarioAssessment: (runId: string, reason: string) =>
-		call<{ appeal_id: string; status: 'open' }>(
+	appealScenarioAssessment: (runId: string, body: ScenarioAssessmentAppealRequest) =>
+		call<ScenarioAssessmentAppealCreatedResponse>(
 			'POST',
 			`/v1/scenarios/runs/${encodeURIComponent(runId)}/appeals`,
-			{ reason }
+			body
 		),
 	replayScenario: (runId: string, events: string[]) =>
 		call<ScenarioCounterfactualReplay>(
@@ -759,7 +758,7 @@ export const Api = {
 			{ events }
 		),
 	listScenarioAssessmentAppeals: () =>
-		call<{ appeals: ScenarioAssessmentAppealQueueItem[] }>(
+		call<ScenarioAssessmentAppealQueueResponse>(
 			'GET',
 			'/v1/admin/scenario-assessment-appeals'
 		),
@@ -770,13 +769,9 @@ export const Api = {
 		),
 	reviewScenarioAssessmentAppeal: (
 		appealId: string,
-		body: { decision: 'confirmed' | 'reassessment_required'; rationale: string }
+		body: ScenarioAssessmentAppealReviewRequest
 	) =>
-		call<{
-			appeal_id: string;
-			status: 'reviewed';
-			decision: 'confirmed' | 'reassessment_required';
-		}>(
+		call<ScenarioAssessmentAppealReviewResponse>(
 			'POST',
 			`/v1/admin/scenario-assessment-appeals/${encodeURIComponent(appealId)}/review`,
 			body

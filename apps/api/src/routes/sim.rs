@@ -146,6 +146,126 @@ pub struct ScenarioAppealSummary {
     reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealRequest.ts",
+        rename = "ScenarioAssessmentAppealRequest"
+    )
+)]
+pub struct ScenarioAssessmentAppealRequest {
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealCreatedResponse.ts",
+        rename = "ScenarioAssessmentAppealCreatedResponse"
+    )
+)]
+pub struct ScenarioAssessmentAppealCreatedResponse {
+    appeal_id: Uuid,
+    status: ScenarioAppealStatus,
+}
+
+#[derive(sqlx::FromRow, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealQueueItem.ts",
+        rename = "ScenarioAssessmentAppealQueueItem"
+    )
+)]
+pub struct ScenarioAssessmentAppealQueueItem {
+    appeal_id: Uuid,
+    run_id: Uuid,
+    scenario: String,
+    scenario_version: i32,
+    reason: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealQueueResponse.ts",
+        rename = "ScenarioAssessmentAppealQueueResponse"
+    )
+)]
+pub struct ScenarioAssessmentAppealQueueResponse {
+    appeals: Vec<ScenarioAssessmentAppealQueueItem>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealReviewRequest.ts",
+        rename = "ScenarioAssessmentAppealReviewRequest"
+    )
+)]
+pub struct ScenarioAssessmentAppealReviewRequest {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"confirmed\" | \"reassessment_required\"")
+    )]
+    pub decision: String,
+    pub rationale: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppealReviewResponse.ts",
+        rename = "ScenarioAssessmentAppealReviewResponse"
+    )
+)]
+pub struct ScenarioAssessmentAppealReviewResponse {
+    appeal_id: Uuid,
+    status: ScenarioAppealStatus,
+    decision: ScenarioAppealDecision,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentAppeal.ts",
+        rename = "ScenarioAssessmentAppeal"
+    )
+)]
+pub struct ScenarioAssessmentAppeal {
+    appeal_id: Uuid,
+    run_id: Uuid,
+    reason: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+    scenario: String,
+    scenario_version: i32,
+    timeline: Vec<crate::routes::program::ScenarioTimelineEvent>,
+    rubric: Vec<ScenarioRubricResult>,
+}
+
 #[derive(Serialize)]
 #[cfg_attr(
     feature = "type-export",
@@ -860,17 +980,12 @@ pub async fn record_assessment(
 
 // ---- appeals (learner challenge; human review resolves, SIM-07) --------------
 
-#[derive(Deserialize)]
-pub struct ScenarioAssessmentAppealReq {
-    pub reason: String,
-}
-
 pub async fn appeal_scenario_assessment(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(run_id): Path<Uuid>,
-    Json(req): Json<ScenarioAssessmentAppealReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Json(req): Json<ScenarioAssessmentAppealRequest>,
+) -> ApiResult<(StatusCode, Json<ScenarioAssessmentAppealCreatedResponse>)> {
     let reason = req.reason.trim();
     if reason.chars().count() < 10
         || reason.chars().count() > 2000
@@ -945,27 +1060,20 @@ pub async fn appeal_scenario_assessment(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"appeal_id": appeal_id, "status":"open"})),
+        Json(ScenarioAssessmentAppealCreatedResponse {
+            appeal_id,
+            status: ScenarioAppealStatus::Open,
+        }),
     ))
-}
-
-#[derive(sqlx::FromRow)]
-struct ScenarioAssessmentAppealQueueRow {
-    appeal_id: Uuid,
-    run_id: Uuid,
-    scenario: String,
-    scenario_version: i32,
-    reason: String,
-    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub async fn list_scenario_assessment_appeals(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioAssessmentAppealQueueResponse>> {
     require_admin(&state, &headers)?;
-    let rows = sqlx::query_as::<_, ScenarioAssessmentAppealQueueRow>(
+    let appeals = sqlx::query_as::<_, ScenarioAssessmentAppealQueueItem>(
         r#"SELECT appeal.id AS appeal_id, appeal.run_id, scenario.title AS scenario,
 		          version.version AS scenario_version, appeal.reason, appeal.created_at
 		   FROM scenario_assessment_appeals appeal
@@ -981,16 +1089,7 @@ pub async fn list_scenario_assessment_appeals(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(
-        json!({"appeals": rows.into_iter().map(|appeal| json!({
-		"appeal_id": appeal.appeal_id,
-		"run_id": appeal.run_id,
-		"scenario": appeal.scenario,
-		"scenario_version": appeal.scenario_version,
-		"reason": appeal.reason,
-		"created_at": appeal.created_at,
-	})).collect::<Vec<_>>()}),
-    ))
+    Ok(Json(ScenarioAssessmentAppealQueueResponse { appeals }))
 }
 
 #[derive(sqlx::FromRow)]
@@ -1010,7 +1109,7 @@ pub async fn get_scenario_assessment_appeal(
     _user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(appeal_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ScenarioAssessmentAppeal>> {
     require_admin(&state, &headers)?;
     let appeal = sqlx::query_as::<_, ScenarioAssessmentAppealDetailRow>(
         r#"SELECT appeal.id AS appeal_id, appeal.run_id, appeal.reason, appeal.created_at,
@@ -1027,22 +1126,16 @@ pub async fn get_scenario_assessment_appeal(
     .await?
     .ok_or_else(|| ApiError::not_found("scenario_assessment_appeal_not_found"))?;
     let rubric = rubric_results(&state, appeal.run_id, appeal.scenario_version_id).await?;
-    Ok(Json(json!({
-        "appeal_id": appeal.appeal_id,
-        "run_id": appeal.run_id,
-        "reason": appeal.reason,
-        "created_at": appeal.created_at,
-        "scenario": appeal.scenario,
-        "scenario_version": appeal.scenario_version,
-        "timeline": crate::routes::program::transcript_timeline(&appeal.transcript),
-        "rubric": rubric,
-    })))
-}
-
-#[derive(Deserialize)]
-pub struct ScenarioAssessmentAppealReviewReq {
-    pub decision: String,
-    pub rationale: String,
+    Ok(Json(ScenarioAssessmentAppeal {
+        appeal_id: appeal.appeal_id,
+        run_id: appeal.run_id,
+        reason: appeal.reason,
+        created_at: appeal.created_at,
+        scenario: appeal.scenario,
+        scenario_version: appeal.scenario_version,
+        timeline: crate::routes::program::transcript_timeline(&appeal.transcript),
+        rubric,
+    }))
 }
 
 pub async fn review_scenario_assessment_appeal(
@@ -1050,15 +1143,19 @@ pub async fn review_scenario_assessment_appeal(
     reviewer: AuthUser,
     headers: axum::http::HeaderMap,
     Path(appeal_id): Path<Uuid>,
-    Json(req): Json<ScenarioAssessmentAppealReviewReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Json(req): Json<ScenarioAssessmentAppealReviewRequest>,
+) -> ApiResult<(StatusCode, Json<ScenarioAssessmentAppealReviewResponse>)> {
     require_admin(&state, &headers)?;
-    if !matches!(req.decision.as_str(), "confirmed" | "reassessment_required") {
-        return Err(ApiError::unprocessable(
-            "invalid_appeal_decision",
-            "decision must be confirmed or reassessment_required",
-        ));
-    }
+    let decision = match req.decision.as_str() {
+        "confirmed" => ScenarioAppealDecision::Confirmed,
+        "reassessment_required" => ScenarioAppealDecision::ReassessmentRequired,
+        _ => {
+            return Err(ApiError::unprocessable(
+                "invalid_appeal_decision",
+                "decision must be confirmed or reassessment_required",
+            ));
+        }
+    };
     let rationale = req.rationale.trim();
     if rationale.chars().count() < 10
         || rationale.chars().count() > 2000
@@ -1133,7 +1230,11 @@ pub async fn review_scenario_assessment_appeal(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({"appeal_id": appeal_id, "status":"reviewed", "decision":req.decision})),
+        Json(ScenarioAssessmentAppealReviewResponse {
+            appeal_id,
+            status: ScenarioAppealStatus::Reviewed,
+            decision,
+        }),
     ))
 }
 

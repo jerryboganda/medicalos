@@ -19819,6 +19819,7 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{appeal}");
+    assert_eq!(appeal.as_object().unwrap().len(), 2);
     assert_eq!(appeal["status"], "open");
     let appeal_id = appeal["appeal_id"].as_str().unwrap();
     let (status, open_debrief) = call(
@@ -19858,11 +19859,15 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{appeal_queue}");
-    assert!(appeal_queue["appeals"]
+    assert_eq!(appeal_queue.as_object().unwrap().len(), 1);
+    let queued_appeal = appeal_queue["appeals"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|item| item["appeal_id"] == appeal_id));
+        .find(|item| item["appeal_id"] == appeal_id)
+        .unwrap();
+    assert_eq!(queued_appeal.as_object().unwrap().len(), 6);
+    assert_eq!(queued_appeal["reason"], appeal_reason);
     let appeal_detail_path = format!("/v1/admin/scenario-assessment-appeals/{appeal_id}");
     let (status, appeal_detail) = call(
         app.clone(),
@@ -19870,7 +19875,10 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{appeal_detail}");
+    assert_eq!(appeal_detail.as_object().unwrap().len(), 8);
     assert_eq!(appeal_detail["reason"], appeal_reason);
+    assert!(!appeal_detail["timeline"].as_array().unwrap().is_empty());
+    assert!(!appeal_detail["rubric"].as_array().unwrap().is_empty());
     let resolve_appeal_path = format!("/v1/admin/scenario-assessment-appeals/{appeal_id}/review");
     let review_body = serde_json::json!({
         "decision":"reassessment_required",
@@ -19917,6 +19925,8 @@ async fn sim04_assessment_requires_evidence_or_not_assessed_reason() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{appeal_decision}");
+    assert_eq!(appeal_decision.as_object().unwrap().len(), 3);
+    assert_eq!(appeal_decision["status"], "reviewed");
     assert_eq!(appeal_decision["decision"], "reassessment_required");
     let (status, reviewed_debrief) = call(
         app.clone(),

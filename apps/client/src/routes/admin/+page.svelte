@@ -13,6 +13,7 @@
 		type AdminCurriculumNode,
 		type AdminScenarioAssessment,
 		type PendingScenarioAssessment,
+		type ScenarioAppealDecision,
 		type ScenarioAssessmentAppeal,
 		type ScenarioAssessmentAppealQueueItem
 	} from '$lib/api';
@@ -88,7 +89,7 @@
 	let appealQueueError = $state('');
 	let appealQueueMessage = $state('');
 	let selectedAssessmentAppeal = $state<ScenarioAssessmentAppeal | null>(null);
-	let appealDecision = $state<'confirmed' | 'reassessment_required'>('confirmed');
+	let appealDecision = $state<ScenarioAppealDecision>('confirmed');
 	let appealRationale = $state('');
 	let settingsDraft = $state({
 		masteryLow: 1400,
