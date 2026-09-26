@@ -22102,7 +22102,56 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{non_ch_res}");
     assert_eq!(non_ch_res["error"]["code"], "invalid_blueprint_chapter");
 
-    // 4. Validation reject: wrong-exam chapter ID (non-existent or other exam)
+    // 4. Validation reject: cross-exam chapter scoping and nonexistent chapter ID
+    // 4a. Real published kind='chapter' node belonging to a different valid exam
+    let foreign_exam_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO exams (id, code, name) VALUES ($1, $2, 'Foreign Exam')",
+    )
+    .bind(foreign_exam_id)
+    .bind(format!("FOREIGN_{}", foreign_exam_id.simple()))
+    .execute(&state.pool)
+    .await
+    .expect("insert foreign exam");
+
+    let foreign_chapter_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO curriculum_nodes (id, exam_id, kind, name, status, display_order) VALUES ($1, $2, 'chapter', 'Foreign Exam Chapter', 'active', 1)",
+    )
+    .bind(foreign_chapter_id)
+    .bind(foreign_exam_id)
+    .execute(&state.pool)
+    .await
+    .expect("insert foreign chapter");
+
+    let mut foreign_ch_req = request(
+        "POST",
+        "/v1/mocks",
+        Some(&token),
+        Some(serde_json::json!({
+            "exam_id": ids.exam_id,
+            "title": "Cross-Exam Blueprint Mock",
+            "blueprint": [{ "chapter_id": foreign_chapter_id, "count": 1 }],
+            "time_limit_seconds": 600,
+            "pass_mark_percent": 70,
+            "attempts_allowed": 2,
+            "integrity_policy": "log_only"
+        })),
+    );
+    foreign_ch_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
+    let (status, foreign_ch_res) = call(app.clone(), foreign_ch_req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{foreign_ch_res}");
+    assert_eq!(foreign_ch_res["error"]["code"], "invalid_blueprint_chapter");
+
+    let mocks_after_foreign: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mocks")
+        .fetch_one(&state.pool)
+        .await
+        .expect("mocks count");
+    assert_eq!(initial_mocks_count, mocks_after_foreign, "mock count unchanged after foreign-exam chapter rejection");
+
+    // 4b. Nonexistent chapter ID rejection
     let random_chapter_id = Uuid::new_v4();
     let mut wrong_ch_req = request(
         "POST",
@@ -22110,7 +22159,7 @@ async fn mock_types_and_time_analysis() {
         Some(&token),
         Some(serde_json::json!({
             "exam_id": ids.exam_id,
-            "title": "Foreign Chapter Mock",
+            "title": "Nonexistent Chapter Mock",
             "blueprint": [{ "chapter_id": random_chapter_id, "count": 1 }],
             "time_limit_seconds": 600,
             "pass_mark_percent": 70,
@@ -22124,6 +22173,12 @@ async fn mock_types_and_time_analysis() {
     let (status, wrong_ch_res) = call(app.clone(), wrong_ch_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong_ch_res}");
     assert_eq!(wrong_ch_res["error"]["code"], "invalid_blueprint_chapter");
+
+    let mocks_after_nonexistent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mocks")
+        .fetch_one(&state.pool)
+        .await
+        .expect("mocks count");
+    assert_eq!(initial_mocks_count, mocks_after_nonexistent, "mock count unchanged after nonexistent chapter rejection");
 
     // 5. Validation reject: field bounds without silent clamping
     // 5a. Time limit bounds: < 60 or > 28800

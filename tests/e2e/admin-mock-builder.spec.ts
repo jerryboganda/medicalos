@@ -211,8 +211,15 @@ test('administrator creates mock test with form type and blueprint, learner sees
 	expect(createdMockPayload).toBeDefined();
 	expect(createdMockPayload?.title).toBe('Cardiorespiratory Mini Mock');
 	expect(createdMockPayload?.mock_type).toBe('mini');
+	expect(createdMockPayload?.exam_id).toBe('00000000-0000-0000-0000-000000000001');
 	expect(createdMockPayload?.time_limit_seconds).toBe(2700);
 	expect(createdMockPayload?.pass_mark_percent).toBe(65);
+	expect(createdMockPayload?.blueprint).toEqual([
+		{
+			chapter_id: '00000000-0000-0000-0000-000000000002',
+			count: 15
+		}
+	]);
 
 	// Verify configured mocks list in admin contains new mock and mini chip
 	await expect(page.getByTestId('mock-item').filter({ hasText: 'Cardiorespiratory Mini Mock' })).toBeVisible();
@@ -230,4 +237,10 @@ test('administrator creates mock test with form type and blueprint, learner sees
 	await expect(timeAnalysis).toBeVisible();
 	await expect(timeAnalysis).toContainText('1m 15s');
 	await expect(timeAnalysis).toContainText('37s/question avg');
+
+	// Assert completed result's per-chapter timing line
+	const mockResult = page.getByTestId('mock-result');
+	await expect(mockResult).toBeVisible();
+	await expect(mockResult).toContainText('Cardiorespiratory Physiology: 2/2');
+	await expect(mockResult).toContainText('(1m 15s)');
 });
