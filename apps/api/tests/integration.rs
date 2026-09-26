@@ -16758,9 +16758,35 @@ async fn analytics_stream_taxonomy_and_pseudonymity_enforced() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{dash}");
+    assert_eq!(dash.as_object().unwrap().len(), 7, "{dash}");
     assert!(dash["institutions"].as_i64().is_some(), "{dash}");
     assert!(dash["users"].as_i64().unwrap() >= 1, "{dash}");
     assert!(dash["open_incidents"].as_i64().is_some(), "{dash}");
+    for field in [
+        "institutions",
+        "users",
+        "published_questions",
+        "articles",
+        "rights_records",
+        "open_incidents",
+        "coach_turns_last_30_days",
+    ] {
+        assert!(dash[field].as_i64().is_some_and(|count| count >= 0), "{field}: {dash}");
+    }
+
+    let (status, unauthenticated_dashboard) = call(
+        app.clone(),
+        request("GET", "/v1/admin/dashboard", None, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{unauthenticated_dashboard}");
+
+    let (status, denied_dashboard) = call(
+        app.clone(),
+        request("GET", "/v1/admin/dashboard", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_dashboard}");
 }
 
 #[tokio::test]

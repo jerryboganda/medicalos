@@ -1,4 +1,5 @@
 import { auth, clearToken } from './auth.svelte';
+import type { AdminDashboard } from './generated/admin/AdminDashboard';
 import type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
 import type { ImageAnnotationCreatedResponse } from './generated/image/ImageAnnotationCreatedResponse';
 import type { ImageAnnotationReviewResponse } from './generated/image/ImageAnnotationReviewResponse';
@@ -39,6 +40,7 @@ export type { TodayTask } from './generated/today/TodayTask';
 export type { TodayRevision } from './generated/today/TodayRevision';
 export type { LearnerChapter } from './generated/today/LearnerChapter';
 export type { TodayRevisionBudget } from './generated/today/TodayRevisionBudget';
+export type { AdminDashboard } from './generated/admin/AdminDashboard';
 export type { ImageConceptLink } from './generated/image/ImageConceptLink';
 export type { AdminImageAnnotation } from './generated/image/AdminImageAnnotation';
 export type { AdminImageAnnotationListResponse } from './generated/image/AdminImageAnnotationListResponse';
@@ -851,6 +853,7 @@ export const Api = {
 		),
 	adminReports: () =>
 		call<{ reports: AdminReport[] }>('GET', '/v1/admin/reports?limit=100'),
+	adminDashboard: () => call<AdminDashboard>('GET', '/v1/admin/dashboard'),
 	adminSettings: () => call<{ settings: AdminSettings }>('GET', '/v1/admin/settings'),
 	updateAdminSettings: (settings: AdminSettings) =>
 		call<{ updated: (keyof AdminSettings)[] }>('PATCH', '/v1/admin/settings', settings),

@@ -990,7 +990,10 @@
 		</button>
 	</div>
 {:else}
-	<p><a class="btn" href={`${base}/admin/image-annotations`}>Image annotation review</a></p>
+	<nav class="admin-shortcuts" aria-label="Admin tools">
+		<a class="btn primary" href={`${base}/admin/dashboard`}>Owner dashboard</a>
+		<a class="btn" href={`${base}/admin/image-annotations`}>Image annotation review</a>
+	</nav>
 	<section class="card" aria-labelledby="runtime-settings-heading" data-testid="runtime-settings">
 		<h2 id="runtime-settings-heading">Runtime settings</h2>
 		<p class="muted">
@@ -2047,6 +2050,14 @@
 {/if}
 
 <style>
+	/* Hallmark · macrostructure: App Shell (existing Editorial Console) · tone: utilitarian · anchor hue: violet */
+	.admin-shortcuts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-sm);
+		margin-bottom: var(--space-lg);
+	}
+
 	.runtime-settings-fields {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));

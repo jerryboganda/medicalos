@@ -1561,11 +1561,31 @@ pub async fn psychometric_queue(
 
 /// ADMIN-01: real cross-tenant aggregates. Counts only — tenant rows stay
 /// behind their own access rules.
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminDashboard.ts",
+        rename = "AdminDashboard"
+    )
+)]
+pub struct AdminDashboard {
+    institutions: i64,
+    users: i64,
+    published_questions: i64,
+    articles: i64,
+    rights_records: i64,
+    open_incidents: i64,
+    coach_turns_last_30_days: i64,
+}
+
 pub async fn dashboard(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminDashboard>> {
     state.require_admin(admin_headers(&headers))?;
     let counts = sqlx::query!(
         r#"SELECT (SELECT COUNT(*) FROM institutions) AS "institutions!",
@@ -1578,15 +1598,15 @@ pub async fn dashboard(
     )
     .fetch_one(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "institutions": counts.institutions,
-        "users": counts.users,
-        "published_questions": counts.published_questions,
-        "articles": counts.articles,
-        "rights_records": counts.rights_records,
-        "open_incidents": counts.open_incidents,
-        "coach_turns_last_30_days": counts.coach_turns_30d,
-    })))
+    Ok(Json(AdminDashboard {
+        institutions: counts.institutions,
+        users: counts.users,
+        published_questions: counts.published_questions,
+        articles: counts.articles,
+        rights_records: counts.rights_records,
+        open_incidents: counts.open_incidents,
+        coach_turns_last_30_days: counts.coach_turns_30d,
+    }))
 }
 
 // ---- ADMIN-02/TRUST-07: content rights ledger (§19.2) ------------------------
