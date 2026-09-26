@@ -379,7 +379,7 @@ async fn qotd_payload(
         }));
     };
     let mut conn = state.pool.acquire().await?;
-    let Some(question_id) = selected_qotd_id(&mut *conn, exam_id).await? else {
+    let Some(question_id) = selected_qotd_id(&mut conn, exam_id).await? else {
         return Ok(json!({
             "enabled": true,
             "exam_id": exam_id,
@@ -461,7 +461,7 @@ pub async fn answer_qotd(
     let exam_id = settings
         .qotd_exam_id
         .ok_or_else(|| ApiError::not_found("qotd_unavailable"))?;
-    let selected = selected_qotd_id(&mut *tx, exam_id)
+    let selected = selected_qotd_id(&mut tx, exam_id)
         .await?
         .ok_or_else(|| ApiError::not_found("qotd_unavailable"))?;
     if req.question_version_id != selected {
