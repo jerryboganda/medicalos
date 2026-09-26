@@ -161,6 +161,52 @@
 	let currentItemStartedAt = null;
 	let elapsedByItem = $state({});
 	let lastPersistedSecond = null;
+	const CLOCK_CHANGE_THRESHOLD_MS = 10_000;
+	const MAX_CLOCK_SAMPLE_GAP_MS = 60_000;
+	let clockOffsetBaselineMs = null;
+	let clockSampleAtMs = null;
+
+	/**
+	 * @param {'background' | 'window_blur' | 'fullscreen_exit' | 'clock_change'} signalType
+	 * @param {Record<string, number>} [detail]
+	 */
+	function recordIntegritySignal(signalType, detail = {}) {
+		if (!session?.deadline || session.status !== 'open' || result) return;
+		void Api.recordIntegrityEvent({
+			session_id: sid,
+			signal_type: signalType,
+			detail,
+			client_time: new Date().toISOString()
+		}).catch(() => {
+			// Integrity logging must never interrupt answering or submission.
+		});
+	}
+
+	function checkDeviceClock() {
+		if (document.visibilityState !== 'visible') {
+			clockOffsetBaselineMs = null;
+			clockSampleAtMs = null;
+			return;
+		}
+		const monotonicNow = performance.now();
+		const clockOffsetMs = Date.now() - monotonicNow;
+		if (
+			clockOffsetBaselineMs === null ||
+			clockSampleAtMs === null ||
+			monotonicNow - clockSampleAtMs > MAX_CLOCK_SAMPLE_GAP_MS
+		) {
+			clockOffsetBaselineMs = clockOffsetMs;
+			clockSampleAtMs = monotonicNow;
+			return;
+		}
+
+		const clockDeltaMs = Math.round(clockOffsetMs - clockOffsetBaselineMs);
+		if (Math.abs(clockDeltaMs) >= CLOCK_CHANGE_THRESHOLD_MS) {
+			recordIntegritySignal('clock_change', { clock_delta_ms: clockDeltaMs });
+			clockOffsetBaselineMs = clockOffsetMs;
+		}
+		clockSampleAtMs = monotonicNow;
+	}
 
 	function warnIfThresholdCrossed(previous, next) {
 		const thresholds = [[600_000, '10 minutes'], [300_000, '5 minutes'], [60_000, '1 minute']];
@@ -185,8 +231,13 @@
 	function anchorTimer(remote) {
 		if (!remote?.deadline || !remote?.server_now) return;
 		const previous = remainingMs;
+		const monotonicNow = performance.now();
+		if (clockOffsetBaselineMs === null) {
+			clockOffsetBaselineMs = Date.now() - monotonicNow;
+			clockSampleAtMs = monotonicNow;
+		}
 		timerBaseRemainingMs = new Date(remote.deadline).getTime() - new Date(remote.server_now).getTime();
-		timerStartedAt = performance.now();
+		timerStartedAt = monotonicNow;
 		remainingMs = Math.max(0, timerBaseRemainingMs);
 		lastPersistedSecond = Math.ceil(remainingMs / 1000);
 		warnIfThresholdCrossed(previous, remainingMs);
@@ -194,6 +245,7 @@
 
 	function tick() {
 		if (!session?.deadline) return;
+		checkDeviceClock();
 		if (timerStartedAt === null) anchorTimer(session);
 		if (timerStartedAt === null) return;
 		const previous = remainingMs;
@@ -844,7 +896,13 @@
 	onMount(() => {
 		void load();
 		window.addEventListener('online', onNetworkOnline);
-		const refreshTimer = async () => {
+		const handleVisibilityChange = async () => {
+			if (document.visibilityState === 'hidden') {
+				recordIntegritySignal('background');
+				clockOffsetBaselineMs = null;
+				clockSampleAtMs = null;
+				return;
+			}
 			if (document.visibilityState !== 'visible' || !session?.deadline || !navigator.onLine) return;
 			try {
 				const remote = await Api.getSession(sid);
@@ -854,10 +912,21 @@
 				// The monotonic local timer continues through a temporary outage.
 			}
 		};
-		document.addEventListener('visibilitychange', refreshTimer);
+		let wasFullscreen = Boolean(document.fullscreenElement);
+		const reportFullscreenExit = () => {
+			const fullscreen = Boolean(document.fullscreenElement);
+			if (wasFullscreen && !fullscreen) recordIntegritySignal('fullscreen_exit');
+			wasFullscreen = fullscreen;
+		};
+		const reportWindowBlur = () => recordIntegritySignal('window_blur');
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		document.addEventListener('fullscreenchange', reportFullscreenExit);
+		window.addEventListener('blur', reportWindowBlur);
 		return () => {
 			window.removeEventListener('online', onNetworkOnline);
-			document.removeEventListener('visibilitychange', refreshTimer);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			document.removeEventListener('fullscreenchange', reportFullscreenExit);
+			window.removeEventListener('blur', reportWindowBlur);
 			for (const timer of noteTimers.values()) clearTimeout(timer);
 		};
 	});

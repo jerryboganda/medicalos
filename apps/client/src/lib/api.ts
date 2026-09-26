@@ -870,6 +870,13 @@ export const Api = {
 			body
 		),
 	getSession: (sid: string) => call<PracticeSession>('GET', `/v1/practice/sessions/${sid}`),
+	recordIntegrityEvent: (body: {
+		session_id: string;
+		signal_type: 'background' | 'window_blur' | 'fullscreen_exit' | 'clock_change';
+		detail?: Record<string, number>;
+		client_time: string;
+	}) =>
+		call<{ recorded: true; event_id: string }>('POST', '/v1/integrity-events', body),
 	getSessionHint: (sid: string, itemIndex: number) =>
 		call<{ hint: string; assisted: true }>(
 			'GET',
