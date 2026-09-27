@@ -121,6 +121,11 @@ Progress log: **2026-09-27 — B1 landed** (PR #13 + PR #12 merged;
 runs 36353096430/36354446229 green; production verified `82d5d05` -> `12b54a6`).
 EX-07 -> tested; OPS-03/PROT-01/SR-08/ARCH-02 advanced with named tails.
 
+**2026-09-28 — B2 ledger pass**: 18 narrative "CI-verified" rows
+canonicalized to the standard `tested` vocabulary with run links;
+LIB-08, OFF-02, OPS-04, OPS-01 flipped to `tested`. OFF-01 receipt slice
+in review (PR #14); signing secret confirmed provisioned.
+
 Pace reference: the last stretch converted ~45 IDs in 3 days of agent stretches.
 At that pace the 25 engineering-ready IDs ≈ 1.5–3 weeks of batched agent work
 once billing is fixed.
