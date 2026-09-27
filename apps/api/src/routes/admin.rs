@@ -2672,7 +2672,7 @@ fn extraction_report_json(row: ExtractionReportRow) -> ApiResult<AdminExtraction
         malware_scan_status,
         expected_regions: expected.into_iter().collect(),
         extracted_regions: extracted.into_iter().collect(),
-        missing_regions,
+        missing_regions: missing,
         uncertain_regions: string_set(&row.uncertain_regions).into_iter().collect(),
         critical_regions: string_set(&row.critical_regions).into_iter().collect(),
         status,
