@@ -25,3 +25,4 @@ Cargo.lock
 # Playwright output
 test-results/
 playwright-report/
+_ci*.log
