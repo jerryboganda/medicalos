@@ -1181,6 +1181,7 @@ pub struct PrivateImportRight {
     rights_id: Uuid,
     ref_code: String,
     licensor: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     valid_to: Option<chrono::NaiveDate>,
     search_allowed: bool,
 }
@@ -1205,6 +1206,7 @@ pub struct PrivateDocumentSummary {
     media_type: String,
     rights_ref: String,
     sha256: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     created_at: chrono::DateTime<chrono::Utc>,
     available: bool,
 }
@@ -1257,6 +1259,7 @@ pub struct PrivateImportResponse {
     pub media_type: String,
     pub rights_ref: String,
     pub sha256: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub available: bool,
     pub content: String,
@@ -2634,7 +2637,6 @@ pub struct ImageAnnotationReviewReq {
     #[cfg_attr(feature = "type-export", ts(type = "\"approved\" | \"rejected\""))]
     pub decision: String,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub note: String,
 }
 

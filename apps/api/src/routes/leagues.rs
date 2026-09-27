@@ -65,7 +65,9 @@ pub struct CompetitionLeagueJoined {
     pub joined: bool,
     pub exam_id: Uuid,
     pub cohort_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub week_start: chrono::NaiveDate,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub week_end: chrono::NaiveDate,
     pub division: i32,
     pub cohort_number: i32,

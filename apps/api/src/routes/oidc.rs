@@ -45,7 +45,6 @@ pub struct ConfigureOidcReq {
     )]
     pub client_secret: Option<String>,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub clear_client_secret: bool,
     pub enabled: bool,
 }

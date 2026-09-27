@@ -229,7 +229,6 @@ pub async fn calculate(
 pub struct ConvertInput {
     pub value: f64,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub analyte: String,
     pub from: String,
     pub to: String,

@@ -452,7 +452,9 @@ pub struct InstitutionAuditEvent {
     pub action: String,
     pub entity: String,
     pub entity_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown | null"))]
     pub new_value: Option<serde_json::Value>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub at: DateTime<Utc>,
 }
 
@@ -998,6 +1000,7 @@ pub async fn create_cohort(
 )]
 pub struct AssignmentReq {
     pub title: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub due_at: Option<DateTime<Utc>>,
 }
 
@@ -1412,7 +1415,6 @@ pub struct PortfolioReq {
     pub kind: String,
     pub title: String,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub detail: String,
     #[cfg_attr(
         feature = "type-export",

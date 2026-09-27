@@ -1403,7 +1403,9 @@ pub struct CompetitionSummary {
     )]
     pub cadence: String,
     pub series_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub starts_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub ends_at: chrono::DateTime<chrono::Utc>,
     pub status: String,
     pub entered: bool,

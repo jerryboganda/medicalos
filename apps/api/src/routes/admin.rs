@@ -319,13 +319,10 @@ pub struct CreateQuestionReq {
     #[serde(default)]
     pub rights_ref: Option<String>,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub tags: Vec<String>,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub source_refs: Vec<String>,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub media_refs: Vec<String>,
 }
 
@@ -844,10 +841,8 @@ pub async fn search_questions(
 pub struct ImportReq {
     pub exam_id: Uuid,
     #[serde(default = "default_filename")]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub filename: String,
     #[serde(default)]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     pub dry_run: bool,
     pub rows: Vec<CreateQuestionReq>,
 }
@@ -979,7 +974,9 @@ pub struct AdminAuditEvent {
     pub action: String,
     pub entity: String,
     pub entity_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown | null"))]
     pub old_value: Option<serde_json::Value>,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown | null"))]
     pub new_value: Option<serde_json::Value>,
     #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub at: chrono::DateTime<chrono::Utc>,
@@ -1938,7 +1935,9 @@ pub struct ContentRightsReq {
     pub territory: Option<String>,
     /// Content use flags, including private_import and document_extraction.
     pub permitted_uses: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub valid_from: chrono::NaiveDate,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub valid_to: Option<chrono::NaiveDate>,
     pub notes: Option<String>,
     pub contract_ref: Option<String>,
@@ -2158,9 +2157,12 @@ pub struct AdminContentRight {
     pub licensor: String,
     pub territory: String,
     pub permitted_uses: Vec<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub valid_from: chrono::NaiveDate,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub valid_to: Option<chrono::NaiveDate>,
     pub notes: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
     pub revoked_by: Option<Uuid>,
     pub revocation_note: Option<String>,
@@ -2498,6 +2500,7 @@ pub struct ExtractionReportReview {
     pub reviewer_id: Option<Uuid>,
     pub verified_regions: Option<Vec<String>>,
     pub note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -2527,6 +2530,7 @@ pub struct AdminExtractionReport {
     pub critical_regions: Vec<String>,
     pub status: ExtractionReportStatus,
     pub created_by: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub review: Option<ExtractionReportReview>,
 }

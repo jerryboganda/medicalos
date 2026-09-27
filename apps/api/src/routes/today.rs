@@ -34,7 +34,6 @@ pub struct NextActionQuery {
     )]
     activity_preference: String,
     #[serde(default = "default_time_multiplier")]
-    #[cfg_attr(feature = "type-export", ts(optional))]
     time_multiplier: f64,
 }
 

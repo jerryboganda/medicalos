@@ -215,6 +215,7 @@ pub struct CommunityPost {
     pub body: String,
     pub status: String,
     pub handle: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -280,6 +281,7 @@ pub struct ReportPostReq {
 pub struct ReportCommunityPostResponse {
     pub report_id: Uuid,
     pub status: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -300,6 +302,7 @@ pub struct CommunityPostReportSummary {
     pub post_id: Uuid,
     pub reason: String,
     pub status: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -332,6 +335,7 @@ pub struct GroupPostReport {
     pub post_id: Uuid,
     pub reason: String,
     pub note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub post_body: String,
     pub author_handle: String,

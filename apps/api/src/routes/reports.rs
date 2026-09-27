@@ -98,11 +98,16 @@ pub struct QuestionReportResponse {
         ts(type = "\"open\" | \"quarantined\" | \"resolved_fixed\" | \"resolved_rejected\"")
     )]
     pub status: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub acknowledged_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub resolution_due_at: chrono::DateTime<chrono::Utc>,
     pub resolution_note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
     pub corrected_version_id: Option<Uuid>,
     pub corrected_version_number: Option<i32>,
@@ -141,8 +146,11 @@ pub struct AdminReport {
     pub reporter_feedback: Vec<ReportFeedback>,
     pub feedback_truncated: bool,
     pub report_count: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub first_reported_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub resolution_due_at: chrono::DateTime<chrono::Utc>,
     pub acknowledgements_on_time: bool,
     pub resolution_overdue: bool,
