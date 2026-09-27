@@ -866,7 +866,7 @@ pub async fn pack_resources(
     let issued_at_rfc3339 = issued_at.to_rfc3339();
     let message =
         pack_download_receipt_message(&req.device_id, exam_id, &issued_at_rfc3339, &checksums);
-    let signature = hex(ed25519_signing_key(&state)?
+    let signature = hex(&ed25519_signing_key(&state)?
         .sign(message.as_bytes())
         .to_bytes());
     sqlx::query(
