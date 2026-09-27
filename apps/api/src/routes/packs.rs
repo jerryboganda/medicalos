@@ -107,6 +107,48 @@ pub struct PackResourcesReq {
 )]
 pub struct PackResourcesResponse {
     pub resources: Vec<PackQuestionResource>,
+    pub receipt: PackDownloadReceipt,
+}
+
+/// OFF-01: a signed, server-recorded attestation that this device received
+/// rights-verified content for exactly these checksums under an active lease.
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "packs/PackDownloadReceipt.ts",
+        rename = "PackDownloadReceipt"
+    )
+)]
+pub struct PackDownloadReceipt {
+    pub device_id: String,
+    pub exam_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub issued_at: chrono::DateTime<chrono::Utc>,
+    pub checksums: Vec<String>,
+    pub signature: String,
+}
+
+/// The exact bytes an auditor or the browser re-covers from the receipt fields
+/// before checking the Ed25519 signature. Shared by the handler and tests so
+/// the canonical form cannot drift between signer and verifier.
+pub fn pack_download_receipt_message(
+    device_id: &str,
+    exam_id: Uuid,
+    issued_at: &str,
+    checksums: &[String],
+) -> String {
+    let payload = json!({
+        "checksums": checksums,
+        "device_id": device_id,
+        "exam_id": exam_id,
+        "issued_at": issued_at,
+    });
+    let mut canonical = String::new();
+    canonical_value(&payload, &mut canonical);
+    canonical
 }
 
 #[derive(Deserialize)]
