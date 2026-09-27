@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 Requirement IDs: ADMIN-01, ARCH-02
-Implementation state: source implementation and static review complete; generated ARCH-02 binding and GitHub Actions acceptance pending.
+Implementation state: API response, generated binding, dashboard route, access/retry states, responsive layout, and browser flow passed in GitHub Actions run 36245924351 on 63e5cd5; the ADMIN-01 source files are unchanged through 63f6509. Current-branch ARCH-02 changes still need their own CI acceptance.
 Source: `.scratch/admin01-dashboard/spec.md`; `docs/requirements/traceability.md`
 
 ## Acceptance

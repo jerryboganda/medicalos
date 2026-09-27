@@ -25,3 +25,8 @@ Cargo.lock
 # Playwright output
 test-results/
 playwright-report/
+_ci*.log
+.freebuff/
+
+# Local staging backups (infra/local, docs/deployment/orca-desktop.md)
+.backups/

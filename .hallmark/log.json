@@ -1,6 +1,14 @@
 [
   {
     "date": "2026-09-26",
+    "macrostructure": "App Shell (Admin Mock Builder & Practice/Session Mock Presentation)",
+    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
+    "enrichment": "none",
+    "variation": "mock test creation with 7 exam form types and blueprint builder, mock type tags in practice, and session time analysis (total time, average time per question, and per-chapter breakdown)",
+    "brief": "EX-07 mock types, time analysis, and editorial mock builder"
+  },
+  {
+    "date": "2026-09-26",
     "macrostructure": "Long Document (published article reader with native media section)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
     "enrichment": "timed caption track and seekable chapter list",

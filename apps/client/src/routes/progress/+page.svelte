@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { Api } from '$lib/api';
+	import type { ReviewDebtResponse } from '$lib/api';
 	import { auth, loadAuth } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
 
@@ -11,14 +12,6 @@
 		mastery_index: number | null;
 		evidence_level: string;
 		independent_count: number;
-	}
-
-	interface ReviewDebt {
-		due_now: number;
-		completed_last_7_days: number;
-		daily_rate: number | null;
-		projected_backlog_days: number | null;
-		note: string;
 	}
 
 	interface SelectionPolicy {
@@ -68,7 +61,7 @@
 	let filterDifficulty = $state('');
 	let trendDays = $state('');
 	let heatLoading = $state(false);
-	let debt = $state<ReviewDebt | null>(null);
+	let debt = $state<ReviewDebtResponse | null>(null);
 	let debtUnavailable = $state(false);
 	let policy = $state<SelectionPolicy | null>(null);
 	let policyUnavailable = $state(false);

@@ -11,43 +11,236 @@ use uuid::Uuid;
 use crate::agent;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::routes::mock::MockType;
 use crate::seed::QuestionOption;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/BlueprintSlice.ts",
+        rename = "BlueprintSlice"
+    )
+)]
 pub struct BlueprintSlice {
     pub chapter_id: Uuid,
     pub count: i32,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionRequest.ts",
+        rename = "CreateSessionRequest"
+    )
+)]
 pub struct CreateSessionReq {
     pub preset: String,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chapter_id: Option<Uuid>,
     /// QB-06 targeted pool: several chapters at once (overrides chapter_id).
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chapter_ids: Option<Vec<Uuid>>,
     /// QB-07 blueprint-balanced random pool; counts are exact per chapter.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub blueprint: Option<Vec<BlueprintSlice>>,
     /// QB-06 pool filter: any (default) | unseen | incorrect | marked.
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"any\" | \"unseen\" | \"incorrect\" | \"marked\"",
+            optional = nullable
+        )
+    )]
     pub source: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub question_count: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub source_session_id: Option<Uuid>,
     /// AI-08: stable identity for a task launched from today's plan.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub plan_task_key: Option<Uuid>,
     /// EX-08: required for the timed preset, validated server-side.
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub time_limit_seconds: Option<i64>,
     /// QB-03: optional per-question budget for untimed sessions (seconds).
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub per_question_seconds: Option<i64>,
 }
 
 #[derive(Serialize)]
-struct ItemPayload {
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionOption.ts",
+        rename = "SessionOption"
+    )
+)]
+pub struct SessionOption {
+    text: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionItem.ts",
+        rename = "CreateSessionItem"
+    )
+)]
+pub struct CreateSessionItem {
     item_index: i16,
     question_version_id: Uuid,
     vignette: String,
     lead_in: String,
     difficulty: String,
-    options: Vec<serde_json::Value>,
+    options: Vec<SessionOption>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/CreateSessionResponse.ts",
+        rename = "CreateSessionResponse"
+    )
+)]
+pub struct CreateSessionResponse {
+    session_id: Uuid,
+    items: Vec<CreateSessionItem>,
+    per_question_seconds: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionDetailOption.ts",
+        rename = "SessionDetailOption"
+    )
+)]
+pub struct SessionDetailOption {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    rationale: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionReportStatus.ts",
+        rename = "SessionReportStatus"
+    )
+)]
+pub enum SessionReportStatus {
+    Open,
+    Quarantined,
+    ResolvedFixed,
+    ResolvedRejected,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionReportReceipt.ts",
+        rename = "SessionReportReceipt"
+    )
+)]
+pub struct SessionReportReceipt {
+    status: String,
+    resolution_note: Option<String>,
+    correction_note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    corrected_version_id: Option<Uuid>,
+    corrected_version_number: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    acknowledged_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    resolution_due_at: chrono::DateTime<chrono::Utc>,
+    resolution_overdue: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "practice/SessionItem.ts", rename = "SessionItem")
+)]
+pub struct SessionDetailItem {
+    item_index: i16,
+    question_version_id: Uuid,
+    vignette: String,
+    lead_in: String,
+    difficulty: String,
+    hint_available: bool,
+    hint_used: bool,
+    options: Vec<SessionDetailOption>,
+    answered: bool,
+    chosen_index: Option<i16>,
+    correct: Option<bool>,
+    correct_index: Option<i16>,
+    key_learning_point: Option<String>,
+    exam_tip: Option<String>,
+    report_status: Option<SessionReportStatus>,
+    corrected_version_id: Option<Uuid>,
+    corrected: bool,
+    correction_note: Option<String>,
+    my_report: Option<SessionReportReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    tutoring_cards: Option<Vec<crate::routes::program::TutoringCard>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/PracticeSession.ts",
+        rename = "PracticeSession"
+    )
+)]
+pub struct PracticeSessionResponse {
+    session_id: Uuid,
+    user_id: Uuid,
+    preset: String,
+    chapter_id: Option<Uuid>,
+    source_session_id: Option<Uuid>,
+    status: String,
+    mock_id: Option<Uuid>,
+    time_limit_seconds: Option<i32>,
+    per_question_seconds: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    server_now: chrono::DateTime<chrono::Utc>,
+    items: Vec<SessionDetailItem>,
 }
 
 pub(crate) struct PoolQuestion {
@@ -154,7 +347,7 @@ async fn insert_session(
     per_question_seconds: Option<i32>,
     plan_task_key: Option<Uuid>,
     pool_questions: &[PoolQuestion],
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateSessionResponse>> {
     // EX-08: the server issues the deadline — the client never sets it, and
     // answer acceptance is checked against it server-side.
     let deadline = time_limit_seconds
@@ -199,7 +392,7 @@ async fn insert_session(
         .await?;
         let opts: Vec<QuestionOption> =
             serde_json::from_value(q.options.clone()).map_err(|_| ApiError::internal())?;
-        items.push(ItemPayload {
+        items.push(CreateSessionItem {
             item_index: idx,
             question_version_id: q.id,
             vignette: q.vignette.clone(),
@@ -208,23 +401,23 @@ async fn insert_session(
             // §11.3: no answer keys or rationales before they are permitted.
             options: opts
                 .into_iter()
-                .map(|o| serde_json::json!({"text": o.text}))
+                .map(|o| SessionOption { text: o.text })
                 .collect(),
         });
     }
     tx.commit().await?;
-    Ok(Json(serde_json::json!({
-        "session_id": sid,
-        "items": items,
-        "per_question_seconds": per_question_seconds,
-    })))
+    Ok(Json(CreateSessionResponse {
+        session_id: sid,
+        items,
+        per_question_seconds,
+    }))
 }
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CreateSessionReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateSessionResponse>> {
     let free_daily_questions = crate::routes::settings::current_bounded_i64(
         &state.pool,
         "free_daily_questions",
@@ -700,13 +893,13 @@ pub async fn create_session(
 }
 
 /// Session detail for the client: full item list for the navigator, with
-/// answer keys and rationales revealed only for already-answered items
-/// (§11.3 — nothing unreleased reaches the client).
+/// tutor feedback released per answer and exam-mode feedback held until submit
+/// (§11.2–11.3 — nothing unreleased reaches the client).
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(sid): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PracticeSessionResponse>> {
     let session = sqlx::query!(
         "SELECT preset, chapter_id, source_session_id, status, time_limit_seconds, deadline, mock_id, per_question_seconds AS \"per_question_seconds?\"
          FROM practice_sessions
@@ -806,21 +999,31 @@ pub async fn get_session(
             serde_json::from_value(it.options.unwrap_or_else(|| serde_json::json!([])))
                 .map_err(|_| ApiError::internal())?;
         let answered = it.attempt_id.is_some();
-        let public_opts: Vec<serde_json::Value> = opts
-            .iter()
-            .map(|o| serde_json::json!({"text": o.text}))
+        let feedback_released = answered
+            && (!matches!(session.preset.as_str(), "mock" | "timed")
+                || session.status == "submitted");
+        let public_opts = opts
+            .into_iter()
+            .map(|o| SessionDetailOption {
+                text: o.text,
+                rationale: if feedback_released {
+                    Some(o.rationale)
+                } else {
+                    None
+                },
+            })
             .collect();
         // QB-08: honest flag state so the UI can label affected items.
         let report_status = if it.corrected {
-            serde_json::Value::String("resolved_fixed".into())
+            Some(SessionReportStatus::ResolvedFixed)
         } else if it.quarantined || it.question_status == "quarantined" {
-            serde_json::Value::String("quarantined".into())
+            Some(SessionReportStatus::Quarantined)
         } else if it.flagged {
-            serde_json::Value::String("open".into())
+            Some(SessionReportStatus::Open)
         } else if it.reviewed_rejected {
-            serde_json::Value::String("resolved_rejected".into())
+            Some(SessionReportStatus::ResolvedRejected)
         } else {
-            serde_json::Value::Null
+            None
         };
         let my_report = match (
             it.my_report_status,
@@ -829,84 +1032,107 @@ pub async fn get_session(
         ) {
             (Some(status), Some(created_at), Some(acknowledged_at)) => {
                 let resolution_due_at = created_at + chrono::Duration::hours(72);
-                Some(serde_json::json!({
-                    "status": status,
-                    "resolution_note": it.my_resolution_note,
-                    "correction_note": it.my_correction_note,
-                    "resolved_at": it.my_report_resolved_at,
-                    "corrected_version_id": it.my_corrected_version_id,
-                    "corrected_version_number": it.my_corrected_version_number,
-                    "acknowledged_at": acknowledged_at,
-                    "acknowledgement_due_at": created_at + chrono::Duration::hours(24),
-                    "resolution_due_at": resolution_due_at,
-                    "resolution_overdue": it.my_report_resolved_at.is_none()
-                        && chrono::Utc::now() > resolution_due_at,
-                }))
+                let acknowledgement_due_at = created_at + chrono::Duration::hours(24);
+                let resolution_overdue =
+                    it.my_report_resolved_at.is_none() && chrono::Utc::now() > resolution_due_at;
+                Some(SessionReportReceipt {
+                    status,
+                    resolution_note: it.my_resolution_note,
+                    correction_note: it.my_correction_note,
+                    resolved_at: it.my_report_resolved_at,
+                    corrected_version_id: it.my_corrected_version_id,
+                    corrected_version_number: it.my_corrected_version_number,
+                    acknowledged_at,
+                    acknowledgement_due_at,
+                    resolution_due_at,
+                    resolution_overdue,
+                })
             }
             _ => None,
         };
-        let mut item = serde_json::json!({
-            "item_index": it.item_index,
-            "question_version_id": it.question_version_id,
-            "vignette": it.vignette,
-            "lead_in": it.lead_in,
-            "difficulty": it.difficulty,
-            "hint_available": session.preset == "tutor" && it.hint_available,
-            "hint_used": it.hint_used,
-            "options": public_opts,
-            "answered": answered,
-            "chosen_index": it.chosen_index,
-            "correct": it.correct,
-            "correct_index": null,
-            "key_learning_point": null,
-            "exam_tip": null,
-            "report_status": report_status,
-            "corrected_version_id": it.corrected_version_id,
+        let tutoring_cards = if feedback_released
+            && session.preset == "tutor"
+            && it.question_status == "published"
+        {
+            Some(crate::routes::program::ensure_pregen(&state.pool, it.question_version_id).await?)
+        } else {
+            None
+        };
+        out.push(SessionDetailItem {
+            item_index: it.item_index,
+            question_version_id: it.question_version_id,
+            vignette: it.vignette,
+            lead_in: it.lead_in,
+            difficulty: it.difficulty,
+            hint_available: session.preset == "tutor" && it.hint_available,
+            hint_used: it.hint_used,
+            options: public_opts,
+            answered,
+            chosen_index: it.chosen_index,
+            correct: if feedback_released { it.correct } else { None },
+            correct_index: if feedback_released {
+                it.correct_index
+            } else {
+                None
+            },
+            key_learning_point: if feedback_released {
+                it.key_learning_point
+            } else {
+                None
+            },
+            exam_tip: if feedback_released { it.exam_tip } else { None },
+            report_status,
+            corrected_version_id: it.corrected_version_id,
             // corrected covers both directions: a source correction swapped this
             // item's content, or the learner was served the replacement version.
-            "corrected": it.corrected || it.current_corrected,
-            "correction_note": it.correction_note,
-            "my_report": my_report,
+            corrected: it.corrected || it.current_corrected,
+            correction_note: it.correction_note,
+            my_report,
+            tutoring_cards,
         });
-        if answered {
-            item["correct_index"] = serde_json::json!(it.correct_index);
-            item["options"] = serde_json::json!(opts);
-            item["key_learning_point"] = serde_json::json!(it.key_learning_point);
-            item["exam_tip"] = serde_json::json!(it.exam_tip);
-            if session.preset == "tutor" && it.question_status == "published" {
-                item["tutoring_cards"] = serde_json::json!(
-                    crate::routes::program::ensure_pregen(&state.pool, it.question_version_id)
-                        .await?
-                );
-            }
-        }
-        out.push(item);
     }
 
-    Ok(Json(serde_json::json!({
-        "session_id": sid,
-        "preset": session.preset,
-        "chapter_id": session.chapter_id,
-        "source_session_id": session.source_session_id,
-        "status": session.status,
-        "mock_id": session.mock_id,
-        "time_limit_seconds": session.time_limit_seconds,
-        "per_question_seconds": session.per_question_seconds,
+    Ok(Json(PracticeSessionResponse {
+        session_id: sid,
+        user_id: user.user_id,
+        preset: session.preset,
+        chapter_id: session.chapter_id,
+        source_session_id: session.source_session_id,
+        status: session.status,
+        mock_id: session.mock_id,
+        time_limit_seconds: session.time_limit_seconds,
+        per_question_seconds: session.per_question_seconds,
         // EX-08: the client derives its countdown from these two values, so
         // changing the device clock never extends the timer.
-        "deadline": session.deadline,
-        "server_now": chrono::Utc::now(),
-        "items": out,
-    })))
+        deadline: session.deadline,
+        server_now: chrono::Utc::now(),
+        items: out,
+    }))
 }
 
 /// Return an authored hint only after explicit learner action in a tutor run.
 /// Viewing it is persisted on the session item before the answer can be saved.
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/SessionHintResponse.ts",
+        rename = "SessionHintResponse"
+    )
+)]
+pub struct SessionHintResponse {
+    hint: String,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    assisted: bool,
+}
+
 pub async fn hint(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path((sid, item_index)): Path<(Uuid, i16)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<SessionHintResponse>> {
     let mut tx = state.pool.begin().await?;
     let session = sqlx::query!(
         "SELECT preset, status, deadline FROM practice_sessions WHERE id = $1 AND user_id = $2 FOR UPDATE",
@@ -976,24 +1202,101 @@ pub async fn hint(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(serde_json::json!({ "hint": hint, "assisted": true })))
+    Ok(Json(SessionHintResponse {
+        hint,
+        assisted: true,
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerRequest.ts",
+        rename = "AnswerRequest"
+    )
+)]
 pub struct AnswerReq {
     pub item_index: i16,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub chosen_index: Option<i16>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"sure\" | \"unsure\"", optional = nullable)
+    )]
     pub confidence: Option<String>,
     /// QB-04: client-declared assistance (in-session tools). The server also
     /// marks answers assisted when a coach turn preceded them on the question.
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub assisted: Option<bool>,
     pub idempotency_key: String,
     /// QB-17: client-measured time on item. Server clamps; absent stays
     /// null (never synthesized).
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub elapsed_ms: Option<i64>,
     /// Local timestamp for a queued practice answer. A late upload is accepted
     /// only within the practice grace window and is always assisted evidence.
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub client_recorded_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerRecordedResponse.ts",
+        rename = "AnswerRecordedResponse"
+    )
+)]
+pub struct AnswerRecordedResponse {
+    already_recorded: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    recorded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "true", optional))]
+    answer_changed: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerFeedbackResponse.ts",
+        rename = "AnswerFeedbackResponse"
+    )
+)]
+pub struct AnswerFeedbackResponse {
+    already_recorded: bool,
+    correct: Option<bool>,
+    correct_index: i16,
+    options: Vec<QuestionOption>,
+    key_learning_point: String,
+    exam_tip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    tutoring_cards: Option<Vec<crate::routes::program::TutoringCard>>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "practice/AnswerResponse.ts",
+        rename = "AnswerResponse"
+    )
+)]
+pub enum AnswerResponse {
+    Feedback(AnswerFeedbackResponse),
+    Recorded(AnswerRecordedResponse),
 }
 
 async fn replay_answer(
@@ -1002,7 +1305,7 @@ async fn replay_answer(
     preset: &str,
     status: &str,
     idempotency_key: &str,
-) -> ApiResult<Option<Json<serde_json::Value>>> {
+) -> ApiResult<Option<Json<AnswerResponse>>> {
     let replay = sqlx::query!(
         r#"SELECT a.question_version_id, a.chosen_index, a.correct, qv.correct_index, qv.options,
                   qv.key_learning_point, qv.exam_tip, qv.status AS question_status
@@ -1039,7 +1342,7 @@ pub async fn answer(
     user: AuthUser,
     Path(sid): Path<Uuid>,
     Json(req): Json<AnswerReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     apply_answer(&state, user.user_id, sid, req).await
 }
 
@@ -1052,7 +1355,7 @@ pub async fn apply_answer(
     user_id: Uuid,
     sid: Uuid,
     req: AnswerReq,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     let session = sqlx::query!(
         "SELECT status, deadline, preset, created_at,
                 per_question_seconds AS \"per_question_seconds?\",
@@ -1158,15 +1461,16 @@ pub async fn apply_answer(
                 )
                 .execute(&state.pool)
                 .await?;
-                return Ok(Json(serde_json::json!({
-                    "already_recorded": true,
-                    "recorded": true,
-                    "answer_changed": true,
+                return Ok(Json(AnswerResponse::Recorded(AnswerRecordedResponse {
+                    already_recorded: true,
+                    recorded: true,
+                    answer_changed: Some(true),
                 })));
             }
-            return Ok(Json(serde_json::json!({
-                "already_recorded": true,
-                "recorded": true,
+            return Ok(Json(AnswerResponse::Recorded(AnswerRecordedResponse {
+                already_recorded: true,
+                recorded: true,
+                answer_changed: None,
             })));
         }
         return Err(ApiError::conflict(
@@ -1452,23 +1756,187 @@ fn response_for_preset(
     options: &serde_json::Value,
     key_learning_point: String,
     exam_tip: Option<String>,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<AnswerResponse> {
     if matches!(preset, "mock" | "timed") {
-        return Ok(serde_json::json!({
-            "already_recorded": already,
-            "recorded": true,
+        return Ok(AnswerResponse::Recorded(AnswerRecordedResponse {
+            already_recorded: already,
+            recorded: true,
+            answer_changed: None,
         }));
     }
     let opts: Vec<QuestionOption> =
         serde_json::from_value(options.clone()).map_err(|_| ApiError::internal())?;
-    Ok(serde_json::json!({
-        "already_recorded": already,
-        "correct": correct,
-        "correct_index": correct_index,
-        "options": opts,
-        "key_learning_point": key_learning_point,
-        "exam_tip": exam_tip,
+    Ok(AnswerResponse::Feedback(AnswerFeedbackResponse {
+        already_recorded: already,
+        correct,
+        correct_index,
+        options: opts,
+        key_learning_point,
+        exam_tip,
+        tutoring_cards: None,
     }))
+}
+
+/// SR-08: enroll missed, skipped, unsure, and assisted questions from the submitted
+/// practice session into the learner's re-test queue at the configured first valid interval.
+/// Atomic with the open-to-submitted transition.
+async fn enroll_missed_questions_in_retest_queue(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    sid: Uuid,
+) -> ApiResult<()> {
+    let setting_val = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT value FROM app_settings WHERE key = 'retest_intervals_days'",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let intervals = crate::routes::settings::effective_retest_intervals(
+        crate::routes::settings::i64_list_or_default(
+            setting_val.as_ref(),
+            &crate::routes::settings::DEFAULT_RETEST_INTERVAL_DAYS,
+        ),
+    );
+    let first_interval_days = intervals[0];
+    let now = chrono::Utc::now();
+    let due = now + chrono::Duration::days(first_interval_days);
+
+    sqlx::query(
+        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
+           SELECT DISTINCT
+               $2 AS user_id,
+               qv.id AS question_version_id,
+               0 AS passes,
+               $3 AS due,
+               $4 AS updated_at
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           LEFT JOIN attempts a
+             ON a.session_id = si.session_id AND a.item_index = si.item_index
+           WHERE si.session_id = $1
+             AND qv.status = 'published'
+             AND (
+                 a.id IS NULL
+                 OR a.chosen_index IS NULL
+                 OR a.correct = FALSE
+                 OR a.confidence = 'unsure'
+                 OR a.assisted = TRUE
+                 OR si.hint_used = TRUE
+             )
+           ON CONFLICT (user_id, question_version_id) DO UPDATE SET
+               passes = 0,
+               due = EXCLUDED.due,
+               updated_at = EXCLUDED.updated_at"#,
+    )
+    .bind(sid)
+    .bind(user_id)
+    .bind(due)
+    .bind(now)
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/SubmitTimeItem.ts",
+        rename = "SubmitTimeItem"
+    )
+)]
+pub struct SubmitTimeItem {
+    item_index: i16,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    elapsed_ms: Option<i64>,
+    answer_changes: Option<i32>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/SubmitTime.ts", rename = "SubmitTime")
+)]
+pub struct SubmitTime {
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    duration_seconds: Option<i64>,
+    items: Vec<SubmitTimeItem>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "mock/MockResultBreakdown.ts",
+        rename = "MockResultBreakdown"
+    )
+)]
+pub struct MockResultBreakdown {
+    chapter: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    total: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    correct: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    time_seconds: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/MockResult.ts", rename = "MockResult")
+)]
+pub struct MockResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    mock_type: Option<MockType>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    score_percent: i64,
+    passed: bool,
+    pass_mark_percent: i32,
+    percentile: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    takers: i64,
+    ranked: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    late_sync_answers: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    total_time_seconds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    avg_time_per_question_seconds: Option<i64>,
+    breakdown: Vec<MockResultBreakdown>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "mock/SubmitResult.ts", rename = "SubmitResult")
+)]
+pub struct SubmitResult {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    total: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    correct: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    incorrect: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    skipped: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    score: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
+    expected_score: Option<i64>,
+    mock: Option<MockResult>,
+    time: SubmitTime,
 }
 
 pub async fn submit(
@@ -1566,6 +2034,7 @@ pub async fn submit(
         applied_completion = updated.rows_affected() > 0;
     }
     if applied_completion {
+        enroll_missed_questions_in_retest_queue(&mut tx, user.user_id, sid).await?;
         agent::mark_linked_task_done_on(&mut tx, user.user_id, plan_task_key).await?;
     }
     tx.commit().await?;
@@ -1632,35 +2101,36 @@ pub async fn submit(
     )
     .fetch_all(&state.pool)
     .await?;
-    let time_items: Vec<serde_json::Value> = item_timings
+    let time_items: Vec<SubmitTimeItem> = item_timings
         .iter()
-        .map(|t| {
-            serde_json::json!({
-                "item_index": t.item_index,
-                "elapsed_ms": t.elapsed_ms,
-                "answer_changes": t.answer_changes,
-            })
+        .map(|t| SubmitTimeItem {
+            item_index: t.item_index,
+            elapsed_ms: t.elapsed_ms,
+            answer_changes: t.answer_changes,
         })
         .collect();
 
-    let mut body = serde_json::json!({
-        "total": totals.total,
-        "correct": totals.correct,
-        "incorrect": totals.incorrect,
-        "skipped": totals.skipped,
-        "score": score,
-        "expected_score": expected_score,
-        "mock": null,
-        "time": {
-            "duration_seconds": duration_seconds,
-            "items": time_items,
+    let mut body = SubmitResult {
+        total: totals.total,
+        correct: totals.correct,
+        incorrect: totals.incorrect,
+        skipped: totals.skipped,
+        score,
+        expected_score,
+        mock: None,
+        time: SubmitTime {
+            duration_seconds,
+            items: time_items,
         },
-    });
+    };
 
     if let Some(mock_id) = session.mock_id {
-        let mock = sqlx::query!("SELECT pass_mark_percent FROM mocks WHERE id = $1", mock_id)
-            .fetch_one(&state.pool)
-            .await?;
+        let mock = sqlx::query!(
+            "SELECT pass_mark_percent, mock_type FROM mocks WHERE id = $1",
+            mock_id
+        )
+        .fetch_one(&state.pool)
+        .await?;
         let passed = score >= mock.pass_mark_percent as i64;
         let late_sync_answers = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM attempts WHERE session_id = $1 AND offline_recorded_at IS NOT NULL",
@@ -1705,10 +2175,38 @@ pub async fn submit(
         } else {
             None
         };
+        let total_time_seconds = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(elapsed_ms) / 1000, 0)::BIGINT FROM attempts WHERE session_id = $1",
+        )
+        .bind(sid)
+        .fetch_one(&state.pool)
+        .await?
+        .max(0);
+
+        let timing_stats = sqlx::query!(
+            r#"SELECT
+                COALESCE(SUM(elapsed_ms) / 1000, 0)::BIGINT AS "answered_time_seconds!",
+                COUNT(*)::BIGINT AS "timed_answered_count!"
+               FROM attempts
+               WHERE session_id = $1
+                 AND chosen_index IS NOT NULL
+                 AND elapsed_ms IS NOT NULL"#,
+            sid
+        )
+        .fetch_one(&state.pool)
+        .await?;
+
+        let avg_time_per_question_seconds = if timing_stats.timed_answered_count > 0 {
+            (timing_stats.answered_time_seconds / timing_stats.timed_answered_count).max(0)
+        } else {
+            0
+        };
+
         let breakdown = sqlx::query!(
             r#"SELECT c.name AS chapter_name,
                       COALESCE(COUNT(*), 0) AS "total!",
-                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!"
+                      COALESCE(COUNT(*) FILTER (WHERE a.correct = TRUE), 0) AS "correct!",
+                      COALESCE(SUM(a.elapsed_ms) / 1000, 0)::BIGINT AS "time_seconds!"
                FROM session_items si
                JOIN question_versions qv ON qv.id = si.question_version_id
                JOIN curriculum_nodes c ON c.id = qv.chapter_id
@@ -1720,19 +2218,26 @@ pub async fn submit(
         )
         .fetch_all(&state.pool)
         .await?;
-        body["mock"] = serde_json::json!({
-            "score_percent": score,
-            "passed": passed,
-            "pass_mark_percent": mock.pass_mark_percent,
-            "percentile": percentile,
-            "takers": takers,
-            "ranked": ranked,
-            "late_sync_answers": late_sync_answers,
-            "breakdown": breakdown.iter().map(|b| serde_json::json!({
-                "chapter": b.chapter_name,
-                "total": b.total,
-                "correct": b.correct,
-            })).collect::<Vec<_>>(),
+        body.mock = Some(MockResult {
+            mock_type: Some(MockType::from_wire(&mock.mock_type).ok_or_else(ApiError::internal)?),
+            score_percent: score,
+            passed,
+            pass_mark_percent: mock.pass_mark_percent,
+            percentile,
+            takers,
+            ranked,
+            late_sync_answers,
+            total_time_seconds: Some(total_time_seconds),
+            avg_time_per_question_seconds: Some(avg_time_per_question_seconds),
+            breakdown: breakdown
+                .into_iter()
+                .map(|b| MockResultBreakdown {
+                    chapter: b.chapter_name,
+                    total: b.total,
+                    correct: b.correct,
+                    time_seconds: Some(b.time_seconds.max(0)),
+                })
+                .collect(),
         });
     }
 
@@ -1743,7 +2248,7 @@ pub async fn submit(
          RETURNING result_payload::text",
     )
     .bind(sid)
-    .bind(body)
+    .bind(serde_json::to_value(body).map_err(|_| ApiError::internal())?)
     .bind(user.user_id)
     .fetch_optional(&state.pool)
     .await?
@@ -1765,7 +2270,7 @@ async fn response_for_question(
     options: &serde_json::Value,
     key_learning_point: String,
     exam_tip: Option<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerResponse>> {
     let mut effective_question_version_id = question_version_id;
     let mut effective_question_status = question_status.to_owned();
     let mut effective_correct_index = correct_index;
@@ -1821,10 +2326,12 @@ async fn response_for_question(
         effective_exam_tip,
     )?;
     if preset == "tutor" && effective_question_status == "published" {
-        response["tutoring_cards"] = serde_json::json!(
-            crate::routes::program::ensure_pregen(&state.pool, effective_question_version_id,)
-                .await?
-        );
+        if let AnswerResponse::Feedback(response) = &mut response {
+            response.tutoring_cards = Some(
+                crate::routes::program::ensure_pregen(&state.pool, effective_question_version_id)
+                    .await?,
+            );
+        }
     }
     Ok(Json(response))
 }

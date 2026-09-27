@@ -1,6 +1,6 @@
 # LIB-05 — Source-change propagation
 
-Status: ready-for-agent
+Status: resolved
 Requirement IDs: LIB-05, TRUST-07, QB-08, AI-18
 Source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §19.4 and §9.5
 
@@ -117,6 +117,13 @@ and score-recalculation policies based on the change type.
 - API and browser regression cases, formatting, builds, tests, and migration
   verification passed in GitHub Actions run
   [36159484978](https://github.com/jerryboganda/medicalos/actions/runs/36159484978).
+- The later full CI run
+  [36245924351](https://github.com/jerryboganda/medicalos/actions/runs/36245924351)
+  passed on `63e5cd5`, an ancestor of the current branch. The source-change API
+  has no changes since that tested revision; the later library-page edit only
+  updates the private-import generated type name. A branch-wide rerun remains
+  pending because GitHub Actions currently rejects jobs before runner startup
+  for account payment/spending-limit reasons.
 - Result actions and due retests now exclude quarantined or archived question
   versions; the retest queue cannot fall back to unsafe stored content.
 - Open sessions retain their pinned key after quarantine. Answer replay avoids

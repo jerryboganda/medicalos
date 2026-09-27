@@ -6,7 +6,7 @@
 		Api,
 		ApiError,
 		type CompetitionAttemptStep,
-		type CompetitionLeaderboard,
+		type CompetitionLeaderboardResponse,
 		type CompetitionLeagueState,
 		type CompetitionSummary
 	} from '$lib/api';
@@ -55,7 +55,7 @@
 	} | null>(null);
 	let selectedCompetitionChoice = $state<number | null>(null);
 	let pendingCompetitionAnswerKey = $state('');
-	let competitionLeaderboard = $state<CompetitionLeaderboard | null>(null);
+	let competitionLeaderboard = $state<CompetitionLeaderboardResponse | null>(null);
 	let leaderboardCompetition = $state<CompetitionSummary | null>(null);
 	let competitionQuestionHeading = $state<HTMLHeadingElement>();
 	let competitionErrorSummary = $state<HTMLDivElement>();
@@ -348,7 +348,12 @@
 				<div class="card" style="margin-bottom: var(--space-md);" data-testid="mock-card">
 					<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
 						<strong>{mock.title}</strong>
-						<span class="chip">Pass {mock.pass_mark_percent}%</span>
+						<div style="display:flex; gap:6px; align-items:center;">
+							{#if mock.mock_type}
+								<span class="chip" data-testid="mock-type-chip">{mock.mock_type.replace('_', ' ')}</span>
+							{/if}
+							<span class="chip">Pass {mock.pass_mark_percent}%</span>
+						</div>
 					</div>
 					<p class="muted" style="margin: var(--space-xs) 0;">
 						{mock.attempts_used}/{mock.attempts_allowed} attempts

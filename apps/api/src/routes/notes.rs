@@ -5,7 +5,7 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -15,21 +15,117 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "notes/NoteRequest.ts", rename = "NoteRequest")
+)]
 pub struct NoteReq {
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub title: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub body: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub source_question_version_id: Option<Uuid>,
     /// OFF-03: offline edits carry the updated_at they were based on. When
     /// it is stale, the update is refused with the server version instead of
     /// silently overwriting newer changes.
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub base_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "notes/NoteBacklink.ts", rename = "NoteBacklink")
+)]
+pub struct NoteBacklink {
+    note_id: Uuid,
+    title: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "notes/Note.ts", rename = "Note")
+)]
+pub struct Note {
+    note_id: Uuid,
+    title: String,
+    body: String,
+    source_question_version_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    updated_at: chrono::DateTime<chrono::Utc>,
+    backlinks: Vec<NoteBacklink>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "notes/CreateNoteResponse.ts",
+        rename = "CreateNoteResponse"
+    )
+)]
+pub struct CreateNoteResponse {
+    note_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "notes/UpdateNoteResponse.ts",
+        rename = "UpdateNoteResponse"
+    )
+)]
+pub struct UpdateNoteResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "notes/ListNotesResponse.ts",
+        rename = "ListNotesResponse"
+    )
+)]
+pub struct ListNotesResponse {
+    notes: Vec<Note>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "notes/DeleteNoteResponse.ts",
+        rename = "DeleteNoteResponse"
+    )
+)]
+pub struct DeleteNoteResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    deleted: bool,
 }
 
 pub async fn create_note(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<NoteReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateNoteResponse>> {
     let id = Uuid::new_v4();
     let created = sqlx::query!(
         "INSERT INTO notes (id, user_id, title, body, source_question_version_id)
@@ -42,9 +138,10 @@ pub async fn create_note(
     )
     .fetch_one(&state.pool)
     .await?;
-    Ok(Json(
-        json!({ "note_id": id, "updated_at": created.updated_at }),
-    ))
+    Ok(Json(CreateNoteResponse {
+        note_id: id,
+        updated_at: created.updated_at,
+    }))
 }
 
 pub async fn update_note(
@@ -52,7 +149,7 @@ pub async fn update_note(
     user: AuthUser,
     Path(note_id): Path<Uuid>,
     Json(req): Json<NoteReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<UpdateNoteResponse>> {
     // OFF-03: versioned note resolution — a stale base refuses with the
     // server's current version; the client then merges or force-writes.
     if let Some(base) = req.base_updated_at {
@@ -87,14 +184,16 @@ pub async fn update_note(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("note_not_found"))?;
-    Ok(Json(json!({ "updated_at": result.updated_at })))
+    Ok(Json(UpdateNoteResponse {
+        updated_at: result.updated_at,
+    }))
 }
 
 pub async fn delete_note(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(note_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<DeleteNoteResponse>> {
     let deleted = sqlx::query!(
         "DELETE FROM notes WHERE id = $1 AND user_id = $2",
         note_id,
@@ -105,13 +204,13 @@ pub async fn delete_note(
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("note_not_found"));
     }
-    Ok(Json(json!({ "deleted": true })))
+    Ok(Json(DeleteNoteResponse { deleted: true }))
 }
 
 pub async fn list_notes(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ListNotesResponse>> {
     let rows = sqlx::query!(
         r#"SELECT n.id, n.title, n.body, n.source_question_version_id,
                   n.created_at, n.updated_at,
@@ -128,20 +227,23 @@ pub async fn list_notes(
     )
     .fetch_all(&state.pool)
     .await?;
-    let notes: Vec<serde_json::Value> = rows
+    let notes = rows
         .into_iter()
         .map(|r| {
-            json!({
-                "note_id": r.id,
-                "title": r.title,
-                "body": r.body,
-                "source_question_version_id": r.source_question_version_id,
-                "backlinks": r.backlinks,
-                "updated_at": r.updated_at,
+            Ok(Note {
+                note_id: r.id,
+                title: r.title,
+                body: r.body,
+                source_question_version_id: r.source_question_version_id,
+                updated_at: r.updated_at,
+                backlinks: serde_json::from_value(
+                    r.backlinks.unwrap_or_else(|| serde_json::json!([])),
+                )
+                .map_err(|_| ApiError::internal())?,
             })
         })
-        .collect();
-    Ok(Json(json!({ "notes": notes })))
+        .collect::<ApiResult<Vec<_>>>()?;
+    Ok(Json(ListNotesResponse { notes }))
 }
 
 #[derive(Deserialize)]

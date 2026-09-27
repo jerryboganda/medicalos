@@ -36,9 +36,36 @@ and keep ARCH-02 open until every client-consumed contract is generated.
 - Keep the hand-written HTTP transport in `api.ts`; it may import and re-export
   generated types but may not restate their fields.
 - The completed slices cover Today, the IMG-04 `ImageConceptLink` DTO, and
-  learner image-case/admin annotation response DTOs. Other client-consumed
-  request and response families remain hand-written, so ARCH-02 stays in
-  progress.
+  learner image-case/admin annotation response DTOs. Scenario workflow
+  contracts, administrator assessment request/response contracts, and the
+  EX-07 mock and timed-submit DTOs are also generated from Rust; those slices
+  are authored on this branch and await final CI acceptance. The practice
+  session-creation response is authored in issue 11, and its request is
+  authored in issue 12 on this branch; both await final CI acceptance. The
+  practice answer request and response are authored in issues 13 and 14 and
+  also await CI. Session detail is tracked in issue 15. Learner note contracts
+  are tracked in issue 16, next-action contracts in issue 17, and engagement
+  contracts in issue 18, auth/OIDC contracts in issue 19, and plan-action
+  contracts in issue 20, portfolio/CE contracts in issue 21, notification
+  contracts in issue 22, marks/review contracts in issue 23, learner study-tool
+  contracts in issue 24, integrity-event contracts in issue 25, and the exam
+  registry response in issue 26, Coach conversation contracts in issue 27, and
+  admin rights/extraction-report contracts in issue 28, and learner
+  curriculum/mastery/selection-policy contracts in issue 29, institutional
+  workspace/analytics contracts in issue 30, opt-in community group and
+  moderation contracts in issue 31, private duel/share-card contracts in
+  issue 32, competition listing/attempt/leaderboard contracts in issue 33, and
+  weekly league contracts in issue 34, and plan-undo/question-report contracts
+  in issue 35, and administrator settings contracts in issue 36. These
+  branch-authored slices await final CI acceptance. Private-import contracts
+  are authored in issue 37, administrator hierarchy/concept contracts in
+  issue 38, administrator workflow/import/audit contracts in issue 39, and
+  pack lease revocation in issue 40, image case administration requests
+  in issue 41, JSON numeric wire types in issue 42, and remaining scenario
+  request contracts in issue 43. The API facade now
+  uses generated request and response types;
+  final generator-drift, client-build, and browser acceptance remain pending,
+  so ARCH-02 stays in progress.
 - The image-case response slice preserves existing endpoint payloads and
   rights and review gates; its evidence is recorded in
   `issues/02-image-case-contracts.md`.
@@ -73,4 +100,6 @@ and keep ARCH-02 open until every client-consumed contract is generated.
 ## Further Notes
 
 The generator choice and package facts are recorded in
-`research.md`. See issue `issues/01-today-contracts.md` for the active slice.
+`research.md`. See issue `issues/01-today-contracts.md` for the original
+slice and `issues/10-ex07-mock-and-submit-contracts.md` for the mock and
+submit contracts.

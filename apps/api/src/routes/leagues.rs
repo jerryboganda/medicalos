@@ -3,7 +3,7 @@
 use axum::extract::{Path, State};
 use axum::Json;
 use chrono::Datelike;
-use serde_json::json;
+use serde::Serialize;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,6 +15,94 @@ use crate::state::AppState;
 
 const COHORT_SIZE: i64 = 30;
 const PROMOTION_SIZE: usize = 3;
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueNotJoined.ts",
+        rename = "CompetitionLeagueNotJoined"
+    )
+)]
+pub struct CompetitionLeagueNotJoined {
+    #[cfg_attr(feature = "type-export", ts(type = "false"))]
+    pub joined: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueStanding.ts",
+        rename = "CompetitionLeagueStanding"
+    )
+)]
+pub struct CompetitionLeagueStanding {
+    pub rank: i64,
+    pub handle: String,
+    pub points: f64,
+    pub accuracy: f64,
+    pub total_time_ms: i64,
+    pub is_me: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueJoined.ts",
+        rename = "CompetitionLeagueJoined"
+    )
+)]
+pub struct CompetitionLeagueJoined {
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    pub joined: bool,
+    pub exam_id: Uuid,
+    pub cohort_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub week_start: chrono::NaiveDate,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub week_end: chrono::NaiveDate,
+    pub division: i32,
+    pub cohort_number: i32,
+    pub standings: Vec<CompetitionLeagueStanding>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueState.ts",
+        rename = "CompetitionLeagueState"
+    )
+)]
+pub enum CompetitionLeagueState {
+    NotJoined(CompetitionLeagueNotJoined),
+    Joined(CompetitionLeagueJoined),
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/LeaveCompetitionLeagueResponse.ts",
+        rename = "LeaveCompetitionLeagueResponse"
+    )
+)]
+pub struct LeaveCompetitionLeagueResponse {
+    pub left: bool,
+}
 
 fn week_start(date: chrono::NaiveDate) -> chrono::NaiveDate {
     date - chrono::Duration::days(i64::from(date.weekday().num_days_from_monday()))
@@ -262,7 +350,7 @@ async fn current_state(
     exam_id: Uuid,
     user_id: Uuid,
     week: chrono::NaiveDate,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<CompetitionLeagueState> {
     let membership = sqlx::query(
         "SELECT cohort.id AS cohort_id, cohort.division, cohort.cohort_number
          FROM competition_league_memberships member
@@ -276,7 +364,9 @@ async fn current_state(
     .fetch_optional(&mut **tx)
     .await?;
     let Some(membership) = membership else {
-        return Ok(json!({ "joined": false }));
+        return Ok(CompetitionLeagueState::NotJoined(
+            CompetitionLeagueNotJoined { joined: false },
+        ));
     };
     let cohort_id: Uuid = membership.try_get("cohort_id")?;
     let division: i32 = membership.try_get("division")?;
@@ -314,25 +404,25 @@ async fn current_state(
     let standings = scores
         .iter()
         .map(|row| {
-            Ok(json!({
-                "rank": row.try_get::<i64, _>("rank")?,
-                "handle": row.try_get::<String, _>("handle")?,
-                "points": row.try_get::<f64, _>("points")?,
-                "accuracy": row.try_get::<f64, _>("accuracy")?,
-                "total_time_ms": row.try_get::<i64, _>("total_time_ms")?,
-                "is_me": row.try_get::<Uuid, _>("user_id")? == user_id,
-            }))
+            Ok(CompetitionLeagueStanding {
+                rank: row.try_get("rank")?,
+                handle: row.try_get("handle")?,
+                points: row.try_get("points")?,
+                accuracy: row.try_get("accuracy")?,
+                total_time_ms: row.try_get("total_time_ms")?,
+                is_me: row.try_get::<Uuid, _>("user_id")? == user_id,
+            })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    Ok(json!({
-        "joined": true,
-        "exam_id": exam_id,
-        "cohort_id": cohort_id,
-        "week_start": week,
-        "week_end": week + chrono::Duration::days(7),
-        "division": division,
-        "cohort_number": cohort_number,
-        "standings": standings,
+    Ok(CompetitionLeagueState::Joined(CompetitionLeagueJoined {
+        joined: true,
+        exam_id,
+        cohort_id,
+        week_start: week,
+        week_end: week + chrono::Duration::days(7),
+        division,
+        cohort_number,
+        standings,
     }))
 }
 
@@ -340,7 +430,7 @@ pub async fn state(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(exam_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionLeagueState>> {
     let week = week_start(chrono::Utc::now().date_naive());
     let mut tx = state.pool.begin().await?;
     lock_exam(&mut tx, exam_id).await?;
@@ -356,7 +446,9 @@ pub async fn state(
     .await?;
     if !opted_in {
         tx.commit().await?;
-        return Ok(Json(json!({ "joined": false })));
+        return Ok(Json(CompetitionLeagueState::NotJoined(
+            CompetitionLeagueNotJoined { joined: false },
+        )));
     }
     ensure_current_memberships(&mut tx, exam_id, week, user.user_id).await?;
     let result = current_state(&mut tx, exam_id, user.user_id, week).await?;
@@ -368,7 +460,7 @@ pub async fn join(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(exam_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionLeagueState>> {
     let week = week_start(chrono::Utc::now().date_naive());
     let mut tx = state.pool.begin().await?;
     lock_exam(&mut tx, exam_id).await?;
@@ -404,7 +496,7 @@ pub async fn leave(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Path(exam_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<LeaveCompetitionLeagueResponse>> {
     let week = week_start(chrono::Utc::now().date_naive());
     let mut tx = state.pool.begin().await?;
     lock_exam(&mut tx, exam_id).await?;
@@ -429,5 +521,7 @@ pub async fn leave(
         .await?;
     }
     tx.commit().await?;
-    Ok(Json(json!({ "left": deactivated > 0 })))
+    Ok(Json(LeaveCompetitionLeagueResponse {
+        left: deactivated > 0,
+    }))
 }

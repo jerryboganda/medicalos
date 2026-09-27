@@ -43,11 +43,9 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       # Compile-time-checked queries (§31.1) expand against the live schema.
-      - name: Apply schema for query checks and tests
-        run: |
-          for f in apps/api/migrations/*.up.sql; do
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || exit 1
-          done
+      # OPS-03: Verify all migrations apply, roll back in reverse order, and reapply cleanly (§30.1)
+      - name: Verify migration rollback and reapply
+        run: bash scripts/verify-migrations.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Dependency advisories + licenses
@@ -202,3 +200,11 @@ jobs:
       - name: API logs on failure
         if: failure()
         run: cat api.log
+      - name: Upload Playwright failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: tests/e2e/test-results
+          include-hidden-files: true
+          if-no-files-found: ignore

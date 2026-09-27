@@ -184,19 +184,13 @@ pub async fn retest_result(
     user: AuthUser,
     Json(req): Json<RetestResultReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let mut intervals = crate::routes::settings::current_i64_list(
+    let raw_intervals = crate::routes::settings::current_i64_list(
         &state.pool,
         "retest_intervals_days",
         &crate::routes::settings::DEFAULT_RETEST_INTERVAL_DAYS,
     )
     .await?;
-    if intervals.is_empty()
-        || intervals.len() > 20
-        || intervals.iter().any(|days| !(1..=3650).contains(days))
-        || !intervals.windows(2).all(|pair| pair[0] < pair[1])
-    {
-        intervals = crate::routes::settings::DEFAULT_RETEST_INTERVAL_DAYS.to_vec();
-    }
+    let intervals = crate::routes::settings::effective_retest_intervals(raw_intervals);
     let replay = sqlx::query!(
         "SELECT id FROM retest_history
          WHERE user_id = $1 AND idempotency_key = $2",
