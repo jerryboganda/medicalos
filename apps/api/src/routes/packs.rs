@@ -818,7 +818,37 @@ pub async fn pack_resources(
             tutoring_cards: tutoring_cards.remove(&row.id).unwrap_or_default(),
         })?);
     }
-    Ok(Json(PackResourcesResponse { resources }))
+    // OFF-01: issue and record a verified download receipt for this batch.
+    let checksums: Vec<String> = resources.iter().map(|r| r.checksum.clone()).collect();
+    let issued_at = chrono::Utc::now();
+    let issued_at_rfc3339 = issued_at.to_rfc3339();
+    let message =
+        pack_download_receipt_message(&req.device_id, exam_id, &issued_at_rfc3339, &checksums);
+    let signature = hex(ed25519_signing_key(state)?
+        .sign(message.as_bytes())
+        .to_bytes());
+    sqlx::query(
+        "INSERT INTO pack_download_receipts
+           (id, user_id, exam_id, device_id, checksums, signature, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user.user_id)
+    .bind(exam_id)
+    .bind(&req.device_id)
+    .bind(json!(checksums))
+    .bind(&signature)
+    .bind(issued_at)
+    .execute(&state.pool)
+    .await?;
+    let receipt = PackDownloadReceipt {
+        device_id: req.device_id.clone(),
+        exam_id,
+        issued_at,
+        checksums,
+        signature,
+    };
+    Ok(Json(PackResourcesResponse { resources, receipt }))
 }
 
 // ---- OFF-04 / PROT-02 / §22: pack leases ------------------------------------
