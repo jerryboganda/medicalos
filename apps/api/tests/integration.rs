@@ -20110,6 +20110,8 @@ async fn off02_concurrent_session_submit_returns_one_persisted_receipt() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{detail}");
+    let expected_user_id = learner_id.to_string();
+    assert_eq!(detail["user_id"].as_str(), Some(expected_user_id.as_str()));
     let version_id = detail["items"][0]["question_version_id"]
         .as_str()
         .unwrap()

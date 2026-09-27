@@ -56,11 +56,21 @@ test('learner loop: register, plan, answer, submit, revision, undo', async ({
 	// Start the tutor session.
 	await start.click();
 	await expect(page.getByText('Question 1 of 2')).toBeVisible();
+	const questionWatermark = page.getByTestId('question-watermark');
+	await expect(questionWatermark).toBeVisible();
+	const decorativeWatermark = questionWatermark.locator('.watermark-tiles');
+	await expect(decorativeWatermark).toHaveAttribute('aria-hidden', 'true');
+	await expect(decorativeWatermark).toHaveAttribute(
+		'data-watermark',
+		/^Account [0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+	);
+	await expect(decorativeWatermark).toHaveCSS('pointer-events', 'none');
 
 	// Item 1: choose A, see tutor feedback with the key learning point.
 	await page.getByTestId('option-0').click();
 	await page.getByTestId('answer').click();
 	await expect(page.getByTestId('feedback')).toContainText('Key learning point');
+	await expect(page.getByTestId('explanation-watermark')).toBeVisible();
 
 	// Item 2: same.
 	await page.getByTestId('next').click();

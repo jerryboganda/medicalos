@@ -232,6 +232,7 @@ pub struct SessionDetailItem {
 )]
 pub struct PracticeSessionResponse {
     session_id: Uuid,
+    user_id: Uuid,
     preset: String,
     chapter_id: Option<Uuid>,
     source_session_id: Option<Uuid>,
@@ -1103,6 +1104,7 @@ pub async fn get_session(
 
     Ok(Json(PracticeSessionResponse {
         session_id: sid,
+        user_id: user.user_id,
         preset: session.preset,
         chapter_id: session.chapter_id,
         source_session_id: session.source_session_id,
