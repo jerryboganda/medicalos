@@ -1459,7 +1459,7 @@ pub struct AnswerCompetitionQuestionReq {
     pub elapsed_ms: Option<i64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
