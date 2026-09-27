@@ -1641,6 +1641,10 @@
 		margin-top: var(--space-md);
 	}
 
+	.question-card > .linklike {
+		margin-right: var(--space-lg);
+	}
+
 	.results-card h1 {
 		margin-bottom: var(--space-md);
 	}
@@ -1710,9 +1714,13 @@
 		min-height: 20px;
 	}
 
+	/* The Eliminate control takes an implicit column only while it exists, so
+	 * answered options keep the full width (no phantom gap). */
 	.option-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr);
+		grid-auto-flow: column;
+		grid-auto-columns: auto;
 		align-items: center;
 		gap: var(--space-sm);
 	}
