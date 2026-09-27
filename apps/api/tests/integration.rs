@@ -7251,18 +7251,15 @@ async fn pregen_tutoring_generated_and_cached() {
         &issued_at,
         &receipt_checksums,
     );
-    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(
-        &hex_bytes(before_tutor_answer["verification_key"].as_str().unwrap())
-            .try_into()
-            .expect("verification key is 32 bytes"),
-    )
-    .expect("verification key parses");
-    let signature = ed25519_dalek::Signature::from_slice(
-        &hex_bytes(receipt["signature"].as_str().unwrap())
-            .try_into()
-            .expect("signature is 64 bytes"),
-    )
-    .expect("signature parses");
+    let key_bytes: [u8; 32] = hex_bytes(before_tutor_answer["verification_key"].as_str().unwrap())
+        .try_into()
+        .expect("verification key is 32 bytes");
+    let verifying_key =
+        ed25519_dalek::VerifyingKey::from_bytes(&key_bytes).expect("verification key parses");
+    let sig_bytes: [u8; 64] = hex_bytes(receipt["signature"].as_str().unwrap())
+        .try_into()
+        .expect("signature is 64 bytes");
+    let signature = ed25519_dalek::Signature::from_slice(&sig_bytes).expect("signature parses");
     assert!(
         verifying_key
             .verify_strict(message.as_bytes(), &signature)
