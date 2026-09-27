@@ -1,5 +1,14 @@
 [
   {
+    "date": "2026-09-28",
+    "scope": "app",
+    "macrostructure": "App Shell (side rail / tab bar + sheet) for the client; Marquee Hero + Catalogue/Index-First/Long Document for the site",
+    "theme": "owner-locked §7.1 tokens (Midnight-equivalent) + light reading theme + prefers-contrast high contrast",
+    "enrichment": "site: Tier-A CSS aurora + Tier-B hand-built SVG learning loop; client: none",
+    "variation": "design.md locks the system; packages/design-system split into tokens/base/components/layout/motion; nav N3 side-rail (desktop) + bottom tab bar + sheet (mobile), site nav N5 floating pill, footer Ft5 statement; ⌘K quick jump; View Transitions route motion",
+    "brief": "UI motion system and app-shell overhaul across web, PWA, Tauri desktop/mobile shells and the marketing site"
+  },
+  {
     "date": "2026-09-26",
     "macrostructure": "App Shell (Admin Mock Builder & Practice/Session Mock Presentation)",
     "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
@@ -150,84 +159,5 @@
     "enrichment": "none",
     "variation": "institution sign-in handoff with compact mobile navigation",
     "brief": "Institution OIDC login, provider setup, and responsive callback"
-  },
-  {
-    "date": "2026-09-23",
-    "macrostructure": "App Shell (existing faculty workspace)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "chapter checklist and coverage table within existing workspace",
-    "brief": "Faculty workspace: program curriculum mapping and privacy-preserving coverage"
-  },
-  {
-    "date": "2026-09-23",
-    "macrostructure": "App Shell (existing learner session workspace)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "answer-gated one-tap cards in the existing feedback panel, cached with the session",
-    "brief": "AI-18 source-linked pre-generated tutoring cards"
-  },
-  {
-    "date": "2026-09-23",
-    "macrostructure": "App Shell (existing learner session workspace)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "responsive tool tray and question workspace within the existing session card system",
-    "brief": "QB-13 session calculators, conversions, text sizing, tutor hints, notes, marks, and local-first timer state"
-  },
-  {
-    "date": "2026-09-24",
-    "macrostructure": "App Shell (existing editorial console)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "finished-case queue, ordered transcript, and criterion forms within the existing admin workspace",
-    "brief": "SIM-04 examiner workflow with transcript-index evidence"
-  },
-  {
-    "date": "2026-09-24",
-    "macrostructure": "App Shell (existing learner navigation)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "published station list leading into authored action controls, numbered debrief, and a read-only alternate timeline",
-    "brief": "SIM-01/SIM-06 learner scenario and counterfactual replay flow"
-  },
-  {
-    "date": "2026-09-24",
-    "macrostructure": "App Shell (existing learner debrief and editorial console)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "learner appeal status in the debrief and a separate evidence-led independent review queue in the existing admin workspace",
-    "brief": "SIM-07 independent assessment appeal workflow"
-  },
-  {
-    "date": "2026-09-24",
-    "macrostructure": "App Shell (existing scenario workspace)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "a compact role roster, short-lived invitation code, and SBAR handover records inside the authored case flow",
-    "brief": "SIM-08 team roles and handover"
-  },
-  {
-    "date": "2026-09-18",
-    "macrostructure": "App Shell (owner §7.4: single-column mobile, side-rail desktop; no marketing hero/footer)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens: dark paper · violet accent · sans display)",
-    "enrichment": "none (typography only)",
-    "brief": "Medical Learning OS learner app: login, Today plan, session workspace"
-  },
-  {
-    "date": "2026-09-25",
-    "macrostructure": "App Shell (existing Practice page)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "none",
-    "variation": "opt-in recurring event cards lead into one server-timed question at a time; exam-scoped weekly cohorts show private standings and one-click opt-in",
-    "brief": "COMP-01/02/03 recurring competition series and weekly leagues"
-  },
-  {
-    "date": "2026-09-26",
-    "macrostructure": "Long Document (source-linked article reading column)",
-    "theme": "Midnight-equivalent (owner-locked §7.1 tokens)",
-    "enrichment": "native audio/video controls, timed captions, transcript, and chapter navigation",
-    "variation": "stream rights-referenced media only on demand; keep offline packs limited to licensed question resources",
-    "brief": "LIB-08 article media player"
   }
 ]

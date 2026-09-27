@@ -1,0 +1,145 @@
+/*
+ * Motion vocabulary (design.md § Motion). Every entry communicates arrival,
+ * a press result or a state change — nothing loops except real loaders and
+ * the marketing aurora. All of it collapses under reduced motion.
+ */
+
+@keyframes mlos-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes mlos-rise {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+@keyframes mlos-fade {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes mlos-fade-out {
+	to {
+		opacity: 0;
+	}
+}
+
+@keyframes mlos-stamp {
+	from {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+}
+
+@keyframes mlos-fill {
+	from {
+		transform: scaleX(0);
+	}
+}
+
+@keyframes mlos-shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -100% 0;
+	}
+}
+
+@keyframes mlos-draw {
+	from {
+		stroke-dashoffset: var(--path-length, 100);
+	}
+	to {
+		stroke-dashoffset: 0;
+	}
+}
+
+/* ---- entrance stagger: one orchestrated arrival per insertion ------------- */
+/* Apply to a container; its direct children rise in, 45 ms apart, capped at
+ * eight steps (~360 ms) so a long page never feels slow to settle. */
+
+.enter-stagger > * {
+	animation: mlos-rise var(--dur-slow) var(--ease-out) both;
+}
+
+.enter-stagger > :nth-child(2) {
+	animation-delay: calc(var(--stagger) * 1);
+}
+.enter-stagger > :nth-child(3) {
+	animation-delay: calc(var(--stagger) * 2);
+}
+.enter-stagger > :nth-child(4) {
+	animation-delay: calc(var(--stagger) * 3);
+}
+.enter-stagger > :nth-child(5) {
+	animation-delay: calc(var(--stagger) * 4);
+}
+.enter-stagger > :nth-child(6) {
+	animation-delay: calc(var(--stagger) * 5);
+}
+.enter-stagger > :nth-child(7) {
+	animation-delay: calc(var(--stagger) * 6);
+}
+.enter-stagger > :nth-child(n + 8) {
+	animation-delay: calc(var(--stagger) * 7);
+}
+
+/* ---- scroll reveal: progressive enhancement, marketing only --------------- */
+/* Scroll-driven where supported; elsewhere the content is simply there. */
+
+@supports (animation-timeline: view()) {
+	@media (prefers-reduced-motion: no-preference) and (min-width: 40rem) {
+		.reveal-on-scroll {
+			animation: mlos-rise linear both;
+			animation-timeline: view();
+			animation-range: entry 0% entry 40%;
+		}
+	}
+}
+
+/* ---- view transitions (client route changes, site page loads) -------------- */
+
+::view-transition {
+	pointer-events: none; /* never swallow a click mid-transition */
+}
+
+::view-transition-old(root) {
+	animation: mlos-fade-out var(--dur-fast) var(--ease-in) both;
+}
+
+::view-transition-new(root) {
+	animation: mlos-fade var(--dur-slow) var(--ease-out) both;
+}
+
+/* ---- reduced motion: opacity-only, ≤ 150 ms; loaders keep running -------- */
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 1ms !important;
+		animation-delay: 0ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 1ms !important;
+		scroll-behavior: auto !important;
+	}
+
+	/* Functional loaders: slower, but still telling the truth about work. */
+	html .btn[data-loading='true']::before,
+	html .is-loading {
+		animation-duration: 2.4s !important;
+		animation-iteration-count: infinite !important;
+	}
+
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none !important;
+	}
+}

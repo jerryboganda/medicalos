@@ -157,7 +157,7 @@
 		<h2 id="dashboard-metrics-heading">Current platform totals</h2>
 		<p class="muted">Coach activity covers the most recent 30 days; the other totals reflect current records.</p>
 		{#if loading}
-			<p role="status">Loading platform totals…</p>
+			<p class="is-loading" role="status">Loading platform totals…</p>
 			<div class="metric-grid" aria-hidden="true">
 				{#each metrics as metric (metric.key)}
 					<article class="metric-card metric-skeleton">

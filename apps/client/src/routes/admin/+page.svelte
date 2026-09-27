@@ -1115,6 +1115,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Editorial console | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Editorial console</h1>
 
 {#if !unlocked}
@@ -1142,7 +1146,6 @@
 {:else}
 	<nav class="admin-shortcuts" aria-label="Admin tools">
 		<a class="btn" href={base + '/admin/articles'}>Article workspace</a>
-		<a class="btn" href={base + '/admin/articles'}>Article workspace</a>
 		<a class="btn primary" href={`${base}/admin/dashboard`}>Owner dashboard</a>
 		<a class="btn" href={`${base}/admin/image-annotations`}>Image annotation review</a>
 	</nav>
@@ -1156,7 +1159,7 @@
 		</p>
 		{#if settingsError}<p class="error-text" role="alert">{settingsError}</p>{/if}
 		{#if !settingsLoaded}
-			<p class="muted" role="status">{settingsBusy ? 'Loading runtime settings…' : 'Runtime settings are unavailable.'}</p>
+			<p class="muted" class:is-loading={settingsBusy} role="status">{settingsBusy ? 'Loading runtime settings…' : 'Runtime settings are unavailable.'}</p>
 		{:else}
 			<form onsubmit={saveRuntimeSettings}>
 				<div class="runtime-settings-fields">
@@ -1250,7 +1253,7 @@
 			judgment and does not validate clinical competence.
 		</p>
 		{#if pendingAssessmentBusy && pendingAssessments.length === 0}
-			<p class="muted" role="status">Loading finished stations…</p>
+			<p class="muted is-loading" role="status">Loading finished stations…</p>
 		{:else if pendingAssessmentError}
 			<p class="error-text" role="alert">{pendingAssessmentError}</p>
 		{:else if pendingAssessments.length === 0}
@@ -1336,7 +1339,7 @@
 			original assessment.
 		</p>
 		{#if appealQueueBusy && assessmentAppeals.length === 0}
-			<p class="muted" role="status">Loading assessment appeals…</p>
+			<p class="muted is-loading" role="status">Loading assessment appeals…</p>
 		{:else if appealQueueError}
 			<p class="error-text" role="alert">{appealQueueError}</p>
 		{:else if assessmentAppeals.length === 0}
@@ -1426,15 +1429,14 @@
 				<input id="rights-territory" bind:value={rightsTerritory} placeholder="worldwide" />
 			</label>
 			<fieldset
+				class="permitted-uses"
 				disabled={rightsBusy}
-				style="display:flex; flex-wrap:wrap; gap:var(--space-md); border:1px solid var(--color-surface-elevated); border-radius:var(--radius-control); padding:var(--space-md); margin:var(--space-md) 0;"
 			>
 				<legend>Permitted uses</legend>
 				{#each contentRightUses as use (use.value)}
-					<label style="display:flex; align-items:center; gap:var(--space-sm);">
+					<label class="cluster">
 						<input
 							type="checkbox"
-							style="width:auto;"
 							checked={rightsPermittedUses.includes(use.value)}
 							onchange={(event) =>
 								toggleContentRightUse(use.value, event.currentTarget.checked)}
@@ -1528,11 +1530,11 @@
 
 		<h3>Recorded grants</h3>
 		{#if rightsBusy && contentRights.length === 0}
-			<p class="muted" role="status">Loading rights records…</p>
+			<p class="muted is-loading" role="status">Loading rights records…</p>
 		{:else if contentRights.length === 0}
 			<p class="muted">No content rights records yet.</p>
 		{:else}
-			<ul style="list-style:none; padding:0;">
+			<ul class="bare-list">
 				{#each contentRights as right (right.rights_id)}
 					<li
 						class="rights-record"
@@ -1685,11 +1687,11 @@
 
 		<h3>Extraction reports</h3>
 		{#if extractionBusy && extractionReports.length === 0}
-			<p class="muted" role="status">Loading extraction reports…</p>
+			<p class="muted is-loading" role="status">Loading extraction reports…</p>
 		{:else if extractionReports.length === 0}
 			<p class="muted">No extraction reports recorded.</p>
 		{:else}
-			<ul style="list-style:none; padding:0;">
+			<ul class="bare-list">
 				{#each extractionReports as report (report.report_id)}
 					<li class="extraction-report" data-testid={'extraction-report-' + report.report_id}>
 						<strong>{report.source_label}</strong>
@@ -1706,7 +1708,7 @@
 							<p>Review: {report.review.decision} · {report.review.note}</p>
 						{/if}
 						{#if report.status === 'review_required' && report.rights_available && report.malware_scan_status === 'clean' && report.missing_regions.length === 0 && reviewRegions(report).length > 0}
-							<fieldset disabled={extractionBusy} style="border:1px solid var(--color-surface-elevated); border-radius:var(--radius-control); padding:var(--space-md);">
+							<fieldset class="region-review" disabled={extractionBusy}>
 								<legend>Review critical and uncertain regions</legend>
 								{#each reviewRegions(report) as region (region)}
 									<label class="field" for={`extraction-verify-${report.report_id}-${region}`}>
@@ -1794,7 +1796,7 @@
 				{#if concepts.length === 0}
 					<p class="muted">Create a concept identity before mapping this node.</p>
 				{:else}
-				<fieldset disabled={mappingBusy} style="border:0; padding:0; margin:var(--space-md) 0;">
+				<fieldset class="plain-fieldset" disabled={mappingBusy}>
 					<legend>Mapped concepts</legend>
 					{#each concepts as concept (concept.concept_id)}
 						<label class="field" for={`concept-map-${concept.concept_id}`}>
@@ -1937,7 +1939,7 @@
 
 	<div class="card">
 		<h2>Bulk question import</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Import CSV or Excel .xlsx rows with 2-10 option/rationale pairs. Each row
 			needs an active rights_ref allowing display and derivatives, scoped to all
 			source and media references. correct_option is one-based; separate tags,
@@ -1957,10 +1959,10 @@
 				onchange={selectImportFile}
 			/>
 		</label>
-		<p id="import-file-help" class="muted" style="font-size: var(--text-sm);">
+		<p id="import-file-help" class="muted small">
 			{importFile ? importFile.name : 'CSV must be UTF-8. XLSX formulas are not accepted. Maximum file size: 3 MiB.'}
 		</p>
-		<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:var(--space-lg);">
+		<div class="cluster file-import-actions">
 			<button
 				class="btn"
 				type="button"
@@ -1984,7 +1986,7 @@
 		</div>
 		<details>
 			<summary>Import JSON rows</summary>
-			<p class="muted" style="font-size: var(--text-sm);">
+			<p class="muted small">
 				JSON rows use chapter_id, difficulty, vignette, lead_in, options with
 				text and rationale, correct_index (zero-based), key_learning_point,
 			and source_ref. Every row also needs an active rights_ref allowing
@@ -2000,7 +2002,7 @@
 				data-testid="import-json"
 			></textarea>
 		</label>
-		<div style="display:flex; gap:12px; flex-wrap:wrap;">
+		<div class="cluster">
 			<button
 				class="btn"
 				type="button"
@@ -2034,14 +2036,14 @@
 		</details>
 		{#if importReport}
 			<pre
-				style="white-space:pre-wrap; font-size: var(--text-sm);"
+				class="pre-wrap small"
 				data-testid="import-report">{importReport}</pre>
 		{/if}
 	</div>
 
 	<div class="card">
 		<h2>Editorial workflow</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Authored and imported items are born drafts. A draft must be
 			submitted, approved, and published before learners ever see it —
 			and the author of an item cannot be its approver. Paste one or more
@@ -2056,7 +2058,7 @@
 				data-testid="workflow-ids"
 			></textarea>
 		</label>
-		<div style="display:flex; gap:12px; flex-wrap:wrap;">
+		<div class="cluster">
 			<button
 				class="btn"
 				type="button"
@@ -2094,7 +2096,7 @@
 			</button>
 		</div>
 		{#if workflowReport.length > 0}
-			<ul style="font-size: var(--text-sm);">
+			<ul class="small">
 				{#each workflowReport as r (r.version_id)}
 					<li>
 						{r.version_id}:
@@ -2112,10 +2114,10 @@
 	</div>
 
 	<div class="card" data-testid="report-queue">
-		<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+		<div class="row">
 			<div>
 				<h2>Question reports</h2>
-				<p class="muted" style="margin:0;">Receipt is acknowledged immediately. Resolve within 72 hours; marking a report fixed requires a newer published question version.</p>
+				<p class="muted flush">Receipt is acknowledged immediately. Resolve within 72 hours; marking a report fixed requires a newer published question version.</p>
 			</div>
 			<button class="btn" type="button" disabled={reportQueueBusy} onclick={loadReportQueue} data-testid="report-queue-refresh">
 				{reportQueueBusy ? 'Refreshing…' : 'Refresh'}
@@ -2127,24 +2129,24 @@
 			<p class="muted" data-testid="report-queue-empty">No unresolved question reports.</p>
 		{/if}
 		{#each reportQueue as report (report.question_version_id)}
-			<article class="card" data-testid="report-item" style="margin-top:var(--space-md);">
-				<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+			<article class="card report-item" data-testid="report-item">
+				<div class="row">
 					<strong>Version {report.version} · {report.category.replaceAll('_', ' ')} · {report.report_count} report{report.report_count === 1 ? '' : 's'}</strong>
 					<span class="chip">{report.quarantined ? 'Quarantined' : 'In review'}</span>
 				</div>
-				<p style="margin:var(--space-sm) 0;"><strong>{report.vignette}</strong><br />{report.lead_in}</p>
+				<p class="report-stem"><strong>{report.vignette}</strong><br />{report.lead_in}</p>
 				<div aria-label="Learner report details">
 					{#each report.reporter_feedback as feedback}
-						<p class="muted" style="margin:4px 0;">
+						<p class="muted tight">
 							<strong>{feedback.category.replaceAll('_', ' ')}:</strong>
 							{feedback.note || 'No additional details provided.'}
 						</p>
 					{/each}
 					{#if report.feedback_truncated}
-						<p class="muted" style="margin:4px 0;">Showing the first 20 of {report.report_count} reports.</p>
+						<p class="muted tight">Showing the first 20 of {report.report_count} reports.</p>
 					{/if}
 				</div>
-				<p class="muted" style="font-size:var(--text-sm);">
+				<p class="muted small">
 					First reported {new Date(report.first_reported_at).toLocaleString()} ·
 					Acknowledgement due {new Date(report.acknowledgement_due_at).toLocaleString()} ·
 					Acknowledged {report.acknowledgements_on_time ? 'within 24 hours' : 'late'} ·
@@ -2175,7 +2177,7 @@
 						data-testid="report-correction-note"
 					></textarea>
 				</label>
-				<div style="display:flex; gap:8px; flex-wrap:wrap;">
+				<div class="cluster">
 					<button class="btn primary" type="button" disabled={reportQueueBusy || !!resolvingReport || !resolutionNotes[report.report_id]?.trim() || !correctionNotes[report.report_id]?.trim()} data-testid="report-resolve-fixed" onclick={() => resolveQuestionReport(report.report_id, 'resolved_fixed')}>
 						{resolvingReport === report.report_id ? 'Saving…' : 'Mark corrected'}
 					</button>
@@ -2269,11 +2271,11 @@
 				{/if}
 			</div>
 
-			<fieldset class="rights-record" style="margin-top:var(--space-md);">
+			<fieldset class="rights-record">
 				<legend>Blueprint chapters</legend>
 				<p class="muted">Add chapters and the question count (1–200) to sample from each chapter.</p>
-				<div style="display:flex; gap:var(--space-sm); align-items:flex-end; flex-wrap:wrap;">
-					<label class="field" for="blueprint-chapter" style="flex:1; min-width:14rem;">
+				<div class="form-row">
+					<label class="field" for="blueprint-chapter">
 						<span>Curriculum chapter</span>
 						{#if mockExamChapters.length > 0}
 							<select
@@ -2294,7 +2296,7 @@
 							/>
 						{/if}
 					</label>
-					<label class="field" for="blueprint-count" style="width:8rem;">
+					<label class="field blueprint-count" for="blueprint-count">
 						<span>Count (1–200)</span>
 						<input id="blueprint-count" type="number" min="1" max="200" step="1" bind:value={blueprintCount} data-testid="blueprint-count" />
 					</label>
@@ -2304,10 +2306,10 @@
 				</div>
 
 				{#if mockBlueprintEntries.length > 0}
-					<ul style="margin-top:var(--space-sm); list-style:none; padding:0;" data-testid="blueprint-entries">
+					<ul class="bare-list" data-testid="blueprint-entries">
 						{#each mockBlueprintEntries as entry, index}
 							{@const ch = mockExamChapters.find((c) => c.id === entry.chapter_id)}
-							<li style="display:flex; justify-content:space-between; align-items:center; padding:var(--space-xs) 0; border-bottom:1px solid var(--color-surface-elevated);" data-testid="blueprint-entry-item">
+							<li class="row blueprint-entry" data-testid="blueprint-entry-item">
 								<span><strong>{ch ? ch.name : `Chapter ${entry.chapter_id}`}</strong>: {entry.count} questions</span>
 								<button class="btn" type="button" onclick={() => removeBlueprintEntry(index)}>Remove</button>
 							</li>
@@ -2316,27 +2318,27 @@
 				{/if}
 			</fieldset>
 
-			<div style="margin-top:var(--space-md);">
+			<div>
 				<button class="btn primary" type="submit" disabled={mocksBusy || !mockTitle.trim() || mockBlueprintEntries.length === 0} data-testid="create-mock-btn">
 					{mocksBusy ? 'Creating mock…' : 'Create mock test'}
 				</button>
 			</div>
 		</form>
 
-		<h3 style="margin-top:var(--space-lg);">Configured mock tests</h3>
+		<h3>Configured mock tests</h3>
 		{#if mocksBusy && mocksList.length === 0}
-			<p class="muted" role="status">Loading mock tests…</p>
+			<p class="muted is-loading" role="status">Loading mock tests…</p>
 		{:else if mocksList.length === 0}
 			<p class="muted">No mock tests configured yet.</p>
 		{:else}
-			<ul style="list-style:none; padding:0;" data-testid="mock-list">
+			<ul class="bare-list" data-testid="mock-list">
 				{#each mocksList as mock (mock.mock_id)}
-					<li class="rights-record" style="margin-bottom:var(--space-sm);" data-testid="mock-item">
-						<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--space-xs);">
+					<li class="rights-record" data-testid="mock-item">
+						<div class="row">
 							<strong>{mock.title}</strong>
 							<span class="chip" data-testid="mock-item-type">{(mock.mock_type ?? 'full').replace('_', ' ')}</span>
 						</div>
-						<p class="muted" style="margin:var(--space-xs) 0; font-size:var(--text-sm);">
+						<p class="muted tight small">
 							Time limit: {mock.time_limit_seconds ? Math.round(mock.time_limit_seconds / 60) + 'm' : 'Unlimited'} · Pass mark: {mock.pass_mark_percent}% · Attempts: {mock.attempts_used} / {mock.attempts_allowed} · Integrity: {mock.integrity_policy}
 						</p>
 					</li>
@@ -2426,5 +2428,41 @@
 		padding: var(--space-md);
 		border: 1px solid var(--color-surface-elevated);
 		border-radius: var(--radius-control);
+	}
+
+	.permitted-uses,
+	.region-review {
+		padding: var(--space-md);
+		border: 1px solid var(--color-surface-elevated);
+		border-radius: var(--radius-control);
+	}
+
+	.permitted-uses {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-md);
+		margin: var(--space-md) 0;
+	}
+
+	.file-import-actions {
+		margin-bottom: var(--space-lg);
+	}
+
+	.report-item {
+		margin-top: var(--space-md);
+	}
+
+	.report-stem {
+		margin: var(--space-sm) 0;
+	}
+
+	/* Beats the .form-row > .field default so the count stays narrow. */
+	.form-row > .blueprint-count {
+		flex: 0 1 8rem;
+	}
+
+	.blueprint-entry {
+		padding: var(--space-xs) 0;
+		border-bottom: 1px solid var(--color-surface-elevated);
 	}
 </style>

@@ -161,7 +161,7 @@
 </section>
 
 {#if loading}
-	<p role="status" class="muted">Loading the published version for this context…</p>
+	<p role="status" class="muted is-loading">Loading the published version for this context…</p>
 {:else if error}
 	<section class="card reader-error" role="alert" data-testid="article-unavailable">
 		<h1>Version unavailable</h1>

@@ -868,6 +868,8 @@
 
 	function onKeydown(event) {
 		if (result || !session || !item) return;
+		// Browser/OS shortcuts (Ctrl+C, Ctrl+A, ⌘F…) must never pick an answer.
+		if (event.metaKey || event.ctrlKey || event.altKey) return;
 		if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
 		const key = event.key.toLowerCase();
 		if (key === 'e' && !item.answered) {
@@ -973,7 +975,7 @@
 
 <div class="session-workspace" data-testid="session-workspace" style={`--session-font-scale: ${[1, 1.125, 1.25, 1.5][textSize]};`}>
 {#if !loadFailed && !result && session}
-	<div class="card" style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+	<div class="card session-toolbar">
 		<button
 			class="btn {focusMode ? 'primary' : ''}"
 			type="button"
@@ -1007,7 +1009,7 @@
 				</button>
 			{/each}
 		</div>
-		<span class="muted" style="font-size: var(--text-sm);">
+		<span class="muted small toolbar-hint">
 			In focus mode, swipe left or right to move between answered items.
 		</span>
 	</div>
@@ -1140,7 +1142,7 @@
 	<p class="error-text" role="alert">{loadFailed}</p>
 	<button class="btn" type="button" onclick={load}>Retry</button>
 {:else if result}
-	<div class="card" data-testid="results">
+	<div class="card results-card" data-testid="results">
 		<h1>Session submitted</h1>
 		{#if integrityAutoSubmitted}
 			<p class="feedback" role="status" data-testid="integrity-auto-submitted">
@@ -1166,7 +1168,7 @@
 					<p>You are ahead of {result.mock.percentile}% of takers of this same form.</p>
 				{/if}
 				{#if result.mock.total_time_seconds !== undefined}
-					<p class="muted" data-testid="mock-time-analysis" style="margin: var(--space-xs) 0;">
+					<p class="muted tight" data-testid="mock-time-analysis">
 						Total time: {Math.floor(result.mock.total_time_seconds / 60)}m {result.mock.total_time_seconds % 60}s
 						{#if result.mock.avg_time_per_question_seconds !== undefined}
 							· {result.mock.avg_time_per_question_seconds}s/question avg
@@ -1174,7 +1176,7 @@
 					</p>
 				{/if}
 				{#each result.mock.breakdown as row (row.chapter)}
-					<p style="margin:2px 0;">
+					<p class="breakdown-row">
 						{row.chapter}: {row.correct}/{row.total}
 						{#if row.time_seconds !== undefined}
 							<span class="muted">({Math.floor(row.time_seconds / 60)}m {row.time_seconds % 60}s)</span>
@@ -1192,7 +1194,7 @@
 		<a class="btn primary" href={`${base}/today`} data-testid="back-today">Back to Today</a>
 	</div>
 {:else if session}
-	<p class="muted" style="margin-bottom: var(--space-sm);">
+	<p class="muted session-progress">
 		Question {current + 1} of {session.items.length}
 		· {session.preset === 'revision' ? 'Re-practice' : session.preset === 'timed' ? 'Timed' : 'Tutor mode'}
 		{#if remainingMs !== null}
@@ -1206,6 +1208,7 @@
 			</span>
 		{/if}
 	</p>
+	<div class="meter session-meter" style:--value={(current + 1) / session.items.length}><span></span></div>
 
 	{#if item}
 		<div class="card question-card">
@@ -1214,8 +1217,8 @@
 				<p data-testid="question-text">{item.vignette}</p>
 				<p><strong>{item.lead_in}</strong></p>
 				{#if item.corrected}
-					<p style="margin:0 0 var(--space-sm);">
-						<span class="chip" data-testid="corrected-badge">Corrected</span>
+					<p class="cluster">
+						<span class="chip info" data-testid="corrected-badge">Corrected</span>
 						{#if item.correction_note}
 							<span class="muted" data-testid="correction-changelog">Update: {item.correction_note}</span>
 						{/if}
@@ -1263,7 +1266,7 @@
 			{/if}
 
 			{#if !item.answered && deferredFeedback}
-				<p class="muted" style="margin: 0 0 var(--space-sm);">
+				<p class="muted small">
 					Answers and explanations are revealed after you submit this assessment.
 				</p>
 			{/if}
@@ -1348,20 +1351,20 @@
 						</p>
 						{#each item.options as option, i (i)}
 							{#if option.rationale && (i === item.correct_index || i === item.chosen_index)}
-								<p style="margin: 4px 0;">
+								<p class="tight">
 									<strong>{letterLabel(i)}.</strong> {option.rationale}
 								</p>
 							{/if}
 						{/each}
-						<p style="margin: var(--space-sm) 0 0;">
+						<p class="key-point">
 							<strong>Key learning point:</strong> {item.key_learning_point}
 						</p>
 						{#if item.exam_tip}
-							<p class="muted" style="margin: 4px 0 0;">Exam tip: {item.exam_tip}</p>
+							<p class="muted tight-top">Exam tip: {item.exam_tip}</p>
 						{/if}
 					</div>
 					{#if session.preset === 'tutor' && item.tutoring_cards?.length}
-						<div role="group" aria-label="One-tap tutoring cards" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:var(--space-md);">
+						<div class="cluster tutoring-cards" role="group" aria-label="One-tap tutoring cards">
 							{#each TUTORING_PROMPTS as [promptType, label] (promptType)}
 								{#if promptType !== 'why_wrong' || item.correct === false}
 									<button
@@ -1394,7 +1397,7 @@
 										<p>Compare your selected answer with the keyed answer.</p>
 										{#each item.options as option, i (i)}
 											{#if i === item.chosen_index || i === item.correct_index}
-												<p style="margin:4px 0;">
+												<p class="tight">
 													<strong>{i === item.chosen_index ? 'Your answer' : 'Keyed answer'}: {option.text}</strong>
 													{#if option.rationale} — {option.rationale}{/if}
 												</p>
@@ -1417,24 +1420,24 @@
 										onclick={() => (testAnswerRevealed = true)}
 									>Reveal answer</button>
 								{/if}
-								<p class="muted" style="margin:0;">Source: {activeTutoringCard.source_ref}</p>
+								<p class="muted small">Source: {activeTutoringCard.source_ref}</p>
 							</div>
 						{/if}
 					{/if}
 					{#if item.report_status === 'quarantined'}
-						<p class="muted" style="margin: 4px 0 0;">
+						<p class="muted small tight-top">
 							Flagged by learners — out of rotation pending editorial review.
 						</p>
 					{:else if item.report_status === 'open'}
-						<p class="muted" style="margin: 4px 0 0;">
+						<p class="muted small tight-top">
 							Flagged by a learner — under review.
 						</p>
 					{:else if item.report_status === 'resolved_fixed'}
-						<p class="muted" style="margin: 4px 0 0;">
+						<p class="muted small tight-top">
 							This version was corrected. A newer reviewed version is in use.
 						</p>
 					{:else if item.report_status === 'resolved_rejected'}
-						<p class="muted" style="margin: 4px 0 0;">
+						<p class="muted small tight-top">
 							A report was reviewed; this version remains in use.
 						</p>
 					{/if}
@@ -1444,16 +1447,16 @@
 					<div class="feedback" data-testid="my-report-status">
 						<p class="verdict">Your report: {item.my_report.status.replaceAll('_', ' ')}</p>
 						{#if item.my_report.resolution_note}
-							<p style="margin:4px 0;">Review note: {item.my_report.resolution_note}</p>
+							<p class="tight">Review note: {item.my_report.resolution_note}</p>
 						{/if}
 						{#if item.my_report.correction_note}
-							<p style="margin:4px 0;">Public correction: {item.my_report.correction_note}</p>
+							<p class="tight">Public correction: {item.my_report.correction_note}</p>
 						{/if}
 						{#if item.my_report.corrected_version_number}
-							<p style="margin:4px 0;">Corrected version v{item.my_report.corrected_version_number} was published.</p>
+							<p class="tight">Corrected version v{item.my_report.corrected_version_number} was published.</p>
 						{/if}
 						{#if item.my_report.status === 'open' || item.my_report.status === 'quarantined'}
-							<p class="muted" style="margin:4px 0;">
+							<p class="muted small tight">
 								Acknowledged {new Date(item.my_report.acknowledged_at).toLocaleString()} ·
 								resolution due {new Date(item.my_report.resolution_due_at).toLocaleString()}
 								{#if item.my_report.resolution_overdue}<strong class="danger-text">Overdue</strong>{/if}
@@ -1483,11 +1486,11 @@
 					<div data-testid="report-form">
 						<p class="field">
 							<span>What's wrong?</span>
-							<span style="display:flex; gap:8px; flex-wrap:wrap;">
+							<span class="cluster">
 								{#each REPORT_CATEGORIES as [value, label]}
 									<button
 										type="button"
-										class="btn {reportCategory === value ? 'primary' : ''}"
+										class="btn small {reportCategory === value ? 'primary' : ''}"
 										disabled={reportBusy}
 										data-testid={`report-cat-${value}`}
 										onclick={() => {
@@ -1513,7 +1516,7 @@
 						{#if reportError}
 							<p class="error-text" role="alert">{reportError}</p>
 						{/if}
-						<p style="display:flex; gap:12px;">
+						<p class="cluster">
 							<button
 								class="btn primary"
 								type="button"
@@ -1574,13 +1577,76 @@
 		</div>
 	{/if}
 {:else}
-	<p class="muted">Loading the session…</p>
+	<p class="muted is-loading">Loading the session…</p>
 {/if}
 </div>
 
 <style>
 	.session-workspace {
 		font-size: calc(1rem * var(--session-font-scale, 1));
+	}
+
+	/* Toolbar: compact, secondary to the question (§7.3 reading first). */
+	.session-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-sm);
+		padding: var(--space-md);
+	}
+
+	.session-toolbar > .btn {
+		min-height: 40px;
+		padding-inline: var(--space-lg);
+		font-size: var(--text-sm);
+	}
+
+	.toolbar-hint {
+		flex: 1 1 14rem;
+	}
+
+	.session-progress {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--space-xs);
+		margin: var(--space-lg) 0 var(--space-sm);
+		font-weight: 600;
+	}
+
+	.session-meter {
+		margin-bottom: var(--space-lg);
+		height: 4px;
+	}
+
+	/* Question text stays the strongest element on the screen (§7.5). */
+	.question-card :global([data-testid='question-text']) {
+		font-size: 1.0625em;
+		line-height: 1.7;
+	}
+
+	.key-point {
+		margin: var(--space-md) 0 0;
+		padding: var(--space-md);
+		border-radius: var(--radius-sm);
+		background: color-mix(in oklab, var(--color-surface) 60%, transparent);
+	}
+
+	.tutoring-cards {
+		margin-top: var(--space-md);
+	}
+
+	.results-card h1 {
+		margin-bottom: var(--space-md);
+	}
+
+	.results-card .stat-row > :first-child {
+		border-color: color-mix(in oklab, var(--color-accent) 50%, transparent);
+		background: var(--color-action-wash);
+	}
+
+	.breakdown-row {
+		margin: 2px 0;
 	}
 
 	.session-workspace :is(input, select, textarea) {

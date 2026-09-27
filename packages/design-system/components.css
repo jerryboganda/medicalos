@@ -1,0 +1,643 @@
+/*
+ * Shared components (design.md § Component voice). Element-level form rules
+ * use :where() so any page-scoped style wins without specificity fights.
+ * Rule: pseudo-elements never carry text — generated text leaks into
+ * accessible names (and the Playwright role queries that read them).
+ */
+
+/* ---- buttons: all eight states ------------------------------------------- */
+
+.btn {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-sm);
+	min-height: 44px; /* §7.3 touch targets */
+	padding: 0 var(--space-xl);
+	border-radius: var(--radius-control);
+	border: 1px solid var(--color-border);
+	background: var(--color-surface-elevated);
+	box-shadow: inset 0 1px 0 var(--color-highlight);
+	color: var(--color-text-primary);
+	font: 600 var(--text-body) / 1 var(--font-body);
+	letter-spacing: 0.005em;
+	text-decoration: none;
+	white-space: nowrap; /* gate 49: no two-line buttons */
+	cursor: pointer;
+	user-select: none;
+	touch-action: manipulation;
+	transition:
+		background-color var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out),
+		color var(--dur-fast) var(--ease-out),
+		opacity var(--dur-fast) var(--ease-out),
+		transform var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.btn:hover:not(:disabled, [aria-disabled='true']) {
+		background-color: var(--color-surface-hover);
+		border-color: var(--color-border-strong);
+		color: var(--color-text-primary);
+		transform: translateY(-1px);
+	}
+}
+
+.btn:active:not(:disabled, [aria-disabled='true']) {
+	transform: scale(0.97);
+	transition-duration: 60ms;
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: not-allowed;
+	box-shadow: none;
+}
+
+.btn[aria-pressed='true'] {
+	border-color: var(--color-accent);
+	background-color: var(--color-action-wash);
+}
+
+/* Loading: inline spinner, only while data-loading="true" (a real request). */
+.btn[data-loading='true'] {
+	cursor: progress;
+}
+
+.btn[data-loading='true']:disabled {
+	opacity: 0.85;
+}
+
+.btn[data-loading='true']::before {
+	content: '';
+	flex: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 2px solid currentColor;
+	border-right-color: transparent;
+	animation: mlos-spin 700ms linear infinite;
+}
+
+.btn.primary {
+	border-color: transparent;
+	background: var(--color-action-primary)
+		linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0) 60%);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.2),
+		var(--glow-action);
+	color: var(--color-on-action);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.btn.primary:hover:not(:disabled, [aria-disabled='true']) {
+		background-color: var(--color-action-hover);
+		color: var(--color-on-action);
+		border-color: transparent;
+	}
+}
+
+.btn.primary[aria-pressed='true'] {
+	background-color: var(--color-action-primary);
+}
+
+.btn.success {
+	border-color: transparent;
+	background: var(--color-success);
+	color: var(--color-success-ink);
+}
+
+.btn.danger-text {
+	background: transparent;
+	border-color: color-mix(in oklab, var(--color-error) 70%, transparent);
+	box-shadow: none;
+	color: var(--color-error);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.btn.danger-text:hover:not(:disabled) {
+		background-color: var(--color-error-wash);
+		border-color: var(--color-error);
+		color: var(--color-error);
+	}
+}
+
+.btn.ghost {
+	background: transparent;
+	border-color: transparent;
+	box-shadow: none;
+}
+
+.btn.small {
+	min-height: 36px;
+	padding-inline: var(--space-md);
+	font-size: var(--text-sm);
+}
+
+.linklike {
+	background: none;
+	border: none;
+	color: var(--color-accent);
+	cursor: pointer;
+	font: inherit;
+	padding: var(--space-sm) 0;
+	text-decoration: underline;
+	text-decoration-color: color-mix(in oklab, currentColor 45%, transparent);
+	text-underline-offset: 3px;
+	transition:
+		color var(--dur-fast) var(--ease-out),
+		text-decoration-color var(--dur-fast) var(--ease-out);
+}
+
+.linklike:hover:not(:disabled) {
+	color: var(--color-text-primary);
+	text-decoration-color: currentColor;
+}
+
+.linklike:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* ---- cards ---------------------------------------------------------------- */
+
+.card {
+	position: relative;
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-1);
+	padding: var(--space-xl);
+	margin-bottom: var(--space-lg);
+}
+
+.card > :first-child {
+	margin-top: 0;
+}
+
+.card > :last-child {
+	margin-bottom: 0;
+}
+
+/* A card inside a card becomes a tile — no double borders, no stacked glow. */
+.card .card {
+	background: color-mix(in oklab, var(--color-surface-elevated) 55%, var(--color-surface));
+	border-radius: var(--radius-control);
+	box-shadow: none;
+	padding: var(--space-lg);
+	margin-bottom: var(--space-md);
+}
+
+/* ---- chips / status ---------------------------------------------------------- */
+
+.chip,
+.status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--text-sm);
+	font-weight: 600;
+	line-height: 1;
+	padding: 6px var(--space-md);
+	border-radius: var(--radius-pill);
+	border: 1px solid var(--color-border-strong);
+	color: var(--color-text-secondary);
+	background: color-mix(in oklab, var(--color-surface-elevated) 50%, transparent);
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.chip.done,
+.chip.undone,
+.chip.warn,
+.chip.info,
+.status.dev {
+	color: var(--chip-tone);
+	border-color: color-mix(in oklab, var(--chip-tone) 55%, transparent);
+	background: color-mix(in oklab, var(--chip-tone) 10%, transparent);
+}
+
+.chip.done::before,
+.chip.undone::before,
+.chip.warn::before,
+.chip.info::before,
+.status.dev::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.chip.done {
+	--chip-tone: var(--color-success);
+}
+
+.chip.undone,
+.chip.warn,
+.status.dev {
+	--chip-tone: var(--color-warning);
+}
+
+.chip.info {
+	--chip-tone: var(--color-accent);
+}
+
+/* ---- forms ------------------------------------------------------------------- */
+
+.field {
+	display: block;
+	margin-bottom: var(--space-lg);
+}
+
+.field span,
+.field legend {
+	display: block;
+	margin-bottom: 6px;
+	color: var(--color-text-secondary);
+	font-size: var(--text-sm);
+}
+
+.field > span:first-child,
+.field > legend {
+	font-weight: 600;
+}
+
+.field :is(input, select, textarea) + span {
+	margin: 6px 0 0;
+}
+
+.field .error-text,
+.field .danger-text {
+	color: var(--color-error);
+}
+
+:where(
+		input:not(
+				[type='checkbox'],
+				[type='radio'],
+				[type='range'],
+				[type='file'],
+				[type='color'],
+				[type='hidden'],
+				[type='submit'],
+				[type='button'],
+				[type='image']
+			),
+		select,
+		textarea
+	) {
+	width: 100%;
+	box-sizing: border-box;
+	min-height: 44px;
+	padding: 0 var(--space-md);
+	border-radius: var(--radius-control);
+	border: 1px solid var(--color-border-strong);
+	background-color: color-mix(in oklab, var(--color-canvas) 70%, var(--color-surface));
+	color: var(--color-text-primary);
+	font: var(--text-body) / 1.4 var(--font-body);
+	transition:
+		border-color var(--dur-fast) var(--ease-out),
+		background-color var(--dur-fast) var(--ease-out);
+}
+
+:where(textarea) {
+	min-height: 96px;
+	padding: var(--space-md);
+	line-height: 1.55;
+	resize: vertical;
+}
+
+:where(select) {
+	appearance: none;
+	padding-right: 40px;
+	background-image: linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+		linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+	background-position:
+		calc(100% - 20px) 52%,
+		calc(100% - 15px) 52%;
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+	cursor: pointer;
+}
+
+:where(input, select, textarea)::placeholder {
+	color: var(--color-text-secondary);
+	opacity: 0.7;
+}
+
+:where(input, select, textarea):hover:not(:disabled, :focus-visible) {
+	border-color: color-mix(in oklab, var(--color-accent) 45%, var(--color-border-strong));
+}
+
+:where(input, select, textarea):focus-visible {
+	outline: 2px solid var(--color-focus);
+	outline-offset: 0;
+	border-color: var(--color-focus);
+}
+
+:where(input, select, textarea):disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+:where(input, select, textarea)[aria-invalid='true'] {
+	border-color: var(--color-error);
+}
+
+/* Checkbox + radio: drawn, with a spring tick — still native inputs. */
+:where(input[type='checkbox'], input[type='radio']) {
+	appearance: none;
+	flex: none;
+	display: inline-grid;
+	place-content: center;
+	width: 20px;
+	height: 20px;
+	margin: 0 var(--space-xs) 0 0;
+	border: 1.5px solid var(--color-border-strong);
+	border-radius: 6px;
+	background: color-mix(in oklab, var(--color-canvas) 70%, var(--color-surface));
+	vertical-align: -4px;
+	cursor: pointer;
+	transition:
+		background-color var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out);
+}
+
+:where(input[type='radio']) {
+	border-radius: 50%;
+}
+
+:where(input[type='checkbox'], input[type='radio'])::before {
+	content: '';
+	width: 10px;
+	height: 10px;
+	transform: scale(0);
+	transition: transform var(--dur-base) var(--ease-spring);
+	background: var(--color-on-action);
+}
+
+:where(input[type='checkbox'])::before {
+	clip-path: polygon(14% 44%, 0 58%, 40% 100%, 100% 22%, 86% 8%, 38% 70%);
+}
+
+:where(input[type='radio'])::before {
+	border-radius: 50%;
+	width: 8px;
+	height: 8px;
+}
+
+:where(input[type='checkbox'], input[type='radio']):checked {
+	background: var(--color-action-primary);
+	border-color: var(--color-action-primary);
+}
+
+:where(input[type='checkbox'], input[type='radio']):checked::before {
+	transform: scale(1);
+}
+
+:where(input[type='checkbox'], input[type='radio']):hover:not(:disabled) {
+	border-color: var(--color-accent);
+}
+
+:where(input[type='range']) {
+	accent-color: var(--color-action-primary);
+}
+
+fieldset {
+	min-width: 0;
+}
+
+/* ---- feedback, notices -------------------------------------------------------- */
+
+.feedback {
+	border-radius: var(--radius-control);
+	border: 1px solid var(--color-border-strong);
+	background: color-mix(in oklab, var(--color-surface-elevated) 60%, transparent);
+	padding: var(--space-lg);
+	margin: 0 0 var(--space-lg);
+	animation: mlos-rise var(--dur-slow) var(--ease-out) both;
+}
+
+.feedback > :first-child {
+	margin-top: 0;
+}
+
+.feedback > :last-child {
+	margin-bottom: 0;
+}
+
+.feedback.good {
+	border-color: color-mix(in oklab, var(--color-success) 70%, transparent);
+	background: var(--color-success-wash);
+}
+
+.feedback.bad {
+	border-color: color-mix(in oklab, var(--color-error) 70%, transparent);
+	background: var(--color-error-wash);
+}
+
+.feedback .verdict {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	font-weight: 700;
+	margin: 0 0 var(--space-sm);
+}
+
+.feedback.good .verdict {
+	color: var(--color-success);
+}
+
+.feedback.bad .verdict {
+	color: var(--color-error);
+}
+
+/* Status icon beside the verdict: a mask, never text (§7.3 icon + colour). */
+.feedback.good .verdict::before,
+.feedback.bad .verdict::before {
+	content: '';
+	flex: none;
+	width: 20px;
+	height: 20px;
+	background: currentColor;
+	mask: var(--icon-mask) center / contain no-repeat;
+	animation: mlos-stamp var(--dur-base) var(--ease-spring) both;
+}
+
+.feedback.good .verdict::before {
+	--icon-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m7.5 12.5 3 3 6-7'/%3E%3C/svg%3E");
+}
+
+.feedback.bad .verdict::before {
+	--icon-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m9 9 6 6m0-6-6 6'/%3E%3C/svg%3E");
+}
+
+[role='alert'].error-text,
+[role='alert'].danger-text {
+	animation: mlos-rise var(--dur-base) var(--ease-out) both;
+}
+
+/* ---- stats + meters ------------------------------------------------------------- */
+
+.stat-row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+	gap: var(--space-md);
+	margin: var(--space-lg) 0;
+}
+
+.stat-row > * {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	min-width: 0;
+	padding: var(--space-md) var(--space-lg);
+	border-radius: var(--radius-control);
+	border: 1px solid var(--color-border);
+	background: color-mix(in oklab, var(--color-surface-elevated) 55%, transparent);
+	color: var(--color-text-secondary);
+	font-size: var(--text-sm);
+	animation: mlos-rise var(--dur-slow) var(--ease-out) both;
+}
+
+.stat-row > :nth-child(2) {
+	animation-delay: calc(var(--stagger) * 1);
+}
+
+.stat-row > :nth-child(3) {
+	animation-delay: calc(var(--stagger) * 2);
+}
+
+.stat-row > :nth-child(4) {
+	animation-delay: calc(var(--stagger) * 3);
+}
+
+.stat-row strong {
+	display: block;
+	color: var(--color-text-primary);
+	font-family: var(--font-display);
+	font-size: var(--text-xl);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.1;
+	overflow-wrap: anywhere;
+}
+
+/* <div class="meter" style="--value: 0.4"><span></span></div> */
+.meter {
+	position: relative;
+	height: 6px;
+	border-radius: var(--radius-pill);
+	background: var(--color-surface-elevated);
+	overflow: hidden;
+}
+
+.meter > span {
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background: linear-gradient(90deg, var(--color-action-primary), var(--color-accent));
+	transform-origin: left center;
+	transform: scaleX(clamp(0, var(--value, 0), 1));
+	transition: transform 600ms var(--ease-out);
+	animation: mlos-fill 900ms var(--ease-out) both;
+}
+
+.meter.done > span {
+	background: var(--color-success);
+}
+
+/* ---- small parts ----------------------------------------------------------------- */
+
+.kbd {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.6em;
+	padding: 2px 6px;
+	border-radius: 6px;
+	border: 1px solid var(--color-border-strong);
+	border-bottom-width: 2px;
+	background: var(--color-surface-elevated);
+	color: var(--color-text-secondary);
+	font: 600 var(--text-xs) / 1.2 var(--font-body);
+}
+
+/* Loading copy shimmers while a real request is in flight (§7.3). Put it on
+ * the text element itself, never on a card: it paints its own background. */
+@media (forced-colors: active) {
+	.is-loading {
+		color: CanvasText !important;
+		background: none !important;
+	}
+}
+
+.is-loading {
+	background: linear-gradient(
+			100deg,
+			var(--color-text-secondary) 20%,
+			var(--color-text-primary) 50%,
+			var(--color-text-secondary) 80%
+		)
+		0 0 / 250% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: mlos-shimmer 1.6s linear infinite;
+}
+
+/* ---- tables ------------------------------------------------------------------------- */
+
+:where(table) {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--text-sm);
+}
+
+:where(th, td) {
+	padding: var(--space-sm) var(--space-md);
+	border-bottom: 1px solid var(--color-border);
+	text-align: left;
+	vertical-align: top;
+}
+
+:where(th) {
+	color: var(--color-text-secondary);
+	font-weight: 600;
+}
+
+/* ---- disclosure ---------------------------------------------------------------------- */
+
+:where(details) > summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-sm);
+	cursor: pointer;
+	list-style: none;
+	font-weight: 600;
+	transition: color var(--dur-fast) var(--ease-out);
+}
+
+:where(details) > summary::-webkit-details-marker {
+	display: none;
+}
+
+:where(details) > summary::after {
+	content: '';
+	flex: none;
+	margin-left: auto;
+	width: 8px;
+	height: 8px;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: translateY(-2px) rotate(45deg);
+	transition: transform var(--dur-base) var(--ease-out);
+	opacity: 0.7;
+}
+
+:where(details[open]) > summary::after {
+	transform: translateY(2px) rotate(225deg);
+}

@@ -1,15 +1,18 @@
 /*
- * Medical Learning OS — design tokens.
- * Source: master plan §7.1 "Proposed starting tokens, to be validated in real
- * screens." These are the owner-approved starting values, NOT a measured
- * extraction or contrast certification (§7.1). Every foreground/background
- * combination gets validated during Phase 1 hallmark UI work before release.
- * Components must consume these by name — never inline raw values
+ * Medical Learning OS — design tokens. The locked system is described in
+ * /design.md; this file is its canonical export.
+ *
+ * The seven §7.1 colours, the spacing scale and the radius choices are the
+ * owner-approved starting values ("proposed tokens, to be validated in real
+ * screens") — keep them greppable against the plan. Everything else is
+ * derived from them. Components consume tokens by name, never raw values
  * (hallmark locked-token rule; TRUST-01 applies to visual claims too).
  */
 
 :root {
-	/* Color */
+	color-scheme: dark;
+
+	/* ---- colour: §7.1 owner-locked ------------------------------------- */
 	--color-canvas: #09090f;
 	--color-surface: #14141e;
 	--color-surface-elevated: #1b1728;
@@ -18,7 +21,48 @@
 	--color-text-primary: #f5f3ff;
 	--color-text-secondary: #b8b4c6;
 
-	/* Spacing — 4 pt scale (§7.1) */
+	/* ---- colour: states (tuned for the dark violet surfaces) ------------- */
+	--color-success: #34d399;
+	--color-error: #f87171;
+	--color-warning: #fbbf24;
+	--color-focus: #a78bfa;
+	--color-success-ink: #06281d;
+	--color-on-action: #ffffff;
+
+	/* ---- colour: derived ---------------------------------------------------- */
+	--color-surface-hover: #232336;
+	--color-action-hover: #8b5cf6;
+	--color-border: color-mix(in oklab, var(--color-text-primary) 9%, transparent);
+	--color-border-strong: color-mix(in oklab, var(--color-text-primary) 18%, transparent);
+	--color-highlight: color-mix(in oklab, var(--color-text-primary) 7%, transparent);
+	--color-action-wash: color-mix(in oklab, var(--color-action-primary) 18%, transparent);
+	--color-success-wash: color-mix(in oklab, var(--color-success) 14%, transparent);
+	--color-error-wash: color-mix(in oklab, var(--color-error) 12%, transparent);
+	--color-warning-wash: color-mix(in oklab, var(--color-warning) 12%, transparent);
+	--color-scrim: color-mix(in oklab, var(--color-canvas) 72%, transparent);
+	--color-chrome: color-mix(in oklab, var(--color-canvas) 78%, transparent);
+
+	/* Restrained §7.1 atmosphere: one plum bloom above the fold, never behind
+	 * reading content. */
+	--atmosphere: radial-gradient(
+			70% 55% at 50% -12%,
+			color-mix(in oklab, var(--color-action-primary) 24%, transparent),
+			transparent 70%
+		),
+		radial-gradient(
+			40% 35% at 100% 0%,
+			color-mix(in oklab, var(--color-accent) 10%, transparent),
+			transparent 70%
+		);
+
+	/* ---- elevation ---------------------------------------------------------- */
+	--shadow-1: inset 0 1px 0 var(--color-highlight), 0 1px 2px rgb(0 0 0 / 0.35),
+		0 8px 24px -16px rgb(0 0 0 / 0.6);
+	--shadow-2: inset 0 1px 0 var(--color-highlight), 0 12px 32px -12px rgb(0 0 0 / 0.65);
+	--shadow-3: inset 0 1px 0 var(--color-highlight), 0 32px 64px -16px rgb(0 0 0 / 0.75);
+	--glow-action: 0 10px 28px -10px color-mix(in oklab, var(--color-action-primary) 75%, transparent);
+
+	/* ---- spacing: §7.1 4-pt scale (+4xl for marketing sections) ------------ */
 	--space-xs: 4px;
 	--space-sm: 8px;
 	--space-md: 12px;
@@ -26,47 +70,109 @@
 	--space-xl: 24px;
 	--space-2xl: 32px;
 	--space-3xl: 48px;
+	--space-4xl: 64px;
 
-	/* Radius — §7.1 ranges, lower-bound choices pending screen validation */
+	/* ---- radius: §7.1 ranges, lower bounds pending screen validation ------ */
 	--radius-card: 20px; /* plan range 20–24 px */
 	--radius-control: 12px; /* plan range 12–16 px */
+	--radius-sm: 8px;
+	--radius-pill: 999px;
 
-	/* Type — 16–18 px reading baseline, user-adjustable (§7.1, §7.3) */
+	/* ---- type: 16–18 px reading baseline (§7.1, §7.3) ---------------------- */
+	--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+	--font-body: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--text-xs: 12px;
+	--text-sm: 14px;
 	--text-body: 16px;
 	--text-body-lg: 18px;
-	--text-sm: 14px;
+	--text-lg: 20px;
 	--text-xl: 24px;
+	--text-2xl: 30px;
+	--text-3xl: clamp(30px, 4.2vw, 40px);
+	--text-display: clamp(38px, 7vw, 68px);
+	--measure: 68ch;
 
-	/* Fonts — hallmark 2+1 pairing, self-hosted via @fontsource (no CDN,
-	 * honors §30.2 budgets and offline-first). Lifted into the token block
-	 * per the locked-token rule. */
-	--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
-	--font-body: 'Manrope', system-ui, -apple-system, sans-serif;
+	/* ---- layout --------------------------------------------------------------- */
+	--rail-width: 264px;
+	--topbar-height: 60px;
+	--tabbar-height: 64px;
+	--content-width: 760px;
+	--content-width-wide: 1080px;
+	--safe-top: env(safe-area-inset-top, 0px);
+	--safe-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-left: env(safe-area-inset-left, 0px);
+	--safe-right: env(safe-area-inset-right, 0px);
+	--z-chrome: 20;
+	--z-scrim: 30;
+	--z-sheet: 40;
+	--z-dialog: 50;
 
-	/* Interaction-state colors (hallmark state discipline: success / error /
-	 * warning need named tokens; tuned for the dark violet surfaces). */
-	--color-success: #34d399;
-	--color-error: #f87171;
-	--color-warning: #fbbf24;
-	--color-focus: #a78bfa;
-
-	/* Hover + wash variants (lifted tokens — no inline values in components) */
-	--color-surface-hover: #232336;
-	--color-action-hover: #8b5cf6;
-	--color-action-wash: rgba(124, 58, 237, 0.18);
-	--color-success-wash: rgba(52, 211, 153, 0.14);
-	--color-error-wash: rgba(248, 113, 113, 0.12);
-	--color-success-ink: #06281d;
-
-	/* Motion — brief, purposeful; reduced-motion alternative required (§7.1, §7.3) */
+	/* ---- motion: brief, purposeful; reduced-motion collapse in motion.css -- */
 	--dur-fast: 120ms;
 	--dur-base: 200ms;
+	--dur-slow: 320ms;
+	--dur-page: 420ms;
+	--stagger: 45ms;
 	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	/* Damped spring, ~2 % overshoot — physical surfaces only (sheet, dialog,
+	 * nav indicator). Generated from ζ = 0.78, f = 1.3 Hz. */
+	--ease-spring: linear(
+		0, 0.067 5%, 0.216 10%, 0.391 15%, 0.557 20%, 0.699 25%, 0.81 30%, 0.892 35%,
+		0.949 40%, 0.985 45%, 1.006 50%, 1.016 55%, 1.02 60%, 1.019 65%, 1.017 70%,
+		1.013 75%, 1.01 80%, 1.007 85%, 1.004 90%, 1.003 95%, 1
+	);
 }
 
-@media (prefers-reduced-motion: reduce) {
+/* ---- light reading theme (§7.3) — opt-in, persisted as mlos_theme -------- */
+:root[data-theme='light'] {
+	color-scheme: light;
+
+	--color-canvas: #f7f6fb;
+	--color-surface: #ffffff;
+	--color-surface-elevated: #efedf7;
+	--color-action-primary: #6d28d9;
+	--color-accent: #6d28d9;
+	--color-text-primary: #17141f;
+	--color-text-secondary: #57536a;
+
+	--color-success: #047857;
+	--color-error: #b91c1c;
+	--color-warning: #a16207;
+	--color-focus: #6d28d9;
+	--color-success-ink: #ffffff;
+
+	--color-surface-hover: #e6e3f2;
+	--color-action-hover: #7c3aed;
+	--color-border: color-mix(in oklab, var(--color-text-primary) 11%, transparent);
+	--color-border-strong: color-mix(in oklab, var(--color-text-primary) 22%, transparent);
+	--color-highlight: rgb(255 255 255 / 0.7);
+	--color-action-wash: color-mix(in oklab, var(--color-action-primary) 10%, transparent);
+	--color-scrim: color-mix(in oklab, var(--color-text-primary) 28%, transparent);
+	--color-chrome: color-mix(in oklab, var(--color-canvas) 82%, transparent);
+
+	--atmosphere: radial-gradient(
+		70% 50% at 50% -14%,
+		color-mix(in oklab, var(--color-action-primary) 9%, transparent),
+		transparent 70%
+	);
+	--shadow-1: 0 1px 2px rgb(23 20 31 / 0.06), 0 8px 24px -18px rgb(23 20 31 / 0.25);
+	--shadow-2: 0 12px 32px -14px rgb(23 20 31 / 0.22);
+	--shadow-3: 0 32px 64px -18px rgb(23 20 31 / 0.35);
+	--glow-action: 0 8px 20px -10px color-mix(in oklab, var(--color-action-primary) 55%, transparent);
+}
+
+/* ---- high contrast (§7.3) — follows the OS, no toggle needed ------------- */
+@media (prefers-contrast: more) {
 	:root {
-		--dur-fast: 0ms;
-		--dur-base: 0ms;
+		--color-text-secondary: #dcd9e8;
+		--color-border: color-mix(in oklab, var(--color-text-primary) 32%, transparent);
+		--color-border-strong: color-mix(in oklab, var(--color-text-primary) 55%, transparent);
+		--atmosphere: none;
+	}
+
+	:root[data-theme='light'] {
+		--color-text-secondary: #2e2b3a;
 	}
 }

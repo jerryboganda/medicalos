@@ -76,15 +76,19 @@
 	{#each notes as note (note.note_id)}
 		<div class="card" data-testid="note">
 			<strong>{note.title || 'Untitled'}</strong>
-			<p style="margin: var(--space-xs) 0 0;">{note.body}</p>
+			<p class="tight-top pre-wrap">{note.body}</p>
 			{#if note.backlinks.length > 0}
-				<p class="muted" style="font-size: var(--text-sm);">
+				<p class="muted small">
 					Linked from: {note.backlinks.map((b) => b.title).join(', ')}
 				</p>
 			{/if}
-			<button class="btn danger-text" type="button" onclick={() => remove(note.note_id)}>
+			<button class="btn danger-text small" type="button" onclick={() => remove(note.note_id)}>
 				Delete
 			</button>
 		</div>
 	{/each}
 {/if}
+
+<svelte:head>
+	<title>Notes | Medical Learning OS</title>
+</svelte:head>

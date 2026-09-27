@@ -221,7 +221,7 @@
 </p>
 
 {#if loading}
-	<p class="muted" aria-live="polite">Opening this device's saved packs…</p>
+	<p class="muted is-loading" aria-live="polite">Opening this device's saved packs…</p>
 {:else}
 	{#if error}
 		<p class="danger-text" role="alert" data-testid="pack-error">{error}</p>
