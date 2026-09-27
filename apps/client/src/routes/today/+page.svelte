@@ -60,6 +60,8 @@
 		const done = goal.mode === 'minutes' ? goal.minutes_today : goal.answered_today;
 		return Math.min(1, done / goal.target);
 	});
+	// Presentation only: the server orders the plan; the first pending task in
+	// that order carries the one primary button (§7.1 one dominant action).
 	const nextTaskId = $derived(today?.tasks.find((task) => task.status !== 'done')?.id ?? null);
 
 	async function loadMocks() {
@@ -569,7 +571,7 @@
 						{#if task.status !== 'done'}
 							<div class="cluster">
 								<button
-									class="btn primary"
+									class="btn {task.id === nextTaskId ? 'primary' : ''}"
 									type="button"
 									disabled={startingTask !== ''}
 									data-loading={startingTask === task.id}
@@ -677,7 +679,7 @@
 				{/if}
 			</label>
 			<button
-				class="btn primary"
+				class="btn"
 				type="submit"
 				disabled={planBusy}
 				data-loading={planBusy}
@@ -804,7 +806,7 @@
 					</p>
 					{#if mock.attempts_used < mock.attempts_allowed}
 						<button
-							class="btn primary"
+							class="btn"
 							type="button"
 							disabled={startingMock !== ''}
 							data-loading={startingMock === mock.mock_id}

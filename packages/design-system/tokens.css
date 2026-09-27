@@ -90,6 +90,7 @@
 	--text-2xl: 30px;
 	--text-3xl: clamp(30px, 4.2vw, 40px);
 	--text-display: clamp(38px, 7vw, 68px);
+	--text-display-s: clamp(34px, 6vw, 60px); /* 51–90-char headlines */
 	--measure: 68ch;
 
 	/* ---- layout --------------------------------------------------------------- */

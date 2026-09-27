@@ -164,7 +164,7 @@
 	border-radius: var(--radius-control);
 	background: none;
 	color: var(--color-text-secondary);
-	font: 600 15px / 1.2 var(--font-body);
+	font: 600 var(--text-sm) / 1.2 var(--font-body);
 	text-align: left;
 	text-decoration: none;
 	cursor: pointer;
@@ -473,7 +473,6 @@
 	.shell.with-nav .jump {
 		flex: 1 0 100%;
 		justify-content: flex-start;
-		height: 40px;
 		padding: 0 var(--space-md);
 	}
 
@@ -505,6 +504,10 @@
 	@media (pointer: fine) {
 		.rail-link {
 			min-height: 38px;
+		}
+
+		.shell.with-nav .jump {
+			height: 40px;
 		}
 	}
 }
@@ -540,29 +543,17 @@ main.wide {
 	padding-top: var(--space-lg);
 }
 
-/* Study session: §7.3 — reading beats atmosphere. No glow behind vignettes. */
+/* Study session: §7.3 — reading beats atmosphere. No glow behind vignettes,
+ * no decorative draw in the chrome. */
 html:has(.shell.in-session) {
 	--atmosphere: none;
 }
 
+.in-session .emblem path {
+	animation: none;
+}
+
 /* ---- view transitions -------------------------------------------------------- */
-
-::view-transition-old(root),
-::view-transition-new(root) {
-	animation: none; /* the chrome doesn't change; only the page and the pills move */
-}
-
-::view-transition-group(page) {
-	animation-duration: 0s;
-}
-
-::view-transition-old(page) {
-	animation: mlos-fade-out var(--dur-fast) var(--ease-in) both;
-}
-
-::view-transition-new(page) {
-	animation: mlos-fade var(--dur-base) var(--ease-out) both;
-}
 
 ::view-transition-group(rail-indicator),
 ::view-transition-group(tab-indicator) {
@@ -570,7 +561,20 @@ html:has(.shell.in-session) {
 	animation-timing-function: var(--ease-spring);
 }
 
-/* Theme switch: the new theme spreads as a circle from the toggle. */
+/* Entering or leaving a session drops the nav: the pill goes with it. */
+::view-transition-old(rail-indicator):only-child,
+::view-transition-new(rail-indicator):only-child,
+::view-transition-old(tab-indicator):only-child,
+::view-transition-new(tab-indicator):only-child {
+	animation: none;
+}
+
+/* Theme switch: the new theme spreads as a circle from the toggle. The page
+ * and pills join the root snapshot so the circle reveals everything at once. */
+:root[data-theme-switch] :is(main, .rail-indicator, .tab-indicator) {
+	view-transition-name: none;
+}
+
 :root[data-theme-switch]::view-transition-old(root) {
 	animation: none;
 }
@@ -713,4 +717,11 @@ html:has(.shell.in-session) {
 
 .timer {
 	font-variant-numeric: tabular-nums;
+}
+
+/* Inside a session every feedback motion stays ≤ 150 ms (spec non-goal, §7.3). */
+.in-session .feedback,
+.in-session .feedback .verdict::before,
+.in-session .option:is(.correct, .incorrect)::after {
+	animation-duration: var(--dur-fast);
 }

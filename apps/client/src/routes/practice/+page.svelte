@@ -658,8 +658,8 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-sm);
-		min-height: 36px;
-		margin: var(--space-xs) 0;
+		min-height: 44px;
+		margin: 0;
 		cursor: pointer;
 	}
 
@@ -688,7 +688,6 @@
 		gap: var(--space-xs);
 		padding: 0;
 		list-style: none;
-		counter-reset: rank;
 	}
 
 	.standings li {

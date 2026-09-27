@@ -4,7 +4,8 @@
 
 import type { IconName } from './components/icons';
 
-export type NavGroup = 'Study' | 'Learn' | 'You' | 'Workspaces';
+export const NAV_GROUPS = ['Study', 'Learn', 'You', 'Workspaces'] as const;
+export type NavGroup = (typeof NAV_GROUPS)[number];
 
 export type NavItem = {
 	href: string;
@@ -34,8 +35,6 @@ export const NAV: NavItem[] = [
 	{ href: '/faculty', label: 'Faculty', icon: 'faculty', group: 'Workspaces', testid: 'nav-faculty', keywords: 'institution cohorts assignments' },
 	{ href: '/admin', label: 'Console', icon: 'console', group: 'Workspaces', testid: 'nav-admin', keywords: 'editorial admin import settings' }
 ];
-
-export const NAV_GROUPS: NavGroup[] = ['Study', 'Learn', 'You', 'Workspaces'];
 
 /** Deep pages the palette can open but the rail doesn't list. */
 export const PALETTE_EXTRAS: Pick<NavItem, 'href' | 'label' | 'icon' | 'group' | 'keywords'>[] = [

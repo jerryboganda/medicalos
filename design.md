@@ -32,7 +32,7 @@ App-only rules (the shell and the session workspace) live in `apps/client/src/ap
 
 - **Dark** is the product default. **Light reading** is opt-in and persists per device (`mlos_theme`).
 - **High contrast** follows the OS through `prefers-contrast: more` and needs no toggle.
-- New colours are derived from these tokens with `color-mix()` in `tokens.css`; they are never inlined in components.
+- Components reference colour tokens by name. Mixing tokens with `color-mix()` for a wash or hairline is fine anywhere; a raw hex, `rgb()` or named colour outside `tokens.css` is not.
 - One violet action per viewport. The accent (`#a78bfa`) marks focus, links, and the active nav indicator only.
 
 ## Typography
@@ -74,17 +74,19 @@ The vocabulary, and nothing outside it:
 2. **Page entrance.** Direct children of `<main>` rise 8 px and fade in, staggered 45 ms each and capped at 8 items (about 360 ms total). The entrance plays once per insertion, never on scroll.
 3. **Press.** Buttons scale to 0.97 on `:active`. On hover-capable pointers only, buttons lift 1 px.
 4. **Loading.** Buttons show an inline spinner via `data-loading="true"`. `.is-loading` text shimmers only while a real request is in flight (§7.3: no fake "analyzing"). Put it on the text element, never on a card.
-5. **Feedback.** Answer feedback, alerts and notices fade in with an 8 px rise. A correct option gets a check stamp, an incorrect one a single 120 ms tint. Nothing loops.
+5. **Feedback.** Answer feedback, alerts and notices fade in with an 8 px rise. A correct or incorrect option gets its icon stamped in (200 ms; 120 ms inside a session). Nothing loops.
 6. **Surfaces.** The sheet slides up and the dialog scales from 0.96, both via `@starting-style`. Backdrops fade.
 7. **Progress.** Meters fill with `transform: scaleX()` over 600 ms `--ease-out`.
-8. **Marketing only.** An ambient aurora drifts in the hero, the loop diagram's pulse travels, and sections reveal with scroll-driven animation. All of it stops under reduced motion.
+8. **Theme switch.** The light reading theme spreads as a circle from the toggle (560 ms `clip-path` reveal via a view transition).
+9. **Marketing only.** An ambient aurora drifts in the hero, the loop diagram's pulse travels, and sections reveal with scroll-driven animation. All of it stops under reduced motion.
 
 Hard rules:
 
-- Animate only `transform` and `opacity` (the one exception is colour/border on state changes).
+- Animate only `transform` and `opacity`. The named exceptions are colour/border on state changes, `stroke-dashoffset` for one-shot draws (the emblem pulse and the site loop arc), `background-position` for the loading shimmer, `clip-path` for the theme reveal, and `box-shadow` on the four site loop nodes.
 - Focus rings appear instantly and never animate.
 - `prefers-reduced-motion: reduce` collapses everything to opacity at ≤ 150 ms and skips view transitions. Spinners and shimmer keep running, slower, because they are functional.
-- The session workspace (`/session/*`) allows only functional motion (press, select, feedback) and no entrance stagger (§7.3).
+- The session workspace (`/session/*`) allows only functional motion (press, select, feedback) while a question is open: no entrance stagger, no emblem draw, no atmosphere (§7.3). The results screen after submission may animate.
+- One-off choreography durations (the 1100 ms draw, the 560 ms reveal, the 60 ms press) live beside their component with a comment; everything else uses the duration tokens.
 - Never animate text content that tests or screen readers read (no count-up on asserted values).
 
 ## App shell (client, §7.4)
@@ -95,7 +97,7 @@ Hard rules:
 - **Signed out:** only the brand bar, with the login page as a centred atmospheric card.
 - **Navigation data** lives in one place, `apps/client/src/lib/nav.ts`, and the rail, sheet, tab bar and command palette all read it. Add a destination there, once.
 - Safe-area insets (`env(safe-area-inset-*)`) pad the top bar, the tab bar and the sheet for notched phones and Tauri mobile.
-- Touch targets are ≥ 44 px (§7.3).
+- Touch targets are ≥ 44 px (§7.3). Compact variants (`.btn.small` 36 px, rail links 38 px, the rail's quick-jump 40 px) apply only under `pointer: fine`.
 
 ## Component voice
 

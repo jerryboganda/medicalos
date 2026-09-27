@@ -62,15 +62,30 @@ test('mobile tab bar and the Menu sheet', async ({ page }) => {
 	await expect(page).toHaveURL(/\/practice$/);
 	await expect(page.getByTestId('tab-practice')).toHaveAttribute('aria-current', 'page');
 
-	await page.getByRole('button', { name: 'Menu' }).click();
 	const sheet = page.getByRole('navigation', { name: 'Main navigation' });
+	// "Menu" becomes "Close menu" while open; Escape closes it too.
+	await page.getByRole('button', { name: 'Menu' }).click();
 	await expect(sheet).toBeVisible();
+	await page.getByRole('button', { name: 'Close menu' }).click();
+	await expect(sheet).toBeHidden();
+	await page.getByRole('button', { name: 'Menu' }).click();
+	await expect(sheet).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(sheet).toBeHidden();
+
+	await page.getByRole('button', { name: 'Menu' }).click();
 	await sheet.getByTestId('nav-notes').click();
 	await expect(page).toHaveURL(/\/notes$/);
 	await expect(sheet).toBeHidden();
-	expect(
-		await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-	).toBe(true);
+
+	for (const width of [320, 375, 414, 768]) {
+		await page.setViewportSize({ width, height: 812 });
+		await expect(page.getByRole('navigation', { name: 'Quick navigation' })).toBeVisible();
+		expect(
+			await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+			`shell overflows at ${width}px`
+		).toBe(true);
+	}
 });
 
 test('the light reading theme persists across reloads', async ({ page }) => {

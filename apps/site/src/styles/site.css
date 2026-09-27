@@ -198,7 +198,7 @@ h2 {
 }
 
 .hero h1 {
-	font-size: clamp(36px, 6vw, 64px); /* 62-char headline: display-s bracket */
+	font-size: var(--text-display-s); /* 62-char headline: display-s bracket */
 	max-width: 15ch;
 	margin-bottom: var(--space-xl);
 }
@@ -207,22 +207,6 @@ h2 {
 	font-size: var(--text-body-lg);
 	color: var(--color-text-secondary);
 	margin-bottom: var(--space-2xl);
-}
-
-.hero-copy > * {
-	animation: mlos-rise var(--dur-page) var(--ease-out) backwards;
-}
-
-.hero-copy > :nth-child(2) {
-	animation-delay: 70ms;
-}
-
-.hero-copy > :nth-child(3) {
-	animation-delay: 140ms;
-}
-
-.hero-copy > :nth-child(4) {
-	animation-delay: 210ms;
 }
 
 /* No horizontal bleed: the blur is ink overflow (never scrollable), and the
@@ -500,7 +484,6 @@ h2 {
 	padding: 0;
 	margin-bottom: 0;
 	list-style: none;
-	counter-reset: stage;
 }
 
 .stage {
@@ -890,21 +873,6 @@ h2 {
 	max-width: var(--measure);
 	color: var(--color-text-secondary);
 	font-size: var(--text-sm);
-}
-
-/* ---- cross-document transitions ---------------------------------------------------------------- */
-
-::view-transition-old(root),
-::view-transition-new(root) {
-	animation: none;
-}
-
-::view-transition-old(page) {
-	animation: mlos-fade-out var(--dur-fast) var(--ease-in) both;
-}
-
-::view-transition-new(page) {
-	animation: mlos-rise var(--dur-slow) var(--ease-out) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1596,9 +1596,14 @@
 	}
 
 	.session-toolbar > .btn {
-		min-height: 40px;
 		padding-inline: var(--space-lg);
 		font-size: var(--text-sm);
+	}
+
+	@media (pointer: fine) {
+		.session-toolbar > .btn {
+			min-height: 40px;
+		}
 	}
 
 	.toolbar-hint {

@@ -65,7 +65,7 @@
  * eight steps (~360 ms) so a long page never feels slow to settle. */
 
 .enter-stagger > * {
-	animation: mlos-rise var(--dur-slow) var(--ease-out) both;
+	animation: mlos-rise var(--dur-slow) var(--ease-out) backwards;
 }
 
 .enter-stagger > :nth-child(2) {
@@ -104,17 +104,28 @@
 }
 
 /* ---- view transitions (client route changes, site page loads) -------------- */
+/* Each app names its content `page`; the chrome stays in `root` and does not
+ * animate, so only the page fades and any named pills glide. */
 
 ::view-transition {
 	pointer-events: none; /* never swallow a click mid-transition */
 }
 
-::view-transition-old(root) {
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation: none;
+}
+
+::view-transition-group(page) {
+	animation-duration: 0s;
+}
+
+::view-transition-old(page) {
 	animation: mlos-fade-out var(--dur-fast) var(--ease-in) both;
 }
 
-::view-transition-new(root) {
-	animation: mlos-fade var(--dur-slow) var(--ease-out) both;
+::view-transition-new(page) {
+	animation: mlos-fade var(--dur-base) var(--ease-out) both;
 }
 
 /* ---- reduced motion: opacity-only, ≤ 150 ms; loaders keep running -------- */

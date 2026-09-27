@@ -206,7 +206,11 @@
 	}
 
 	.palette-field input:focus-visible {
-		outline: none;
+		outline: none; /* the whole field carries the (instant) focus ring below */
+	}
+
+	.palette-field:focus-within {
+		box-shadow: inset 0 -2px 0 var(--color-focus);
 	}
 
 	.palette-list {

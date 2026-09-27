@@ -37,7 +37,7 @@
 	}
 
 	.stop-b {
-		stop-color: color-mix(in oklab, var(--color-action-primary) 72%, black);
+		stop-color: var(--color-action-primary);
 	}
 
 	.pulse {

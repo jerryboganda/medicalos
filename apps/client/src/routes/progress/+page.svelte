@@ -1,4 +1,7 @@
 <script lang="ts">
+	// Mastery bands read as status chips: icon + colour + the band word (§7.3).
+	const BAND_TONE = { weak: 'error', developing: 'warn', strong: 'done' };
+
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { Api } from '$lib/api';
@@ -201,7 +204,7 @@
 				<ul class="bare-list band-list small">
 					{#each sys.chapters as ch (ch.chapter_id)}
 						<li>
-							{ch.chapter_name} — <strong class="band band-{ch.band}">{ch.band}</strong>
+							{ch.chapter_name} — <strong class="chip {BAND_TONE[ch.band] ?? ''}">{ch.band}</strong>
 							{#if ch.evidence_count !== null}, {ch.evidence_count} answer(s){/if}
 							{#if ch.filtered_accuracy !== undefined && ch.filtered_accuracy !== null}
 								· accuracy at this filter: {ch.filtered_accuracy}%
@@ -309,40 +312,6 @@
 		display: grid;
 		gap: var(--space-sm);
 		margin-bottom: var(--space-lg);
-	}
-
-	.band {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px var(--space-sm);
-		border-radius: var(--radius-pill);
-		border: 1px solid var(--color-border-strong);
-		font-weight: 700;
-		text-transform: capitalize;
-	}
-
-	.band::before {
-		content: '';
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: currentColor;
-	}
-
-	.band-weak {
-		color: var(--color-error);
-		border-color: color-mix(in oklab, var(--color-error) 50%, transparent);
-	}
-
-	.band-developing {
-		color: var(--color-warning);
-		border-color: color-mix(in oklab, var(--color-warning) 50%, transparent);
-	}
-
-	.band-strong {
-		color: var(--color-success);
-		border-color: color-mix(in oklab, var(--color-success) 50%, transparent);
 	}
 
 	.timeline {

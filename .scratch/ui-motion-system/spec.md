@@ -1,6 +1,6 @@
 # UI motion system and app-shell overhaul
 
-Status: in-progress
+Status: in-progress (first push green: CI run 36358455756, 71/71 e2e)
 Requirement IDs: §6 (IA, global command control), §7.1 (visual direction), §7.3 (functional visual rules: light reading theme, high contrast, reduced motion, 44–48 px targets), §7.4 (responsive shell), UX-01, UX-02, TRUST-06 (partial: a11y states only)
 
 ## Problem
@@ -22,18 +22,20 @@ Requirement IDs: §6 (IA, global command control), §7.1 (visual direction), §7
   - Desktop: side rail.
   - Mobile: top bar, bottom tab bar, and a sheet holding the full "Main navigation".
   - Study sessions: no primary nav (§6), but the brand link stays.
-  - ⌘K / Ctrl+K command palette on native `<dialog>`, navigation only (no fake search).
+  - ⌘K / Ctrl+K command palette on native `<dialog>`: navigation plus two real shell actions (theme, sign out). It never pretends to search content.
   - Route transitions through the View Transitions API.
-  - Light reading theme toggle. High contrast follows `prefers-contrast: more`.
+  - Light reading theme toggle (circular view-transition reveal). High contrast follows `prefers-contrast: more`.
+  - Native-app readiness for the PWA and the future Tauri shells: `viewport-fit=cover` + safe-area insets, `theme-color` that follows the theme, a web manifest and the brand emblem as favicon.
+  - Tab bar labels §6's "Learn" destination "Library": concrete beats abstract for a five-tab bar.
 - Motion vocabulary, each with a reduced-motion collapse:
   - page-content entrance stagger
   - button press and hover lift
   - option select and answer-feedback reveal
   - sheet and dialog enter/exit
-  - skeleton shimmer for real loading states
+  - loading-copy shimmer (`.is-loading`) for real loading states
   - goal progress fill
   - nav indicator morph
-- Pages: inline layout styles replaced with named utilities; page-level polish on Today, Coach, Review, Login, and the session results view.
+- Pages: inline layout styles replaced with named utilities; page-level polish on Today (§7.2 greeting/date, one primary action, goal meter), Practice, Progress, Coach, Review, Notes, Notifications, Login, and the session results view; per-page `<title>`s.
 - Site: shared system adopted, atmospheric hero, hand-built loop diagram (SVG), scroll-driven reveals, cross-document view transitions.
 - `design.md` at the repo root locks the system for future work.
 
