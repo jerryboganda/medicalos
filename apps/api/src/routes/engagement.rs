@@ -1473,7 +1473,7 @@ pub struct CompetitionQuestionOption {
     pub text: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),

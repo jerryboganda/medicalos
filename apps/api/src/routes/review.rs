@@ -62,7 +62,7 @@ pub struct CreateDeckReq {
     pub name: String,
 }
 
-#[derive(Serialize, Serialize)]
+#[derive(Serialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),

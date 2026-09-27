@@ -1071,12 +1071,12 @@ pub async fn get_session(
             chosen_index: it.chosen_index,
             correct: if feedback_released { it.correct } else { None },
             correct_index: if feedback_released {
-                it.correct_index.unwrap_or_default()
+                it.correct_index
             } else {
                 None
             },
             key_learning_point: if feedback_released {
-                it.key_learning_point.unwrap_or_default()
+                it.key_learning_point
             } else {
                 None
             },
