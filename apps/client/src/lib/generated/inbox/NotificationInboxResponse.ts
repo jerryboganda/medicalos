@@ -2,4 +2,4 @@
 import type { NotificationItem } from "./NotificationItem";
 import type { NotificationPreferences } from "./NotificationPreferences";
 
-export type NotificationInboxResponse = { notifications: NotificationItem[], preferences: NotificationPreferences, };
+export type NotificationInboxResponse = { notifications: Array<NotificationItem>, preferences: NotificationPreferences, };

@@ -4,4 +4,4 @@
  * ADMIN-01: real cross-tenant aggregates. Counts only — tenant rows stay
  * behind their own access rules.
  */
-export type AdminDashboard = { institutions: bigint, users: bigint, published_questions: bigint, articles: bigint, rights_records: bigint, open_incidents: bigint, coach_turns_last_30_days: bigint, };
+export type AdminDashboard = { institutions: number, users: number, published_questions: number, articles: number, rights_records: number, open_incidents: number, coach_turns_last_30_days: number, };
