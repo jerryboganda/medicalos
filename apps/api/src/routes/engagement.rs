@@ -823,7 +823,7 @@ pub struct EngagementSettingsReq {
         ts(type = "boolean", optional = nullable)
     )]
     pub qotd_enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "double_option")]
     #[cfg_attr(
         feature = "type-export",
         ts(type = "string", optional = nullable)
@@ -1021,6 +1021,17 @@ pub async fn institution_coverage(
         })
         .collect();
     Ok(Json(json!({ "coverage": coverage })))
+}
+
+/// Absent → None (setting untouched); explicit null → Some(None) (cleared);
+/// a value → Some(Some(v)). Plain `Option<Option<T>>` cannot tell null from
+/// absent because serde short-circuits the outer Option on null.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 // ---- COMP-01/02: competitions on the shared scoring crate --------------------
