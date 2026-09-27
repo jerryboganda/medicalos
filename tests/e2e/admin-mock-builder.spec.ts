@@ -101,6 +101,11 @@ test('administrator creates mock test with form type and blueprint, learner sees
 
 	await page.route('**/v1/admin/**', async (route) => {
 		const url = new URL(route.request().url());
+		if (url.pathname.endsWith('/hierarchy')) {
+			// the dedicated hierarchy mock (registered earlier) owns this one
+			await route.fallback();
+			return;
+		}
 		if (url.pathname.endsWith('/settings')) {
 			await route.fulfill({
 				status: 200,
