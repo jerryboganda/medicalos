@@ -22670,6 +22670,7 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
         version_id
     }
 
+    #[allow(clippy::too_many_arguments)] // test helper mirrors the API surface
     async fn answer(
         app: &Router,
         learner: &str,
