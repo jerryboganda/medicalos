@@ -42,6 +42,16 @@ test('administrator reaches the owner dashboard and sees responsive aggregate co
 		else if (path.endsWith('/scenario-assessment-appeals')) body = { appeals: [] };
 		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 	});
+	// Any other API call must not hit the real API: a 401 clears the learner
+	// token and the owner dashboard bounces to /login before metrics render.
+	await page.route('**/v1/**', async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		if (!path.includes('/v1/admin/')) {
+			await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+			return;
+		}
+		await route.fallback();
+	});
 
 	await page.goto('/admin');
 	await page.getByRole('link', { name: 'Owner dashboard' }).click();

@@ -149,7 +149,34 @@ test('administrator creates mock test with form type and blueprint, learner sees
 		});
 	});
 
-	await page.route('**/v1/practice/sessions/sess-e2e-time-1', async (route) => {
+	await page.route('**/v1/practice/sessions/sess-e2e-time-1**', async (route) => {
+		const req = route.request();
+		if (req.method() === 'POST' && req.url().endsWith('/submit')) {
+			// EX-04/OFF-02: submitted results are recovered through the idempotent submit seam
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					score: 100,
+					correct: 2,
+					incorrect: 0,
+					skipped: 0,
+					mock: {
+						mock_type: 'mini',
+						score_percent: 100,
+						passed: true,
+						pass_mark_percent: 65,
+						percentile: null,
+						total_time_seconds: 75,
+						avg_time_per_question_seconds: 37,
+						breakdown: [
+							{ chapter: 'Cardiorespiratory Physiology', correct: 2, total: 2, time_seconds: 75 }
+						]
+					}
+				})
+			});
+			return;
+		}
 		await route.fulfill({
 			status: 200,
 			contentType: 'application/json',
