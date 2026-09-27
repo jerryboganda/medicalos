@@ -200,3 +200,11 @@ jobs:
       - name: API logs on failure
         if: failure()
         run: cat api.log
+      - name: Upload Playwright failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          path: tests/e2e/test-results
+          include-hidden-files: true
+          if-no-files-found: ignore
