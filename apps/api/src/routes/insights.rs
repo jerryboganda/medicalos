@@ -5,7 +5,7 @@
 
 use axum::extract::{Query, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -15,6 +15,15 @@ use crate::error::ApiResult;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/HeatmapQuery.ts",
+        rename = "HeatmapQuery"
+    )
+)]
 pub struct HeatmapQuery {
     /// PROG-01 drill-down: only this system's chapters.
     pub system_id: Option<Uuid>,
@@ -22,6 +31,94 @@ pub struct HeatmapQuery {
     pub difficulty: Option<String>,
     /// PROG-01 trend: recent-window accuracy (days) alongside the overall one.
     pub trend_days: Option<i64>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/MasteryHeatmapBand.ts",
+        rename = "MasteryHeatmapBand"
+    )
+)]
+pub enum MasteryHeatmapBand {
+    Weak,
+    Developing,
+    Strong,
+    Unassessed,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/MasteryHeatmapChapter.ts",
+        rename = "MasteryHeatmapChapter"
+    )
+)]
+pub struct MasteryHeatmapChapter {
+    pub chapter_id: Uuid,
+    pub chapter_name: String,
+    pub ability: Option<f32>,
+    pub evidence_count: Option<i32>,
+    pub band: MasteryHeatmapBand,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filtered_accuracy: Option<Option<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_answered: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent_correct: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/MasteryHeatmapSystem.ts",
+        rename = "MasteryHeatmapSystem"
+    )
+)]
+pub struct MasteryHeatmapSystem {
+    pub system_id: Uuid,
+    pub system_name: String,
+    pub chapters: Vec<MasteryHeatmapChapter>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/MasteryHeatmapBands.ts",
+        rename = "MasteryHeatmapBands"
+    )
+)]
+pub struct MasteryHeatmapBands {
+    pub weak_below: f32,
+    pub strong_at: f32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "insights/MasteryHeatmapResponse.ts",
+        rename = "MasteryHeatmapResponse"
+    )
+)]
+pub struct MasteryHeatmapResponse {
+    pub systems: Vec<MasteryHeatmapSystem>,
+    pub bands: MasteryHeatmapBands,
 }
 
 /// GET /v1/me/mistake-hypotheses — AI-03: chapters where the learner keeps
@@ -72,7 +169,7 @@ pub async fn mastery_heatmap(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Query(q): Query<HeatmapQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MasteryHeatmapResponse>> {
     if let Some(d) = &q.difficulty {
         if !matches!(d.as_str(), "easy" | "medium" | "hard") {
             return Err(crate::error::ApiError::unprocessable(
@@ -193,54 +290,61 @@ pub async fn mastery_heatmap(
             std::collections::HashMap::new()
         };
 
-    let mut systems: Vec<serde_json::Value> = Vec::new();
+    let mut systems: Vec<MasteryHeatmapSystem> = Vec::new();
     for r in rows {
         let band = match (r.ability, r.evidence_count) {
             (Some(ability), Some(count)) if count > 0 => {
                 if ability < weak_at {
-                    "weak"
+                    MasteryHeatmapBand::Weak
                 } else if ability >= strong_at {
-                    "strong"
+                    MasteryHeatmapBand::Strong
                 } else {
-                    "developing"
+                    MasteryHeatmapBand::Developing
                 }
             }
-            _ => "unassessed",
+            _ => MasteryHeatmapBand::Unassessed,
         };
-        let mut entry = json!({
-            "chapter_id": r.chapter_id,
-            "chapter_name": r.chapter_name,
-            "ability": r.ability,
-            "evidence_count": r.evidence_count,
-            "band": band,
-        });
-        if let Some((answered, correct, recent_correct)) = overlays.get(&r.chapter_id) {
-            entry["filtered_accuracy"] = if *answered > 0 {
-                json!(Some(*correct * 100 / *answered))
+        let (filtered_accuracy, recent_answered, recent_correct) =
+            if let Some((answered, correct, recent_correct)) = overlays.get(&r.chapter_id) {
+                (
+                    Some(if *answered > 0 {
+                        Some(*correct * 100 / *answered)
+                    } else {
+                        None
+                    }),
+                    recent_correct.map(|_| *answered),
+                    recent_correct.as_ref().copied(),
+                )
             } else {
-                json!(None::<i64>)
+                (None, None, None)
             };
-            if let Some(recent) = recent_correct {
-                entry["recent_answered"] = json!(answered);
-                entry["recent_correct"] = json!(recent);
-            }
-        }
-        if let Some(sys) = systems
-            .iter_mut()
-            .find(|s| s["system_id"] == r.system_id.to_string())
-        {
-            sys["chapters"].as_array_mut().unwrap().push(entry);
+        let entry = MasteryHeatmapChapter {
+            chapter_id: r.chapter_id,
+            chapter_name: r.chapter_name,
+            ability: r.ability,
+            evidence_count: r.evidence_count,
+            band,
+            filtered_accuracy,
+            recent_answered,
+            recent_correct,
+        };
+        if let Some(sys) = systems.iter_mut().find(|s| s.system_id == r.system_id) {
+            sys.chapters.push(entry);
         } else {
-            systems.push(json!({
-                "system_id": r.system_id,
-                "system_name": r.system_name,
-                "chapters": [entry],
-            }));
+            systems.push(MasteryHeatmapSystem {
+                system_id: r.system_id,
+                system_name: r.system_name,
+                chapters: vec![entry],
+            });
         }
     }
-    Ok(Json(
-        json!({ "systems": systems, "bands": {"weak_below": weak_at, "strong_at": strong_at} }),
-    ))
+    Ok(Json(MasteryHeatmapResponse {
+        systems,
+        bands: MasteryHeatmapBands {
+            weak_below: weak_at,
+            strong_at,
+        },
+    }))
 }
 
 // ---- CORE-05: per-chapter accuracy trend (§8.8) -------------------------------

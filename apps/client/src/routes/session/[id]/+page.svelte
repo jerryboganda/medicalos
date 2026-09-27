@@ -147,6 +147,13 @@
 	const allAnswered = $derived(
 		session?.items ? session.items.every((i, index) => i.answered || pendingAnswers[index]) : false
 	);
+	const watermarkLabel = $derived(
+		session?.user_id
+			? `Account ${session.user_id}`
+			: session?.session_id
+				? `Session ${session.session_id}`
+				: ''
+	);
 	const marked = $derived(item ? Boolean(markState[item.question_version_id]) : false);
 	const questionNote = $derived(item ? (noteByVersion[item.question_version_id] ?? '') : '');
 	const questionHighlights = $derived(item ? (highlights[item.question_version_id] ?? []) : []);
@@ -1158,8 +1165,21 @@
 				{:else}
 					<p>You are ahead of {result.mock.percentile}% of takers of this same form.</p>
 				{/if}
+				{#if result.mock.total_time_seconds !== undefined}
+					<p class="muted" data-testid="mock-time-analysis" style="margin: var(--space-xs) 0;">
+						Total time: {Math.floor(result.mock.total_time_seconds / 60)}m {result.mock.total_time_seconds % 60}s
+						{#if result.mock.avg_time_per_question_seconds !== undefined}
+							· {result.mock.avg_time_per_question_seconds}s/question avg
+						{/if}
+					</p>
+				{/if}
 				{#each result.mock.breakdown as row (row.chapter)}
-					<p style="margin:2px 0;">{row.chapter}: {row.correct}/{row.total}</p>
+					<p style="margin:2px 0;">
+						{row.chapter}: {row.correct}/{row.total}
+						{#if row.time_seconds !== undefined}
+							<span class="muted">({Math.floor(row.time_seconds / 60)}m {row.time_seconds % 60}s)</span>
+						{/if}
+					</p>
 				{/each}
 			</div>
 		{:else if result.expected_score !== null}
@@ -1189,16 +1209,19 @@
 
 	{#if item}
 		<div class="card question-card">
-			<p data-testid="question-text">{item.vignette}</p>
-			<p><strong>{item.lead_in}</strong></p>
-			{#if item.corrected}
-				<p style="margin:0 0 var(--space-sm);">
-					<span class="chip" data-testid="corrected-badge">Corrected</span>
-					{#if item.correction_note}
-						<span class="muted" data-testid="correction-changelog">Update: {item.correction_note}</span>
-					{/if}
-				</p>
-			{/if}
+			<div class="watermarked-copy" data-testid="question-watermark">
+				<span class="watermark-tiles" aria-hidden="true" data-watermark={watermarkLabel}></span>
+				<p data-testid="question-text">{item.vignette}</p>
+				<p><strong>{item.lead_in}</strong></p>
+				{#if item.corrected}
+					<p style="margin:0 0 var(--space-sm);">
+						<span class="chip" data-testid="corrected-badge">Corrected</span>
+						{#if item.correction_note}
+							<span class="muted" data-testid="correction-changelog">Update: {item.correction_note}</span>
+						{/if}
+					</p>
+				{/if}
+			</div>
 
 			{#if eliminating}
 				<p class="muted" role="status">Elimination mode is on. Select options to strike out; press E again to exit.</p>
@@ -1318,22 +1341,25 @@
 					class="feedback {item.correct === true ? 'good' : item.correct === false ? 'bad' : ''}"
 					data-testid="feedback"
 				>
-					<p class="verdict">
-						{item.correct === true ? 'Correct.' : item.correct === false ? 'Not quite.' : 'Skipped.'}
-					</p>
-					{#each item.options as option, i (i)}
-						{#if option.rationale && (i === item.correct_index || i === item.chosen_index)}
-							<p style="margin: 4px 0;">
-								<strong>{letterLabel(i)}.</strong> {option.rationale}
-							</p>
+					<div class="watermarked-copy" data-testid="explanation-watermark">
+						<span class="watermark-tiles" aria-hidden="true" data-watermark={watermarkLabel}></span>
+						<p class="verdict">
+							{item.correct === true ? 'Correct.' : item.correct === false ? 'Not quite.' : 'Skipped.'}
+						</p>
+						{#each item.options as option, i (i)}
+							{#if option.rationale && (i === item.correct_index || i === item.chosen_index)}
+								<p style="margin: 4px 0;">
+									<strong>{letterLabel(i)}.</strong> {option.rationale}
+								</p>
+							{/if}
+						{/each}
+						<p style="margin: var(--space-sm) 0 0;">
+							<strong>Key learning point:</strong> {item.key_learning_point}
+						</p>
+						{#if item.exam_tip}
+							<p class="muted" style="margin: 4px 0 0;">Exam tip: {item.exam_tip}</p>
 						{/if}
-					{/each}
-					<p style="margin: var(--space-sm) 0 0;">
-						<strong>Key learning point:</strong> {item.key_learning_point}
-					</p>
-					{#if item.exam_tip}
-						<p class="muted" style="margin: 4px 0 0;">Exam tip: {item.exam_tip}</p>
-					{/if}
+					</div>
 					{#if session.preset === 'tutor' && item.tutoring_cards?.length}
 						<div role="group" aria-label="One-tap tutoring cards" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:var(--space-md);">
 							{#each TUTORING_PROMPTS as [promptType, label] (promptType)}
@@ -1357,11 +1383,13 @@
 						{#if activeTutoringCard}
 							<div class="feedback">
 								<div
+									class="watermarked-copy"
 									data-testid="tutor-card-content"
 									role="status"
 									aria-live="polite"
 									aria-atomic="true"
 								>
+									<span class="watermark-tiles" aria-hidden="true" data-watermark={watermarkLabel}></span>
 									{#if activeTutoringCard.prompt_type === 'why_wrong'}
 										<p>Compare your selected answer with the keyed answer.</p>
 										{#each item.options as option, i (i)}
@@ -1632,6 +1660,39 @@
 		padding: var(--space-sm) var(--space-md);
 		border-left: 3px solid var(--color-accent);
 		background: var(--color-surface-elevated);
+	}
+
+	.watermarked-copy {
+		position: relative;
+		isolation: isolate;
+		overflow: hidden;
+	}
+
+	.watermark-tiles {
+		position: absolute;
+		z-index: 2;
+		inset: 0;
+		pointer-events: none;
+		user-select: none;
+	}
+
+	.watermark-tiles::before {
+		position: absolute;
+		inset: -15%;
+		pointer-events: none;
+		content: attr(data-watermark) "  ·  " attr(data-watermark) "  ·  " attr(data-watermark) "\A"
+			attr(data-watermark) "  ·  " attr(data-watermark) "  ·  " attr(data-watermark) "\A"
+			attr(data-watermark) "  ·  " attr(data-watermark) "  ·  " attr(data-watermark) "\A"
+			attr(data-watermark) "  ·  " attr(data-watermark) "  ·  " attr(data-watermark);
+		color: var(--color-text-secondary);
+		font-size: var(--text-xs);
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		line-height: 3;
+		text-align: center;
+		white-space: pre;
+		opacity: 0.12;
+		transform: rotate(-18deg) scale(1.15);
 	}
 
 	.timer-warning {

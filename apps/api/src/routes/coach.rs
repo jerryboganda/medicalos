@@ -13,17 +13,114 @@ use crate::seed::QuestionOption;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/CoachTurnRequest.ts",
+        rename = "CoachTurnRequest"
+    )
+)]
 pub struct CoachTurnReq {
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub question_version_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional = nullable))]
     pub prompt_type: Option<String>, // free | why_wrong | explain
     pub message: String,
     pub idempotency_key: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/CoachTurnResponse.ts",
+        rename = "CoachTurnResponse"
+    )
+)]
+pub struct CoachTurnResponse {
+    already_recorded: bool,
+    answer: String,
+    adapter: String,
+    model: String,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown"))]
+    grounded_on: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional))]
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/CoachHistoryTurn.ts",
+        rename = "CoachHistoryTurn"
+    )
+)]
+pub struct CoachHistoryTurn {
+    prompt_type: String,
+    message: String,
+    answer: String,
+    adapter: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/CoachHistoryResponse.ts",
+        rename = "CoachHistoryResponse"
+    )
+)]
+pub struct CoachHistoryResponse {
+    turns: Vec<CoachHistoryTurn>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/AnswerableQuestion.ts",
+        rename = "AnswerableQuestion"
+    )
+)]
+pub struct AnswerableQuestion {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    question_version_id: Uuid,
+    vignette: String,
+    chapter: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "coach/AnswerableQuestionsResponse.ts",
+        rename = "AnswerableQuestionsResponse"
+    )
+)]
+pub struct AnswerableQuestionsResponse {
+    questions: Vec<AnswerableQuestion>,
 }
 
 fn prompt_type_of(raw: &Option<String>) -> &'static str {
@@ -205,7 +302,7 @@ pub async fn coach_turn(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CoachTurnReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CoachTurnResponse>> {
     check_daily_allowance(&state, user.user_id).await?;
 
     // EX-06: assessment-specific AI restrictions bind at the question —
@@ -248,14 +345,14 @@ pub async fn coach_turn(
     .fetch_optional(&state.pool)
     .await?;
     if let Some(t) = replay {
-        return Ok(Json(json!({
-            "already_recorded": true,
-            "answer": t.answer,
-            "adapter": t.adapter,
-            "model": t.model,
-            "grounded_on": t.grounded_on,
-            "created_at": t.created_at,
-        })));
+        return Ok(Json(CoachTurnResponse {
+            already_recorded: true,
+            answer: t.answer,
+            adapter: t.adapter,
+            model: t.model,
+            grounded_on: t.grounded_on,
+            created_at: Some(t.created_at),
+        }));
     }
 
     // AI-06 permissioning: without a question version there is NO permitted
@@ -342,20 +439,21 @@ pub async fn coach_turn(
     .await?;
     let _ = turn_id;
 
-    Ok(Json(json!({
-        "already_recorded": false,
-        "answer": answer,
-        "adapter": adapter,
-        "model": model,
-        "grounded_on": grounded_on,
-    })))
+    Ok(Json(CoachTurnResponse {
+        already_recorded: false,
+        answer,
+        adapter: adapter.to_owned(),
+        model: model.to_owned(),
+        grounded_on,
+        created_at: None,
+    }))
 }
 
 pub async fn history(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Query(q): Query<std::collections::HashMap<String, Uuid>>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CoachHistoryResponse>> {
     let Some(vid) = q.get("question_version_id").copied() else {
         return Err(ApiError::unprocessable(
             "question_required",
@@ -371,19 +469,17 @@ pub async fn history(
     )
     .fetch_all(&state.pool)
     .await?;
-    let turns: Vec<serde_json::Value> = rows
+    let turns: Vec<CoachHistoryTurn> = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "prompt_type": r.prompt_type,
-                "message": r.message,
-                "answer": r.answer,
-                "adapter": r.adapter,
-                "created_at": r.created_at,
-            })
+        .map(|r| CoachHistoryTurn {
+            prompt_type: r.prompt_type,
+            message: r.message,
+            answer: r.answer,
+            adapter: r.adapter,
+            created_at: r.created_at,
         })
         .collect();
-    Ok(Json(json!({ "turns": turns })))
+    Ok(Json(CoachHistoryResponse { turns }))
 }
 
 /// AI-16: the questions this learner may ask the Coach about — ones they
@@ -391,7 +487,7 @@ pub async fn history(
 pub async fn answerable_questions(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnswerableQuestionsResponse>> {
     let rows = sqlx::query!(
         r#"SELECT DISTINCT qv.id AS version_id, qv.vignette, c.name AS chapter_name
            FROM attempts a
@@ -403,17 +499,15 @@ pub async fn answerable_questions(
     )
     .fetch_all(&state.pool)
     .await?;
-    let questions: Vec<serde_json::Value> = rows
+    let questions: Vec<AnswerableQuestion> = rows
         .into_iter()
-        .map(|r| {
-            json!({
-                "question_version_id": r.version_id,
-                "vignette": r.vignette,
-                "chapter": r.chapter_name,
-            })
+        .map(|r| AnswerableQuestion {
+            question_version_id: r.version_id,
+            vignette: r.vignette,
+            chapter: r.chapter_name,
         })
         .collect();
-    Ok(Json(json!({ "questions": questions })))
+    Ok(Json(AnswerableQuestionsResponse { questions }))
 }
 
 // ---- AI-11/12: learner-editable memory and delayed intervention evidence -----

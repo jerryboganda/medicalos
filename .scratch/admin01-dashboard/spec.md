@@ -1,6 +1,6 @@
 # ADMIN-01 — Owner dashboard UI
 
-Status: ready-for-agent
+Status: tested (GitHub Actions run 36245924351; ADMIN-01 API, binding, route, and E2E files unchanged through 63f6509)
 Requirement IDs: ADMIN-01, ARCH-02
 
 ## Problem Statement

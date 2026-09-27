@@ -513,6 +513,15 @@ pub async fn debrief(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioCounterfactualReplayRequest.ts",
+        rename = "ScenarioCounterfactualReplayRequest"
+    )
+)]
 pub struct CounterfactualReplayReq {
     pub events: Vec<String>,
 }
@@ -652,20 +661,45 @@ fn require_admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult
     )
 }
 
-#[derive(sqlx::FromRow)]
-struct PendingScenarioAssessment {
+#[derive(Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/PendingScenarioAssessment.ts",
+        rename = "PendingScenarioAssessment"
+    )
+)]
+pub struct PendingScenarioAssessment {
     run_id: Uuid,
     scenario: String,
     scenario_version: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
     finished_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     criterion_count: i64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/PendingScenarioAssessmentsResponse.ts",
+        rename = "PendingScenarioAssessmentsResponse"
+    )
+)]
+pub struct PendingScenarioAssessmentsResponse {
+    runs: Vec<PendingScenarioAssessment>,
 }
 
 pub async fn pending_assessments(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     headers: axum::http::HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<PendingScenarioAssessmentsResponse>> {
     require_admin(&state, &headers)?;
     let rows = sqlx::query_as::<_, PendingScenarioAssessment>(
         r#"SELECT run.id AS run_id, scenario.title AS scenario,
@@ -689,15 +723,30 @@ pub async fn pending_assessments(
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "runs": rows.into_iter().map(|run| json!({
-            "run_id": run.run_id,
-            "scenario": run.scenario,
-            "scenario_version": run.scenario_version,
-            "finished_at": run.finished_at,
-            "criterion_count": run.criterion_count,
-        })).collect::<Vec<_>>()
-    })))
+    Ok(Json(PendingScenarioAssessmentsResponse { runs: rows }))
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/AdminScenarioAssessment.ts",
+        rename = "AdminScenarioAssessment"
+    )
+)]
+pub struct AdminScenarioAssessment {
+    run_id: Uuid,
+    scenario: String,
+    scenario_version: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "unknown[]"))]
+    transcript: serde_json::Value,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    started_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    finished_at: chrono::DateTime<chrono::Utc>,
+    rubric: Vec<ScenarioRubricResult>,
 }
 
 pub async fn admin_assessment(
@@ -705,35 +754,41 @@ pub async fn admin_assessment(
     _user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(run_id): Path<Uuid>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminScenarioAssessment>> {
     require_admin(&state, &headers)?;
     let run = admin_assessment_run(&state, run_id).await?;
-    if run.finished_at.is_none() {
-        return Err(ApiError::conflict(
-            "run_not_finished",
-            "finish the station before assessment",
-        ));
-    }
+    let finished_at = run.finished_at.ok_or_else(|| {
+        ApiError::conflict("run_not_finished", "finish the station before assessment")
+    })?;
     let rubric = rubric_results(&state, run_id, run.scenario_version_id).await?;
-    Ok(Json(json!({
-        "run_id": run_id,
-        "scenario": run.title,
-        "scenario_version": run.version,
-        "transcript": run.transcript,
-        "started_at": run.started_at,
-        "finished_at": run.finished_at,
-        "rubric": rubric,
-    })))
+    Ok(Json(AdminScenarioAssessment {
+        run_id,
+        scenario: run.title,
+        scenario_version: run.version,
+        transcript: run.transcript,
+        started_at: run.started_at,
+        finished_at,
+        rubric,
+    }))
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssessmentStatus {
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentStatus.ts",
+        rename = "ScenarioAssessmentStatus"
+    )
+)]
+pub enum ScenarioAssessmentStatus {
     Assessed,
     NotAssessed,
 }
 
-impl AssessmentStatus {
+impl ScenarioAssessmentStatus {
     fn as_str(self) -> &'static str {
         match self {
             Self::Assessed => "assessed",
@@ -743,20 +798,57 @@ impl AssessmentStatus {
 }
 
 #[derive(Deserialize)]
-pub struct CriterionAssessmentReq {
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioCriterionAssessment.ts",
+        rename = "ScenarioCriterionAssessment"
+    )
+)]
+pub struct ScenarioCriterionAssessment {
     pub criterion_key: String,
-    pub assessment_status: AssessmentStatus,
+    pub assessment_status: ScenarioAssessmentStatus,
     pub score: Option<f32>,
     pub evidence: String,
     #[serde(default)]
-    pub transcript_event_indexes: Vec<usize>,
+    #[cfg_attr(feature = "type-export", ts(type = "number[]", optional))]
+    pub transcript_event_indexes: Option<Vec<usize>>,
     #[serde(default)]
-    pub transcript_uncertain: bool,
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    pub transcript_uncertain: Option<bool>,
 }
 
 #[derive(Deserialize)]
-pub struct RecordAssessmentReq {
-    pub criteria: Vec<CriterionAssessmentReq>,
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentRequest.ts",
+        rename = "ScenarioAssessmentRequest"
+    )
+)]
+pub struct ScenarioAssessmentRequest {
+    pub criteria: Vec<ScenarioCriterionAssessment>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioAssessmentReceipt.ts",
+        rename = "ScenarioAssessmentReceipt"
+    )
+)]
+pub struct ScenarioAssessmentReceipt {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    recorded_criteria: usize,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    not_assessed: usize,
 }
 
 #[derive(sqlx::FromRow)]
@@ -778,8 +870,8 @@ pub async fn record_assessment(
     reviewer: AuthUser,
     headers: axum::http::HeaderMap,
     Path(run_id): Path<Uuid>,
-    Json(req): Json<RecordAssessmentReq>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    Json(req): Json<ScenarioAssessmentRequest>,
+) -> ApiResult<(StatusCode, Json<ScenarioAssessmentReceipt>)> {
     require_admin(&state, &headers)?;
     let mut tx = state.pool.begin().await?;
     let run = sqlx::query_as::<_, AssessmentTarget>(
@@ -861,6 +953,11 @@ pub async fn record_assessment(
     let mut seen = HashSet::new();
     let transcript_len = run.transcript.as_array().map_or(0, Vec::len);
     for criterion in &req.criteria {
+        let transcript_event_indexes = criterion
+            .transcript_event_indexes
+            .as_deref()
+            .unwrap_or_default();
+        let transcript_uncertain = criterion.transcript_uncertain.unwrap_or_default();
         if !seen.insert(criterion.criterion_key.as_str()) {
             return Err(ApiError::unprocessable(
                 "duplicate_criterion",
@@ -880,7 +977,7 @@ pub async fn record_assessment(
             ));
         }
         match criterion.assessment_status {
-            AssessmentStatus::Assessed => {
+            ScenarioAssessmentStatus::Assessed => {
                 if criterion
                     .score
                     .is_none_or(|score| !score.is_finite() || score < 0.0 || score > *max_score)
@@ -890,23 +987,20 @@ pub async fn record_assessment(
                         "assessed scores must be within the criterion's allowed range",
                     ));
                 }
-                let cites_uncorrected_uncertain =
-                    criterion.transcript_event_indexes.iter().any(|index| {
-                        uncertain_events.contains(index) && !corrected_indexes.contains(index)
-                    });
-                if cites_uncorrected_uncertain && !criterion.transcript_uncertain {
+                let cites_uncorrected_uncertain = transcript_event_indexes.iter().any(|index| {
+                    uncertain_events.contains(index) && !corrected_indexes.contains(index)
+                });
+                if cites_uncorrected_uncertain && !transcript_uncertain {
                     return Err(ApiError::unprocessable(
                         "uncertain_transcript_evidence",
                         "this judgment cites an uncorrected uncertain transcript segment — acknowledge the uncertainty",
                     ));
                 }
-                if criterion.transcript_event_indexes.is_empty()
-                    || criterion
-                        .transcript_event_indexes
+                if transcript_event_indexes.is_empty()
+                    || transcript_event_indexes
                         .iter()
                         .any(|index| *index >= transcript_len)
-                    || !criterion
-                        .transcript_event_indexes
+                    || !transcript_event_indexes
                         .windows(2)
                         .all(|pair| pair[0] < pair[1])
                 {
@@ -916,10 +1010,10 @@ pub async fn record_assessment(
                     ));
                 }
             }
-            AssessmentStatus::NotAssessed => {
+            ScenarioAssessmentStatus::NotAssessed => {
                 if criterion.score.is_some()
-                    || !criterion.transcript_event_indexes.is_empty()
-                    || criterion.transcript_uncertain
+                    || !transcript_event_indexes.is_empty()
+                    || transcript_uncertain
                 {
                     return Err(ApiError::unprocessable(
                         "invalid_not_assessed_result",
@@ -933,7 +1027,12 @@ pub async fn record_assessment(
     let not_assessed = req
         .criteria
         .iter()
-        .filter(|criterion| matches!(criterion.assessment_status, AssessmentStatus::NotAssessed))
+        .filter(|criterion| {
+            matches!(
+                criterion.assessment_status,
+                ScenarioAssessmentStatus::NotAssessed
+            )
+        })
         .count();
     for criterion in &req.criteria {
         sqlx::query(
@@ -947,10 +1046,13 @@ pub async fn record_assessment(
         .bind(&criterion.criterion_key)
         .bind(criterion.evidence.trim())
         .bind(criterion.score)
-        .bind(criterion.transcript_uncertain)
+        .bind(criterion.transcript_uncertain.unwrap_or_default())
         .bind(criterion.assessment_status.as_str())
         .bind(reviewer.user_id)
-        .bind(json!(criterion.transcript_event_indexes))
+        .bind(json!(criterion
+            .transcript_event_indexes
+            .as_deref()
+            .unwrap_or_default()))
         .execute(&mut *tx)
         .await?;
     }
@@ -966,10 +1068,10 @@ pub async fn record_assessment(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "recorded_criteria": req.criteria.len(),
-            "not_assessed": not_assessed
-        })),
+        Json(ScenarioAssessmentReceipt {
+            recorded_criteria: req.criteria.len(),
+            not_assessed,
+        }),
     ))
 }
 

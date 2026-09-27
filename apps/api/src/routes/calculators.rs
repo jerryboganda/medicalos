@@ -2,8 +2,7 @@
 
 use axum::extract::{Path, State};
 use axum::Json;
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::auth::AuthUser;
@@ -13,23 +12,83 @@ use crate::state::AppState;
 const DISCLAIMER: &str = "For exam practice only; not for clinical use.";
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "calculators/CalculatorInput.ts",
+        rename = "CalculatorInput"
+    )
+)]
 pub struct CalculatorInput {
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub weight_kg: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub height_m: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub height_cm: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub systolic: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub diastolic: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub eye: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub verbal: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub motor: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub age_years: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub serum_creatinine_mg_dl: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(optional = nullable))]
     pub female: Option<bool>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub sodium_mmol_l: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub chloride_mmol_l: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub bicarbonate_mmol_l: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub calcium_mg_dl: Option<f64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional = nullable))]
     pub albumin_g_dl: Option<f64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "calculators/CalculatorResponse.ts",
+        rename = "CalculatorResponse"
+    )
+)]
+pub struct CalculatorResponse {
+    calculator: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    value: f64,
+    unit: String,
+    disclaimer: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "calculators/ConvertResponse.ts",
+        rename = "ConvertResponse"
+    )
+)]
+pub struct ConvertResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    value: f64,
+    unit: String,
+    disclaimer: String,
 }
 
 fn required(value: Option<f64>, name: &'static str) -> ApiResult<f64> {
@@ -147,17 +206,26 @@ pub async fn calculate(
     _user: AuthUser,
     Path(kind): Path<String>,
     Json(input): Json<CalculatorInput>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CalculatorResponse>> {
     let (value, unit) = calculation_value(&kind, input)?;
-    Ok(Json(json!({
-        "calculator": kind,
-        "value": value,
-        "unit": unit,
-        "disclaimer": DISCLAIMER
-    })))
+    Ok(Json(CalculatorResponse {
+        calculator: kind,
+        value,
+        unit: unit.to_owned(),
+        disclaimer: DISCLAIMER.to_owned(),
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "calculators/ConvertInput.ts",
+        rename = "ConvertInput"
+    )
+)]
 pub struct ConvertInput {
     pub value: f64,
     #[serde(default)]
@@ -170,12 +238,12 @@ pub async fn convert(
     State(_state): State<Arc<AppState>>,
     _user: AuthUser,
     Json(input): Json<ConvertInput>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ConvertResponse>> {
     let value = calc_engine::convert_unit(input.value, &input.analyte, &input.from, &input.to)
         .map_err(|error| ApiError::unprocessable("invalid_conversion", error.to_string()))?;
-    Ok(Json(json!({
-        "value": value,
-        "unit": input.to,
-        "disclaimer": DISCLAIMER
-    })))
+    Ok(Json(ConvertResponse {
+        value,
+        unit: input.to,
+        disclaimer: DISCLAIMER.to_owned(),
+    }))
 }

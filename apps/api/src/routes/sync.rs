@@ -88,12 +88,14 @@ fn invalid_payload(event_id: &str) -> serde_json::Value {
     })
 }
 
-fn finish(event_id: &str, result: ApiResult<Json<serde_json::Value>>) -> serde_json::Value {
+fn finish<T: serde::Serialize>(event_id: &str, result: ApiResult<Json<T>>) -> serde_json::Value {
     match result {
-        Ok(mut value) => {
-            value.0["event_id"] = json!(event_id);
-            value.0["status"] = json!("applied_or_duplicate");
-            value.0
+        Ok(value) => {
+            let mut payload = serde_json::to_value(value.0)
+                .expect("offline sync responses are serializable JSON payloads");
+            payload["event_id"] = json!(event_id);
+            payload["status"] = json!("applied_or_duplicate");
+            payload
         }
         Err(e) => json!({
             "event_id": event_id,

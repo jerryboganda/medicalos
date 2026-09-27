@@ -7,7 +7,7 @@ use axum::Json;
 use chrono::Datelike;
 use competition_scoring::{rank, AnswerRecord, Difficulty, Entry, ScoringConfig};
 use rand::seq::SliceRandom;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgConnection, Row};
 use std::collections::HashSet;
@@ -20,6 +20,195 @@ use crate::seed::QuestionOption;
 use crate::state::AppState;
 
 // ---- ENG-01: daily goal, streak with freezes, question of the day -----------
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementDailyGoal.ts",
+        rename = "EngagementDailyGoal"
+    )
+)]
+pub struct EngagementDailyGoal {
+    enabled: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
+    mode: String,
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
+    unit: String,
+    target: i32,
+    answered_today: i32,
+    minutes_today: i64,
+    met: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementStreak.ts",
+        rename = "EngagementStreak"
+    )
+)]
+pub struct EngagementStreak {
+    enabled: bool,
+    count: i32,
+    freezes: i32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementOption.ts",
+        rename = "EngagementOption"
+    )
+)]
+pub struct EngagementOption {
+    text: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementCommunitySplit.ts",
+        rename = "EngagementCommunitySplit"
+    )
+)]
+pub struct EngagementCommunitySplit {
+    chosen_index: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    count: i64,
+}
+
+#[derive(Default, Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementQotd.ts",
+        rename = "EngagementQotd"
+    )
+)]
+pub struct EngagementQotd {
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "string", optional = nullable)
+    )]
+    exam_id: Option<Option<Uuid>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    needs_exam_selection: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    answered: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional))]
+    question_version_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    vignette: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    options: Option<Vec<EngagementOption>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(optional))]
+    community_split: Option<Vec<EngagementCommunitySplit>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
+    community_total: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "engagement/Engagement.ts", rename = "Engagement")
+)]
+pub struct Engagement {
+    enabled: bool,
+    available_minutes: i32,
+    daily_goal: EngagementDailyGoal,
+    streak: EngagementStreak,
+    qotd: EngagementQotd,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementSettingsResponse.ts",
+        rename = "EngagementSettingsResponse"
+    )
+)]
+pub struct EngagementSettingsResponse {
+    daily_goal_questions: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
+    daily_goal_mode: String,
+    available_minutes: i32,
+    daily_goal_enabled: bool,
+    streak_enabled: bool,
+    qotd_enabled: bool,
+    freezes: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    qotd_exam_id: Option<Uuid>,
+}
+
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/QotdAnswerRequest.ts",
+        rename = "QotdAnswerRequest"
+    )
+)]
+#[derive(Deserialize)]
+pub struct QotdAnswerReq {
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub question_version_id: Uuid,
+    pub chosen_index: i32,
+    #[serde(default)]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "number", optional = nullable)
+    )]
+    pub elapsed_ms: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/QotdAnswerResponse.ts",
+        rename = "QotdAnswerResponse"
+    )
+)]
+pub struct QotdAnswerResponse {
+    correct: bool,
+    correct_index: i32,
+    community_split: Vec<EngagementCommunitySplit>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
+    community_total: i64,
+}
 
 /// Ensure a settings row exists (defaults: goal on, 20 questions, streak on,
 /// QOTD on, zero freezes).
@@ -197,7 +386,7 @@ pub async fn record_daily_progress(state: &AppState, user_id: Uuid) -> ApiResult
 pub async fn engagement_status(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Engagement>> {
     let global = engagement_global_enabled(&state).await?;
     ensure_engagement(&state, user.user_id).await?;
     record_daily_progress(&state, user.user_id).await?;
@@ -233,36 +422,36 @@ pub async fn engagement_status(
     let qotd = if global && s.qotd_enabled {
         qotd_payload(&state, user.user_id, s.qotd_exam_id).await?
     } else {
-        json!({ "enabled": false })
+        EngagementQotd::default()
     };
 
-    Ok(Json(json!({
-        "enabled": global,
-        "available_minutes": s.daily_available_minutes,
-        "daily_goal": {
-            "enabled": s.daily_goal_enabled && global,
-            "mode": s.daily_goal_mode,
-            "unit": goal_unit,
-            "target": goal_target,
-            "answered_today": answered_today,
-            "minutes_today": elapsed_ms / 60_000,
-            "met": goal_met,
+    Ok(Json(Engagement {
+        enabled: global,
+        available_minutes: s.daily_available_minutes,
+        daily_goal: EngagementDailyGoal {
+            enabled: s.daily_goal_enabled && global,
+            mode: s.daily_goal_mode,
+            unit: goal_unit.to_owned(),
+            target: goal_target,
+            answered_today,
+            minutes_today: elapsed_ms / 60_000,
+            met: goal_met,
         },
-        "streak": {
-            "enabled": s.streak_enabled && global,
-            "count": streak,
-            "freezes": s.freeze_bank,
+        streak: EngagementStreak {
+            enabled: s.streak_enabled && global,
+            count: streak,
+            freezes: s.freeze_bank,
         },
-        "qotd": qotd,
-    })))
+        qotd,
+    }))
 }
 
 pub async fn qotd(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<EngagementQotd>> {
     if !engagement_global_enabled(&state).await? {
-        return Ok(Json(json!({ "enabled": false })));
+        return Ok(Json(EngagementQotd::default()));
     }
     ensure_engagement(&state, user.user_id).await?;
     let settings = sqlx::query!(
@@ -273,7 +462,7 @@ pub async fn qotd(
     .fetch_one(&state.pool)
     .await?;
     if !settings.qotd_enabled {
-        return Ok(Json(json!({ "enabled": false })));
+        return Ok(Json(EngagementQotd::default()));
     }
     Ok(Json(
         qotd_payload(&state, user.user_id, settings.qotd_exam_id).await?,
@@ -372,7 +561,7 @@ async fn qotd_payload(
     state: &AppState,
     user_id: Uuid,
     exam_id: Option<Uuid>,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<EngagementQotd> {
     let existing = sqlx::query!(
         r#"SELECT a.question_version_id, a.chosen_index
            FROM qotd_answers a
@@ -392,37 +581,45 @@ async fn qotd_payload(
         .fetch_all(&state.pool)
         .await?;
         let total: i64 = split.iter().map(|r| r.n).sum();
-        return Ok(json!({
-            "enabled": true,
-            "exam_id": exam_id,
-            "needs_exam_selection": false,
-            "answered": true,
-            "available": false,
-            "community_split": split.iter().map(|r| json!({
-                "chosen_index": r.chosen_index,
-                "count": r.n,
-            })).collect::<Vec<_>>(),
-            "community_total": total,
-        }));
+        return Ok(EngagementQotd {
+            enabled: true,
+            exam_id: Some(exam_id),
+            needs_exam_selection: Some(false),
+            answered: Some(true),
+            available: Some(false),
+            community_split: Some(
+                split
+                    .iter()
+                    .map(|r| EngagementCommunitySplit {
+                        chosen_index: r.chosen_index,
+                        count: r.n,
+                    })
+                    .collect(),
+            ),
+            community_total: Some(total),
+            ..EngagementQotd::default()
+        });
     }
     let Some(exam_id) = exam_id else {
-        return Ok(json!({
-            "enabled": true,
-            "exam_id": null,
-            "needs_exam_selection": true,
-            "answered": false,
-            "available": false,
-        }));
+        return Ok(EngagementQotd {
+            enabled: true,
+            exam_id: Some(None),
+            needs_exam_selection: Some(true),
+            answered: Some(false),
+            available: Some(false),
+            ..EngagementQotd::default()
+        });
     };
     let mut conn = state.pool.acquire().await?;
     let Some(question_id) = selected_qotd_id(&mut conn, exam_id).await? else {
-        return Ok(json!({
-            "enabled": true,
-            "exam_id": exam_id,
-            "needs_exam_selection": false,
-            "answered": false,
-            "available": false,
-        }));
+        return Ok(EngagementQotd {
+            enabled: true,
+            exam_id: Some(Some(exam_id)),
+            needs_exam_selection: Some(false),
+            answered: Some(false),
+            available: Some(false),
+            ..EngagementQotd::default()
+        });
     };
     let q = sqlx::query!(
         r#"SELECT qv.id, qv.vignette, qv.options
@@ -439,42 +636,41 @@ async fn qotd_payload(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(q) = q else {
-        return Ok(json!({
-            "enabled": true,
-            "exam_id": exam_id,
-            "needs_exam_selection": false,
-            "answered": false,
-            "available": false,
-        }));
+        return Ok(EngagementQotd {
+            enabled: true,
+            exam_id: Some(Some(exam_id)),
+            needs_exam_selection: Some(false),
+            answered: Some(false),
+            available: Some(false),
+            ..EngagementQotd::default()
+        });
     };
-    let options: Vec<serde_json::Value> =
+    let options: Vec<QuestionOption> =
         serde_json::from_value(q.options.clone()).unwrap_or_default();
-    Ok(json!({
-        "enabled": true,
-        "exam_id": exam_id,
-        "needs_exam_selection": false,
-        "answered": false,
-        "available": true,
-        "question_version_id": q.id,
-        "vignette": q.vignette,
-        "options": options.iter().map(|o| json!({ "text": o["text"] })).collect::<Vec<_>>(),
+    Ok(EngagementQotd {
+        enabled: true,
+        exam_id: Some(Some(exam_id)),
+        needs_exam_selection: Some(false),
+        answered: Some(false),
+        available: Some(true),
+        question_version_id: Some(q.id),
+        vignette: Some(q.vignette),
+        options: Some(
+            options
+                .into_iter()
+                .map(|option| EngagementOption { text: option.text })
+                .collect(),
+        ),
         // correct_index withheld until answered (no cheating via the payload).
-    }))
-}
-
-#[derive(Deserialize)]
-pub struct QotdAnswerReq {
-    pub question_version_id: Uuid,
-    pub chosen_index: i32,
-    #[serde(default)]
-    pub elapsed_ms: Option<i64>,
+        ..EngagementQotd::default()
+    })
 }
 
 pub async fn answer_qotd(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<QotdAnswerReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<QotdAnswerResponse>> {
     if !engagement_global_enabled(&state).await? {
         return Err(ApiError::forbidden(
             "engagement_disabled",
@@ -569,34 +765,69 @@ pub async fn answer_qotd(
     .await?;
     let total: i64 = split.iter().map(|r| r.n).sum();
     let correct = i32::from(q.correct_index) == req.chosen_index;
-    Ok(Json(json!({
-        "correct": correct,
-        "correct_index": q.correct_index,
-        "community_split": split.iter().map(|r| json!({
-            "chosen_index": r.chosen_index,
-            "count": r.n,
-        })).collect::<Vec<_>>(),
-        "community_total": total,
-    })))
-}
-
-fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    T::deserialize(deserializer).map(Some)
+    Ok(Json(QotdAnswerResponse {
+        correct,
+        correct_index: i32::from(q.correct_index),
+        community_split: split
+            .iter()
+            .map(|r| EngagementCommunitySplit {
+                chosen_index: r.chosen_index,
+                count: r.n,
+            })
+            .collect(),
+        community_total: total,
+    }))
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/EngagementSettings.ts",
+        rename = "EngagementSettings"
+    )
+)]
 pub struct EngagementSettingsReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "number", optional = nullable)
+    )]
     pub daily_goal_questions: Option<i32>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"questions\" | \"minutes\"",
+            optional = nullable
+        )
+    )]
     pub daily_goal_mode: Option<String>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "number", optional = nullable)
+    )]
     pub available_minutes: Option<i32>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub daily_goal_enabled: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub streak_enabled: Option<bool>,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "boolean", optional = nullable)
+    )]
     pub qotd_enabled: Option<bool>,
-    #[serde(default, deserialize_with = "deserialize_present")]
+    #[serde(default, deserialize_with = "double_option")]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "string", optional = nullable)
+    )]
     pub qotd_exam_id: Option<Option<Uuid>>,
 }
 
@@ -604,7 +835,7 @@ pub async fn update_engagement_settings(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<EngagementSettingsReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<EngagementSettingsResponse>> {
     ensure_engagement(&state, user.user_id).await?;
     if req
         .daily_goal_questions
@@ -703,16 +934,16 @@ pub async fn update_engagement_settings(
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "daily_goal_questions": s.daily_goal_questions,
-        "daily_goal_mode": s.daily_goal_mode,
-        "available_minutes": s.daily_available_minutes,
-        "daily_goal_enabled": s.daily_goal_enabled,
-        "streak_enabled": s.streak_enabled,
-        "qotd_enabled": s.qotd_enabled,
-        "freezes": s.freeze_bank,
-        "qotd_exam_id": s.qotd_exam_id,
-    })))
+    Ok(Json(EngagementSettingsResponse {
+        daily_goal_questions: s.daily_goal_questions,
+        daily_goal_mode: s.daily_goal_mode,
+        available_minutes: s.daily_available_minutes,
+        daily_goal_enabled: s.daily_goal_enabled,
+        streak_enabled: s.streak_enabled,
+        qotd_enabled: s.qotd_enabled,
+        freezes: s.freeze_bank,
+        qotd_exam_id: s.qotd_exam_id,
+    }))
 }
 
 // ---- ENG-02: XP + achievements -----------------------------------------------
@@ -790,6 +1021,17 @@ pub async fn institution_coverage(
         })
         .collect();
     Ok(Json(json!({ "coverage": coverage })))
+}
+
+/// Absent → None (setting untouched); explicit null → Some(None) (cleared);
+/// a value → Some(Some(v)). Plain `Option<Option<T>>` cannot tell null from
+/// absent because serde short-circuits the outer Option on null.
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 // ---- COMP-01/02: competitions on the shared scoring crate --------------------
@@ -1140,10 +1382,216 @@ async fn materialize_competition_series(state: &AppState) -> ApiResult<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionSummary.ts",
+        rename = "CompetitionSummary"
+    )
+)]
+pub struct CompetitionSummary {
+    pub competition_id: Uuid,
+    pub title: String,
+    pub exam_id: Uuid,
+    pub exam: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"one_off\" | \"daily\" | \"weekly\" | \"monthly\" | \"live\"")
+    )]
+    pub cadence: String,
+    pub series_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub starts_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub ends_at: chrono::DateTime<chrono::Utc>,
+    pub status: String,
+    pub entered: bool,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"in_progress\" | \"submitted\" | null")
+    )]
+    pub attempt_status: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionListResponse.ts",
+        rename = "CompetitionListResponse"
+    )
+)]
+pub struct CompetitionListResponse {
+    pub competitions: Vec<CompetitionSummary>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/StartCompetitionEntryRequest.ts",
+        rename = "StartCompetitionEntryRequest"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct StartCompetitionEntryReq {
+    pub handle: String,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/AnswerCompetitionQuestionRequest.ts",
+        rename = "AnswerCompetitionQuestionRequest"
+    )
+)]
+#[serde(deny_unknown_fields)]
+pub struct AnswerCompetitionQuestionReq {
+    pub question_version_id: Uuid,
+    pub chosen_index: i64,
+    pub idempotency_key: Uuid,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionQuestionOption.ts",
+        rename = "CompetitionQuestionOption"
+    )
+)]
+pub struct CompetitionQuestionOption {
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionQuestion.ts",
+        rename = "CompetitionQuestion"
+    )
+)]
+pub struct CompetitionQuestion {
+    pub question_version_id: Uuid,
+    pub question_number: usize,
+    pub total_questions: usize,
+    pub vignette: String,
+    pub lead_in: String,
+    pub options: Vec<CompetitionQuestionOption>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionInProgressResponse.ts",
+        rename = "CompetitionInProgressResponse"
+    )
+)]
+pub struct CompetitionInProgressResponse {
+    pub attempt_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "false"))]
+    pub submitted: bool,
+    pub question: CompetitionQuestion,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionSubmittedResponse.ts",
+        rename = "CompetitionSubmittedResponse"
+    )
+)]
+pub struct CompetitionSubmittedResponse {
+    pub attempt_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "true"))]
+    pub submitted: bool,
+    pub entry_id: Uuid,
+    pub score: f64,
+    pub questions: i64,
+    pub total_time_ms: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionAttemptStep.ts",
+        rename = "CompetitionAttemptStep"
+    )
+)]
+pub enum CompetitionAttemptStep {
+    InProgress(CompetitionInProgressResponse),
+    Submitted(CompetitionSubmittedResponse),
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeaderboardEntry.ts",
+        rename = "CompetitionLeaderboardEntry"
+    )
+)]
+pub struct CompetitionLeaderboardEntry {
+    pub rank: i64,
+    pub handle: String,
+    pub score: f32,
+    pub accuracy: f64,
+    pub questions_attempted: i64,
+    pub average_response_time_ms: f64,
+    pub total_time_ms: i64,
+    pub is_me: bool,
+    pub prize_eligible: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeaderboardResponse.ts",
+        rename = "CompetitionLeaderboardResponse"
+    )
+)]
+pub struct CompetitionLeaderboardResponse {
+    pub prize_reviewed: bool,
+    pub status: String,
+    pub entries: Vec<CompetitionLeaderboardEntry>,
+}
+
 pub async fn list_competitions(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionListResponse>> {
     materialize_competition_series(&state).await?;
     let rows = sqlx::query(
         r#"SELECT c.id, c.title, c.exam_id, e.name AS exam, c.cadence, c.series_id,
@@ -1169,45 +1617,25 @@ pub async fn list_competitions(
     .bind(user.user_id)
     .fetch_all(&state.pool)
     .await?;
-    let comps: Vec<serde_json::Value> = rows
+    let competitions: Vec<CompetitionSummary> = rows
         .iter()
         .map(|row| {
-            let id: Uuid = row.try_get("id")?;
-            let title: String = row.try_get("title")?;
-            let exam_id: Uuid = row.try_get("exam_id")?;
-            let exam: String = row.try_get("exam")?;
-            let cadence: String = row.try_get("cadence")?;
-            let series_id: Option<Uuid> = row.try_get("series_id")?;
-            let starts_at: chrono::DateTime<chrono::Utc> = row.try_get("starts_at")?;
-            let ends_at: chrono::DateTime<chrono::Utc> = row.try_get("ends_at")?;
-            let status: String = row.try_get("status")?;
-            let entered: bool = row.try_get("entered")?;
-            let attempt_status: Option<String> = row.try_get("attempt_status")?;
-            Ok(json!({
-                "competition_id": id, "title": title, "starts_at": starts_at,
-                "exam_id": exam_id, "exam": exam, "cadence": cadence, "series_id": series_id,
-                "ends_at": ends_at, "status": status, "entered": entered,
-                "attempt_status": attempt_status,
-            }))
+            Ok(CompetitionSummary {
+                competition_id: row.try_get("id")?,
+                title: row.try_get("title")?,
+                exam_id: row.try_get("exam_id")?,
+                exam: row.try_get("exam")?,
+                cadence: row.try_get("cadence")?,
+                series_id: row.try_get("series_id")?,
+                starts_at: row.try_get("starts_at")?,
+                ends_at: row.try_get("ends_at")?,
+                status: row.try_get("status")?,
+                entered: row.try_get("entered")?,
+                attempt_status: row.try_get("attempt_status")?,
+            })
         })
         .collect::<Result<_, sqlx::Error>>()?;
-    Ok(Json(json!({ "competitions": comps })))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StartCompetitionEntryReq {
-    pub handle: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnswerCompetitionQuestionReq {
-    pub question_version_id: Uuid,
-    pub chosen_index: i64,
-    pub idempotency_key: Uuid,
-    #[serde(default)]
-    pub elapsed_ms: Option<i64>,
+    Ok(Json(CompetitionListResponse { competitions }))
 }
 
 #[derive(Deserialize, serde::Serialize)]
@@ -1240,7 +1668,7 @@ async fn present_competition_question(
     option_order: &[usize],
     position: usize,
     total_questions: usize,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<CompetitionQuestion> {
     let row = sqlx::query(
         "SELECT vignette, lead_in, options, status
          FROM question_versions WHERE id = $1",
@@ -1266,18 +1694,20 @@ async fn present_competition_question(
     {
         return Err(ApiError::internal());
     }
-    let displayed_options: Vec<serde_json::Value> = option_order
+    let displayed_options: Vec<CompetitionQuestionOption> = option_order
         .iter()
-        .map(|index| json!({ "text": options[*index].text.clone() }))
+        .map(|index| CompetitionQuestionOption {
+            text: options[*index].text.clone(),
+        })
         .collect();
-    Ok(json!({
-        "question_version_id": question_version_id,
-        "question_number": position + 1,
-        "total_questions": total_questions,
-        "vignette": row.try_get::<String, _>("vignette")?,
-        "lead_in": row.try_get::<String, _>("lead_in")?,
-        "options": displayed_options,
-    }))
+    Ok(CompetitionQuestion {
+        question_version_id,
+        question_number: position + 1,
+        total_questions,
+        vignette: row.try_get("vignette")?,
+        lead_in: row.try_get("lead_in")?,
+        options: displayed_options,
+    })
 }
 
 /// Start or resume one server-timed competition attempt.
@@ -1286,7 +1716,7 @@ pub async fn start_competition_entry(
     user: AuthUser,
     Path(comp_id): Path<Uuid>,
     Json(req): Json<StartCompetitionEntryReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionAttemptStep>> {
     let handle = req.handle.trim();
     if handle.is_empty() || handle.len() > 40 {
         return Err(ApiError::unprocessable(
@@ -1443,11 +1873,13 @@ pub async fn start_competition_entry(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({
-        "attempt_id": attempt_id,
-        "submitted": false,
-        "question": question,
-    })))
+    Ok(Json(CompetitionAttemptStep::InProgress(
+        CompetitionInProgressResponse {
+            attempt_id,
+            submitted: false,
+            question,
+        },
+    )))
 }
 
 /// Submit one displayed option; elapsed time and scoring are server-owned.
@@ -1456,7 +1888,7 @@ pub async fn answer_competition_question(
     user: AuthUser,
     Path(comp_id): Path<Uuid>,
     Json(req): Json<AnswerCompetitionQuestionReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CompetitionAttemptStep>> {
     if req.elapsed_ms.is_some() {
         return Err(ApiError::bad_request(
             "client_timing_not_allowed",
@@ -1499,16 +1931,16 @@ pub async fn answer_competition_question(
         return previous
             .response
             .clone()
-            .map(Json)
-            .ok_or_else(ApiError::internal);
+            .ok_or_else(ApiError::internal)
+            .and_then(decode_competition_attempt_step);
     }
     let attempt_status: String = attempt.try_get("status")?;
     if attempt_status == "submitted" {
         return answers
             .last()
             .and_then(|answer| answer.response.clone())
-            .map(Json)
-            .ok_or_else(ApiError::internal);
+            .ok_or_else(ApiError::internal)
+            .and_then(decode_competition_attempt_step);
     }
     let starts_at: chrono::DateTime<chrono::Utc> = attempt.try_get("starts_at")?;
     let ends_at: chrono::DateTime<chrono::Utc> = attempt.try_get("ends_at")?;
@@ -1763,7 +2195,15 @@ pub async fn answer_competition_question(
         response
     };
     tx.commit().await?;
-    Ok(Json(response))
+    decode_competition_attempt_step(response)
+}
+
+fn decode_competition_attempt_step(
+    response: serde_json::Value,
+) -> ApiResult<Json<CompetitionAttemptStep>> {
+    serde_json::from_value(response)
+        .map(Json)
+        .map_err(|_| ApiError::internal())
 }
 
 /// Simple XP award called from the practice submit handler, with the

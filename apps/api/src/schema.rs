@@ -71,6 +71,7 @@ migrations!(
     "0054_eng01_time_goal",
     "0055_ex08_policy_enforcement",
     "0056_img04_anatomy_links",
+    "0057_ex07_mock_types_and_time",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

@@ -6,7 +6,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
@@ -34,7 +34,22 @@ fn valid_category(raw: &str) -> bool {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ReportQuestionRequest.ts",
+        rename = "ReportQuestionRequest"
+    )
+)]
 pub struct ReportReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"wrong_answer\" | \"bad_explanation\" | \"typo\" | \"duplicate\" | \"outdated\" | \"broken_image\" | \"other\""
+        )
+    )]
     pub category: String,
     pub note: Option<String>,
 }
@@ -45,10 +60,137 @@ pub struct QueueParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ResolveQuestionReportRequest.ts",
+        rename = "ResolveQuestionReportRequest"
+    )
+)]
 pub struct ResolveReportReq {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"resolved_fixed\" | \"resolved_rejected\"")
+    )]
     pub status: String,
     pub resolution_note: String,
     pub correction_note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/QuestionReportResponse.ts",
+        rename = "QuestionReportResponse"
+    )
+)]
+pub struct QuestionReportResponse {
+    pub report_id: Uuid,
+    pub already_recorded: bool,
+    pub quarantined: bool,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"open\" | \"quarantined\" | \"resolved_fixed\" | \"resolved_rejected\"")
+    )]
+    pub status: String,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub acknowledged_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub resolution_due_at: chrono::DateTime<chrono::Utc>,
+    pub resolution_note: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
+    pub resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub corrected_version_id: Option<Uuid>,
+    pub corrected_version_number: Option<i32>,
+    pub correction_note: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ReportFeedback.ts",
+        rename = "ReportFeedback"
+    )
+)]
+pub struct ReportFeedback {
+    pub category: String,
+    pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "reports/AdminReport.ts", rename = "AdminReport")
+)]
+pub struct AdminReport {
+    pub report_id: Uuid,
+    pub question_version_id: Uuid,
+    pub question_id: Uuid,
+    pub version: i32,
+    pub vignette: String,
+    pub lead_in: String,
+    pub category: String,
+    pub reporter_feedback: Vec<ReportFeedback>,
+    pub feedback_truncated: bool,
+    pub report_count: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub first_reported_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub acknowledgement_due_at: chrono::DateTime<chrono::Utc>,
+    #[cfg_attr(feature = "type-export", ts(type = "string"))]
+    pub resolution_due_at: chrono::DateTime<chrono::Utc>,
+    pub acknowledgements_on_time: bool,
+    pub resolution_overdue: bool,
+    pub quarantined: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/AdminReportsResponse.ts",
+        rename = "AdminReportsResponse"
+    )
+)]
+pub struct AdminReportsResponse {
+    pub reports: Vec<AdminReport>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ResolveQuestionReportResponse.ts",
+        rename = "ResolveQuestionReportResponse"
+    )
+)]
+pub struct ResolveQuestionReportResponse {
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"resolved_fixed\" | \"resolved_rejected\"")
+    )]
+    pub status: String,
+    pub question_version_id: Uuid,
+    pub corrected_version_id: Option<Uuid>,
+    pub resolved_reports: u64,
+    pub notified_reporters: usize,
 }
 
 pub async fn report(
@@ -56,7 +198,7 @@ pub async fn report(
     user: AuthUser,
     Path(version_id): Path<Uuid>,
     Json(req): Json<ReportReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<QuestionReportResponse>> {
     if !valid_category(&req.category) {
         return Err(ApiError::unprocessable(
             "invalid_category",
@@ -94,21 +236,21 @@ pub async fn report(
     .await?;
     if let Some(existing) = existing {
         tx.commit().await?;
-        return Ok(Json(serde_json::json!({
-            "report_id": existing.id,
-            "already_recorded": true,
-            "quarantined": existing.status == "quarantined",
-            "status": existing.status,
-            "created_at": existing.created_at,
-            "acknowledged_at": existing.acknowledged_at,
-            "acknowledgement_due_at": existing.created_at + chrono::Duration::hours(24),
-            "resolution_due_at": existing.created_at + chrono::Duration::hours(72),
-            "resolution_note": existing.resolution_note,
-            "resolved_at": existing.resolved_at,
-            "corrected_version_id": existing.corrected_version_id,
-            "corrected_version_number": existing.corrected_version_number,
-            "correction_note": existing.correction_note,
-        })));
+        return Ok(Json(QuestionReportResponse {
+            report_id: existing.id,
+            already_recorded: true,
+            quarantined: existing.status == "quarantined",
+            status: existing.status,
+            created_at: existing.created_at,
+            acknowledged_at: existing.acknowledged_at,
+            acknowledgement_due_at: existing.created_at + chrono::Duration::hours(24),
+            resolution_due_at: existing.created_at + chrono::Duration::hours(72),
+            resolution_note: existing.resolution_note,
+            resolved_at: existing.resolved_at,
+            corrected_version_id: existing.corrected_version_id,
+            corrected_version_number: existing.corrected_version_number,
+            correction_note: existing.correction_note,
+        }));
     }
     if version.status != "published" {
         return Err(ApiError::not_found("question_not_found"));
@@ -148,21 +290,21 @@ pub async fn report(
         "open"
     };
     tx.commit().await?;
-    Ok(Json(serde_json::json!({
-        "report_id": inserted.id,
-        "already_recorded": false,
-        "status": status,
-        "quarantined": status == "quarantined",
-        "created_at": inserted.created_at,
-        "acknowledged_at": inserted.acknowledged_at,
-        "acknowledgement_due_at": inserted.created_at + chrono::Duration::hours(24),
-        "resolution_due_at": inserted.created_at + chrono::Duration::hours(72),
-        "resolution_note": null,
-        "resolved_at": null,
-        "corrected_version_id": null,
-        "corrected_version_number": null,
-        "correction_note": null,
-    })))
+    Ok(Json(QuestionReportResponse {
+        report_id: inserted.id,
+        already_recorded: false,
+        status: status.into(),
+        quarantined: status == "quarantined",
+        created_at: inserted.created_at,
+        acknowledged_at: inserted.acknowledged_at,
+        acknowledgement_due_at: inserted.created_at + chrono::Duration::hours(24),
+        resolution_due_at: inserted.created_at + chrono::Duration::hours(72),
+        resolution_note: None,
+        resolved_at: None,
+        corrected_version_id: None,
+        corrected_version_number: None,
+        correction_note: None,
+    }))
 }
 
 pub async fn my_reports(
@@ -224,7 +366,7 @@ pub async fn review_queue(
     _user: AuthUser,
     headers: HeaderMap,
     Query(params): Query<QueueParams>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AdminReportsResponse>> {
     state.require_admin(
         headers
             .get("x-admin-token")
@@ -279,30 +421,33 @@ pub async fn review_queue(
     .bind(limit)
     .fetch_all(&state.pool)
     .await?;
-    let reports: Vec<serde_json::Value> = rows
+    let reports: Vec<AdminReport> = rows
         .into_iter()
-        .map(|row| {
-            json!({
-                "report_id": row.get::<Uuid, _>("report_id"),
-                "question_version_id": row.get::<Uuid, _>("question_version_id"),
-                "question_id": row.get::<Uuid, _>("question_id"),
-                "version": row.get::<i32, _>("version"),
-                "vignette": row.get::<String, _>("vignette"),
-                "lead_in": row.get::<String, _>("lead_in"),
-                "category": row.get::<String, _>("category"),
-                "reporter_feedback": row.get::<serde_json::Value, _>("reporter_feedback"),
-                "feedback_truncated": row.get::<bool, _>("feedback_truncated"),
-                "report_count": row.get::<i64, _>("report_count"),
-                "first_reported_at": row.get::<chrono::DateTime<chrono::Utc>, _>("first_reported_at"),
-                "acknowledgement_due_at": row.get::<chrono::DateTime<chrono::Utc>, _>("acknowledgement_due_at"),
-                "resolution_due_at": row.get::<chrono::DateTime<chrono::Utc>, _>("resolution_due_at"),
-                "acknowledgements_on_time": row.get::<bool, _>("acknowledgements_on_time"),
-                "resolution_overdue": row.get::<bool, _>("resolution_overdue"),
-                "quarantined": row.get::<bool, _>("quarantined"),
+        .map(|row| -> Result<AdminReport, sqlx::Error> {
+            let feedback: serde_json::Value = row.try_get("reporter_feedback")?;
+            let reporter_feedback = serde_json::from_value(feedback)
+                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+            Ok(AdminReport {
+                report_id: row.try_get("report_id")?,
+                question_version_id: row.try_get("question_version_id")?,
+                question_id: row.try_get("question_id")?,
+                version: row.try_get("version")?,
+                vignette: row.try_get("vignette")?,
+                lead_in: row.try_get("lead_in")?,
+                category: row.try_get("category")?,
+                reporter_feedback,
+                feedback_truncated: row.try_get("feedback_truncated")?,
+                report_count: row.try_get("report_count")?,
+                first_reported_at: row.try_get("first_reported_at")?,
+                acknowledgement_due_at: row.try_get("acknowledgement_due_at")?,
+                resolution_due_at: row.try_get("resolution_due_at")?,
+                acknowledgements_on_time: row.try_get("acknowledgements_on_time")?,
+                resolution_overdue: row.try_get("resolution_overdue")?,
+                quarantined: row.try_get("quarantined")?,
             })
         })
-        .collect();
-    Ok(Json(json!({ "reports": reports })))
+        .collect::<Result<_, _>>()?;
+    Ok(Json(AdminReportsResponse { reports }))
 }
 
 /// Resolve every learner report for one question version as a single editorial decision.
@@ -312,7 +457,7 @@ pub async fn resolve(
     headers: HeaderMap,
     Path(report_id): Path<Uuid>,
     Json(req): Json<ResolveReportReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ResolveQuestionReportResponse>> {
     state.require_admin(
         headers
             .get("x-admin-token")
@@ -470,11 +615,11 @@ pub async fn resolve(
     .await?
     .len();
     tx.commit().await?;
-    Ok(Json(json!({
-        "status": req.status,
-        "question_version_id": question_version_id,
-        "corrected_version_id": corrected_version_id,
-        "resolved_reports": updated,
-        "notified_reporters": notified_reporters
-    })))
+    Ok(Json(ResolveQuestionReportResponse {
+        status: req.status,
+        question_version_id,
+        corrected_version_id,
+        resolved_reports: updated,
+        notified_reporters,
+    }))
 }

@@ -77,7 +77,11 @@ test('administrator loads and saves live runtime settings', async ({ page }) => 
 	await page.getByLabel('Medium competition points').fill('12');
 	await page.getByLabel('Hard competition points').fill('18');
 	await page.getByRole('button', { name: 'Save runtime settings' }).click();
-	await expect(page.getByRole('alert')).toContainText('Mastery boundaries must be increasing.');
+	await expect(
+		page
+			.getByRole('alert')
+			.filter({ hasText: 'Mastery boundaries must be increasing.' })
+	).toBeVisible();
 	await page.getByRole('button', { name: 'Save runtime settings' }).click();
 
 	expect(savedSettings).toEqual({

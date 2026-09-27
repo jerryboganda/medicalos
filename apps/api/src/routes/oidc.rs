@@ -13,7 +13,7 @@ use openidconnect::{
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, TokenResponse,
 };
 use rand::RngCore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -27,9 +27,22 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "oidc/OidcProviderUpdate.ts",
+        rename = "OidcProviderUpdate"
+    )
+)]
 pub struct ConfigureOidcReq {
     pub issuer: String,
     pub client_id: String,
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "string", optional = nullable)
+    )]
     pub client_secret: Option<String>,
     #[serde(default)]
     pub clear_client_secret: bool,
@@ -37,8 +50,62 @@ pub struct ConfigureOidcReq {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "oidc/CompleteOidcRequest.ts",
+        rename = "CompleteOidcRequest"
+    )
+)]
 pub struct CompleteOidcReq {
     pub ticket: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "oidc/OidcProviderView.ts",
+        rename = "OidcProviderView"
+    )
+)]
+pub struct OidcProviderView {
+    issuer: String,
+    client_id: String,
+    enabled: bool,
+    client_secret_configured: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "oidc/StartInstitutionSsoResponse.ts",
+        rename = "StartInstitutionSsoResponse"
+    )
+)]
+pub struct StartInstitutionSsoResponse {
+    authorization_url: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "oidc/CompleteOidcResponse.ts",
+        rename = "CompleteOidcResponse"
+    )
+)]
+pub struct CompleteOidcResponse {
+    token: String,
 }
 
 #[derive(Deserialize)]
@@ -207,13 +274,13 @@ fn provider_view(
     client_id: String,
     enabled: bool,
     secret_configured: bool,
-) -> Value {
-    json!({
-        "issuer": issuer,
-        "client_id": client_id,
-        "enabled": enabled,
-        "client_secret_configured": secret_configured
-    })
+) -> OidcProviderView {
+    OidcProviderView {
+        issuer,
+        client_id,
+        enabled,
+        client_secret_configured: secret_configured,
+    }
 }
 
 pub async fn get_provider(
@@ -221,7 +288,7 @@ pub async fn get_provider(
     Path(institution_id): Path<Uuid>,
     headers: HeaderMap,
     _user: AuthUser,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<OidcProviderView>> {
     require_admin(&state, &headers)?;
     let row = sqlx::query(
         "SELECT issuer, client_id, enabled, client_secret_ciphertext IS NOT NULL AS secret_configured
@@ -245,7 +312,7 @@ pub async fn configure_provider(
     headers: HeaderMap,
     user: AuthUser,
     Json(req): Json<ConfigureOidcReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<OidcProviderView>> {
     require_admin(&state, &headers)?;
     let issuer = req.issuer.trim();
     let client_id = req.client_id.trim();
@@ -363,7 +430,7 @@ pub async fn configure_provider(
 pub async fn start_login(
     State(state): State<Arc<AppState>>,
     Path(institution_id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<StartInstitutionSsoResponse>> {
     let row = sqlx::query(
         "SELECT issuer, client_id, client_secret_ciphertext
          FROM institution_oidc_providers
@@ -436,9 +503,9 @@ pub async fn start_login(
     .bind(provider_metadata)
     .execute(&state.pool)
     .await?;
-    Ok(Json(
-        json!({ "authorization_url": authorization_url.to_string() }),
-    ))
+    Ok(Json(StartInstitutionSsoResponse {
+        authorization_url: authorization_url.to_string(),
+    }))
 }
 
 async fn finish_callback(
@@ -566,7 +633,7 @@ pub async fn callback(
 pub async fn complete(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CompleteOidcReq>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<CompleteOidcResponse>> {
     if req.ticket.len() < 32 || req.ticket.len() > 128 {
         return Err(ApiError::unauthorized());
     }
@@ -580,5 +647,5 @@ pub async fn complete(
     .await?
     .ok_or_else(ApiError::unauthorized)?;
     let token = issue_session(&state.pool, user_id).await?;
-    Ok(Json(json!({ "token": token })))
+    Ok(Json(CompleteOidcResponse { token }))
 }

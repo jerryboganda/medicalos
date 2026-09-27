@@ -5,7 +5,7 @@
 	import { Api, ApiError } from '$lib/api';
 	import type {
 		LibrarySearchResult,
-		PrivateImport,
+		PrivateImportResponse,
 		PrivateImportRight,
 		PrivateDocumentSearchResult,
 		PrivateImportSummary
@@ -36,7 +36,7 @@
 	let importError = $state('');
 	let readingId = $state('');
 	let deletingId = $state('');
-	let openedImport = $state<PrivateImport | null>(null);
+	let openedImport = $state<PrivateImportResponse | null>(null);
 
 	function utcToday(): string {
 		return new Date().toISOString().slice(0, 10);

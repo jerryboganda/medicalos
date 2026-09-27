@@ -268,6 +268,15 @@ pub async fn list_team(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamInviteRequest.ts",
+        rename = "ScenarioTeamInviteRequest"
+    )
+)]
 pub struct CreateTeamInviteReq {
     pub role: String,
 }
@@ -362,6 +371,15 @@ pub async fn create_invite(
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioTeamJoinRequest.ts",
+        rename = "ScenarioTeamJoinRequest"
+    )
+)]
 pub struct JoinTeamInviteReq {
     pub invite_code: String,
 }
@@ -499,6 +517,15 @@ fn valid_sbar_text(value: &str) -> bool {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "scenario/ScenarioHandoverCreateRequest.ts",
+        rename = "ScenarioHandoverCreateRequest"
+    )
+)]
 pub struct CreateHandoverReq {
     pub recipient_member_id: Uuid,
     pub situation: String,
