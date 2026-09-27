@@ -812,21 +812,12 @@ pub struct ScenarioCriterionAssessment {
     pub assessment_status: ScenarioAssessmentStatus,
     pub score: Option<f32>,
     pub evidence: String,
-    #[serde(default, deserialize_with = "deserialize_present")]
+    #[serde(default)]
     #[cfg_attr(feature = "type-export", ts(type = "number[]", optional))]
     pub transcript_event_indexes: Option<Vec<usize>>,
-    #[serde(default, deserialize_with = "deserialize_present")]
+    #[serde(default)]
     #[cfg_attr(feature = "type-export", ts(optional))]
     pub transcript_uncertain: Option<bool>,
-}
-
-fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    Option<T>: Deserialize<'de>,
-{
-    // Absent and explicit null both mean "not given"; only a real value maps to Some.
-    Option::<T>::deserialize(deserializer)
 }
 
 #[derive(Deserialize)]

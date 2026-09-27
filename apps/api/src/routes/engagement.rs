@@ -779,15 +779,6 @@ pub async fn answer_qotd(
     }))
 }
 
-fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    Option<T>: Deserialize<'de>,
-{
-    // Absent and explicit null both mean "not given"; only a real value maps to Some.
-    Option::<T>::deserialize(deserializer)
-}
-
 #[derive(Deserialize)]
 #[cfg_attr(
     feature = "type-export",
@@ -832,7 +823,7 @@ pub struct EngagementSettingsReq {
         ts(type = "boolean", optional = nullable)
     )]
     pub qotd_enabled: Option<bool>,
-    #[serde(default, deserialize_with = "deserialize_present")]
+    #[serde(default)]
     #[cfg_attr(
         feature = "type-export",
         ts(type = "string", optional = nullable)

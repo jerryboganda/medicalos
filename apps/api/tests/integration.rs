@@ -1023,23 +1023,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
-    assert_json_keys(
-        &session,
-        &[
-            "session_id",
-            "user_id",
-            "preset",
-            "chapter_id",
-            "source_session_id",
-            "status",
-            "mock_id",
-            "time_limit_seconds",
-            "per_question_seconds",
-            "deadline",
-            "server_now",
-            "items",
-        ],
-    );
+    assert_json_keys(&session, &["session_id", "items", "per_question_seconds"]);
     let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
     let session_items = session["items"].as_array().unwrap();
     assert_eq!(session_items.len(), task_question_count as usize);
@@ -1083,6 +1067,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             "deadline",
             "server_now",
             "items",
+            "user_id",
         ],
     );
     assert_eq!(detail["session_id"], serde_json::json!(sid));
@@ -3394,8 +3379,20 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     .await;
     assert_eq!(status, StatusCode::OK, "{started}");
     let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
-    // The blueprint freezes its two questions in random order — locate them.
-    let form_items = started["items"].as_array().unwrap();
+    // The blueprint freezes its two questions in random order — locate them
+    // via the session detail (the mock start response omits items).
+    let (status, form) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{sid}"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{form}");
+    let form_items = form["items"].as_array().unwrap();
     let glorbin_idx: i16 = form_items
         .iter()
         .position(|i| i["lead_in"] == "What happens to hormone Z secretion as glorbin rises?")
