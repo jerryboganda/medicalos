@@ -7,7 +7,6 @@ use axum::extract::{Path, State};
 use axum::Json;
 use scheduler::{build_queue, from_state, to_state, QueueCard, QueueLimits, Rating, Scheduler};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::{PgConnection, Row};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -63,7 +62,7 @@ pub struct CreateDeckReq {
     pub name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Serialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
@@ -82,7 +81,7 @@ pub async fn create_deck(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<CreateDeckReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<CreateDeckResponse>> {
     let name = req.name.trim();
     if name.is_empty() || name.len() > 120 {
         return Err(ApiError::unprocessable(
@@ -167,7 +166,7 @@ pub async fn add_card(
     user: AuthUser,
     Path(deck_id): Path<Uuid>,
     Json(req): Json<AddCardReq>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AddCardResponse>> {
     let front = req.front.trim();
     let back = req.back.trim();
     if front.is_empty() || back.is_empty() || front.len() > 5000 || back.len() > 5000 {

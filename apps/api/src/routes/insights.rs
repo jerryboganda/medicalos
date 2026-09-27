@@ -169,7 +169,7 @@ pub async fn mastery_heatmap(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Query(q): Query<HeatmapQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<MasteryHeatmapResponse>> {
     if let Some(d) = &q.difficulty {
         if !matches!(d.as_str(), "easy" | "medium" | "hard") {
             return Err(crate::error::ApiError::unprocessable(

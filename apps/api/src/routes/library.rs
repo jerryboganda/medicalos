@@ -1185,7 +1185,7 @@ pub struct PrivateImportRight {
     search_allowed: bool,
 }
 
-#[derive(sqlx::FromRow, Serialize, sqlx::FromRow)]
+#[derive(sqlx::FromRow, Serialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),

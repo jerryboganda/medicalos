@@ -1492,7 +1492,7 @@ pub struct CompetitionQuestion {
     pub options: Vec<CompetitionQuestionOption>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
@@ -1509,7 +1509,7 @@ pub struct CompetitionInProgressResponse {
     pub question: CompetitionQuestion,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),

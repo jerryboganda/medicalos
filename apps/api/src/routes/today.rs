@@ -530,7 +530,7 @@ pub async fn next_action(
         source_session_id: task.source_session_id,
         question_count: task.question_count,
         estimated_minutes: task.estimated_minutes,
-        adjusted_estimated_minutes,
+        adjusted_estimated_minutes: *adjusted_estimated_minutes,
         protected: task.protected,
         reason_code: reason_code.to_owned(),
         independent_count: task.independent_count,

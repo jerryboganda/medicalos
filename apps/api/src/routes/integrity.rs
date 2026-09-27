@@ -189,7 +189,7 @@ pub async fn record_integrity_event(
 
     let mut receipt = None;
     if let Some(session_id) = auto_submit {
-        let Json(receipt) = crate::routes::practice::submit(
+        let Json(submit_receipt) = crate::routes::practice::submit(
             State(state.clone()),
             AuthUser {
                 user_id: user.user_id,
@@ -197,7 +197,7 @@ pub async fn record_integrity_event(
             Path(session_id),
         )
         .await?;
-        receipt = Some(receipt);
+        receipt = Some(submit_receipt);
         sqlx::query(
             "UPDATE practice_sessions SET away_since = NULL
              WHERE id = $1 AND status = 'submitted' AND auto_submitted_by_policy = TRUE",

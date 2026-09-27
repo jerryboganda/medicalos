@@ -1,0 +1,397 @@
+﻿2026-09-27T17:07:36.2600689Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings
+2026-09-27T17:07:36.2601092Z ^[[36;1mcargo clippy --workspace --all-targets -- -D warnings^[[0m
+2026-09-27T17:07:36.2635809Z shell: /usr/bin/bash -e {0}
+2026-09-27T17:07:36.2636043Z env:
+2026-09-27T17:07:36.2636205Z   CARGO_TERM_COLOR: always
+2026-09-27T17:07:36.2636722Z   DATABASE_URL: ***localhost:5432/medos_ci
+2026-09-27T17:07:36.2636956Z   CARGO_HOME: /home/runner/.cargo
+2026-09-27T17:07:36.2637144Z   CARGO_INCREMENTAL: 0
+2026-09-27T17:07:36.2637315Z   CACHE_ON_FAILURE: false
+2026-09-27T17:07:36.2637481Z ##[endgroup]
+2026-09-27T17:07:36.7824502Z ^[[1m^[[92m    Updating^[[0m crates.io index
+2026-09-27T17:07:37.4062002Z ^[[1m^[[92m     Locking^[[0m 354 packages to latest compatible versions
+2026-09-27T17:07:37.4078347Z ^[[1m^[[92m      Adding^[[0m argon2 v0.5.3 ^[[1m^[[33m(available: v0.6.0)^[[0m
+2026-09-27T17:07:37.4158561Z ^[[1m^[[92m      Adding^[[0m base64 v0.22.1 ^[[1m^[[33m(available: v0.23.1)^[[0m
+2026-09-27T17:07:37.4196229Z ^[[1m^[[92m      Adding^[[0m chacha20poly1305 v0.10.1 ^[[1m^[[33m(available: v0.11.0)^[[0m
+2026-09-27T17:07:37.4333631Z ^[[1m^[[92m      Adding^[[0m ed25519-dalek v2.2.0 ^[[1m^[[33m(available: v3.0.0)^[[0m
+2026-09-27T17:07:37.4411534Z ^[[1m^[[92m      Adding^[[0m generic-array v0.14.7 ^[[1m^[[33m(available: v0.14.9)^[[0m
+2026-09-27T17:07:37.4589538Z ^[[1m^[[92m      Adding^[[0m jsonwebtoken v9.3.1 ^[[1m^[[33m(available: v11.1.0)^[[0m
+2026-09-27T17:07:37.4608826Z ^[[1m^[[92m      Adding^[[0m matchit v0.8.4 ^[[1m^[[33m(available: v0.8.6)^[[0m
+2026-09-27T17:07:37.4765114Z ^[[1m^[[92m      Adding^[[0m rand v0.8.8 ^[[1m^[[33m(available: v0.10.3)^[[0m
+2026-09-27T17:07:37.4953032Z ^[[1m^[[92m      Adding^[[0m sha2 v0.10.9 ^[[1m^[[33m(available: v0.11.0)^[[0m
+2026-09-27T17:07:37.4988033Z ^[[1m^[[92m      Adding^[[0m sqlx v0.8.6 ^[[1m^[[33m(available: v0.9.0)^[[0m
+2026-09-27T17:07:37.5197924Z ^[[1m^[[92m      Adding^[[0m tower-http v0.6.11 ^[[1m^[[33m(available: v0.7.1)^[[0m
+2026-09-27T17:07:37.9280669Z ^[[1m^[[92m Downloading^[[0m crates ...
+2026-09-27T17:07:38.0834783Z ^[[1m^[[92m  Downloaded^[[0m serde_with_macros v3.24.0
+2026-09-27T17:07:38.0843985Z ^[[1m^[[92m  Downloaded^[[0m serde_with v3.24.0
+2026-09-27T17:07:38.2703463Z ^[[1m^[[92m   Compiling^[[0m serde_with_macros v3.24.0
+2026-09-27T17:07:38.2751135Z ^[[1m^[[92m    Checking^[[0m scheduler v0.1.0 (/home/runner/work/medicalos/medicalos/crates/scheduler)
+2026-09-27T17:07:38.2752005Z ^[[1m^[[92m    Checking^[[0m telemetry v0.1.0 (/home/runner/work/medicalos/medicalos/crates/telemetry)
+2026-09-27T17:07:38.2775088Z ^[[1m^[[92m    Checking^[[0m domain-contracts v0.1.0 (/home/runner/work/medicalos/medicalos/crates/domain-contracts)
+2026-09-27T17:07:41.1782023Z ^[[1m^[[92m    Checking^[[0m calc-engine v0.1.0 (/home/runner/work/medicalos/medicalos/crates/calc-engine)
+2026-09-27T17:07:41.3728430Z ^[[1m^[[92m    Checking^[[0m competition-scoring v0.1.0 (/home/runner/work/medicalos/medicalos/crates/competition-scoring)
+2026-09-27T17:07:43.4101690Z ^[[1m^[[92m    Checking^[[0m serde_with v3.24.0
+2026-09-27T17:07:44.3717817Z ^[[1m^[[92m    Checking^[[0m openidconnect v4.0.1
+2026-09-27T17:07:45.8632128Z ^[[1m^[[92m    Checking^[[0m api v0.1.0 (/home/runner/work/medicalos/medicalos/apps/api)
+2026-09-27T17:07:47.2255665Z ^[[1m^[[91merror^[[0m^[[1m: unused import: `Value`^[[0m
+2026-09-27T17:07:47.2256207Z  ^[[1m^[[94m--> ^[[0mapps/api/src/routes/concepts.rs:7:24
+2026-09-27T17:07:47.2256525Z   ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.2264599Z ^[[1m^[[94m7^[[0m ^[[1m^[[94m|^[[0m use serde_json::{json, Value};
+2026-09-27T17:07:47.2265099Z   ^[[1m^[[94m|^[[0m                        ^[[1m^[[91m^^^^^^[[0m
+2026-09-27T17:07:47.2265420Z   ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.2265780Z   ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: `-D unused-imports` implied by `-D warnings`
+2026-09-27T17:07:47.2266699Z   ^[[1m^[[94m= ^[[0m^[[1mhelp^[[0m: to override `-D warnings` add `#[allow(unused_imports)]`
+2026-09-27T17:07:47.2267002Z 
+2026-09-27T17:07:47.2739045Z ^[[1m^[[91merror^[[0m^[[1m: unused import: `serde_json::json`^[[0m
+2026-09-27T17:07:47.2739896Z   ^[[1m^[[94m--> ^[[0mapps/api/src/routes/review.rs:10:5
+2026-09-27T17:07:47.2740314Z    ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.2741216Z ^[[1m^[[94m10^[[0m ^[[1m^[[94m|^[[0m use serde_json::json;
+2026-09-27T17:07:47.2741594Z    ^[[1m^[[94m|^[[0m     ^[[1m^[[91m^^^^^^^^^^^^^^^^^[[0m
+2026-09-27T17:07:47.2741810Z 
+2026-09-27T17:07:47.9633588Z ^[[1m^[[91merror[E0119]^[[0m^[[1m: conflicting implementations of trait `sqlx::FromRow<'_, _>` for type `routes::library::PrivateDocumentSummary`^[[0m
+2026-09-27T17:07:47.9634303Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/library.rs:1188:36
+2026-09-27T17:07:47.9634620Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.9635009Z ^[[1m^[[94m1188^[[0m ^[[1m^[[94m|^[[0m #[derive(sqlx::FromRow, Serialize, sqlx::FromRow)]
+2026-09-27T17:07:47.9635653Z      ^[[1m^[[94m|^[[0m          ^[[1m^[[94m-------------^[[0m             ^[[1m^[[91m^^^^^^^^^^^^^^[[0m ^[[1m^[[91mconflicting implementation for `routes::library::PrivateDocumentSummary`^[[0m
+2026-09-27T17:07:47.9636075Z      ^[[1m^[[94m|^[[0m          ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.9636337Z      ^[[1m^[[94m|^[[0m          ^[[1m^[[94mfirst implementation here^[[0m
+2026-09-27T17:07:47.9636572Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:47.9637209Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: this error originates in the derive macro `sqlx::FromRow` (in Nightly builds, run with -Z macro-backtrace for more info)
+2026-09-27T17:07:47.9637663Z 
+2026-09-27T17:07:50.3293022Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:50.3293548Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/insights.rs:341:13
+2026-09-27T17:07:50.3293796Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.3294058Z ^[[1m^[[94m341^[[0m ^[[1m^[[94m|^[[0m       Ok(Json(MasteryHeatmapResponse {
+2026-09-27T17:07:50.3294390Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m ________^[[0m^[[1m^[[94m----^[[0m^[[1m^[[91m_^^[[0m
+2026-09-27T17:07:50.3294717Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m        ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.3295037Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m        ^[[1m^[[94marguments to this struct are incorrect^[[0m
+2026-09-27T17:07:50.3295368Z ^[[1m^[[94m342^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         systems,
+2026-09-27T17:07:50.3295700Z ^[[1m^[[94m343^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         bands: MasteryHeatmapBands {
+2026-09-27T17:07:50.3296053Z ^[[1m^[[94m344^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m             weak_below: weak_at,
+2026-09-27T17:07:50.3296356Z ^[[1m^[[94m345^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m             strong_at,
+2026-09-27T17:07:50.3296628Z ^[[1m^[[94m346^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         },
+2026-09-27T17:07:50.3296889Z ^[[1m^[[94m347^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m     }))
+2026-09-27T17:07:50.3297230Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|_____^^[[0m ^[[1m^[[91mexpected `Value`, found `MasteryHeatmapResponse`^[[0m
+2026-09-27T17:07:50.3297524Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.3298125Z ^[[1m^[[96mhelp^[[0m: the type constructed contains `routes::insights::MasteryHeatmapResponse` due to the type of the argument passed
+2026-09-27T17:07:50.3298573Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/insights.rs:341:8
+2026-09-27T17:07:50.3298804Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.3299045Z ^[[1m^[[94m341^[[0m ^[[1m^[[94m|^[[0m        Ok(Json(MasteryHeatmapResponse {
+2026-09-27T17:07:50.3299341Z     ^[[1m^[[94m|^[[0m  ^[[1m^[[96m ________^^[[0m    ^[[1m^[[94m-^[[0m
+2026-09-27T17:07:50.3299643Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m ^[[0m^[[1m^[[96m|^[[0m^[[1m^[[94m_____________|^[[0m
+2026-09-27T17:07:50.3299957Z ^[[1m^[[94m342^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         systems,
+2026-09-27T17:07:50.3300361Z ^[[1m^[[94m343^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         bands: MasteryHeatmapBands {
+2026-09-27T17:07:50.3300739Z ^[[1m^[[94m344^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m             weak_below: weak_at,
+2026-09-27T17:07:50.3301088Z ^[[1m^[[94m345^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m             strong_at,
+2026-09-27T17:07:50.3301633Z ^[[1m^[[94m346^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         },
+2026-09-27T17:07:50.3301930Z ^[[1m^[[94m347^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m     }))
+2026-09-27T17:07:50.3302233Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|_____^[[0m^[[1m^[[94m-^[[0m^[[1m^[[96m^^[[0m
+2026-09-27T17:07:50.3302623Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m|______|^[[0m
+2026-09-27T17:07:50.3303015Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[94mthis argument influences the type of `Json`^[[0m
+2026-09-27T17:07:50.3303295Z ^[[1m^[[92mnote^[[0m: tuple struct defined here
+2026-09-27T17:07:50.3303711Z    ^[[1m^[[94m--> ^[[0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/axum-0.8.9/src/json.rs:97:12
+2026-09-27T17:07:50.3304057Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.3304273Z ^[[1m^[[94m 97^[[0m ^[[1m^[[94m|^[[0m pub struct Json<T>(pub T);
+2026-09-27T17:07:50.3304526Z     ^[[1m^[[94m|^[[0m            ^[[1m^[[92m^^^^^[[0m
+2026-09-27T17:07:50.3304660Z 
+2026-09-27T17:07:50.4746893Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:50.4747487Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/integrity.rs:200:19
+2026-09-27T17:07:50.4747824Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.4748450Z ^[[1m^[[94m192^[[0m ^[[1m^[[94m|^[[0m         let Json(receipt) = crate::routes::practice::submit(
+2026-09-27T17:07:50.4749017Z     ^[[1m^[[94m|^[[0m                  ^[[1m^[[94m-------^[[0m ^[[1m^[[94mexpected due to the type of this binding^[[0m
+2026-09-27T17:07:50.4749438Z ^[[1m^[[94m...^[[0m
+2026-09-27T17:07:50.4749756Z ^[[1m^[[94m200^[[0m ^[[1m^[[94m|^[[0m         receipt = Some(receipt);
+2026-09-27T17:07:50.4750252Z     ^[[1m^[[94m|^[[0m                   ^[[1m^[[91m^^^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Value`, found `Option<Value>`^[[0m
+2026-09-27T17:07:50.4750669Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.4751017Z     ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected enum `serde_json::Value`
+2026-09-27T17:07:50.4751628Z                found enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0mserde_json::Value^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:50.4752384Z ^[[1m^[[96mhelp^[[0m: call `Into::into` on this expression to convert `std::option::Option<serde_json::Value>` into `serde_json::Value`
+2026-09-27T17:07:50.4753126Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.4753469Z ^[[1m^[[94m200^[[0m ^[[1m^[[94m| ^[[0m        receipt = Some(receipt)^[[92m.into()^[[0m;
+2026-09-27T17:07:50.4753850Z     ^[[1m^[[94m|^[[0m                                ^[[92m+++++++^[[0m
+2026-09-27T17:07:50.4754046Z 
+2026-09-27T17:07:50.9167722Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:50.9168452Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/notes.rs:239:51
+2026-09-27T17:07:50.9168881Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.9169790Z ^[[1m^[[94m 239^[[0m ^[[1m^[[94m|^[[0m                 backlinks: serde_json::from_value(r.backlinks).map_err(|_| ApiError::internal())?,
+2026-09-27T17:07:50.9170701Z      ^[[1m^[[94m|^[[0m                            ^[[1m^[[94m----------------------^[[0m ^[[1m^[[91m^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Value`, found `Option<Value>`^[[0m
+2026-09-27T17:07:50.9171329Z      ^[[1m^[[94m|^[[0m                            ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.9171894Z      ^[[1m^[[94m|^[[0m                            ^[[1m^[[94marguments to this function are incorrect^[[0m
+2026-09-27T17:07:50.9172359Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.9173052Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected enum `serde_json::Value`
+2026-09-27T17:07:50.9173727Z                 found enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0mserde_json::Value^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:50.9174353Z ^[[1m^[[92mnote^[[0m: function defined here
+2026-09-27T17:07:50.9175054Z     ^[[1m^[[94m--> ^[[0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/src/value/mod.rs:1037:8
+2026-09-27T17:07:50.9175644Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.9176070Z ^[[1m^[[94m1037^[[0m ^[[1m^[[94m|^[[0m pub fn from_value<T>(value: Value) -> Result<T, Error>
+2026-09-27T17:07:50.9176569Z      ^[[1m^[[94m|^[[0m        ^[[1m^[[92m^^^^^^^^^^^[[0m
+2026-09-27T17:07:50.9177409Z ^[[1m^[[96mhelp^[[0m: consider using `Option::expect` to unwrap the `std::option::Option<serde_json::Value>` value, panicking if the value is an `Option::None`
+2026-09-27T17:07:50.9178393Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:50.9179133Z ^[[1m^[[94m 239^[[0m ^[[1m^[[94m| ^[[0m                backlinks: serde_json::from_value(r.backlinks^[[92m.expect("REASON")^[[0m).map_err(|_| ApiError::internal())?,
+2026-09-27T17:07:50.9179921Z      ^[[1m^[[94m|^[[0m                                                              ^[[92m+++++++++++++++++^[[0m
+2026-09-27T17:07:50.9180383Z 
+2026-09-27T17:07:51.1798320Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.1798735Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/practice.rs:1074:22
+2026-09-27T17:07:51.1798990Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1799250Z ^[[1m^[[94m1074^[[0m ^[[1m^[[94m|^[[0m                 Some(it.correct_index)
+2026-09-27T17:07:51.1799681Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94m----^[[0m ^[[1m^[[91m^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `i16`, found `Option<i16>`^[[0m
+2026-09-27T17:07:51.1800026Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1800382Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94marguments to this enum variant are incorrect^[[0m
+2026-09-27T17:07:51.1800662Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1800916Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected type `^[[1m^[[35mi16^[[0m`
+2026-09-27T17:07:51.1801341Z                 found enum `^[[1m^[[35mstd::option::Option<i16>^[[0m`
+2026-09-27T17:07:51.1801861Z ^[[1m^[[96mhelp^[[0m: the type constructed contains `std::option::Option<i16>` due to the type of the argument passed
+2026-09-27T17:07:51.1802275Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/practice.rs:1074:17
+2026-09-27T17:07:51.1802660Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1802983Z ^[[1m^[[94m1074^[[0m ^[[1m^[[94m|^[[0m                 Some(it.correct_index)
+2026-09-27T17:07:51.1803408Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[96m^^^^^^[[0m^[[1m^[[94m----------------^[[0m^[[1m^[[96m^^[[0m
+2026-09-27T17:07:51.1803717Z      ^[[1m^[[94m|^[[0m                      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1804022Z      ^[[1m^[[94m|^[[0m                      ^[[1m^[[94mthis argument influences the type of `Some`^[[0m
+2026-09-27T17:07:51.1804327Z ^[[1m^[[92mnote^[[0m: tuple variant defined here
+2026-09-27T17:07:51.1804700Z     ^[[1m^[[94m--> ^[[0m/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/option.rs:606:4
+2026-09-27T17:07:51.1805289Z ^[[1m^[[96mhelp^[[0m: consider using `Option::expect` to unwrap the `std::option::Option<i16>` value, panicking if the value is an `Option::None`
+2026-09-27T17:07:51.1805678Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1805950Z ^[[1m^[[94m1074^[[0m ^[[1m^[[94m| ^[[0m                Some(it.correct_index^[[92m.expect("REASON")^[[0m)
+2026-09-27T17:07:51.1806285Z      ^[[1m^[[94m|^[[0m                                      ^[[92m+++++++++++++++++^[[0m
+2026-09-27T17:07:51.1806465Z 
+2026-09-27T17:07:51.1859871Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.1860494Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/practice.rs:1079:22
+2026-09-27T17:07:51.1861014Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1862037Z ^[[1m^[[94m1079^[[0m ^[[1m^[[94m|^[[0m                 Some(it.key_learning_point)
+2026-09-27T17:07:51.1862865Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94m----^[[0m ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `String`, found `Option<String>`^[[0m
+2026-09-27T17:07:51.1863363Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1863774Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[94marguments to this enum variant are incorrect^[[0m
+2026-09-27T17:07:51.1864202Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1864663Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected struct `std::string::String`
+2026-09-27T17:07:51.1865250Z                   found enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0mstd::string::String^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:51.1866007Z ^[[1m^[[96mhelp^[[0m: the type constructed contains `std::option::Option<std::string::String>` due to the type of the argument passed
+2026-09-27T17:07:51.1866583Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/practice.rs:1079:17
+2026-09-27T17:07:51.1867154Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1867507Z ^[[1m^[[94m1079^[[0m ^[[1m^[[94m|^[[0m                 Some(it.key_learning_point)
+2026-09-27T17:07:51.1868027Z      ^[[1m^[[94m|^[[0m                 ^[[1m^[[96m^^^^^^[[0m^[[1m^[[94m---------------------^[[0m^[[1m^[[96m^^[[0m
+2026-09-27T17:07:51.1868462Z      ^[[1m^[[94m|^[[0m                      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1868914Z      ^[[1m^[[94m|^[[0m                      ^[[1m^[[94mthis argument influences the type of `Some`^[[0m
+2026-09-27T17:07:51.1869458Z ^[[1m^[[92mnote^[[0m: tuple variant defined here
+2026-09-27T17:07:51.1870011Z     ^[[1m^[[94m--> ^[[0m/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/option.rs:606:4
+2026-09-27T17:07:51.1870926Z ^[[1m^[[96mhelp^[[0m: consider using `Option::expect` to unwrap the `std::option::Option<std::string::String>` value, panicking if the value is an `Option::None`
+2026-09-27T17:07:51.1871481Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.1871902Z ^[[1m^[[94m1079^[[0m ^[[1m^[[94m| ^[[0m                Some(it.key_learning_point^[[92m.expect("REASON")^[[0m)
+2026-09-27T17:07:51.1872456Z      ^[[1m^[[94m|^[[0m                                           ^[[92m+++++++++++++++++^[[0m
+2026-09-27T17:07:51.1872877Z 
+2026-09-27T17:07:51.6499595Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.6500375Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/program.rs:2420:24
+2026-09-27T17:07:51.6500836Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6501373Z ^[[1m^[[94m2420^[[0m ^[[1m^[[94m|^[[0m             entity_id: r.entity_id,
+2026-09-27T17:07:51.6502031Z      ^[[1m^[[94m|^[[0m                        ^[[1m^[[91m^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Uuid`, found `Option<Uuid>`^[[0m
+2026-09-27T17:07:51.6502739Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6503459Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected struct `uuid::Uuid`
+2026-09-27T17:07:51.6504036Z                   found enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0muuid::Uuid^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:51.6504906Z ^[[1m^[[96mhelp^[[0m: consider using `Option::expect` to unwrap the `std::option::Option<uuid::Uuid>` value, panicking if the value is an `Option::None`
+2026-09-27T17:07:51.6505521Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6505915Z ^[[1m^[[94m2420^[[0m ^[[1m^[[94m| ^[[0m            entity_id: r.entity_id^[[92m.expect("REASON")^[[0m,
+2026-09-27T17:07:51.6506380Z      ^[[1m^[[94m|^[[0m                                   ^[[92m+++++++++++++++++^[[0m
+2026-09-27T17:07:51.6506614Z 
+2026-09-27T17:07:51.6506792Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.6507183Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/program.rs:2421:24
+2026-09-27T17:07:51.6507665Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6508003Z ^[[1m^[[94m2421^[[0m ^[[1m^[[94m|^[[0m             new_value: r.new_value,
+2026-09-27T17:07:51.6508538Z      ^[[1m^[[94m|^[[0m                        ^[[1m^[[91m^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Value`, found `Option<Value>`^[[0m
+2026-09-27T17:07:51.6509090Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6509718Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected enum `serde_json::Value`
+2026-09-27T17:07:51.6510308Z                 found enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0mserde_json::Value^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:51.6511156Z ^[[1m^[[96mhelp^[[0m: consider using `Option::expect` to unwrap the `std::option::Option<serde_json::Value>` value, panicking if the value is an `Option::None`
+2026-09-27T17:07:51.6511759Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6512184Z ^[[1m^[[94m2421^[[0m ^[[1m^[[94m| ^[[0m            new_value: r.new_value^[[92m.expect("REASON")^[[0m,
+2026-09-27T17:07:51.6512916Z      ^[[1m^[[94m|^[[0m                                   ^[[92m+++++++++++++++++^[[0m
+2026-09-27T17:07:51.6513141Z 
+2026-09-27T17:07:51.6586577Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.6587108Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/program.rs:2498:26
+2026-09-27T17:07:51.6587450Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6587782Z ^[[1m^[[94m2498^[[0m ^[[1m^[[94m|^[[0m                 chapter: r.chapter,
+2026-09-27T17:07:51.6588330Z      ^[[1m^[[94m|^[[0m                          ^[[1m^[[91m^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Option<String>`, found `String`^[[0m
+2026-09-27T17:07:51.6589087Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6589733Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected enum `^[[1m^[[35mstd::option::Option^[[0m^[[1m^[[35m<^[[0mstd::string::String^[[1m^[[35m>^[[0m`
+2026-09-27T17:07:51.6590224Z               found struct `std::string::String`
+2026-09-27T17:07:51.6590604Z ^[[1m^[[96mhelp^[[0m: try wrapping the expression in `Some`
+2026-09-27T17:07:51.6591047Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.6591420Z ^[[1m^[[94m2498^[[0m ^[[1m^[[94m| ^[[0m                chapter: ^[[92mSome(^[[0mr.chapter^[[92m)^[[0m,
+2026-09-27T17:07:51.6591861Z      ^[[1m^[[94m|^[[0m                          ^[[92m+++++^[[0m         ^[[92m+^[[0m
+2026-09-27T17:07:51.6592093Z 
+2026-09-27T17:07:51.9132966Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.9133524Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/review.rs:102:13
+2026-09-27T17:07:51.9133895Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9134284Z ^[[1m^[[94m102^[[0m ^[[1m^[[94m|^[[0m     Ok(Json(CreateDeckResponse { deck_id }))
+2026-09-27T17:07:51.9135266Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[94m----^[[0m ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `Value`, found `CreateDeckResponse`^[[0m
+2026-09-27T17:07:51.9135870Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9136341Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[94marguments to this struct are incorrect^[[0m
+2026-09-27T17:07:51.9136811Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9137855Z ^[[1m^[[96mhelp^[[0m: the type constructed contains `routes::review::CreateDeckResponse` due to the type of the argument passed
+2026-09-27T17:07:51.9138570Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/review.rs:102:8
+2026-09-27T17:07:51.9143563Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9144073Z ^[[1m^[[94m102^[[0m ^[[1m^[[94m|^[[0m     Ok(Json(CreateDeckResponse { deck_id }))
+2026-09-27T17:07:51.9144811Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[96m^^^^^^[[0m^[[1m^[[94m------------------------------^[[0m^[[1m^[[96m^^[[0m
+2026-09-27T17:07:51.9145346Z     ^[[1m^[[94m|^[[0m             ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9145988Z     ^[[1m^[[94m|^[[0m             ^[[1m^[[94mthis argument influences the type of `Json`^[[0m
+2026-09-27T17:07:51.9146536Z ^[[1m^[[92mnote^[[0m: tuple struct defined here
+2026-09-27T17:07:51.9147296Z    ^[[1m^[[94m--> ^[[0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/axum-0.8.9/src/json.rs:97:12
+2026-09-27T17:07:51.9147880Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9148399Z ^[[1m^[[94m 97^[[0m ^[[1m^[[94m|^[[0m pub struct Json<T>(pub T);
+2026-09-27T17:07:51.9148876Z     ^[[1m^[[94m|^[[0m            ^[[1m^[[92m^^^^^[[0m
+2026-09-27T17:07:51.9149301Z 
+2026-09-27T17:07:51.9247019Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:51.9247568Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/review.rs:252:13
+2026-09-27T17:07:51.9247939Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9248313Z ^[[1m^[[94m252^[[0m ^[[1m^[[94m|^[[0m       Ok(Json(AddCardResponse {
+2026-09-27T17:07:51.9248792Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m ________^[[0m^[[1m^[[94m----^[[0m^[[1m^[[91m_^^[[0m
+2026-09-27T17:07:51.9249307Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m        ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9249783Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m        ^[[1m^[[94marguments to this struct are incorrect^[[0m
+2026-09-27T17:07:51.9250271Z ^[[1m^[[94m253^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         card_id,
+2026-09-27T17:07:51.9250742Z ^[[1m^[[94m254^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         due: None,
+2026-09-27T17:07:51.9251266Z ^[[1m^[[94m255^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         state: "new".to_owned(),
+2026-09-27T17:07:51.9251795Z ^[[1m^[[94m256^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         card_type,
+2026-09-27T17:07:51.9252259Z ^[[1m^[[94m257^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m         trust,
+2026-09-27T17:07:51.9252872Z ^[[1m^[[94m258^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[91m|^[[0m     }))
+2026-09-27T17:07:51.9253419Z     ^[[1m^[[94m|^[[0m ^[[1m^[[91m|_____^^[[0m ^[[1m^[[91mexpected `Value`, found `AddCardResponse`^[[0m
+2026-09-27T17:07:51.9253883Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9254652Z ^[[1m^[[96mhelp^[[0m: the type constructed contains `routes::review::AddCardResponse` due to the type of the argument passed
+2026-09-27T17:07:51.9255644Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/review.rs:252:8
+2026-09-27T17:07:51.9256049Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9256395Z ^[[1m^[[94m252^[[0m ^[[1m^[[94m|^[[0m        Ok(Json(AddCardResponse {
+2026-09-27T17:07:51.9256816Z     ^[[1m^[[94m|^[[0m  ^[[1m^[[96m ________^^[[0m    ^[[1m^[[94m-^[[0m
+2026-09-27T17:07:51.9257352Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m ^[[0m^[[1m^[[96m|^[[0m^[[1m^[[94m_____________|^[[0m
+2026-09-27T17:07:51.9258087Z ^[[1m^[[94m253^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         card_id,
+2026-09-27T17:07:51.9258566Z ^[[1m^[[94m254^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         due: None,
+2026-09-27T17:07:51.9259079Z ^[[1m^[[94m255^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         state: "new".to_owned(),
+2026-09-27T17:07:51.9259628Z ^[[1m^[[94m256^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         card_type,
+2026-09-27T17:07:51.9260128Z ^[[1m^[[94m257^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m         trust,
+2026-09-27T17:07:51.9260601Z ^[[1m^[[94m258^[[0m ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|^[[0m     }))
+2026-09-27T17:07:51.9261102Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m|^[[0m^[[1m^[[96m|_____^[[0m^[[1m^[[94m-^[[0m^[[1m^[[96m^^[[0m
+2026-09-27T17:07:51.9261530Z     ^[[1m^[[94m|^[[0m ^[[1m^[[94m|______|^[[0m
+2026-09-27T17:07:51.9261980Z     ^[[1m^[[94m|^[[0m        ^[[1m^[[94mthis argument influences the type of `Json`^[[0m
+2026-09-27T17:07:51.9262656Z ^[[1m^[[92mnote^[[0m: tuple struct defined here
+2026-09-27T17:07:51.9263322Z    ^[[1m^[[94m--> ^[[0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/axum-0.8.9/src/json.rs:97:12
+2026-09-27T17:07:51.9263910Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:51.9264246Z ^[[1m^[[94m 97^[[0m ^[[1m^[[94m|^[[0m pub struct Json<T>(pub T);
+2026-09-27T17:07:51.9264664Z     ^[[1m^[[94m|^[[0m            ^[[1m^[[92m^^^^^[[0m
+2026-09-27T17:07:51.9264874Z 
+2026-09-27T17:07:52.3677758Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+2026-09-27T17:07:52.3678282Z    ^[[1m^[[94m--> ^[[0mapps/api/src/routes/today.rs:533:9
+2026-09-27T17:07:52.3678638Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.3678959Z ^[[1m^[[94m533^[[0m ^[[1m^[[94m|^[[0m         adjusted_estimated_minutes,
+2026-09-27T17:07:52.3679467Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91mexpected `i32`, found `&i32`^[[0m
+2026-09-27T17:07:52.3679841Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.3680127Z ^[[1m^[[96mhelp^[[0m: consider dereferencing the borrow
+2026-09-27T17:07:52.3680445Z     ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.3680866Z ^[[1m^[[94m533^[[0m ^[[1m^[[94m| ^[[0m        ^[[92madjusted_estimated_minutes: *^[[0madjusted_estimated_minutes,
+2026-09-27T17:07:52.3681333Z     ^[[1m^[[94m|^[[0m         ^[[92m+++++++++++++++++++++++++++++^[[0m
+2026-09-27T17:07:52.3681534Z 
+2026-09-27T17:07:52.7421227Z ^[[1m^[[91merror[E0277]^[[0m^[[1m: the trait bound `routes::engagement::CompetitionInProgressResponse: serde::Deserialize<'de>` is not satisfied^[[0m
+2026-09-27T17:07:52.7422125Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1544:16
+2026-09-27T17:07:52.7422661Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7423114Z ^[[1m^[[94m1544^[[0m ^[[1m^[[94m|^[[0m     InProgress(CompetitionInProgressResponse),
+2026-09-27T17:07:52.7423642Z      ^[[1m^[[94m|^[[0m                ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91munsatisfied trait bound^[[0m
+2026-09-27T17:07:52.7424067Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7424797Z ^[[1m^[[96mhelp^[[0m: the trait `seed::_::_serde::Deserialize<'_>` is not implemented for `routes::engagement::CompetitionInProgressResponse`
+2026-09-27T17:07:52.7425523Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1505:1
+2026-09-27T17:07:52.7425899Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7426285Z ^[[1m^[[94m1505^[[0m ^[[1m^[[94m|^[[0m pub struct CompetitionInProgressResponse {
+2026-09-27T17:07:52.7426753Z      ^[[1m^[[94m|^[[0m ^[[1m^[[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m
+2026-09-27T17:07:52.7427611Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for local types consider adding `#[derive(serde::Deserialize)]` to your `routes::engagement::CompetitionInProgressResponse` type
+2026-09-27T17:07:52.7428794Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for types from other crates check whether the crate offers a `serde` feature flag
+2026-09-27T17:07:52.7429612Z      ^[[1m^[[94m= ^[[0m^[[1mhelp^[[0m: the following other types implement trait `seed::_::_serde::Deserialize<'de>`:
+2026-09-27T17:07:52.7430124Z                &'a [u8]
+2026-09-27T17:07:52.7430436Z                &'a serde_json::value::RawValue
+2026-09-27T17:07:52.7430892Z                &'a std::path::Path
+2026-09-27T17:07:52.7431219Z                &'a str
+2026-09-27T17:07:52.7431486Z                ()
+2026-09-27T17:07:52.7431719Z                (T,)
+2026-09-27T17:07:52.7431984Z                (T0, T1)
+2026-09-27T17:07:52.7432273Z                (T0, T1, T2)
+2026-09-27T17:07:52.7432700Z              and 453 others
+2026-09-27T17:07:52.7433613Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: the full name for the type has been written to '/home/runner/work/medicalos/medicalos/target/debug/deps/api-fe41acffa3c63f21.long-type-12674589299761105113.txt'
+2026-09-27T17:07:52.7434626Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: consider using `--verbose` to print the full type name to the console
+2026-09-27T17:07:52.7435006Z 
+2026-09-27T17:07:52.7435855Z ^[[1m^[[91merror[E0277]^[[0m^[[1m: the trait bound `routes::engagement::CompetitionInProgressResponse: serde::Deserialize<'de>` is not satisfied^[[0m
+2026-09-27T17:07:52.7436537Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1544:16
+2026-09-27T17:07:52.7436857Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7437201Z ^[[1m^[[94m1544^[[0m ^[[1m^[[94m|^[[0m     InProgress(CompetitionInProgressResponse),
+2026-09-27T17:07:52.7437721Z      ^[[1m^[[94m|^[[0m                ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91munsatisfied trait bound^[[0m
+2026-09-27T17:07:52.7438119Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7438875Z ^[[1m^[[96mhelp^[[0m: the trait `seed::_::_serde::Deserialize<'_>` is not implemented for `routes::engagement::CompetitionInProgressResponse`
+2026-09-27T17:07:52.7439548Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1505:1
+2026-09-27T17:07:52.7439887Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7440245Z ^[[1m^[[94m1505^[[0m ^[[1m^[[94m|^[[0m pub struct CompetitionInProgressResponse {
+2026-09-27T17:07:52.7440722Z      ^[[1m^[[94m|^[[0m ^[[1m^[[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m
+2026-09-27T17:07:52.7441590Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for local types consider adding `#[derive(serde::Deserialize)]` to your `routes::engagement::CompetitionInProgressResponse` type
+2026-09-27T17:07:52.7442655Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for types from other crates check whether the crate offers a `serde` feature flag
+2026-09-27T17:07:52.7443480Z      ^[[1m^[[94m= ^[[0m^[[1mhelp^[[0m: the following other types implement trait `seed::_::_serde::Deserialize<'de>`:
+2026-09-27T17:07:52.7443957Z                &'a [u8]
+2026-09-27T17:07:52.7444211Z                &'a serde_json::value::RawValue
+2026-09-27T17:07:52.7444514Z                &'a std::path::Path
+2026-09-27T17:07:52.7444765Z                &'a str
+2026-09-27T17:07:52.7444988Z                ()
+2026-09-27T17:07:52.7445200Z                (T,)
+2026-09-27T17:07:52.7445407Z                (T0, T1)
+2026-09-27T17:07:52.7445627Z                (T0, T1, T2)
+2026-09-27T17:07:52.7445864Z              and 453 others
+2026-09-27T17:07:52.7446749Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: the full name for the type has been written to '/home/runner/work/medicalos/medicalos/target/debug/deps/api-bf3af718dc785e77.long-type-11658391416420038207.txt'
+2026-09-27T17:07:52.7447750Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: consider using `--verbose` to print the full type name to the console
+2026-09-27T17:07:52.7448109Z 
+2026-09-27T17:07:52.7487573Z ^[[1m^[[91merror[E0277]^[[0m^[[1m: the trait bound `routes::engagement::CompetitionSubmittedResponse: serde::Deserialize<'de>` is not satisfied^[[0m
+2026-09-27T17:07:52.7488365Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1545:15
+2026-09-27T17:07:52.7488723Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7489142Z ^[[1m^[[94m1545^[[0m ^[[1m^[[94m|^[[0m     Submitted(CompetitionSubmittedResponse),
+2026-09-27T17:07:52.7489967Z      ^[[1m^[[94m|^[[0m               ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91munsatisfied trait bound^[[0m
+2026-09-27T17:07:52.7490372Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7491024Z ^[[1m^[[96mhelp^[[0m: the trait `seed::_::_serde::Deserialize<'_>` is not implemented for `routes::engagement::CompetitionSubmittedResponse`
+2026-09-27T17:07:52.7491694Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1522:1
+2026-09-27T17:07:52.7492162Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7492693Z ^[[1m^[[94m1522^[[0m ^[[1m^[[94m|^[[0m pub struct CompetitionSubmittedResponse {
+2026-09-27T17:07:52.7493174Z      ^[[1m^[[94m|^[[0m ^[[1m^[[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m
+2026-09-27T17:07:52.7493960Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for local types consider adding `#[derive(serde::Deserialize)]` to your `routes::engagement::CompetitionSubmittedResponse` type
+2026-09-27T17:07:52.7494841Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for types from other crates check whether the crate offers a `serde` feature flag
+2026-09-27T17:07:52.7495612Z      ^[[1m^[[94m= ^[[0m^[[1mhelp^[[0m: the following other types implement trait `seed::_::_serde::Deserialize<'de>`:
+2026-09-27T17:07:52.7496059Z                &'a [u8]
+2026-09-27T17:07:52.7496313Z                &'a serde_json::value::RawValue
+2026-09-27T17:07:52.7496594Z                &'a std::path::Path
+2026-09-27T17:07:52.7496838Z                &'a str
+2026-09-27T17:07:52.7497042Z                ()
+2026-09-27T17:07:52.7497239Z                (T,)
+2026-09-27T17:07:52.7497433Z                (T0, T1)
+2026-09-27T17:07:52.7497653Z                (T0, T1, T2)
+2026-09-27T17:07:52.7497918Z              and 453 others
+2026-09-27T17:07:52.7498734Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: the full name for the type has been written to '/home/runner/work/medicalos/medicalos/target/debug/deps/api-fe41acffa3c63f21.long-type-12674589299761105113.txt'
+2026-09-27T17:07:52.7499689Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: consider using `--verbose` to print the full type name to the console
+2026-09-27T17:07:52.7500039Z 
+2026-09-27T17:07:52.7500567Z ^[[1m^[[91merror[E0277]^[[0m^[[1m: the trait bound `routes::engagement::CompetitionSubmittedResponse: serde::Deserialize<'de>` is not satisfied^[[0m
+2026-09-27T17:07:52.7501256Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1545:15
+2026-09-27T17:07:52.7501609Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7501975Z ^[[1m^[[94m1545^[[0m ^[[1m^[[94m|^[[0m     Submitted(CompetitionSubmittedResponse),
+2026-09-27T17:07:52.7502705Z      ^[[1m^[[94m|^[[0m               ^[[1m^[[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m ^[[1m^[[91munsatisfied trait bound^[[0m
+2026-09-27T17:07:52.7503116Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7503745Z ^[[1m^[[96mhelp^[[0m: the trait `seed::_::_serde::Deserialize<'_>` is not implemented for `routes::engagement::CompetitionSubmittedResponse`
+2026-09-27T17:07:52.7504392Z     ^[[1m^[[94m--> ^[[0mapps/api/src/routes/engagement.rs:1522:1
+2026-09-27T17:07:52.7504712Z      ^[[1m^[[94m|^[[0m
+2026-09-27T17:07:52.7505021Z ^[[1m^[[94m1522^[[0m ^[[1m^[[94m|^[[0m pub struct CompetitionSubmittedResponse {
+2026-09-27T17:07:52.7505479Z      ^[[1m^[[94m|^[[0m ^[[1m^[[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[[0m
+2026-09-27T17:07:52.7506241Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for local types consider adding `#[derive(serde::Deserialize)]` to your `routes::engagement::CompetitionSubmittedResponse` type
+2026-09-27T17:07:52.7507096Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: for types from other crates check whether the crate offers a `serde` feature flag
+2026-09-27T17:07:52.7507905Z      ^[[1m^[[94m= ^[[0m^[[1mhelp^[[0m: the following other types implement trait `seed::_::_serde::Deserialize<'de>`:
+2026-09-27T17:07:52.7508369Z                &'a [u8]
+2026-09-27T17:07:52.7508630Z                &'a serde_json::value::RawValue
+2026-09-27T17:07:52.7508918Z                &'a std::path::Path
+2026-09-27T17:07:52.7509181Z                &'a str
+2026-09-27T17:07:52.7509399Z                ()
+2026-09-27T17:07:52.7509636Z                (T,)
+2026-09-27T17:07:52.7509835Z                (T0, T1)
+2026-09-27T17:07:52.7510270Z                (T0, T1, T2)
+2026-09-27T17:07:52.7510479Z              and 453 others
+2026-09-27T17:07:52.7511305Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: the full name for the type has been written to '/home/runner/work/medicalos/medicalos/target/debug/deps/api-bf3af718dc785e77.long-type-11658391416420038207.txt'
+2026-09-27T17:07:52.7512236Z      ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: consider using `--verbose` to print the full type name to the console
+2026-09-27T17:07:52.7512840Z 
+2026-09-27T17:07:55.0052891Z ^[[1mSome errors have detailed explanations: E0119, E0277, E0308.^[[0m
+2026-09-27T17:07:55.0053479Z ^[[1mFor more information about an error, try `rustc --explain E0119`.^[[0m
+2026-09-27T17:07:55.1238233Z ^[[1m^[[91merror^[[0m: could not compile `api` (lib test) due to 16 previous errors
+2026-09-27T17:07:55.1239638Z ^[[1m^[[33mwarning^[[0m: build failed, waiting for other jobs to finish...
+2026-09-27T17:07:55.1249036Z ^[[1m^[[91merror^[[0m: could not compile `api` (lib) due to 16 previous errors
+2026-09-27T17:07:55.2037738Z ##[error]Process completed with exit code 101.

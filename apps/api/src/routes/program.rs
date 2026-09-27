@@ -451,8 +451,8 @@ pub struct ProgramCurriculumCoverageResponse {
 pub struct InstitutionAuditEvent {
     pub action: String,
     pub entity: String,
-    pub entity_id: Uuid,
-    pub new_value: serde_json::Value,
+    pub entity_id: Option<Uuid>,
+    pub new_value: Option<serde_json::Value>,
     pub at: DateTime<Utc>,
 }
 
@@ -2495,7 +2495,7 @@ pub async fn institution_analytics(
                 0.0
             };
             InstitutionAnalyticsChapter {
-                chapter: r.chapter,
+                chapter: Some(r.chapter),
                 attempts: r.attempts,
                 correct: r.correct,
                 accuracy,
