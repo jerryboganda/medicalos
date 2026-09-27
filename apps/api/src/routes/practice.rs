@@ -2034,7 +2034,7 @@ pub async fn submit(
         applied_completion = updated.rows_affected() > 0;
     }
     if applied_completion {
-        enroll_missed_questions_in_retest_queue(&mut *tx, user.user_id, sid).await?;
+        enroll_missed_questions_in_retest_queue(&mut tx, user.user_id, sid).await?;
         agent::mark_linked_task_done_on(&mut tx, user.user_id, plan_task_key).await?;
     }
     tx.commit().await?;
