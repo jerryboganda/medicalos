@@ -26,3 +26,4 @@ Cargo.lock
 test-results/
 playwright-report/
 _ci*.log
+.freebuff/
