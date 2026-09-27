@@ -782,9 +782,10 @@ pub async fn answer_qotd(
 fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
+    Option<T>: Deserialize<'de>,
 {
-    T::deserialize(deserializer).map(Some)
+    // Absent and explicit null both mean "not given"; only a real value maps to Some.
+    Option::<T>::deserialize(deserializer)
 }
 
 #[derive(Deserialize)]
@@ -1524,7 +1525,7 @@ pub struct CompetitionSubmittedResponse {
     #[cfg_attr(feature = "type-export", ts(type = "true"))]
     pub submitted: bool,
     pub entry_id: Uuid,
-    pub score: i64,
+    pub score: f64,
     pub questions: i64,
     pub total_time_ms: i64,
 }

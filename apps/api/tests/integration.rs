@@ -1023,7 +1023,23 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
-    assert_json_keys(&session, &["session_id", "items", "per_question_seconds"]);
+    assert_json_keys(
+        &session,
+        &[
+            "session_id",
+            "user_id",
+            "preset",
+            "chapter_id",
+            "source_session_id",
+            "status",
+            "mock_id",
+            "time_limit_seconds",
+            "per_question_seconds",
+            "deadline",
+            "server_now",
+            "items",
+        ],
+    );
     let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
     let session_items = session["items"].as_array().unwrap();
     assert_eq!(session_items.len(), task_question_count as usize);
@@ -3378,6 +3394,16 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     .await;
     assert_eq!(status, StatusCode::OK, "{started}");
     let sid: Uuid = started["session_id"].as_str().unwrap().parse().unwrap();
+    // The blueprint freezes its two questions in random order — locate them.
+    let form_items = started["items"].as_array().unwrap();
+    let glorbin_idx: i16 = form_items
+        .iter()
+        .position(|i| i["lead_in"] == "What happens to hormone Z secretion as glorbin rises?")
+        .expect("glorbin question in form") as i16;
+    let storage_idx: i16 = form_items
+        .iter()
+        .position(|i| i["lead_in"] == "Which step of the fictional pathway is defective?")
+        .expect("storage question in form") as i16;
 
     // §11.3 trust gate: the answer response must NOT leak correctness.
     let (status, ans) = call(
@@ -3386,8 +3412,10 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 0, "chosen_index": 1,
-                                   "confidence": "sure", "idempotency_key": "mock-key-1"})),
+            Some(
+                serde_json::json!({"item_index": glorbin_idx, "chosen_index": 1,
+                                   "confidence": "sure", "idempotency_key": "mock-key-1"}),
+            ),
         ),
     )
     .await;
@@ -3410,7 +3438,12 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{open_detail}");
-    let open_item = &open_detail["items"][0];
+    let open_item = open_detail["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["item_index"] == glorbin_idx)
+        .expect("glorbin item in open detail");
     assert_eq!(open_item["answered"], true);
     assert_eq!(open_item["correct"], Value::Null);
     assert_eq!(open_item["correct_index"], Value::Null);
@@ -3428,8 +3461,10 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 0, "chosen_index": 1,
-                                   "confidence": "sure", "idempotency_key": "mock-key-1"})),
+            Some(
+                serde_json::json!({"item_index": glorbin_idx, "chosen_index": 1,
+                                   "confidence": "sure", "idempotency_key": "mock-key-1"}),
+            ),
         ),
     )
     .await;
@@ -3445,7 +3480,7 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
             Some(serde_json::json!({
-                "item_index": 0,
+                "item_index": glorbin_idx,
                 "chosen_index": 0,
                 "confidence": "sure",
                 "assisted": false,
@@ -3457,15 +3492,17 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     assert_eq!(status, StatusCode::OK, "{corrected}");
     assert_eq!(corrected["answer_changed"], true);
 
-    // Item 2: answer A as well -> exactly 1 correct of 2 = 50% = pass.
+    // Storage question: answer A as well -> exactly 1 correct of 2 = 50% = pass.
     let (status, _) = call(
         app.clone(),
         request(
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 1, "chosen_index": 0,
-                                   "idempotency_key": "mock-key-2"})),
+            Some(
+                serde_json::json!({"item_index": storage_idx, "chosen_index": 0,
+                                   "idempotency_key": "mock-key-2"}),
+            ),
         ),
     )
     .await;
@@ -3496,7 +3533,12 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     .await;
     assert_eq!(status, StatusCode::OK, "{submitted_detail}");
     assert_eq!(submitted_detail["status"], "submitted");
-    let submitted_item = &submitted_detail["items"][0];
+    let submitted_item = submitted_detail["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["item_index"] == glorbin_idx)
+        .expect("glorbin item in submitted detail");
     assert_eq!(submitted_item["correct"], true);
     assert!(submitted_item["correct_index"].is_i64());
     assert!(submitted_item["key_learning_point"].is_string());
@@ -3507,9 +3549,10 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
         assert_json_keys(option, &["text", "rationale"]);
     }
     let question_version_id: Uuid = sqlx::query_scalar(
-        "SELECT question_version_id FROM session_items WHERE session_id = $1 AND item_index = 0",
+        "SELECT question_version_id FROM session_items WHERE session_id = $1 AND item_index = $2",
     )
     .bind(sid)
+    .bind(glorbin_idx)
     .fetch_one(&state.pool)
     .await
     .expect("mock item question version");
