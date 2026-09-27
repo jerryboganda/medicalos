@@ -328,10 +328,7 @@ pub async fn mastery_heatmap(
             recent_answered,
             recent_correct,
         };
-        if let Some(sys) = systems
-            .iter_mut()
-            .find(|s| s.system_id == r.system_id)
-        {
+        if let Some(sys) = systems.iter_mut().find(|s| s.system_id == r.system_id) {
             sys.chapters.push(entry);
         } else {
             systems.push(MasteryHeatmapSystem {

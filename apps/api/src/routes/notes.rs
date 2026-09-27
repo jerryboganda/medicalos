@@ -18,11 +18,7 @@ use crate::state::AppState;
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "notes/NoteRequest.ts",
-        rename = "NoteRequest"
-    )
+    ts(export, export_to = "notes/NoteRequest.ts", rename = "NoteRequest")
 )]
 pub struct NoteReq {
     #[cfg_attr(feature = "type-export", ts(optional = nullable))]
@@ -42,11 +38,7 @@ pub struct NoteReq {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "notes/NoteBacklink.ts",
-        rename = "NoteBacklink"
-    )
+    ts(export, export_to = "notes/NoteBacklink.ts", rename = "NoteBacklink")
 )]
 pub struct NoteBacklink {
     note_id: Uuid,
@@ -244,8 +236,7 @@ pub async fn list_notes(
                 body: r.body,
                 source_question_version_id: r.source_question_version_id,
                 updated_at: r.updated_at,
-                backlinks: serde_json::from_value(r.backlinks)
-                    .map_err(|_| ApiError::internal())?,
+                backlinks: serde_json::from_value(r.backlinks).map_err(|_| ApiError::internal())?,
             })
         })
         .collect::<ApiResult<Vec<_>>>()?;

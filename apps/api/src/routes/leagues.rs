@@ -17,14 +17,30 @@ const COHORT_SIZE: i64 = 30;
 const PROMOTION_SIZE: usize = 3;
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeagueNotJoined.ts", rename = "CompetitionLeagueNotJoined"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueNotJoined.ts",
+        rename = "CompetitionLeagueNotJoined"
+    )
+)]
 pub struct CompetitionLeagueNotJoined {
     #[cfg_attr(feature = "type-export", ts(type = "false"))]
     pub joined: bool,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeagueStanding.ts", rename = "CompetitionLeagueStanding"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueStanding.ts",
+        rename = "CompetitionLeagueStanding"
+    )
+)]
 pub struct CompetitionLeagueStanding {
     pub rank: i64,
     pub handle: String,
@@ -35,7 +51,15 @@ pub struct CompetitionLeagueStanding {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeagueJoined.ts", rename = "CompetitionLeagueJoined"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueJoined.ts",
+        rename = "CompetitionLeagueJoined"
+    )
+)]
 pub struct CompetitionLeagueJoined {
     #[cfg_attr(feature = "type-export", ts(type = "true"))]
     pub joined: bool,
@@ -50,14 +74,30 @@ pub struct CompetitionLeagueJoined {
 
 #[derive(Serialize)]
 #[serde(untagged)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeagueState.ts", rename = "CompetitionLeagueState"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeagueState.ts",
+        rename = "CompetitionLeagueState"
+    )
+)]
 pub enum CompetitionLeagueState {
     NotJoined(CompetitionLeagueNotJoined),
     Joined(CompetitionLeagueJoined),
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/LeaveCompetitionLeagueResponse.ts", rename = "LeaveCompetitionLeagueResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/LeaveCompetitionLeagueResponse.ts",
+        rename = "LeaveCompetitionLeagueResponse"
+    )
+)]
 pub struct LeaveCompetitionLeagueResponse {
     pub left: bool,
 }

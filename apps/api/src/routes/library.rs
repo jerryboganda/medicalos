@@ -1168,7 +1168,15 @@ pub async fn get_article(
 }
 
 #[derive(Serialize, sqlx::FromRow)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportRight.ts", rename = "PrivateImportRight"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportRight.ts",
+        rename = "PrivateImportRight"
+    )
+)]
 pub struct PrivateImportRight {
     rights_id: Uuid,
     ref_code: String,
@@ -1177,13 +1185,23 @@ pub struct PrivateImportRight {
     search_allowed: bool,
 }
 
-#[derive(sqlx::FromRow)]
-#[derive(Serialize, sqlx::FromRow)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportSummary.ts", rename = "PrivateImportSummary"))]
+#[derive(sqlx::FromRow, Serialize, sqlx::FromRow)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportSummary.ts",
+        rename = "PrivateImportSummary"
+    )
+)]
 pub struct PrivateDocumentSummary {
     document_id: Uuid,
     title: String,
-    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"text/plain\" | \"text/markdown\"")
+    )]
     media_type: String,
     rights_ref: String,
     sha256: String,
@@ -1192,23 +1210,50 @@ pub struct PrivateDocumentSummary {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportRightsResponse.ts", rename = "PrivateImportRightsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportRightsResponse.ts",
+        rename = "PrivateImportRightsResponse"
+    )
+)]
 pub struct PrivateImportRightsResponse {
     pub rights: Vec<PrivateImportRight>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportListResponse.ts", rename = "PrivateImportListResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportListResponse.ts",
+        rename = "PrivateImportListResponse"
+    )
+)]
 pub struct PrivateImportListResponse {
     pub documents: Vec<PrivateDocumentSummary>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportResponse.ts", rename = "PrivateImportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportResponse.ts",
+        rename = "PrivateImportResponse"
+    )
+)]
 pub struct PrivateImportResponse {
     pub document_id: Uuid,
     pub title: String,
-    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"text/plain\" | \"text/markdown\"")
+    )]
     pub media_type: String,
     pub rights_ref: String,
     pub sha256: String,
@@ -1218,7 +1263,15 @@ pub struct PrivateImportResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/PrivateImportDeletedResponse.ts", rename = "PrivateImportDeletedResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/PrivateImportDeletedResponse.ts",
+        rename = "PrivateImportDeletedResponse"
+    )
+)]
 pub struct PrivateImportDeletedResponse {
     pub deleted: bool,
 }
@@ -1230,10 +1283,21 @@ struct PrivateImportQuota {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "library/CreatePrivateImportRequest.ts", rename = "CreatePrivateImportRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "library/CreatePrivateImportRequest.ts",
+        rename = "CreatePrivateImportRequest"
+    )
+)]
 pub struct CreatePrivateImportReq {
     pub title: String,
-    #[cfg_attr(feature = "type-export", ts(type = "\"text/plain\" | \"text/markdown\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"text/plain\" | \"text/markdown\"")
+    )]
     pub media_type: String,
     pub content: String,
     pub rights_ref: String,
@@ -1661,7 +1725,15 @@ pub struct ImageCaseReq {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageCaseConceptsRequest.ts", rename = "ImageCaseConceptsRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageCaseConceptsRequest.ts",
+        rename = "ImageCaseConceptsRequest"
+    )
+)]
 pub struct SetImageCaseConceptsReq {
     pub concept_ids: Vec<Uuid>,
 }
@@ -2410,7 +2482,15 @@ pub async fn set_admin_image_case_concepts(
 // learners only ever see approved ones.
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageAnnotationRequest.ts", rename = "ImageAnnotationRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageAnnotationRequest.ts",
+        rename = "ImageAnnotationRequest"
+    )
+)]
 pub struct ImageAnnotationReq {
     pub image_index: i32,
     pub x_percent: f64,
@@ -2541,7 +2621,15 @@ pub async fn list_image_annotations(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "image/ImageAnnotationReviewRequest.ts", rename = "ImageAnnotationReviewRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "image/ImageAnnotationReviewRequest.ts",
+        rename = "ImageAnnotationReviewRequest"
+    )
+)]
 pub struct ImageAnnotationReviewReq {
     #[cfg_attr(feature = "type-export", ts(type = "\"approved\" | \"rejected\""))]
     pub decision: String,

@@ -225,7 +225,15 @@ pub async fn set_flag(
 // ---- INST-01/02/04: institutions, cohorts, assignments ----------------------
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionMembership.ts", rename = "InstitutionMembership"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionMembership.ts",
+        rename = "InstitutionMembership"
+    )
+)]
 pub struct InstitutionMembership {
     pub institution_id: Uuid,
     pub name: String,
@@ -233,26 +241,58 @@ pub struct InstitutionMembership {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/MyInstitutionsResponse.ts", rename = "MyInstitutionsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/MyInstitutionsResponse.ts",
+        rename = "MyInstitutionsResponse"
+    )
+)]
 pub struct MyInstitutionsResponse {
     pub memberships: Vec<InstitutionMembership>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateInstitutionResponse.ts", rename = "CreateInstitutionResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateInstitutionResponse.ts",
+        rename = "CreateInstitutionResponse"
+    )
+)]
 pub struct CreateInstitutionResponse {
     pub institution_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/AddInstitutionMemberResponse.ts", rename = "AddInstitutionMemberResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/AddInstitutionMemberResponse.ts",
+        rename = "AddInstitutionMemberResponse"
+    )
+)]
 pub struct AddInstitutionMemberResponse {
     pub member: Uuid,
     pub role: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CohortSummary.ts", rename = "CohortSummary"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CohortSummary.ts",
+        rename = "CohortSummary"
+    )
+)]
 pub struct CohortSummary {
     pub cohort_id: Uuid,
     pub name: String,
@@ -261,31 +301,71 @@ pub struct CohortSummary {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionCohortsResponse.ts", rename = "InstitutionCohortsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionCohortsResponse.ts",
+        rename = "InstitutionCohortsResponse"
+    )
+)]
 pub struct InstitutionCohortsResponse {
     pub cohorts: Vec<CohortSummary>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateCohortResponse.ts", rename = "CreateCohortResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateCohortResponse.ts",
+        rename = "CreateCohortResponse"
+    )
+)]
 pub struct CreateCohortResponse {
     pub cohort_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateAssignmentResponse.ts", rename = "CreateAssignmentResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateAssignmentResponse.ts",
+        rename = "CreateAssignmentResponse"
+    )
+)]
 pub struct CreateAssignmentResponse {
     pub assignment_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateProgramResponse.ts", rename = "CreateProgramResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateProgramResponse.ts",
+        rename = "CreateProgramResponse"
+    )
+)]
 pub struct CreateProgramResponse {
     pub program_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionProgram.ts", rename = "InstitutionProgram"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionProgram.ts",
+        rename = "InstitutionProgram"
+    )
+)]
 pub struct InstitutionProgram {
     pub program_id: Uuid,
     pub name: String,
@@ -293,13 +373,29 @@ pub struct InstitutionProgram {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionProgramsResponse.ts", rename = "InstitutionProgramsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionProgramsResponse.ts",
+        rename = "InstitutionProgramsResponse"
+    )
+)]
 pub struct InstitutionProgramsResponse {
     pub programs: Vec<InstitutionProgram>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/SetProgramCurriculumResponse.ts", rename = "SetProgramCurriculumResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/SetProgramCurriculumResponse.ts",
+        rename = "SetProgramCurriculumResponse"
+    )
+)]
 pub struct SetProgramCurriculumResponse {
     pub program_id: Uuid,
     pub chapter_ids: Vec<Uuid>,
@@ -307,7 +403,15 @@ pub struct SetProgramCurriculumResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/ProgramCurriculumCoverageChapter.ts", rename = "ProgramCurriculumCoverageChapter"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/ProgramCurriculumCoverageChapter.ts",
+        rename = "ProgramCurriculumCoverageChapter"
+    )
+)]
 pub struct ProgramCurriculumCoverageChapter {
     pub chapter_id: Uuid,
     pub chapter: String,
@@ -317,7 +421,15 @@ pub struct ProgramCurriculumCoverageChapter {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/ProgramCurriculumCoverageResponse.ts", rename = "ProgramCurriculumCoverageResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/ProgramCurriculumCoverageResponse.ts",
+        rename = "ProgramCurriculumCoverageResponse"
+    )
+)]
 pub struct ProgramCurriculumCoverageResponse {
     pub program_id: Uuid,
     pub cohort_size: i64,
@@ -327,7 +439,15 @@ pub struct ProgramCurriculumCoverageResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAuditEvent.ts", rename = "InstitutionAuditEvent"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionAuditEvent.ts",
+        rename = "InstitutionAuditEvent"
+    )
+)]
 pub struct InstitutionAuditEvent {
     pub action: String,
     pub entity: String,
@@ -337,13 +457,29 @@ pub struct InstitutionAuditEvent {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAuditResponse.ts", rename = "InstitutionAuditResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionAuditResponse.ts",
+        rename = "InstitutionAuditResponse"
+    )
+)]
 pub struct InstitutionAuditResponse {
     pub events: Vec<InstitutionAuditEvent>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsChapter.ts", rename = "InstitutionAnalyticsChapter"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionAnalyticsChapter.ts",
+        rename = "InstitutionAnalyticsChapter"
+    )
+)]
 pub struct InstitutionAnalyticsChapter {
     pub chapter: Option<String>,
     pub attempts: i64,
@@ -353,7 +489,15 @@ pub struct InstitutionAnalyticsChapter {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsResponse.ts", rename = "InstitutionAnalyticsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionAnalyticsResponse.ts",
+        rename = "InstitutionAnalyticsResponse"
+    )
+)]
 pub struct InstitutionAnalyticsResponse {
     pub cohort_id: Uuid,
     pub cohort_size: i64,
@@ -367,7 +511,15 @@ pub struct InstitutionAnalyticsResponse {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateInstitutionRequest.ts", rename = "CreateInstitutionRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateInstitutionRequest.ts",
+        rename = "CreateInstitutionRequest"
+    )
+)]
 pub struct CreateInstitutionReq {
     pub name: String,
 }
@@ -401,13 +553,19 @@ pub async fn create_institution(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(CreateInstitutionResponse {
-        institution_id: id,
-    }))
+    Ok(Json(CreateInstitutionResponse { institution_id: id }))
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/AddInstitutionMemberRequest.ts", rename = "AddInstitutionMemberRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/AddInstitutionMemberRequest.ts",
+        rename = "AddInstitutionMemberRequest"
+    )
+)]
 pub struct JoinReq {
     pub user_id: Uuid,
     pub role: Option<String>,
@@ -655,7 +813,15 @@ pub async fn bind_external_enrollment(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateCohortRequest.ts", rename = "CreateCohortRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateCohortRequest.ts",
+        rename = "CreateCohortRequest"
+    )
+)]
 pub struct CreateCohortReq {
     pub name: String,
     pub member_ids: Option<Vec<Uuid>>,
@@ -821,7 +987,15 @@ pub async fn create_cohort(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateAssignmentRequest.ts", rename = "CreateAssignmentRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateAssignmentRequest.ts",
+        rename = "CreateAssignmentRequest"
+    )
+)]
 pub struct AssignmentReq {
     pub title: String,
     pub due_at: Option<DateTime<Utc>>,
@@ -872,7 +1046,15 @@ pub async fn create_assignment(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/CreateProgramRequest.ts", rename = "CreateProgramRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/CreateProgramRequest.ts",
+        rename = "CreateProgramRequest"
+    )
+)]
 pub struct CreateProgramReq {
     pub name: String,
 }
@@ -972,7 +1154,15 @@ pub async fn list_programs(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/SetProgramCurriculumRequest.ts", rename = "SetProgramCurriculumRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/SetProgramCurriculumRequest.ts",
+        rename = "SetProgramCurriculumRequest"
+    )
+)]
 pub struct SetProgramCurriculumReq {
     pub chapter_ids: Vec<Uuid>,
 }
@@ -1133,18 +1323,16 @@ pub async fn program_curriculum_coverage(
     let suppressed = cohort_size < 5;
     let chapters = rows
         .into_iter()
-        .map(|row| {
-            ProgramCurriculumCoverageChapter {
-                chapter_id: row.chapter_id,
-                chapter: row.chapter_name,
-                learners_with_evidence: (!suppressed).then_some(row.learners_with_evidence),
-                attempts: (!suppressed).then_some(row.attempts),
-                coverage_percent: if suppressed || cohort_size == 0 {
-                    None
-                } else {
-                    Some(row.learners_with_evidence as f64 / cohort_size as f64 * 100.0)
-                },
-            }
+        .map(|row| ProgramCurriculumCoverageChapter {
+            chapter_id: row.chapter_id,
+            chapter: row.chapter_name,
+            learners_with_evidence: (!suppressed).then_some(row.learners_with_evidence),
+            attempts: (!suppressed).then_some(row.attempts),
+            coverage_percent: if suppressed || cohort_size == 0 {
+                None
+            } else {
+                Some(row.learners_with_evidence as f64 / cohort_size as f64 * 100.0)
+            },
         })
         .collect();
 
@@ -2326,7 +2514,15 @@ pub async fn institution_analytics(
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "institutions/InstitutionAnalyticsQuery.ts", rename = "InstitutionAnalyticsQuery"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "institutions/InstitutionAnalyticsQuery.ts",
+        rename = "InstitutionAnalyticsQuery"
+    )
+)]
 pub struct AnalyticsQuery {
     pub cohort_id: Option<Uuid>,
 }
@@ -2359,10 +2555,7 @@ pub struct ReplanReq {
 pub struct ReplanWithinCapacityResponse {
     #[cfg_attr(feature = "type-export", ts(type = "false"))]
     replanned: bool,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"within_capacity\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"within_capacity\""))]
     reason: String,
     #[cfg_attr(feature = "type-export", ts(type = "number"))]
     committed_minutes: i64,
@@ -2400,7 +2593,11 @@ pub struct ReplanAppliedResponse {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(export, export_to = "today/ReplanResponse.ts", rename = "ReplanResponse")
+    ts(
+        export,
+        export_to = "today/ReplanResponse.ts",
+        rename = "ReplanResponse"
+    )
 )]
 pub enum ReplanResponse {
     WithinCapacity(ReplanWithinCapacityResponse),
@@ -2691,13 +2888,11 @@ pub async fn selection_policy(
     let k_of = |independent: i32| (32.0 - 2.0 * independent as f32).max(8.0);
     let chapters = rows
         .iter()
-        .map(|r| {
-            SelectionPolicyChapter {
-                chapter: r.chapter_name.clone(),
-                ability: r.ability,
-                current_k: k_of(r.independent),
-                evidence_count: r.evidence,
-            }
+        .map(|r| SelectionPolicyChapter {
+            chapter: r.chapter_name.clone(),
+            ability: r.ability,
+            current_k: k_of(r.independent),
+            evidence_count: r.evidence,
         })
         .collect();
     Ok(Json(SelectionPolicyResponse {

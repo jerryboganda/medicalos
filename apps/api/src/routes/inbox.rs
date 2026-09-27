@@ -162,25 +162,21 @@ pub async fn inbox(
     .fetch_optional(&state.pool)
     .await?;
     let preferences = stored_preferences.map_or_else(
-        || {
-            NotificationPreferences {
-                plan_reminders: true,
-                mock_results: true,
-                reports: true,
-                content_updates: true,
-                quiet_hours_start: 22,
-                quiet_hours_end: 7,
-            }
+        || NotificationPreferences {
+            plan_reminders: true,
+            mock_results: true,
+            reports: true,
+            content_updates: true,
+            quiet_hours_start: 22,
+            quiet_hours_end: 7,
         },
-        |p| {
-            NotificationPreferences {
-                plan_reminders: p.plan_reminders,
-                mock_results: p.mock_results,
-                reports: p.reports,
-                content_updates: p.content_updates,
-                quiet_hours_start: p.quiet_hours_start,
-                quiet_hours_end: p.quiet_hours_end,
-            }
+        |p| NotificationPreferences {
+            plan_reminders: p.plan_reminders,
+            mock_results: p.mock_results,
+            reports: p.reports,
+            content_updates: p.content_updates,
+            quiet_hours_start: p.quiet_hours_start,
+            quiet_hours_end: p.quiet_hours_end,
         },
     );
     let notifications = rows
@@ -268,8 +264,12 @@ pub async fn update_preferences(
     user: AuthUser,
     Json(req): Json<PrefReq>,
 ) -> ApiResult<Json<NotificationPreferencesUpdateResponse>> {
-    if req.quiet_hours_start.is_some_and(|hour| !(0..=23).contains(&hour))
-        || req.quiet_hours_end.is_some_and(|hour| !(0..=23).contains(&hour))
+    if req
+        .quiet_hours_start
+        .is_some_and(|hour| !(0..=23).contains(&hour))
+        || req
+            .quiet_hours_end
+            .is_some_and(|hour| !(0..=23).contains(&hour))
     {
         return Err(ApiError::unprocessable(
             "invalid_quiet_hours",
@@ -300,5 +300,7 @@ pub async fn update_preferences(
     )
     .execute(&state.pool)
     .await?;
-    Ok(Json(NotificationPreferencesUpdateResponse { updated: true }))
+    Ok(Json(NotificationPreferencesUpdateResponse {
+        updated: true,
+    }))
 }

@@ -189,11 +189,7 @@ pub struct SessionReportReceipt {
 #[cfg_attr(
     feature = "type-export",
     derive(ts_rs::TS),
-    ts(
-        export,
-        export_to = "practice/SessionItem.ts",
-        rename = "SessionItem"
-    )
+    ts(export, export_to = "practice/SessionItem.ts", rename = "SessionItem")
 )]
 pub struct SessionDetailItem {
     item_index: i16,
@@ -1037,8 +1033,8 @@ pub async fn get_session(
             (Some(status), Some(created_at), Some(acknowledged_at)) => {
                 let resolution_due_at = created_at + chrono::Duration::hours(72);
                 let acknowledgement_due_at = created_at + chrono::Duration::hours(24);
-                let resolution_overdue = it.my_report_resolved_at.is_none()
-                    && chrono::Utc::now() > resolution_due_at;
+                let resolution_overdue =
+                    it.my_report_resolved_at.is_none() && chrono::Utc::now() > resolution_due_at;
                 Some(SessionReportReceipt {
                     status,
                     resolution_note: it.my_resolution_note,
@@ -1058,9 +1054,7 @@ pub async fn get_session(
             && session.preset == "tutor"
             && it.question_status == "published"
         {
-            Some(
-                crate::routes::program::ensure_pregen(&state.pool, it.question_version_id).await?,
-            )
+            Some(crate::routes::program::ensure_pregen(&state.pool, it.question_version_id).await?)
         } else {
             None
         };
@@ -1086,11 +1080,7 @@ pub async fn get_session(
             } else {
                 None
             },
-            exam_tip: if feedback_released {
-                it.exam_tip
-            } else {
-                None
-            },
+            exam_tip: if feedback_released { it.exam_tip } else { None },
             report_status,
             corrected_version_id: it.corrected_version_id,
             // corrected covers both directions: a source correction swapped this

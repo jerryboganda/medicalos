@@ -33,15 +33,9 @@ use crate::state::AppState;
 )]
 pub struct EngagementDailyGoal {
     enabled: bool,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"questions\" | \"minutes\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
     mode: String,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"questions\" | \"minutes\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
     unit: String,
     target: i32,
     answered_today: i32,
@@ -123,10 +117,7 @@ pub struct EngagementQotd {
     #[cfg_attr(feature = "type-export", ts(optional))]
     available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "string", optional)
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "string", optional))]
     question_version_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "type-export", ts(optional))]
@@ -138,10 +129,7 @@ pub struct EngagementQotd {
     #[cfg_attr(feature = "type-export", ts(optional))]
     community_split: Option<Vec<EngagementCommunitySplit>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "number", optional)
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "number", optional))]
     community_total: Option<i64>,
 }
 
@@ -171,10 +159,7 @@ pub struct Engagement {
 )]
 pub struct EngagementSettingsResponse {
     daily_goal_questions: i32,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"questions\" | \"minutes\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"questions\" | \"minutes\""))]
     daily_goal_mode: String,
     available_minutes: i32,
     daily_goal_enabled: bool,
@@ -1395,38 +1380,76 @@ async fn materialize_competition_series(state: &AppState) -> ApiResult<()> {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionSummary.ts", rename = "CompetitionSummary"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionSummary.ts",
+        rename = "CompetitionSummary"
+    )
+)]
 pub struct CompetitionSummary {
     pub competition_id: Uuid,
     pub title: String,
     pub exam_id: Uuid,
     pub exam: String,
-    #[cfg_attr(feature = "type-export", ts(type = "\"one_off\" | \"daily\" | \"weekly\" | \"monthly\" | \"live\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"one_off\" | \"daily\" | \"weekly\" | \"monthly\" | \"live\"")
+    )]
     pub cadence: String,
     pub series_id: Option<Uuid>,
     pub starts_at: chrono::DateTime<chrono::Utc>,
     pub ends_at: chrono::DateTime<chrono::Utc>,
     pub status: String,
     pub entered: bool,
-    #[cfg_attr(feature = "type-export", ts(type = "\"in_progress\" | \"submitted\" | null"))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"in_progress\" | \"submitted\" | null")
+    )]
     pub attempt_status: Option<String>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionListResponse.ts", rename = "CompetitionListResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionListResponse.ts",
+        rename = "CompetitionListResponse"
+    )
+)]
 pub struct CompetitionListResponse {
     pub competitions: Vec<CompetitionSummary>,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/StartCompetitionEntryRequest.ts", rename = "StartCompetitionEntryRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/StartCompetitionEntryRequest.ts",
+        rename = "StartCompetitionEntryRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct StartCompetitionEntryReq {
     pub handle: String,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/AnswerCompetitionQuestionRequest.ts", rename = "AnswerCompetitionQuestionRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/AnswerCompetitionQuestionRequest.ts",
+        rename = "AnswerCompetitionQuestionRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct AnswerCompetitionQuestionReq {
     pub question_version_id: Uuid,
@@ -1437,13 +1460,29 @@ pub struct AnswerCompetitionQuestionReq {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionQuestionOption.ts", rename = "CompetitionQuestionOption"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionQuestionOption.ts",
+        rename = "CompetitionQuestionOption"
+    )
+)]
 pub struct CompetitionQuestionOption {
     pub text: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionQuestion.ts", rename = "CompetitionQuestion"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionQuestion.ts",
+        rename = "CompetitionQuestion"
+    )
+)]
 pub struct CompetitionQuestion {
     pub question_version_id: Uuid,
     pub question_number: usize,
@@ -1454,7 +1493,15 @@ pub struct CompetitionQuestion {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionInProgressResponse.ts", rename = "CompetitionInProgressResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionInProgressResponse.ts",
+        rename = "CompetitionInProgressResponse"
+    )
+)]
 pub struct CompetitionInProgressResponse {
     pub attempt_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "false"))]
@@ -1463,7 +1510,15 @@ pub struct CompetitionInProgressResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionSubmittedResponse.ts", rename = "CompetitionSubmittedResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionSubmittedResponse.ts",
+        rename = "CompetitionSubmittedResponse"
+    )
+)]
 pub struct CompetitionSubmittedResponse {
     pub attempt_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "true"))]
@@ -1476,14 +1531,30 @@ pub struct CompetitionSubmittedResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionAttemptStep.ts", rename = "CompetitionAttemptStep"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionAttemptStep.ts",
+        rename = "CompetitionAttemptStep"
+    )
+)]
 pub enum CompetitionAttemptStep {
     InProgress(CompetitionInProgressResponse),
     Submitted(CompetitionSubmittedResponse),
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeaderboardEntry.ts", rename = "CompetitionLeaderboardEntry"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeaderboardEntry.ts",
+        rename = "CompetitionLeaderboardEntry"
+    )
+)]
 pub struct CompetitionLeaderboardEntry {
     pub rank: i64,
     pub handle: String,
@@ -1497,7 +1568,15 @@ pub struct CompetitionLeaderboardEntry {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "engagement/CompetitionLeaderboardResponse.ts", rename = "CompetitionLeaderboardResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "engagement/CompetitionLeaderboardResponse.ts",
+        rename = "CompetitionLeaderboardResponse"
+    )
+)]
 pub struct CompetitionLeaderboardResponse {
     pub prize_reviewed: bool,
     pub status: String,

@@ -479,36 +479,37 @@ pub async fn next_action(
 
     let Some((task, adjusted_estimated_minutes)) = selected else {
         let reason_code = if entitlement_blocked {
-                "free_allowance_reached"
-            } else if allowance_insufficient {
-                "free_allowance_insufficient"
-            } else if preference_blocked {
-                "activity_preference_unavailable"
-            } else if content_blocked {
-                "content_unavailable"
-            } else {
-                "no_task_fits"
-            }
-            .to_owned();
-        let allowance = (entitlement_blocked || allowance_insufficient).then(|| {
-            NextActionAllowance {
+            "free_allowance_reached"
+        } else if allowance_insufficient {
+            "free_allowance_insufficient"
+        } else if preference_blocked {
+            "activity_preference_unavailable"
+        } else if content_blocked {
+            "content_unavailable"
+        } else {
+            "no_task_fits"
+        }
+        .to_owned();
+        let allowance =
+            (entitlement_blocked || allowance_insufficient).then(|| NextActionAllowance {
                 limit: free_daily_questions,
                 used: attempted_today,
                 remaining: remaining_free_questions,
                 required: practice_question_counts.iter().min().copied(),
-            }
-        });
-        return Ok(Json(NextActionRecommendation::NoAction(NextActionNoAction {
-            available_minutes: query.available_minutes,
-            activity_preference: query.activity_preference,
-            time_multiplier: query.time_multiplier,
-            exam_date,
-            plan_id: plan.id,
-            plan_version: plan.version,
-            reason_code,
-            allowance,
-            recommended_action: None,
-        })));
+            });
+        return Ok(Json(NextActionRecommendation::NoAction(
+            NextActionNoAction {
+                available_minutes: query.available_minutes,
+                activity_preference: query.activity_preference,
+                time_multiplier: query.time_multiplier,
+                exam_date,
+                plan_id: plan.id,
+                plan_version: plan.version,
+                reason_code,
+                allowance,
+                recommended_action: None,
+            },
+        )));
     };
 
     let reason_code = if task.protected {
@@ -855,7 +856,11 @@ pub async fn set_task_protection(
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "today/UndoResponse.ts", rename = "UndoResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "today/UndoResponse.ts", rename = "UndoResponse")
+)]
 pub struct UndoResponse {
     plan_version: i32,
 }
@@ -1119,16 +1124,14 @@ pub async fn my_curriculum(
     .await?;
     let chapters = rows
         .iter()
-        .map(|r| {
-            CurriculumChapter {
-                chapter_id: r.chapter_id,
-                chapter_name: r.chapter_name.clone(),
-                system: r.system_name.clone(),
-                subject: r.subject_name.clone(),
-                exam_id: r.exam_id,
-                exam: r.exam_name.clone(),
-                published_questions: r.published,
-            }
+        .map(|r| CurriculumChapter {
+            chapter_id: r.chapter_id,
+            chapter_name: r.chapter_name.clone(),
+            system: r.system_name.clone(),
+            subject: r.subject_name.clone(),
+            exam_id: r.exam_id,
+            exam: r.exam_name.clone(),
+            published_questions: r.published,
         })
         .collect();
     Ok(Json(MyCurriculumResponse { chapters }))

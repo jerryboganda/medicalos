@@ -34,9 +34,22 @@ fn valid_category(raw: &str) -> bool {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/ReportQuestionRequest.ts", rename = "ReportQuestionRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ReportQuestionRequest.ts",
+        rename = "ReportQuestionRequest"
+    )
+)]
 pub struct ReportReq {
-    #[cfg_attr(feature = "type-export", ts(type = "\"wrong_answer\" | \"bad_explanation\" | \"typo\" | \"duplicate\" | \"outdated\" | \"broken_image\" | \"other\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"wrong_answer\" | \"bad_explanation\" | \"typo\" | \"duplicate\" | \"outdated\" | \"broken_image\" | \"other\""
+        )
+    )]
     pub category: String,
     pub note: Option<String>,
 }
@@ -47,21 +60,43 @@ pub struct QueueParams {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/ResolveQuestionReportRequest.ts", rename = "ResolveQuestionReportRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ResolveQuestionReportRequest.ts",
+        rename = "ResolveQuestionReportRequest"
+    )
+)]
 pub struct ResolveReportReq {
-    #[cfg_attr(feature = "type-export", ts(type = "\"resolved_fixed\" | \"resolved_rejected\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"resolved_fixed\" | \"resolved_rejected\"")
+    )]
     pub status: String,
     pub resolution_note: String,
     pub correction_note: Option<String>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/QuestionReportResponse.ts", rename = "QuestionReportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/QuestionReportResponse.ts",
+        rename = "QuestionReportResponse"
+    )
+)]
 pub struct QuestionReportResponse {
     pub report_id: Uuid,
     pub already_recorded: bool,
     pub quarantined: bool,
-    #[cfg_attr(feature = "type-export", ts(type = "\"open\" | \"quarantined\" | \"resolved_fixed\" | \"resolved_rejected\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"open\" | \"quarantined\" | \"resolved_fixed\" | \"resolved_rejected\"")
+    )]
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub acknowledged_at: chrono::DateTime<chrono::Utc>,
@@ -75,14 +110,26 @@ pub struct QuestionReportResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/ReportFeedback.ts", rename = "ReportFeedback"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ReportFeedback.ts",
+        rename = "ReportFeedback"
+    )
+)]
 pub struct ReportFeedback {
     pub category: String,
     pub note: Option<String>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/AdminReport.ts", rename = "AdminReport"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "reports/AdminReport.ts", rename = "AdminReport")
+)]
 pub struct AdminReport {
     pub report_id: Uuid,
     pub question_version_id: Uuid,
@@ -103,15 +150,34 @@ pub struct AdminReport {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/AdminReportsResponse.ts", rename = "AdminReportsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/AdminReportsResponse.ts",
+        rename = "AdminReportsResponse"
+    )
+)]
 pub struct AdminReportsResponse {
     pub reports: Vec<AdminReport>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "reports/ResolveQuestionReportResponse.ts", rename = "ResolveQuestionReportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "reports/ResolveQuestionReportResponse.ts",
+        rename = "ResolveQuestionReportResponse"
+    )
+)]
 pub struct ResolveQuestionReportResponse {
-    #[cfg_attr(feature = "type-export", ts(type = "\"resolved_fixed\" | \"resolved_rejected\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"resolved_fixed\" | \"resolved_rejected\"")
+    )]
     pub status: String,
     pub question_version_id: Uuid,
     pub corrected_version_id: Option<Uuid>,

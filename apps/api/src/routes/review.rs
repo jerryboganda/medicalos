@@ -158,10 +158,7 @@ pub struct AddCardResponse {
         ts(type = "\"basic\" | \"cloze\" | \"image\"")
     )]
     card_type: String,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"editorial\" | \"ai_draft\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"editorial\" | \"ai_draft\""))]
     trust: String,
 }
 
@@ -283,10 +280,7 @@ pub struct ReviewQueueItem {
     card_type: String,
     #[cfg_attr(feature = "type-export", ts(type = "string | null"))]
     cloze: Option<String>,
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"editorial\" | \"ai_draft\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"editorial\" | \"ai_draft\""))]
     trust: String,
     ai_draft: bool,
 }

@@ -1023,10 +1023,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
-    assert_json_keys(
-        &session,
-        &["session_id", "items", "per_question_seconds"],
-    );
+    assert_json_keys(&session, &["session_id", "items", "per_question_seconds"]);
     let sid: Uuid = session["session_id"].as_str().unwrap().parse().unwrap();
     let session_items = session["items"].as_array().unwrap();
     assert_eq!(session_items.len(), task_question_count as usize);
@@ -1146,7 +1143,13 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
 
     let served_ids: Vec<Uuid> = session_items
         .iter()
-        .map(|item| item["question_version_id"].as_str().unwrap().parse().unwrap())
+        .map(|item| {
+            item["question_version_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
         .collect();
     assert!(seed_ids.question_versions[..2]
         .iter()
@@ -1172,8 +1175,14 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
             .iter()
             .find(|row| row.get::<Uuid, _>("id") == question_version_id)
             .expect("session item comes from the seeded chapter pool");
-        assert_eq!(item["vignette"].as_str(), Some(fixture.get::<&str, _>("vignette")));
-        assert_eq!(item["lead_in"].as_str(), Some(fixture.get::<&str, _>("lead_in")));
+        assert_eq!(
+            item["vignette"].as_str(),
+            Some(fixture.get::<&str, _>("vignette"))
+        );
+        assert_eq!(
+            item["lead_in"].as_str(),
+            Some(fixture.get::<&str, _>("lead_in"))
+        );
         assert_eq!(
             item["difficulty"].as_str(),
             Some(fixture.get::<&str, _>("difficulty"))
@@ -1230,10 +1239,7 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     let correct_index = answered_fixture.get::<i16, _>("correct_index");
     assert_eq!(ans["correct"], serde_json::json!(correct_index == 0));
     assert_eq!(ans["correct_index"], serde_json::json!(correct_index));
-    assert_eq!(
-        ans["options"],
-        answered_fixture.get::<Value, _>("options")
-    );
+    assert_eq!(ans["options"], answered_fixture.get::<Value, _>("options"));
     for option in ans["options"].as_array().unwrap() {
         assert_json_keys(option, &["text", "rationale"]);
     }
@@ -1288,7 +1294,10 @@ async fn full_loop_cold_start_answer_submit_revision_undo() {
     assert_eq!(answered_item["correct"], ans["correct"]);
     assert_eq!(answered_item["correct_index"], ans["correct_index"]);
     assert_eq!(answered_item["options"], ans["options"]);
-    assert_eq!(answered_item["key_learning_point"], ans["key_learning_point"]);
+    assert_eq!(
+        answered_item["key_learning_point"],
+        ans["key_learning_point"]
+    );
     assert_eq!(answered_item["exam_tip"], ans["exam_tip"]);
     assert!(answered_item["tutoring_cards"].as_array().is_some());
 
@@ -1670,10 +1679,10 @@ async fn timed_session_expires_server_side() {
     sqlx::query(
         "UPDATE practice_sessions SET deadline = now() - interval '1 second' WHERE id = $1",
     )
-        .bind(sid)
-        .execute(&state.pool)
-        .await
-        .expect("expire session");
+    .bind(sid)
+    .execute(&state.pool)
+    .await
+    .expect("expire session");
 
     // Answers are rejected once the server deadline has passed.
     let (status, body) = call(
@@ -1702,7 +1711,10 @@ async fn timed_session_expires_server_side() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{result}");
-    assert_eq!(result["skipped"], 1, "the unanswered item counts as skipped");
+    assert_eq!(
+        result["skipped"], 1,
+        "the unanswered item counts as skipped"
+    );
 }
 
 #[tokio::test]
@@ -1821,7 +1833,15 @@ async fn review_queue_caps_and_fsrs_rescheduling() {
     for item in q["new"].as_array().unwrap() {
         assert_json_keys(
             item,
-            &["card_id", "front", "back", "card_type", "cloze", "trust", "ai_draft"],
+            &[
+                "card_id",
+                "front",
+                "back",
+                "card_type",
+                "cloze",
+                "trust",
+                "ai_draft",
+            ],
         );
     }
 
@@ -3493,13 +3513,12 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     .fetch_one(&state.pool)
     .await
     .expect("mock item question version");
-    let mock_user_id: Uuid = sqlx::query_scalar(
-        "SELECT user_id FROM practice_sessions WHERE id = $1",
-    )
-    .bind(sid)
-    .fetch_one(&state.pool)
-    .await
-    .expect("mock learner");
+    let mock_user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM practice_sessions WHERE id = $1")
+            .bind(sid)
+            .fetch_one(&state.pool)
+            .await
+            .expect("mock learner");
     let corrected_item_scheduled: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM retest_cards WHERE user_id = $1 AND question_version_id = $2)",
     )
@@ -3508,7 +3527,10 @@ async fn mock_lifecycle_deferred_feedback_and_pass_mark() {
     .fetch_one(&state.pool)
     .await
     .expect("corrected mock item schedule state");
-    assert!(!corrected_item_scheduled, "final correct sure response is not scheduled");
+    assert!(
+        !corrected_item_scheduled,
+        "final correct sure response is not scheduled"
+    );
     let mock = result["mock"].as_object().expect("mock block");
     assert_eq!(mock["passed"], true, "50% >= 50% pass mark");
     assert_eq!(
@@ -3905,10 +3927,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{duplicate_return}");
-    assert_json_keys(
-        &duplicate_return,
-        &["recorded", "event_id", "action"],
-    );
+    assert_json_keys(&duplicate_return, &["recorded", "event_id", "action"]);
     assert_eq!(duplicate_return["action"], "none");
     let warn_status: String =
         sqlx::query_scalar("SELECT status FROM practice_sessions WHERE id = $1")
@@ -4067,10 +4086,7 @@ async fn ex08_integrity_warning_and_auto_submit_worker_enforce_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{resumed}");
-    assert_json_keys(
-        &resumed,
-        &["recorded", "event_id", "action", "receipt"],
-    );
+    assert_json_keys(&resumed, &["recorded", "event_id", "action", "receipt"]);
     assert_json_keys(
         &resumed["receipt"],
         &[
@@ -4709,10 +4725,7 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert!(imported_event["actor"].is_string());
     assert!(imported_event["at"].as_str().is_some());
     assert_eq!(imported_event["new_value"]["rows"], 1);
-    let actions: Vec<&str> = events
-        .iter()
-        .filter_map(|e| e["action"].as_str())
-        .collect();
+    let actions: Vec<&str> = events.iter().filter_map(|e| e["action"].as_str()).collect();
     assert!(actions.contains(&"import_applied"), "audit: {audit}");
 
     // Rollback before any attempts removes the batch's questions.
@@ -6818,13 +6831,12 @@ async fn notifications_preferences_roundtrip() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let user_id: Uuid = sqlx::query_scalar(
-        "SELECT user_id FROM auth_sessions WHERE token_hash = $1",
-    )
-    .bind(&token_hash)
-    .fetch_one(&state.pool)
-    .await
-    .expect("authenticated user");
+    let user_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM auth_sessions WHERE token_hash = $1")
+            .bind(&token_hash)
+            .fetch_one(&state.pool)
+            .await
+            .expect("authenticated user");
     sqlx::query(
         "INSERT INTO notifications (id, user_id, category, title, body, deep_link)
          VALUES ($1, $2, 'plan_reminder', 'Study reminder', 'A plan task is due.', NULL)",
@@ -6845,7 +6857,15 @@ async fn notifications_preferences_roundtrip() {
     assert_eq!(inbox["notifications"].as_array().unwrap().len(), 1);
     assert_json_keys(
         &inbox["notifications"][0],
-        &["id", "category", "title", "body", "deep_link", "read", "created_at"],
+        &[
+            "id",
+            "category",
+            "title",
+            "body",
+            "deep_link",
+            "read",
+            "created_at",
+        ],
     );
     assert_eq!(inbox["notifications"][0]["deep_link"], Value::Null);
     assert!(inbox["notifications"][0]["created_at"].is_string());
@@ -7701,8 +7721,7 @@ async fn portfolio_and_ce_records() {
     assert_eq!(status, StatusCode::OK, "{ce}");
     assert_json_keys(&ce, &["activity_id", "note"]);
     assert_eq!(
-        ce["note"],
-        "Recorded as activity. Not an accredited credit.",
+        ce["note"], "Recorded as activity. Not an accredited credit.",
         "§16 honesty: records are never labelled accredited"
     );
 
@@ -11358,7 +11377,13 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::OK, "{eng}");
     assert_json_keys(
         &eng,
-        &["enabled", "available_minutes", "daily_goal", "streak", "qotd"],
+        &[
+            "enabled",
+            "available_minutes",
+            "daily_goal",
+            "streak",
+            "qotd",
+        ],
     );
     assert_eq!(eng["enabled"], true, "{eng}");
     assert_json_keys(
@@ -11598,7 +11623,12 @@ async fn engagement_goal_streak_and_qotd() {
     assert_eq!(status, StatusCode::OK, "{ans}");
     assert_json_keys(
         &ans,
-        &["correct", "correct_index", "community_split", "community_total"],
+        &[
+            "correct",
+            "correct_index",
+            "community_split",
+            "community_total",
+        ],
     );
     for vote in ans["community_split"].as_array().unwrap() {
         assert_json_keys(vote, &["chosen_index", "count"]);
@@ -16009,7 +16039,13 @@ async fn ai04_next_action_respects_time_evidence_and_current_plan() {
     assert_eq!(status, StatusCode::OK, "{revision_pick}");
     assert_eq!(revision_pick.as_object().unwrap().len(), 8);
     assert!(revision_pick.get("allowance").is_none());
-    assert_eq!(revision_pick["recommended_action"].as_object().unwrap().len(), 12);
+    assert_eq!(
+        revision_pick["recommended_action"]
+            .as_object()
+            .unwrap()
+            .len(),
+        12
+    );
     assert_eq!(
         revision_pick["recommended_action"]["task_id"],
         revision_id.to_string()
@@ -18027,13 +18063,7 @@ async fn exam_registry_serves_official_source_and_aliases() {
         .expect("pilot fixture is registered");
     assert_json_keys(
         pilt,
-        &[
-            "exam_id",
-            "code",
-            "name",
-            "official_source_url",
-            "aliases",
-        ],
+        &["exam_id", "code", "name", "official_source_url", "aliases"],
     );
     assert_eq!(
         pilt["official_source_url"],
@@ -19555,7 +19585,10 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
         &provider_view,
         &["issuer", "client_id", "enabled", "client_secret_configured"],
     );
-    assert!(provider_view.get("client_secret").is_none(), "{provider_view}");
+    assert!(
+        provider_view.get("client_secret").is_none(),
+        "{provider_view}"
+    );
 
     let (status, _) = call(
         app.clone(),
@@ -22685,10 +22718,16 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     .execute(&state.pool)
     .await
     .expect("prepare seeded questions");
-    let q_hint = insert_question(&state.pool, ids.chapter1, "Hint fixture", Some("A saved hint"))
-        .await;
+    let q_hint = insert_question(
+        &state.pool,
+        ids.chapter1,
+        "Hint fixture",
+        Some("A saved hint"),
+    )
+    .await;
     let q_correct_sure = insert_question(&state.pool, ids.chapter1, "Correct fixture", None).await;
-    let q_unpublished = insert_question(&state.pool, ids.chapter1, "Unpublished fixture", None).await;
+    let q_unpublished =
+        insert_question(&state.pool, ids.chapter1, "Unpublished fixture", None).await;
     let versions = [
         q_no_attempt,
         q_skip,
@@ -22743,7 +22782,11 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
         .iter()
         .map(|item| {
             (
-                item["question_version_id"].as_str().unwrap().parse().unwrap(),
+                item["question_version_id"]
+                    .as_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
                 item["item_index"].as_i64().unwrap(),
             )
         })
@@ -22751,19 +22794,51 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     assert_eq!(item_indices.len(), versions.len());
 
     answer(
-        &app, &learner, sid, &item_indices, q_skip, None, None, None, "skip",
+        &app,
+        &learner,
+        sid,
+        &item_indices,
+        q_skip,
+        None,
+        None,
+        None,
+        "skip",
     )
     .await;
     answer(
-        &app, &learner, sid, &item_indices, q_wrong, Some(1), Some("sure"), Some(false), "wrong",
+        &app,
+        &learner,
+        sid,
+        &item_indices,
+        q_wrong,
+        Some(1),
+        Some("sure"),
+        Some(false),
+        "wrong",
     )
     .await;
     answer(
-        &app, &learner, sid, &item_indices, q_unsure, Some(0), Some("unsure"), Some(false), "unsure",
+        &app,
+        &learner,
+        sid,
+        &item_indices,
+        q_unsure,
+        Some(0),
+        Some("unsure"),
+        Some(false),
+        "unsure",
     )
     .await;
     answer(
-        &app, &learner, sid, &item_indices, q_assisted, Some(0), Some("sure"), Some(true), "assisted",
+        &app,
+        &learner,
+        sid,
+        &item_indices,
+        q_assisted,
+        Some(0),
+        Some("sure"),
+        Some(true),
+        "assisted",
     )
     .await;
 
@@ -22825,25 +22900,29 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     assert_eq!(second.0, StatusCode::OK, "{}", second.1);
     assert_eq!(first.1, second.1, "concurrent submits share a receipt");
 
-    let learner_id: Uuid = sqlx::query_scalar(
-        "SELECT user_id FROM practice_sessions WHERE id = $1",
-    )
-    .bind(sid)
-    .fetch_one(&state.pool)
-    .await
-    .expect("session learner");
-    let cards = sqlx::query(
-        "SELECT question_version_id, passes, due FROM retest_cards WHERE user_id = $1",
-    )
-    .bind(learner_id)
-    .fetch_all(&state.pool)
-    .await
-    .expect("scheduled cards");
-    let enrolled: Vec<Uuid> = cards.iter().map(|row| row.get("question_version_id")).collect();
+    let learner_id: Uuid =
+        sqlx::query_scalar("SELECT user_id FROM practice_sessions WHERE id = $1")
+            .bind(sid)
+            .fetch_one(&state.pool)
+            .await
+            .expect("session learner");
+    let cards =
+        sqlx::query("SELECT question_version_id, passes, due FROM retest_cards WHERE user_id = $1")
+            .bind(learner_id)
+            .fetch_all(&state.pool)
+            .await
+            .expect("scheduled cards");
+    let enrolled: Vec<Uuid> = cards
+        .iter()
+        .map(|row| row.get("question_version_id"))
+        .collect();
     let expected = [q_no_attempt, q_skip, q_wrong, q_unsure, q_assisted, q_hint];
     assert_eq!(enrolled.len(), expected.len());
     for version_id in expected {
-        assert!(enrolled.contains(&version_id), "{version_id} should be scheduled");
+        assert!(
+            enrolled.contains(&version_id),
+            "{version_id} should be scheduled"
+        );
     }
     assert!(!enrolled.contains(&q_correct_sure));
     assert!(!enrolled.contains(&q_unpublished));
@@ -22851,7 +22930,10 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
         assert_eq!(card.get::<i32, _>("passes"), 0);
         let due: chrono::DateTime<chrono::Utc> = card.get("due");
         let hours_until_due = (due - chrono::Utc::now()).num_hours();
-        assert!((47..=49).contains(&hours_until_due), "due in {hours_until_due}h");
+        assert!(
+            (47..=49).contains(&hours_until_due),
+            "due in {hours_until_due}h"
+        );
     }
 
     let (status, before_due) = call(
@@ -22971,7 +23053,7 @@ async fn mock_types_and_time_analysis() {
 
     // 3. Validation reject: non-chapter curriculum node (system node)
     let system_node_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'system' LIMIT 1"
+        "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'system' LIMIT 1",
     )
     .bind(ids.exam_id)
     .fetch_one(&state.pool)
@@ -23002,14 +23084,12 @@ async fn mock_types_and_time_analysis() {
     // 4. Validation reject: cross-exam chapter scoping and nonexistent chapter ID
     // 4a. Real published kind='chapter' node belonging to a different valid exam
     let foreign_exam_id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO exams (id, code, name) VALUES ($1, $2, 'Foreign Exam')",
-    )
-    .bind(foreign_exam_id)
-    .bind(format!("FOREIGN_{}", foreign_exam_id.simple()))
-    .execute(&state.pool)
-    .await
-    .expect("insert foreign exam");
+    sqlx::query("INSERT INTO exams (id, code, name) VALUES ($1, $2, 'Foreign Exam')")
+        .bind(foreign_exam_id)
+        .bind(format!("FOREIGN_{}", foreign_exam_id.simple()))
+        .execute(&state.pool)
+        .await
+        .expect("insert foreign exam");
 
     let foreign_chapter_id = Uuid::new_v4();
     sqlx::query(
@@ -23046,7 +23126,10 @@ async fn mock_types_and_time_analysis() {
         .fetch_one(&state.pool)
         .await
         .expect("mocks count");
-    assert_eq!(initial_mocks_count, mocks_after_foreign, "mock count unchanged after foreign-exam chapter rejection");
+    assert_eq!(
+        initial_mocks_count, mocks_after_foreign,
+        "mock count unchanged after foreign-exam chapter rejection"
+    );
 
     // 4b. Nonexistent chapter ID rejection
     let random_chapter_id = Uuid::new_v4();
@@ -23075,7 +23158,10 @@ async fn mock_types_and_time_analysis() {
         .fetch_one(&state.pool)
         .await
         .expect("mocks count");
-    assert_eq!(initial_mocks_count, mocks_after_nonexistent, "mock count unchanged after nonexistent chapter rejection");
+    assert_eq!(
+        initial_mocks_count, mocks_after_nonexistent,
+        "mock count unchanged after nonexistent chapter rejection"
+    );
 
     // 5. Validation reject: field bounds without silent clamping
     // 5a. Time limit bounds: < 60 or > 28800
@@ -23090,7 +23176,9 @@ async fn mock_types_and_time_analysis() {
             "time_limit_seconds": 59
         })),
     );
-    time_low_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    time_low_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, time_low_res) = call(app.clone(), time_low_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(time_low_res["error"]["code"], "time_limit_out_of_range");
@@ -23106,7 +23194,9 @@ async fn mock_types_and_time_analysis() {
             "time_limit_seconds": 28801
         })),
     );
-    time_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    time_high_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, time_high_res) = call(app.clone(), time_high_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(time_high_res["error"]["code"], "time_limit_out_of_range");
@@ -23123,7 +23213,9 @@ async fn mock_types_and_time_analysis() {
             "attempts_allowed": 11
         })),
     );
-    att_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    att_high_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, att_res) = call(app.clone(), att_high_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(att_res["error"]["code"], "attempts_out_of_range");
@@ -23140,7 +23232,9 @@ async fn mock_types_and_time_analysis() {
             "pass_mark_percent": 105
         })),
     );
-    pass_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    pass_high_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, pass_res) = call(app.clone(), pass_high_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(pass_res["error"]["code"], "pass_mark_out_of_range");
@@ -23157,7 +23251,9 @@ async fn mock_types_and_time_analysis() {
             "late_sync_grace_seconds": 601
         })),
     );
-    grace_high_req.headers_mut().insert("x-admin-token", "test-admin".parse().unwrap());
+    grace_high_req
+        .headers_mut()
+        .insert("x-admin-token", "test-admin".parse().unwrap());
     let (status, grace_res) = call(app.clone(), grace_high_req).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(grace_res["error"]["code"], "late_sync_grace_out_of_range");
@@ -23167,7 +23263,10 @@ async fn mock_types_and_time_analysis() {
         .fetch_one(&state.pool)
         .await
         .expect("mocks count");
-    assert_eq!(initial_mocks_count, current_mocks_count, "no partial mock insert occurred");
+    assert_eq!(
+        initial_mocks_count, current_mocks_count,
+        "no partial mock insert occurred"
+    );
 
     // Null matches Serde Option semantics and keeps the API defaults intact.
     let mut nullable_req = request(
@@ -23206,7 +23305,11 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(nullable_created["late_sync_grace_seconds"], 600);
     assert_eq!(nullable_created["integrity_policy"], "log_only");
     assert!(nullable_created["away_timeout_seconds"].is_null());
-    let nullable_mock_id: Uuid = nullable_created["mock_id"].as_str().unwrap().parse().unwrap();
+    let nullable_mock_id: Uuid = nullable_created["mock_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
     // 6. Admin successfully creates a mock with mock_type: "mini" and multi-chapter blueprint
     let mut create_req = request(
@@ -23250,11 +23353,7 @@ async fn mock_types_and_time_analysis() {
     let mid: Uuid = created["mock_id"].as_str().unwrap().parse().unwrap();
 
     // 7. GET /v1/mocks returns mock_type
-    let (status, mocks) = call(
-        app.clone(),
-        request("GET", "/v1/mocks", Some(&token), None),
-    )
-    .await;
+    let (status, mocks) = call(app.clone(), request("GET", "/v1/mocks", Some(&token), None)).await;
     assert_eq!(status, StatusCode::OK, "{mocks}");
     assert_json_keys(&mocks, &["mocks"]);
     let mock_list = mocks["mocks"].as_array().unwrap();
@@ -23437,5 +23536,3 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(ch2["time_seconds"], 0);
     assert_eq!(ch2["total"], 1);
 }
-
-

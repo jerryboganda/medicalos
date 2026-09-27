@@ -19,7 +19,15 @@ pub const DEFAULT_MAX_NEW_CARDS_PER_DAY: i64 = 10;
 pub const DEFAULT_COMPETITION_DIFFICULTY_POINTS: [i64; 3] = [5, 10, 15];
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsUpdateRequest.ts", rename = "AdminSettingsUpdateRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "settings/AdminSettingsUpdateRequest.ts",
+        rename = "AdminSettingsUpdateRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsReq {
     pub mastery_bands: Option<Vec<i32>>,
@@ -34,7 +42,15 @@ pub struct SettingsReq {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettings.ts", rename = "AdminSettings"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "settings/AdminSettings.ts",
+        rename = "AdminSettings"
+    )
+)]
 pub struct AdminSettings {
     pub mastery_bands: Vec<i64>,
     pub community_min_sample: i64,
@@ -48,13 +64,29 @@ pub struct AdminSettings {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsResponse.ts", rename = "AdminSettingsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "settings/AdminSettingsResponse.ts",
+        rename = "AdminSettingsResponse"
+    )
+)]
 pub struct AdminSettingsResponse {
     pub settings: AdminSettings,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "settings/AdminSettingsUpdateResponse.ts", rename = "AdminSettingsUpdateResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "settings/AdminSettingsUpdateResponse.ts",
+        rename = "AdminSettingsUpdateResponse"
+    )
+)]
 pub struct AdminSettingsUpdateResponse {
     pub updated: Vec<String>,
 }
@@ -416,7 +448,11 @@ pub async fn get_settings(
                 5000,
             ),
             free_daily_coach_turns: bounded_i64(
-                stored_i64(&stored, "free_daily_coach_turns", state.free_daily_coach_turns),
+                stored_i64(
+                    &stored,
+                    "free_daily_coach_turns",
+                    state.free_daily_coach_turns,
+                ),
                 state.free_daily_coach_turns,
                 0,
                 1000,
@@ -435,7 +471,11 @@ pub async fn get_settings(
                 5000,
             ),
             max_new_cards_per_day: bounded_i64(
-                stored_i64(&stored, "max_new_cards_per_day", DEFAULT_MAX_NEW_CARDS_PER_DAY),
+                stored_i64(
+                    &stored,
+                    "max_new_cards_per_day",
+                    DEFAULT_MAX_NEW_CARDS_PER_DAY,
+                ),
                 DEFAULT_MAX_NEW_CARDS_PER_DAY,
                 0,
                 1000,

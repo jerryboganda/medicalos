@@ -758,10 +758,7 @@ pub async fn admin_assessment(
     require_admin(&state, &headers)?;
     let run = admin_assessment_run(&state, run_id).await?;
     let finished_at = run.finished_at.ok_or_else(|| {
-        ApiError::conflict(
-            "run_not_finished",
-            "finish the station before assessment",
-        )
+        ApiError::conflict("run_not_finished", "finish the station before assessment")
     })?;
     let rubric = rubric_results(&state, run_id, run.scenario_version_id).await?;
     Ok(Json(AdminScenarioAssessment {
@@ -998,10 +995,9 @@ pub async fn record_assessment(
                         "assessed scores must be within the criterion's allowed range",
                     ));
                 }
-                let cites_uncorrected_uncertain =
-                    transcript_event_indexes.iter().any(|index| {
-                        uncertain_events.contains(index) && !corrected_indexes.contains(index)
-                    });
+                let cites_uncorrected_uncertain = transcript_event_indexes.iter().any(|index| {
+                    uncertain_events.contains(index) && !corrected_indexes.contains(index)
+                });
                 if cites_uncorrected_uncertain && !transcript_uncertain {
                     return Err(ApiError::unprocessable(
                         "uncertain_transcript_evidence",

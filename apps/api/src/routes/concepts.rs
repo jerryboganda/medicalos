@@ -47,7 +47,15 @@ fn required_text(value: &str, field: &'static str, max: usize) -> ApiResult<Stri
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptRequest.ts", rename = "CreateConceptRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/CreateConceptRequest.ts",
+        rename = "CreateConceptRequest"
+    )
+)]
 pub struct CreateConceptReq {
     pub canonical_key: String,
     pub display_name: String,
@@ -55,20 +63,44 @@ pub struct CreateConceptReq {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptVersionRequest.ts", rename = "CreateConceptVersionRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/CreateConceptVersionRequest.ts",
+        rename = "CreateConceptVersionRequest"
+    )
+)]
 pub struct NewVersionReq {
     pub display_name: String,
     pub definition: String,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/SetNodeConceptsRequest.ts", rename = "SetNodeConceptsRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/SetNodeConceptsRequest.ts",
+        rename = "SetNodeConceptsRequest"
+    )
+)]
 pub struct SetNodeConceptsReq {
     pub concept_ids: Vec<Uuid>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/AdminConcept.ts", rename = "AdminConcept"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/AdminConcept.ts",
+        rename = "AdminConcept"
+    )
+)]
 pub struct AdminConcept {
     pub concept_id: Uuid,
     pub canonical_key: String,
@@ -78,13 +110,29 @@ pub struct AdminConcept {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/AdminConceptListResponse.ts", rename = "AdminConceptListResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/AdminConceptListResponse.ts",
+        rename = "AdminConceptListResponse"
+    )
+)]
 pub struct AdminConceptListResponse {
     pub concepts: Vec<AdminConcept>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptResponse.ts", rename = "CreateConceptResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/CreateConceptResponse.ts",
+        rename = "CreateConceptResponse"
+    )
+)]
 pub struct CreateConceptResponse {
     pub concept_id: Uuid,
     pub canonical_key: String,
@@ -92,14 +140,26 @@ pub struct CreateConceptResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/CreateConceptVersionResponse.ts", rename = "CreateConceptVersionResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/CreateConceptVersionResponse.ts",
+        rename = "CreateConceptVersionResponse"
+    )
+)]
 pub struct CreateConceptVersionResponse {
     pub concept_id: Uuid,
     pub current_version: i32,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/NodeConcept.ts", rename = "NodeConcept"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "concepts/NodeConcept.ts", rename = "NodeConcept")
+)]
 pub struct NodeConcept {
     pub concept_id: Uuid,
     pub canonical_key: String,
@@ -109,13 +169,29 @@ pub struct NodeConcept {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/NodeConceptsResponse.ts", rename = "NodeConceptsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/NodeConceptsResponse.ts",
+        rename = "NodeConceptsResponse"
+    )
+)]
 pub struct NodeConceptsResponse {
     pub concepts: Vec<NodeConcept>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "concepts/SetNodeConceptsResponse.ts", rename = "SetNodeConceptsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "concepts/SetNodeConceptsResponse.ts",
+        rename = "SetNodeConceptsResponse"
+    )
+)]
 pub struct SetNodeConceptsResponse {
     pub node_id: Uuid,
     pub mapped: usize,

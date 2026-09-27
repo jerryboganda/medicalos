@@ -80,10 +80,21 @@ pub(crate) async fn audit_scoped(
 // ---- hierarchy management (§5.5) -------------------------------------------
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/CreateNodeRequest.ts", rename = "CreateNodeRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/CreateNodeRequest.ts",
+        rename = "CreateNodeRequest"
+    )
+)]
 pub struct CreateNodeReq {
     pub exam_id: Uuid,
-    #[cfg_attr(feature = "type-export", ts(type = "\"subject\" | \"system\" | \"chapter\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"subject\" | \"system\" | \"chapter\"")
+    )]
     pub kind: String,
     pub name: String,
     pub parent_id: Option<Uuid>,
@@ -91,16 +102,35 @@ pub struct CreateNodeReq {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/CreateNodeResponse.ts", rename = "CreateNodeResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/CreateNodeResponse.ts",
+        rename = "CreateNodeResponse"
+    )
+)]
 pub struct CreateNodeResponse {
     pub node_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminCurriculumNode.ts", rename = "AdminCurriculumNode"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminCurriculumNode.ts",
+        rename = "AdminCurriculumNode"
+    )
+)]
 pub struct AdminCurriculumNode {
     pub id: Uuid,
-    #[cfg_attr(feature = "type-export", ts(type = "\"subject\" | \"system\" | \"chapter\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"subject\" | \"system\" | \"chapter\"")
+    )]
     pub kind: String,
     pub name: String,
     pub parent_id: Option<Uuid>,
@@ -110,7 +140,15 @@ pub struct AdminCurriculumNode {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminHierarchyResponse.ts", rename = "AdminHierarchyResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminHierarchyResponse.ts",
+        rename = "AdminHierarchyResponse"
+    )
+)]
 pub struct AdminHierarchyResponse {
     pub nodes: Vec<AdminCurriculumNode>,
 }
@@ -256,7 +294,15 @@ fn validate_hint_length(hint: Option<&str>) -> ApiResult<()> {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/ImportQuestion.ts", rename = "ImportQuestion"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/ImportQuestion.ts",
+        rename = "ImportQuestion"
+    )
+)]
 pub struct CreateQuestionReq {
     pub chapter_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "\"easy\" | \"medium\" | \"hard\""))]
@@ -462,28 +508,61 @@ pub async fn create_question(
 // visible). §19.3: the author of an item can never be its approver.
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowRequest.ts", rename = "AssessmentWorkflowRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AssessmentWorkflowRequest.ts",
+        rename = "AssessmentWorkflowRequest"
+    )
+)]
 pub struct AssessmentWorkflowReq {
     /// submit | approve | reject | publish
-    #[cfg_attr(feature = "type-export", ts(type = "\"submit\" | \"approve\" | \"reject\" | \"publish\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"submit\" | \"approve\" | \"reject\" | \"publish\"")
+    )]
     pub action: String,
     pub version_ids: Vec<Uuid>,
     pub note: Option<String>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowError.ts", rename = "AssessmentWorkflowError"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AssessmentWorkflowError.ts",
+        rename = "AssessmentWorkflowError"
+    )
+)]
 pub struct AssessmentWorkflowError {
     pub code: String,
     pub message: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowResult.ts", rename = "AssessmentWorkflowResult"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AssessmentWorkflowResult.ts",
+        rename = "AssessmentWorkflowResult"
+    )
+)]
 pub struct AssessmentWorkflowResult {
     pub version_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "type-export", ts(type = "\"in_review\" | \"approved\" | \"draft\" | \"published\"", optional))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(
+            type = "\"in_review\" | \"approved\" | \"draft\" | \"published\"",
+            optional
+        )
+    )]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "type-export", ts(optional))]
@@ -491,7 +570,15 @@ pub struct AssessmentWorkflowResult {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AssessmentWorkflowResponse.ts", rename = "AssessmentWorkflowResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AssessmentWorkflowResponse.ts",
+        rename = "AssessmentWorkflowResponse"
+    )
+)]
 pub struct AssessmentWorkflowResponse {
     pub results: Vec<AssessmentWorkflowResult>,
 }
@@ -745,7 +832,15 @@ pub async fn search_questions(
 // ---- bulk import with dry-run/rollback (§19.5) -------------------------------
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportRequest.ts", rename = "AdminImportRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportRequest.ts",
+        rename = "AdminImportRequest"
+    )
+)]
 pub struct ImportReq {
     pub exam_id: Uuid,
     #[serde(default = "default_filename")]
@@ -769,7 +864,15 @@ pub struct ImportFileQuery {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportIssue.ts", rename = "AdminImportIssue"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportIssue.ts",
+        rename = "AdminImportIssue"
+    )
+)]
 pub struct RowIssue {
     pub row: usize,
     pub code: &'static str,
@@ -777,14 +880,30 @@ pub struct RowIssue {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportedQuestion.ts", rename = "AdminImportedQuestion"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportedQuestion.ts",
+        rename = "AdminImportedQuestion"
+    )
+)]
 pub struct AdminImportedQuestion {
     pub question_id: Uuid,
     pub version_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportPreviewResponse.ts", rename = "AdminImportPreviewResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportPreviewResponse.ts",
+        rename = "AdminImportPreviewResponse"
+    )
+)]
 pub struct AdminImportPreviewResponse {
     pub batch_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "\"dry_run\" | \"rejected\""))]
@@ -795,7 +914,15 @@ pub struct AdminImportPreviewResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportAppliedResponse.ts", rename = "AdminImportAppliedResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportAppliedResponse.ts",
+        rename = "AdminImportAppliedResponse"
+    )
+)]
 pub struct AdminImportAppliedResponse {
     pub batch_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "\"applied\""))]
@@ -806,14 +933,30 @@ pub struct AdminImportAppliedResponse {
 
 #[derive(Serialize)]
 #[serde(untagged)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminImportResponse.ts", rename = "AdminImportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminImportResponse.ts",
+        rename = "AdminImportResponse"
+    )
+)]
 pub enum AdminImportResponse {
     Preview(AdminImportPreviewResponse),
     Applied(AdminImportAppliedResponse),
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/RollbackImportResponse.ts", rename = "RollbackImportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/RollbackImportResponse.ts",
+        rename = "RollbackImportResponse"
+    )
+)]
 pub struct RollbackImportResponse {
     pub batch_id: Uuid,
     #[cfg_attr(feature = "type-export", ts(type = "\"rolled_back\""))]
@@ -822,7 +965,15 @@ pub struct RollbackImportResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminAuditEvent.ts", rename = "AdminAuditEvent"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminAuditEvent.ts",
+        rename = "AdminAuditEvent"
+    )
+)]
 pub struct AdminAuditEvent {
     pub actor: Option<Uuid>,
     pub action: String,
@@ -835,7 +986,15 @@ pub struct AdminAuditEvent {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "admin/AdminAuditResponse.ts", rename = "AdminAuditResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "admin/AdminAuditResponse.ts",
+        rename = "AdminAuditResponse"
+    )
+)]
 pub struct AdminAuditResponse {
     pub events: Vec<AdminAuditEvent>,
 }
@@ -1555,16 +1714,14 @@ pub async fn audit_log(
     .await?;
     let events: Vec<AdminAuditEvent> = rows
         .into_iter()
-        .map(|r| {
-            AdminAuditEvent {
-                actor: r.get("actor"),
-                action: r.get("action"),
-                entity: r.get("entity"),
-                entity_id: r.get("entity_id"),
-                old_value: r.get("old_value"),
-                new_value: r.get("new_value"),
-                at: r.get("created_at"),
-            }
+        .map(|r| AdminAuditEvent {
+            actor: r.get("actor"),
+            action: r.get("action"),
+            entity: r.get("entity"),
+            entity_id: r.get("entity_id"),
+            old_value: r.get("old_value"),
+            new_value: r.get("new_value"),
+            at: r.get("created_at"),
         })
         .collect();
     Ok(Json(AdminAuditResponse { events }))
@@ -2269,10 +2426,7 @@ pub struct CreateExtractionReportReq {
 )]
 #[serde(deny_unknown_fields)]
 pub struct ReviewExtractionReportReq {
-    #[cfg_attr(
-        feature = "type-export",
-        ts(type = "\"approved\" | \"rejected\"")
-    )]
+    #[cfg_attr(feature = "type-export", ts(type = "\"approved\" | \"rejected\""))]
     pub decision: String,
     pub verified_regions: Vec<String>,
     pub note: String,
@@ -2701,10 +2855,7 @@ pub async fn create_extraction_report(
     .await?;
     tx.commit().await?;
     let report = extraction_report(&state, report_id).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(extraction_report_json(report)?),
-    ))
+    Ok((StatusCode::CREATED, Json(extraction_report_json(report)?)))
 }
 
 pub async fn review_extraction_report(
@@ -2821,10 +2972,7 @@ pub async fn review_extraction_report(
     .await?;
     tx.commit().await?;
     let report = extraction_report(&state, report_id).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(extraction_report_json(report)?),
-    ))
+    Ok((StatusCode::CREATED, Json(extraction_report_json(report)?)))
 }
 
 // ---- ADMIN-03: AI cost/policy read-out ----------------------------------------

@@ -28,19 +28,43 @@ fn valid_handle(handle: &str) -> bool {
 // ---- COMMUNITY-03: opt-in identity ------------------------------------------
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileRequest.ts", rename = "CommunityProfileRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityProfileRequest.ts",
+        rename = "CommunityProfileRequest"
+    )
+)]
 pub struct ProfileReq {
     pub handle: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityProfileResponse.ts", rename = "CreateCommunityProfileResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateCommunityProfileResponse.ts",
+        rename = "CreateCommunityProfileResponse"
+    )
+)]
 pub struct CreateCommunityProfileResponse {
     pub handle: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileResponse.ts", rename = "CommunityProfileResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityProfileResponse.ts",
+        rename = "CommunityProfileResponse"
+    )
+)]
 pub struct CommunityProfileResponse {
     pub opted_in: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,7 +72,15 @@ pub struct CommunityProfileResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityProfileByHandleResponse.ts", rename = "CommunityProfileByHandleResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityProfileByHandleResponse.ts",
+        rename = "CommunityProfileByHandleResponse"
+    )
+)]
 pub struct CommunityProfileByHandleResponse {
     pub user_id: Uuid,
     pub handle: String,
@@ -113,31 +145,71 @@ pub async fn my_profile(
 // ---- COMMUNITY-01: moderated groups -----------------------------------------
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityGroupRequest.ts", rename = "CreateCommunityGroupRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateCommunityGroupRequest.ts",
+        rename = "CreateCommunityGroupRequest"
+    )
+)]
 pub struct GroupReq {
     pub name: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityGroupResponse.ts", rename = "CreateCommunityGroupResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateCommunityGroupResponse.ts",
+        rename = "CreateCommunityGroupResponse"
+    )
+)]
 pub struct CreateCommunityGroupResponse {
     pub group_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/JoinCommunityGroupResponse.ts", rename = "JoinCommunityGroupResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/JoinCommunityGroupResponse.ts",
+        rename = "JoinCommunityGroupResponse"
+    )
+)]
 pub struct JoinCommunityGroupResponse {
     pub joined: bool,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityPostResponse.ts", rename = "CreateCommunityPostResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateCommunityPostResponse.ts",
+        rename = "CreateCommunityPostResponse"
+    )
+)]
 pub struct CreateCommunityPostResponse {
     pub post_id: Uuid,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPost.ts", rename = "CommunityPost"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityPost.ts",
+        rename = "CommunityPost"
+    )
+)]
 pub struct CommunityPost {
     pub post_id: Uuid,
     pub body: String,
@@ -147,29 +219,64 @@ pub struct CommunityPost {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPostListResponse.ts", rename = "CommunityPostListResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityPostListResponse.ts",
+        rename = "CommunityPostListResponse"
+    )
+)]
 pub struct CommunityPostListResponse {
     pub posts: Vec<CommunityPost>,
     pub is_moderator: bool,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateCommunityPostRequest.ts", rename = "CreateCommunityPostRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateCommunityPostRequest.ts",
+        rename = "CreateCommunityPostRequest"
+    )
+)]
 pub struct PostReq {
     pub body: String,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ReportCommunityPostRequest.ts", rename = "ReportCommunityPostRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ReportCommunityPostRequest.ts",
+        rename = "ReportCommunityPostRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ReportPostReq {
-    #[cfg_attr(feature = "type-export", ts(type = "\"spam\" | \"harassment\" | \"medical_misinformation\" | \"other\""))]
+    #[cfg_attr(
+        feature = "type-export",
+        ts(type = "\"spam\" | \"harassment\" | \"medical_misinformation\" | \"other\"")
+    )]
     pub reason: String,
     pub note: Option<String>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ReportCommunityPostResponse.ts", rename = "ReportCommunityPostResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ReportCommunityPostResponse.ts",
+        rename = "ReportCommunityPostResponse"
+    )
+)]
 pub struct ReportCommunityPostResponse {
     pub report_id: Uuid,
     pub status: String,
@@ -177,7 +284,15 @@ pub struct ReportCommunityPostResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityPostReportSummary.ts", rename = "CommunityPostReportSummary"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityPostReportSummary.ts",
+        rename = "CommunityPostReportSummary"
+    )
+)]
 pub struct CommunityPostReportSummary {
     pub report_id: Uuid,
     pub group_id: Uuid,
@@ -189,13 +304,29 @@ pub struct CommunityPostReportSummary {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/MyCommunityPostReportsResponse.ts", rename = "MyCommunityPostReportsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/MyCommunityPostReportsResponse.ts",
+        rename = "MyCommunityPostReportsResponse"
+    )
+)]
 pub struct MyCommunityPostReportsResponse {
     pub reports: Vec<CommunityPostReportSummary>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/GroupPostReport.ts", rename = "GroupPostReport"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/GroupPostReport.ts",
+        rename = "GroupPostReport"
+    )
+)]
 pub struct GroupPostReport {
     pub report_id: Uuid,
     pub post_id: Uuid,
@@ -207,13 +338,29 @@ pub struct GroupPostReport {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/GroupPostReportQueueResponse.ts", rename = "GroupPostReportQueueResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/GroupPostReportQueueResponse.ts",
+        rename = "GroupPostReportQueueResponse"
+    )
+)]
 pub struct GroupPostReportQueueResponse {
     pub reports: Vec<GroupPostReport>,
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ResolveCommunityPostReportRequest.ts", rename = "ResolveCommunityPostReportRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ResolveCommunityPostReportRequest.ts",
+        rename = "ResolveCommunityPostReportRequest"
+    )
+)]
 #[serde(deny_unknown_fields)]
 pub struct ResolvePostReportReq {
     #[cfg_attr(feature = "type-export", ts(type = "\"dismiss\" | \"remove\""))]
@@ -221,20 +368,44 @@ pub struct ResolvePostReportReq {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ResolveCommunityPostReportResponse.ts", rename = "ResolveCommunityPostReportResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ResolveCommunityPostReportResponse.ts",
+        rename = "ResolveCommunityPostReportResponse"
+    )
+)]
 pub struct ResolveCommunityPostReportResponse {
     pub resolved_reports: u64,
     pub status: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/RemoveCommunityPostResponse.ts", rename = "RemoveCommunityPostResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/RemoveCommunityPostResponse.ts",
+        rename = "RemoveCommunityPostResponse"
+    )
+)]
 pub struct RemoveCommunityPostResponse {
     pub removed: bool,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityGroupSummary.ts", rename = "CommunityGroupSummary"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityGroupSummary.ts",
+        rename = "CommunityGroupSummary"
+    )
+)]
 pub struct CommunityGroupSummary {
     pub group_id: Uuid,
     pub name: String,
@@ -242,7 +413,15 @@ pub struct CommunityGroupSummary {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CommunityGroupsResponse.ts", rename = "CommunityGroupsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CommunityGroupsResponse.ts",
+        rename = "CommunityGroupsResponse"
+    )
+)]
 pub struct CommunityGroupsResponse {
     pub groups: Vec<CommunityGroupSummary>,
 }
@@ -386,14 +565,12 @@ pub async fn list_posts(
             at: r.created_at,
         })
         .collect();
-    posts.extend(anonymous.into_iter().map(|r| {
-        CommunityPost {
-            post_id: r.id,
-            body: r.body,
-            status: r.status,
-            handle: "member".into(),
-            at: r.created_at,
-        }
+    posts.extend(anonymous.into_iter().map(|r| CommunityPost {
+        post_id: r.id,
+        body: r.body,
+        status: r.status,
+        handle: "member".into(),
+        at: r.created_at,
     }));
     Ok(Json(CommunityPostListResponse {
         posts,
@@ -697,7 +874,15 @@ pub async fn remove_post(
 // ---- COMP-03/GROW-01: private duels with share tokens ------------------------
 
 #[derive(Deserialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateDuelRequest.ts", rename = "CreateDuelRequest"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateDuelRequest.ts",
+        rename = "CreateDuelRequest"
+    )
+)]
 pub struct DuelReq {
     pub opponent: Uuid,
     pub exam_id: Uuid,
@@ -706,14 +891,30 @@ pub struct DuelReq {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/CreateDuelResponse.ts", rename = "CreateDuelResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/CreateDuelResponse.ts",
+        rename = "CreateDuelResponse"
+    )
+)]
 pub struct CreateDuelResponse {
     pub duel_id: Uuid,
     pub share_token: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelByTokenResponse.ts", rename = "DuelByTokenResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/DuelByTokenResponse.ts",
+        rename = "DuelByTokenResponse"
+    )
+)]
 pub struct DuelByTokenResponse {
     pub duel_id: Uuid,
     pub status: String,
@@ -724,7 +925,15 @@ pub struct DuelByTokenResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/AcceptDuelResponse.ts", rename = "AcceptDuelResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/AcceptDuelResponse.ts",
+        rename = "AcceptDuelResponse"
+    )
+)]
 pub struct AcceptDuelResponse {
     pub accepted: bool,
     pub your_session_id: Uuid,
@@ -732,7 +941,11 @@ pub struct AcceptDuelResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelSide.ts", rename = "DuelSide"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "community/DuelSide.ts", rename = "DuelSide")
+)]
 pub struct DuelSide {
     pub user_id: Uuid,
     pub score: Option<i32>,
@@ -741,7 +954,15 @@ pub struct DuelSide {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelStateResponse.ts", rename = "DuelStateResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/DuelStateResponse.ts",
+        rename = "DuelStateResponse"
+    )
+)]
 pub struct DuelStateResponse {
     pub status: String,
     pub winner: Option<Uuid>,
@@ -749,13 +970,25 @@ pub struct DuelStateResponse {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DeclineDuelResponse.ts", rename = "DeclineDuelResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/DeclineDuelResponse.ts",
+        rename = "DeclineDuelResponse"
+    )
+)]
 pub struct DeclineDuelResponse {
     pub declined: bool,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/DuelSummary.ts", rename = "DuelSummary"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "community/DuelSummary.ts", rename = "DuelSummary")
+)]
 pub struct DuelSummary {
     pub duel_id: Uuid,
     pub status: String,
@@ -767,14 +1000,30 @@ pub struct DuelSummary {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/MyDuelsResponse.ts", rename = "MyDuelsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/MyDuelsResponse.ts",
+        rename = "MyDuelsResponse"
+    )
+)]
 pub struct MyDuelsResponse {
     pub duels: Vec<DuelSummary>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCardKind.ts", rename = "ShareCardKind"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ShareCardKind.ts",
+        rename = "ShareCardKind"
+    )
+)]
 pub enum ShareCardKind {
     Score,
     Consistency,
@@ -782,7 +1031,11 @@ pub enum ShareCardKind {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCard.ts", rename = "ShareCard"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "community/ShareCard.ts", rename = "ShareCard")
+)]
 pub struct ShareCard {
     pub kind: ShareCardKind,
     pub headline: String,
@@ -792,14 +1045,30 @@ pub struct ShareCard {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/UnavailableShareCard.ts", rename = "UnavailableShareCard"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/UnavailableShareCard.ts",
+        rename = "UnavailableShareCard"
+    )
+)]
 pub struct UnavailableShareCard {
     pub kind: ShareCardKind,
     pub reason: String,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "type-export", derive(ts_rs::TS), ts(export, export_to = "community/ShareCardsResponse.ts", rename = "ShareCardsResponse"))]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "community/ShareCardsResponse.ts",
+        rename = "ShareCardsResponse"
+    )
+)]
 pub struct ShareCardsResponse {
     pub cards: Vec<ShareCard>,
     pub unavailable: Vec<UnavailableShareCard>,

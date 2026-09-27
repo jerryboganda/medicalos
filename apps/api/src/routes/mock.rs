@@ -204,12 +204,11 @@ pub async fn create_mock(
         )
     })?;
 
-    let exam_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM exams WHERE id = $1)"
-    )
-    .bind(req.exam_id)
-    .fetch_one(&state.pool)
-    .await?;
+    let exam_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM exams WHERE id = $1)")
+            .bind(req.exam_id)
+            .fetch_one(&state.pool)
+            .await?;
     if !exam_exists {
         return Err(ApiError::unprocessable(
             "invalid_exam_id",
