@@ -83,6 +83,17 @@ impl ApiError {
         Self::new(StatusCode::FORBIDDEN, code, message)
     }
 
+    /// 423 with a structured details payload — used by login throttling so a
+    /// locked-out legitimate user learns how long to wait (§6.3).
+    pub fn locked(code: &'static str, message: impl Into<String>, details: Value) -> Self {
+        Self {
+            status: StatusCode::LOCKED,
+            code,
+            message: message.into(),
+            details: Some(details),
+        }
+    }
+
     pub fn internal() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
