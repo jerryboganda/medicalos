@@ -7,8 +7,9 @@ use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::AuthUser;
+use crate::auth::{hash_password, AuthUser};
 use crate::error::{ApiError, ApiResult};
+use crate::routes::admin::{admin_headers, audit};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -211,4 +212,62 @@ pub async fn set_session_policy(
     Ok(Json(
         serde_json::json!({ "single_active_session": req.single_active_session }),
     ))
+}
+
+#[derive(Deserialize)]
+pub struct AdminResetPasswordReq {
+    pub new_password: String,
+}
+
+/// Operator-assisted password reset (pilot stop-gap until an email
+/// delivery seam exists — see .scratch/auth-hardening/spec.md). Admin-gated
+/// through the shared seam (role session or legacy token), hashes the new
+/// password like registration does, and revokes every live session so a
+/// stolen session does not survive the reset. Audited with the target,
+/// never with the password.
+pub async fn admin_reset_password(
+    State(state): State<Arc<AppState>>,
+    operator: AuthUser,
+    headers: axum::http::HeaderMap,
+    Path(user_id): Path<Uuid>,
+    Json(req): Json<AdminResetPasswordReq>,
+) -> ApiResult<Json<serde_json::Value>> {
+    state.require_admin(&operator, admin_headers(&headers))?;
+    if req.new_password.len() < 8 {
+        return Err(ApiError::unprocessable(
+            "weak_password",
+            "password must be at least 8 characters",
+        ));
+    }
+    let hash = hash_password(&req.new_password)?;
+    let mut tx = state.pool.begin().await?;
+    let updated = sqlx::query!(
+        "UPDATE users SET password_hash = $1 WHERE id = $2 AND deleted_at IS NULL",
+        hash,
+        user_id
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if updated == 0 {
+        return Err(ApiError::not_found("user_not_found"));
+    }
+    sqlx::query!(
+        "UPDATE auth_sessions SET revoked_at = now()
+         WHERE user_id = $1 AND revoked_at IS NULL",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    audit(
+        &state.pool,
+        operator.user_id,
+        "admin_password_reset",
+        "user",
+        user_id,
+        json!({ "sessions_revoked": true }),
+    )
+    .await?;
+    Ok(Json(json!({ "reset": true })))
 }

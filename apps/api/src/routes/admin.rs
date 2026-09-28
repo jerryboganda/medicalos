@@ -23,7 +23,7 @@ use crate::seed::QuestionOption;
 use crate::state::AppState;
 use domain_contracts::option_count;
 
-fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
+pub(crate) fn admin_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers.get("x-admin-token").and_then(|v| v.to_str().ok())
 }
 
