@@ -19,6 +19,7 @@ pub fn init() {
 fn init_with_otlp(filter: tracing_subscriber::EnvFilter) {
     use opentelemetry::trace::TracerProvider as _;
     use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
 
     // Reads OTEL_EXPORTER_OTLP_ENDPOINT (appending /v1/traces for spans per
     // the OTLP spec), OTEL_EXPORTER_OTLP_HEADERS, and friends.
