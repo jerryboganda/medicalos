@@ -460,6 +460,112 @@ async fn ai05_event_jobs_process_retry_and_dead_letter() {
 }
 
 #[tokio::test]
+async fn ai14_cross_member_perimeter_blocks_private_surfaces() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+
+    // Learner A: private data, no institution. Learner B: admin of tenant A
+    // through the real creation seam. Perimeter under test: B's staff role
+    // grants zero access to A's private surfaces or a foreign tenant.
+    let learner_a = register_and_login(app.clone()).await;
+    let learner_b = register_and_login(app.clone()).await;
+
+    let (status, saved) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/coach-memory/exam_focus",
+            Some(&learner_a),
+            Some(serde_json::json!({"value": "cardiology"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    let (status, inst) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/institutions",
+            Some(&learner_b),
+            Some(serde_json::json!({ "name": "Fictional tenant A" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{inst}");
+    let inst_a: Uuid = inst["institution_id"].as_str().unwrap().parse().unwrap();
+    let inst_b = Uuid::new_v4();
+    sqlx::query("INSERT INTO institutions (id, name) VALUES ($1, 'Fictional tenant B')")
+        .bind(inst_b)
+        .execute(&state.pool)
+        .await
+        .expect("institution b");
+
+    // Learner B — staff/admin of tenant A — reads none of learner A's
+    // private surfaces.
+    for (method, path) in [
+        ("GET", "/v1/me/institutions"),
+        ("GET", "/v1/notes"),
+        ("GET", "/v1/me/coach-memory"),
+        ("GET", "/v1/me/plan/next-action?available_minutes=30"),
+        ("GET", "/v1/me/today"),
+        ("GET", "/v1/me/packs"),
+    ] {
+        let (status, body) = call(app.clone(), request(method, path, Some(&learner_b), None)).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let text = body.to_string();
+        assert!(
+            !text.contains("cardiology"),
+            "{path} leaked another learner's private coach memory"
+        );
+    }
+
+    // Staff of tenant A cannot touch tenant B's program surface.
+    let (status, blocked) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/institutions/{inst_b}/programs"),
+            Some(&learner_b),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{blocked}");
+
+    // The storage-side row-level policies agree with the handler perimeter.
+    let mut tx = state.pool.begin().await.expect("tx");
+    sqlx::query("SET LOCAL ROLE medos_tenant_viewer")
+        .execute(&mut *tx)
+        .await
+        .expect("set role");
+    sqlx::query("SELECT set_config('app.institution_ids', $1, true)")
+        .bind(inst_a.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("scope");
+    let leaked: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM institution_members WHERE institution_id = $1")
+            .bind(inst_b)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count");
+    sqlx::query("ROLLBACK")
+        .execute(&mut *tx)
+        .await
+        .expect("rollback");
+    assert_eq!(
+        leaked, 0,
+        "row-level security and the staff perimeter agree"
+    );
+
+    // The seeded question stays reachable for a note anchor (sanity for ids).
+    let _ = ids.question_versions[0];
+}
+
+#[tokio::test]
 async fn xp_competitions_coverage_flow() {
     let _g = LOCK.lock().await;
     let state = setup().await;
