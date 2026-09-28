@@ -374,6 +374,80 @@ async fn core04_tenant_rls_confines_least_privilege_reads() {
 }
 
 #[tokio::test]
+async fn ai05_event_jobs_process_retry_and_dead_letter() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let vid = ids.question_versions[0];
+
+    // The real kind: a processed job warms the one-tap tutoring cards.
+    let job_id = api::routes::jobs::enqueue(
+        &state.pool,
+        "pregen_tutoring_cards",
+        serde_json::json!({ "question_version_id": vid }),
+        None,
+    )
+    .await
+    .expect("enqueue");
+    let processed = api::routes::jobs::process_due_jobs(&state)
+        .await
+        .expect("process");
+    assert!(processed >= 1, "the due job is claimed");
+    let status: String = sqlx::query_scalar("SELECT status FROM event_jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("status");
+    assert_eq!(status, "done");
+    let cards: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pregen_tutoring WHERE question_version_id = $1")
+            .bind(vid)
+            .fetch_one(&state.pool)
+            .await
+            .expect("cards");
+    assert!(cards >= 1, "the job actually generated the cards");
+
+    // An unknown kind retries with backoff and then dead-letters.
+    let bad = api::routes::jobs::enqueue(&state.pool, "no_such_kind", serde_json::json!({}), None)
+        .await
+        .expect("enqueue unknown kind");
+    for _ in 0..5 {
+        sqlx::query("UPDATE event_jobs SET run_after = now() WHERE id = $1")
+            .bind(bad)
+            .execute(&state.pool)
+            .await
+            .expect("rewind backoff");
+        api::routes::jobs::process_due_jobs(&state)
+            .await
+            .expect("process unknown");
+    }
+    let (status, attempts): (String, i32) =
+        sqlx::query_as("SELECT status, attempts FROM event_jobs WHERE id = $1")
+            .bind(bad)
+            .fetch_one(&state.pool)
+            .await
+            .expect("dead letter");
+    assert_eq!(status, "failed");
+    assert_eq!(attempts, 5);
+
+    // A done job never reprocesses, even when run_after is rewound.
+    sqlx::query("UPDATE event_jobs SET run_after = now() WHERE id = $1")
+        .bind(job_id)
+        .execute(&state.pool)
+        .await
+        .expect("rewind done");
+    api::routes::jobs::process_due_jobs(&state)
+        .await
+        .expect("reprocess");
+    let status: String = sqlx::query_scalar("SELECT status FROM event_jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("done status");
+    assert_eq!(status, "done");
+}
+
+#[tokio::test]
 async fn xp_competitions_coverage_flow() {
     let _g = LOCK.lock().await;
     let state = setup().await;
