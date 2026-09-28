@@ -2,47 +2,48 @@
 //! OpenTelemetry). Local fmt logging is always on with env-filtered levels.
 //! When `OTEL_EXPORTER_OTLP_ENDPOINT` is set — and the crate is built with
 //! its `otlp` feature — spans additionally export to that collector over
-//! OTLP/HTTP. No endpoint or no feature: exactly the fmt-only subscriber.
+//! OTLP/HTTP protobuf (the exporter reads the standard OTEL_* env vars, so
+//! headers/protocol tuning stays out of code). No endpoint or no feature:
+//! exactly the fmt-only subscriber.
 
 pub fn init() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     match std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
-        Ok(endpoint) if !endpoint.trim().is_empty() => init_with_otlp(&endpoint, filter),
+        Ok(endpoint) if !endpoint.trim().is_empty() => init_with_otlp(filter),
         _ => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
 }
 
 #[cfg(feature = "otlp")]
-fn init_with_otlp(endpoint: &str, filter: tracing_subscriber::EnvFilter) {
+fn init_with_otlp(filter: tracing_subscriber::EnvFilter) {
     use opentelemetry::trace::TracerProvider as _;
 
+    // Reads OTEL_EXPORTER_OTLP_ENDPOINT (appending /v1/traces for spans per
+    // the OTLP spec), OTEL_EXPORTER_OTLP_HEADERS, and friends.
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
-        .with_endpoint(format!(
-            "{}/v1/traces",
-            endpoint.trim().trim_end_matches('/')
-        ))
         .build()
         .expect("build OTLP span exporter");
-    let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+    let service_name =
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "medicalos-api".into());
+    let provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(exporter)
-        .with_resource(opentelemetry_sdk::Resource::builder().with_service_name(
-            std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "medicalos-api".into()),
-        ))
+        .with_resource(opentelemetry_sdk::Resource::new(vec![
+            opentelemetry::KeyValue::new("service.name", service_name),
+        ]))
         .build();
     let tracer = provider.tracer("telemetry");
     // The batch exporter owns its own flush scheduling; the process-lifetime
     // provider is intentionally never shut down.
     std::mem::forget(provider);
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
         .init();
 }
 
 #[cfg(not(feature = "otlp"))]
-fn init_with_otlp(_endpoint: &str, filter: tracing_subscriber::EnvFilter) {
+fn init_with_otlp(filter: tracing_subscriber::EnvFilter) {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
