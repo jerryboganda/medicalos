@@ -101,27 +101,82 @@ pub async fn register(
     Ok(Json(RegisterResponse { user_id }))
 }
 
+/// §6.3 login throttling: 10 consecutive wrong passwords lock the account,
+/// backing off exponentially (2^(n-10) minutes) and capped at 15.
+const LOGIN_LOCK_THRESHOLD: i32 = 10;
+const LOGIN_LOCK_CAP_MINUTES: i32 = 15;
+
+fn lock_minutes(failures: i32) -> i32 {
+    (1i32 << (failures - LOGIN_LOCK_THRESHOLD).clamp(0, 20)).min(LOGIN_LOCK_CAP_MINUTES)
+}
+
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginReq>,
 ) -> ApiResult<Json<LoginResponse>> {
     let email = req.email.trim().to_lowercase();
+    // Throttle first: a locked account never reaches the password verify.
+    let throttle = sqlx::query!(
+        "SELECT consecutive_failures, locked_until FROM login_throttle WHERE email = $1",
+        email
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+    if let Some(row) = &throttle {
+        if let Some(locked_until) = row.locked_until {
+            let now = chrono::Utc::now();
+            if locked_until > now {
+                let retry_after = (locked_until - now).num_seconds().max(1);
+                return Err(ApiError::locked(
+                    "login_locked",
+                    "too many failed sign-in attempts; try again later",
+                    serde_json::json!({ "retry_after_seconds": retry_after }),
+                ));
+            }
+        }
+    }
     let user = sqlx::query!(
         "SELECT id, password_hash FROM users
          WHERE email = $1 AND deleted_at IS NULL",
         email
     )
     .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(ApiError::unauthorized)?;
+    .await?;
     // Accounts created through Zitadel have no local password to check.
-    let password_ok = user
-        .password_hash
-        .as_deref()
-        .is_some_and(|hash| verify_password(&req.password, hash));
+    let password_ok = user.as_ref().is_some_and(|user| {
+        user.password_hash
+            .as_deref()
+            .is_some_and(|hash| verify_password(&req.password, hash))
+    });
     if !password_ok {
+        // Count every failed attempt against the address, whether or not the
+        // account exists (the response stays 401 either way).
+        let failures = throttle
+            .as_ref()
+            .map(|row| row.consecutive_failures + 1)
+            .unwrap_or(1);
+        let locked_until = (failures >= LOGIN_LOCK_THRESHOLD)
+            .then(|| chrono::Utc::now() + chrono::Duration::minutes(lock_minutes(failures).into()));
+        sqlx::query!(
+            "INSERT INTO login_throttle (email, consecutive_failures, locked_until, updated_at)
+             VALUES ($1, $2, $3, now())
+             ON CONFLICT (email) DO UPDATE SET
+                consecutive_failures = $2,
+                locked_until = $3,
+                updated_at = now()",
+            email,
+            failures,
+            locked_until
+        )
+        .execute(&state.pool)
+        .await?;
         return Err(ApiError::unauthorized());
     }
+    let user = user.expect("checked above");
     let token = issue_session(&state.pool, user.id).await?;
+    // A successful sign-in forgives the failure history.
+    sqlx::query!("DELETE FROM login_throttle WHERE email = $1", email)
+        .execute(&state.pool)
+        .await?;
     Ok(Json(LoginResponse { token }))
 }

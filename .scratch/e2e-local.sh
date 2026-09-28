@@ -38,9 +38,12 @@ case "$code" in
   200|409) echo "PASS  student account present (HTTP $code)";;
   *) echo "FAIL  student register — HTTP $code"; head -c 300 "$body"; echo; fails=$((fails+1));;
 esac
+# Wrong-password rejection is probed with a throwaway account so repeated
+# script runs never trip the per-account login lockout (§6.3).
+PROBE="probe-wrong-$(date +%s)@local.test"
 code=$(req POST "$BASE/auth/login" -H 'content-type: application/json' \
-  -d "{\"email\":\"$STUDENT\",\"password\":\"wrong-password\"}")
-check "student login rejects wrong password" 401 "$code"
+  -d "{\"email\":\"$PROBE\",\"password\":\"wrong-password\"}")
+check "wrong-password login rejected (probe account)" 401 "$code"
 STOKEN=$(login "$STUDENT")
 if [ -n "$STOKEN" ]; then echo "PASS  student login (session issued)"; else
   echo "FAIL  student login"; fails=$((fails+1)); fi

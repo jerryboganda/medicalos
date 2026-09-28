@@ -76,6 +76,7 @@ migrations!(
     "0059_core04_tenant_rls",
     "0060_event_jobs",
     "0061_zitadel_identity",
+    "0062_login_throttling",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

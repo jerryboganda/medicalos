@@ -1263,6 +1263,126 @@ async fn auth_register_login_and_reject_bad_credentials() {
     assert!(v["token"].as_str().is_some());
 }
 
+/// §6.3: ten consecutive wrong passwords lock the account with an honest
+/// `login_locked` answer carrying the retry hint — even for the correct
+/// password, which never reaches the verifier while locked.
+#[tokio::test]
+async fn login_locks_after_ten_consecutive_failures() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let email = format!("throttle-{}@example.test", Uuid::new_v4());
+
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    for attempt in 1..=10 {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/login",
+                None,
+                Some(serde_json::json!({"email": email, "password": "wrong"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "attempt {attempt}");
+    }
+
+    // The correct password is refused while the lock is live.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
+    assert_eq!(body["error"]["code"], "login_locked", "{body}");
+    assert!(
+        body["error"]["details"]["retry_after_seconds"]
+            .as_i64()
+            .unwrap()
+            > 0,
+        "{body}"
+    );
+}
+
+/// §6.3: a successful sign-in forgives the failure history, so scattered
+/// wrong attempts never accumulate into a lockout.
+#[tokio::test]
+async fn successful_login_resets_the_failure_count() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let email = format!("throttle-reset-{}@example.test", Uuid::new_v4());
+
+    let (status, v) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email, "password": "longenough"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    let wrong = serde_json::json!({"email": email, "password": "wrong"});
+    let right = serde_json::json!({"email": email, "password": "longenough"});
+    for attempt in 1..=5 {
+        let (status, _) = call(
+            app.clone(),
+            request("POST", "/v1/auth/login", None, Some(wrong.clone())),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "streak-1 attempt {attempt}"
+        );
+    }
+    let (status, _) = call(
+        app.clone(),
+        request("POST", "/v1/auth/login", None, Some(right.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "correct password still signs in");
+    for attempt in 1..=5 {
+        let (status, _) = call(
+            app.clone(),
+            request("POST", "/v1/auth/login", None, Some(wrong.clone())),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "streak-2 attempt {attempt}"
+        );
+    }
+    // Five into the fresh streak: not locked, correct password works.
+    let (status, _) = call(
+        app.clone(),
+        request("POST", "/v1/auth/login", None, Some(right.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "reset streak never locks");
+}
+
 #[tokio::test]
 async fn full_loop_cold_start_answer_submit_revision_undo() {
     let _g = LOCK.lock().await;
