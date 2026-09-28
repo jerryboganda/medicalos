@@ -589,7 +589,8 @@ export type { AnswerableQuestionsResponse } from './generated/coach/AnswerableQu
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
 	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
 const BASE: string =
-	import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? '/api' : '');
+	// `||`, not `??`: an empty VITE_API_BASE must not drop the /api prefix.
+	import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? '/api' : '');
 
 export class ApiError extends Error {
 	constructor(
