@@ -31,13 +31,21 @@ pub const DEFAULT_COMPETITION_DIFFICULTY_POINTS: [i64; 3] = [5, 10, 15];
 #[serde(deny_unknown_fields)]
 pub struct SettingsReq {
     pub mastery_bands: Option<Vec<i32>>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub community_min_sample: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub free_daily_questions: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub free_daily_coach_turns: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "Array<number> | null"))]
     pub retest_intervals_days: Option<Vec<i64>>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub offline_lease_days: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub max_reviews_per_day: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub max_new_cards_per_day: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "Array<number> | null"))]
     pub competition_difficulty_points: Option<Vec<i64>>,
 }
 
@@ -52,14 +60,23 @@ pub struct SettingsReq {
     )
 )]
 pub struct AdminSettings {
+    #[cfg_attr(feature = "type-export", ts(type = "Array<number>"))]
     pub mastery_bands: Vec<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub community_min_sample: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub free_daily_questions: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub free_daily_coach_turns: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "Array<number>"))]
     pub retest_intervals_days: Vec<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub offline_lease_days: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub max_reviews_per_day: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub max_new_cards_per_day: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub competition_difficulty_points: [i64; 3],
 }
 

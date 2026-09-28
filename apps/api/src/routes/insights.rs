@@ -30,6 +30,7 @@ pub struct HeatmapQuery {
     /// PROG-01 difficulty filter: accuracy computed over this difficulty only.
     pub difficulty: Option<String>,
     /// PROG-01 trend: recent-window accuracy (days) alongside the overall one.
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub trend_days: Option<i64>,
 }
 
@@ -68,10 +69,13 @@ pub struct MasteryHeatmapChapter {
     pub evidence_count: Option<i32>,
     pub band: MasteryHeatmapBand,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub filtered_accuracy: Option<Option<i64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub recent_answered: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub recent_correct: Option<i64>,
 }
 

@@ -382,6 +382,7 @@ pub struct ResolvePostReportReq {
     )
 )]
 pub struct ResolveCommunityPostReportResponse {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub resolved_reports: u64,
     pub status: String,
 }
@@ -413,6 +414,7 @@ pub struct RemoveCommunityPostResponse {
 pub struct CommunityGroupSummary {
     pub group_id: Uuid,
     pub name: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub members: i64,
 }
 
@@ -891,6 +893,7 @@ pub struct DuelReq {
     pub opponent: Uuid,
     pub exam_id: Uuid,
     pub chapter_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub question_count: Option<i64>,
 }
 
@@ -953,6 +956,7 @@ pub struct AcceptDuelResponse {
 pub struct DuelSide {
     pub user_id: Uuid,
     pub score: Option<i32>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub total_ms: Option<i64>,
     pub session_id: Uuid,
 }

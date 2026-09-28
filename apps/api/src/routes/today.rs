@@ -67,6 +67,7 @@ pub struct RecommendedAction {
     adjusted_estimated_minutes: i32,
     protected: bool,
     reason_code: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     independent_count: i64,
 }
 
@@ -81,8 +82,11 @@ pub struct RecommendedAction {
     )
 )]
 pub struct NextActionAllowance {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     limit: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     used: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     remaining: i64,
     #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     required: Option<i64>,
@@ -1083,6 +1087,7 @@ pub struct CurriculumChapter {
     pub subject: String,
     pub exam_id: Uuid,
     pub exam: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub published_questions: i64,
 }
 

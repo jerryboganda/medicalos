@@ -42,10 +42,12 @@ pub struct CompetitionLeagueNotJoined {
     )
 )]
 pub struct CompetitionLeagueStanding {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub rank: i64,
     pub handle: String,
     pub points: f64,
     pub accuracy: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub total_time_ms: i64,
     pub is_me: bool,
 }
