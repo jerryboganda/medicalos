@@ -107,6 +107,48 @@ pub struct PackResourcesReq {
 )]
 pub struct PackResourcesResponse {
     pub resources: Vec<PackQuestionResource>,
+    pub receipt: PackDownloadReceipt,
+}
+
+/// OFF-01: a signed, server-recorded attestation that this device received
+/// rights-verified content for exactly these checksums under an active lease.
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(
+        export,
+        export_to = "packs/PackDownloadReceipt.ts",
+        rename = "PackDownloadReceipt"
+    )
+)]
+pub struct PackDownloadReceipt {
+    pub device_id: String,
+    pub exam_id: Uuid,
+    /// RFC3339 — this exact string is part of the signed payload.
+    pub issued_at: String,
+    pub checksums: Vec<String>,
+    pub signature: String,
+}
+
+/// The exact bytes an auditor or the browser re-covers from the receipt fields
+/// before checking the Ed25519 signature. Shared by the handler and tests so
+/// the canonical form cannot drift between signer and verifier.
+pub fn pack_download_receipt_message(
+    device_id: &str,
+    exam_id: Uuid,
+    issued_at: &str,
+    checksums: &[String],
+) -> String {
+    let payload = json!({
+        "checksums": checksums,
+        "device_id": device_id,
+        "exam_id": exam_id,
+        "issued_at": issued_at,
+    });
+    let mut canonical = String::new();
+    canonical_value(&payload, &mut canonical);
+    canonical
 }
 
 #[derive(Deserialize)]
@@ -818,7 +860,37 @@ pub async fn pack_resources(
             tutoring_cards: tutoring_cards.remove(&row.id).unwrap_or_default(),
         })?);
     }
-    Ok(Json(PackResourcesResponse { resources }))
+    // OFF-01: issue and record a verified download receipt for this batch.
+    let checksums: Vec<String> = resources.iter().map(|r| r.checksum.clone()).collect();
+    let issued_at = chrono::Utc::now();
+    let issued_at_rfc3339 = issued_at.to_rfc3339();
+    let message =
+        pack_download_receipt_message(&req.device_id, exam_id, &issued_at_rfc3339, &checksums);
+    let signature = hex(&ed25519_signing_key(&state)?
+        .sign(message.as_bytes())
+        .to_bytes());
+    sqlx::query(
+        "INSERT INTO pack_download_receipts
+           (id, user_id, exam_id, device_id, checksums, signature, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user.user_id)
+    .bind(exam_id)
+    .bind(&req.device_id)
+    .bind(json!(checksums))
+    .bind(&signature)
+    .bind(issued_at)
+    .execute(&state.pool)
+    .await?;
+    let receipt = PackDownloadReceipt {
+        device_id: req.device_id.clone(),
+        exam_id,
+        issued_at: issued_at_rfc3339,
+        checksums,
+        signature,
+    };
+    Ok(Json(PackResourcesResponse { resources, receipt }))
 }
 
 // ---- OFF-04 / PROT-02 / §22: pack leases ------------------------------------
