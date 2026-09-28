@@ -337,7 +337,7 @@
 <h1>Practice</h1>
 
 {#if loading}
-	<p class="muted">Loading…</p>
+	<p class="muted is-loading">Loading…</p>
 {:else}
 	<div class="card">
 		<h2>Mock tests</h2>
@@ -345,17 +345,17 @@
 			<p class="muted">No mock tests are available yet.</p>
 		{:else}
 			{#each mocks as mock (mock.mock_id)}
-				<div class="card" style="margin-bottom: var(--space-md);" data-testid="mock-card">
-					<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+				<div class="card" data-testid="mock-card">
+					<div class="row">
 						<strong>{mock.title}</strong>
-						<div style="display:flex; gap:6px; align-items:center;">
+						<div class="cluster">
 							{#if mock.mock_type}
-								<span class="chip" data-testid="mock-type-chip">{mock.mock_type.replace('_', ' ')}</span>
+								<span class="chip info" data-testid="mock-type-chip">{mock.mock_type.replace('_', ' ')}</span>
 							{/if}
 							<span class="chip">Pass {mock.pass_mark_percent}%</span>
 						</div>
 					</div>
-					<p class="muted" style="margin: var(--space-xs) 0;">
+					<p class="muted small">
 						{mock.attempts_used}/{mock.attempts_allowed} attempts
 						{#if mock.time_limit_seconds}
 							· {Math.round(mock.time_limit_seconds / 60)} min
@@ -372,7 +372,7 @@
 							{startingMock === mock.mock_id ? 'Starting…' : 'Start mock'}
 						</button>
 					{:else}
-						<p class="muted" style="margin:0;">All attempts used.</p>
+						<p class="muted">All attempts used.</p>
 					{/if}
 				</div>
 			{/each}
@@ -381,7 +381,7 @@
 
 	<div class="card">
 		<h2>Build a practice session</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Pick one or more chapters, choose which pool the questions come
 			from, and set the length. An empty pool says so honestly — nothing
 			is invented to fill it.
@@ -389,14 +389,12 @@
 		{#if chapters.length === 0}
 			<p class="muted">No curriculum is available yet.</p>
 		{:else}
-			<fieldset style="border:0; padding:0; margin:0 0 var(--space-md);">
-				<legend class="muted" style="font-size: var(--text-sm);">
+			<fieldset class="plain-fieldset">
+				<legend class="muted small">
 					Chapters ({selected.length} selected)
 				</legend>
 				{#each chapters as ch (ch.chapter_id)}
-					<label
-						style="display:flex; gap:8px; align-items:center; margin: var(--space-xs) 0;"
-					>
+					<label class="check-row">
 						<input
 							type="checkbox"
 							checked={selected.includes(ch.chapter_id)}
@@ -405,14 +403,14 @@
 						/>
 						<span>
 							{ch.chapter_name}
-							<span class="muted" style="font-size: var(--text-sm);">
+							<span class="muted small">
 								· {ch.system} · {ch.published_questions} published
 							</span>
 						</span>
 					</label>
 				{/each}
 			</fieldset>
-			<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+			<div class="form-row">
 				<label class="field" for="builder-pool">
 					<span>Pool</span>
 					<select id="builder-pool" bind:value={pool}>
@@ -450,7 +448,7 @@
 
 	<div class="card" data-testid="competition-section">
 		<h2>Competitions</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Opt-in events use one timed attempt. Questions appear one at a time.
 		</p>
 		{#if competitionError}
@@ -469,15 +467,15 @@
 		{:else}
 			{#each competitions as competition (competition.competition_id)}
 				{@const phase = competitionPhase(competition)}
-				<div class="card" style="margin-bottom: var(--space-md);" data-testid="competition-card">
-					<div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
-						<strong style="min-width:0; overflow-wrap:anywhere;">{competition.title}</strong>
-						<div style="display:flex; gap:var(--space-xs); align-items:center;">
+				<div class="card" data-testid="competition-card">
+					<div class="row">
+						<strong class="wrap-anywhere">{competition.title}</strong>
+						<div class="cluster">
 							<span class="chip" data-testid="competition-cadence">{cadenceLabel(competition.cadence)}</span>
-							<span class="chip" data-testid="competition-status">{phase}</span>
+							<span class="chip info" data-testid="competition-status">{phase}</span>
 						</div>
 					</div>
-					<p class="muted" style="margin: var(--space-xs) 0; font-size: var(--text-sm);">
+					<p class="muted small">
 						Starts {competitionDate(competition.starts_at)} · Ends {competitionDate(competition.ends_at)}
 					</p>
 					{#if !communityHandle && (phase === 'Open' || phase === 'In progress')}
@@ -517,7 +515,7 @@
 
 		{#if activeCompetition}
 			{@const step = activeCompetition.step}
-			<div class="card" style="margin-top: var(--space-md);" data-testid="competition-attempt">
+			<div class="card" data-testid="competition-attempt">
 				<h3 tabindex="-1" bind:this={competitionQuestionHeading}>
 					{step.submitted ? 'Competition result' : `Question ${step.question.question_number} of ${step.question.total_questions}`}
 				</h3>
@@ -526,12 +524,12 @@
 						Your score: <strong>{step.score}</strong> · {step.questions} questions · {Math.round(step.total_time_ms / 1000)} seconds
 					</p>
 				{:else}
-					<p style="overflow-wrap:anywhere;">{step.question.vignette}</p>
-					<p style="overflow-wrap:anywhere;"><strong>{step.question.lead_in}</strong></p>
-					<fieldset style="border:0; padding:0; margin:0 0 var(--space-md);">
-						<legend class="muted" style="font-size: var(--text-sm);">Choose one answer</legend>
+					<p class="wrap-anywhere">{step.question.vignette}</p>
+					<p class="wrap-anywhere"><strong>{step.question.lead_in}</strong></p>
+					<fieldset class="plain-fieldset">
+						<legend class="muted small">Choose one answer</legend>
 						{#each step.question.options as option, index}
-							<label style="display:flex; gap:8px; align-items:flex-start; margin: var(--space-sm) 0;">
+							<label class="check-row choice">
 								<input
 									type="radio"
 									name="competition-answer"
@@ -557,16 +555,16 @@
 		{/if}
 
 		{#if competitionLeaderboard && leaderboardCompetition}
-			<div class="card" style="margin-top: var(--space-md);" data-testid="competition-leaderboard">
+			<div class="card" data-testid="competition-leaderboard">
 				<h3 tabindex="-1" bind:this={leaderboardHeading}>{leaderboardCompetition.title} standings</h3>
 				{#if competitionLeaderboard.entries.length === 0}
 					<p class="muted">No eligible leaderboard entries are available.</p>
 				{:else}
-					<ol>
+					<ol class="standings">
 						{#each competitionLeaderboard.entries as entry (`${entry.rank}-${entry.handle}`)}
-							<li style="margin: var(--space-sm) 0;">
-								<strong style="overflow-wrap:anywhere;">#{entry.rank} {entry.handle}{entry.is_me ? ' · you' : ''}</strong>
-								<div class="muted" style="font-size: var(--text-sm);">
+							<li class:me={entry.is_me}>
+								<strong class="wrap-anywhere">#{entry.rank} {entry.handle}{entry.is_me ? ' · you' : ''}</strong>
+								<div class="muted small">
 									{entry.score} points · {Math.round(entry.accuracy * 100)}% accuracy ·
 									{entry.questions_attempted} questions · {Math.round(entry.average_response_time_ms / 100) / 10}s average
 								</div>
@@ -580,7 +578,7 @@
 
 	<div class="card" data-testid="competition-league">
 		<h2>Weekly leagues</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Opt in to a private cohort for your exam. Weekly standings use completed competition scores.
 		</p>
 		{#if leagueExams.length === 0}
@@ -616,11 +614,11 @@
 					{#if leagueState.standings.length === 0}
 						<p class="muted">Complete a competition this week to appear in standings.</p>
 					{:else}
-						<ol>
+						<ol class="standings">
 							{#each leagueState.standings as entry (`${entry.rank}-${entry.handle}`)}
-								<li style="margin: var(--space-sm) 0;">
+								<li class:me={entry.is_me}>
 									<strong>#{entry.rank} {entry.handle}{entry.is_me ? ' · you' : ''}</strong>
-									<div class="muted" style="font-size: var(--text-sm);">
+									<div class="muted small">
 										{entry.points} points · {Math.round(entry.accuracy * 100)}% accuracy · {Math.round(entry.total_time_ms / 1000)}s
 									</div>
 								</li>
@@ -642,7 +640,7 @@
 
 	<div class="card">
 		<h2>Study tools</h2>
-		<p style="margin:0;">
+		<p class="cluster">
 			<a class="btn" href={`${base}/offline`} data-testid="nav-offline-packs">Offline packs</a>
 			<a class="btn" href={`${base}/review`}>Review flashcards</a>
 			<a class="btn" href={`${base}/coach`}>Ask the Coach</a>
@@ -650,3 +648,56 @@
 		</p>
 	</div>
 {/if}
+
+<svelte:head>
+	<title>Practice | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.check-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		min-height: 44px;
+		margin: 0;
+		cursor: pointer;
+	}
+
+	.check-row.choice {
+		align-items: flex-start;
+		margin: var(--space-sm) 0;
+		padding: var(--space-md);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-control);
+		transition:
+			border-color var(--dur-fast) var(--ease-out),
+			background-color var(--dur-fast) var(--ease-out);
+	}
+
+	.check-row.choice:hover {
+		border-color: var(--color-border-strong);
+	}
+
+	.check-row.choice:has(:checked) {
+		border-color: var(--color-action-primary);
+		background: var(--color-action-wash);
+	}
+
+	.standings {
+		display: grid;
+		gap: var(--space-xs);
+		padding: 0;
+		list-style: none;
+	}
+
+	.standings li {
+		padding: var(--space-sm) var(--space-md);
+		border-radius: var(--radius-sm);
+		border: 1px solid transparent;
+	}
+
+	.standings li.me {
+		border-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
+		background: var(--color-action-wash);
+	}
+</style>

@@ -185,6 +185,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Library | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Library</h1>
 
 <section aria-labelledby="reviewed-heading">
@@ -275,7 +279,7 @@
 	<p class="muted">Private imports appear in search only when their rights record also permits search.</p>
 
 	{#if importsLoading}
-		<p class="muted" role="status">Loading your import rights and documents…</p>
+		<p class="muted is-loading" role="status">Loading your import rights and documents…</p>
 	{:else if importsError}
 		<p class="error-text" role="alert">{importsError}</p>
 		<button class="btn" type="button" onclick={loadPrivateImports}>Retry</button>
@@ -336,7 +340,7 @@
 
 	<h3>Your documents</h3>
 	{#if importsLoading}
-		<p class="muted">Import list is loading.</p>
+		<p class="muted is-loading">Import list is loading.</p>
 	{:else if privateImports.length === 0}
 		<p class="muted">You have no private imports yet.</p>
 	{:else}

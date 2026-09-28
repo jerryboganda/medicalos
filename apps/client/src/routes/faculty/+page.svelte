@@ -282,6 +282,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Faculty workspace | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Faculty workspace</h1>
 
 <div class="card">
@@ -323,11 +327,11 @@
 {#if activeId}
 	<div class="card">
 		<h2>Members</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Add a member by account ID with a §18.1 role: admin, instructor,
 			author, reviewer, or learner.
 		</p>
-		<form onsubmit={addMember} style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+		<form class="form-row" onsubmit={addMember}>
 			<label class="field" for="member-id">
 				<span>User ID</span>
 				<input id="member-id" bind:value={memberUserId} />

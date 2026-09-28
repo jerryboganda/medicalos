@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod auth;
+pub mod authz;
 pub mod error;
 pub mod routes;
 pub mod schema;
@@ -29,6 +30,13 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::oidc::callback),
         )
         .route("/v1/auth/oidc/complete", post(routes::oidc::complete))
+        .route("/v1/auth/start", get(routes::platform_auth::start))
+        .route("/v1/auth/providers", get(routes::platform_auth::providers))
+        .route(
+            "/v1/auth/oidc/callback",
+            get(routes::platform_auth::callback),
+        )
+        .route("/v1/me", get(routes::platform_auth::me))
         .route(
             "/v1/me/devices",
             post(routes::accounts::register_device).get(routes::accounts::list_devices),
@@ -693,6 +701,16 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             get(routes::oidc::callback),
         )
         .route("/api/v1/auth/oidc/complete", post(routes::oidc::complete))
+        .route("/api/v1/auth/start", get(routes::platform_auth::start))
+        .route(
+            "/api/v1/auth/providers",
+            get(routes::platform_auth::providers),
+        )
+        .route(
+            "/api/v1/auth/oidc/callback",
+            get(routes::platform_auth::callback),
+        )
+        .route("/api/v1/me", get(routes::platform_auth::me))
         .route(
             "/api/v1/me/devices",
             post(routes::accounts::register_device).get(routes::accounts::list_devices),

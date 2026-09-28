@@ -1,0 +1,7 @@
+/* One import for the whole shared layer — see /design.md. Order matters:
+ * tokens → element defaults → components → layout utilities → motion. */
+@import './tokens.css';
+@import './base.css';
+@import './components.css';
+@import './layout.css';
+@import './motion.css';

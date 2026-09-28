@@ -63,12 +63,12 @@
 		<p class="muted">No notifications. Plan, report, and source updates appear here.</p>
 	{:else}
 		{#each items as n (n.id)}
-			<div class="card" style="margin-bottom: var(--space-md);">
-				<div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+			<div class="card">
+				<div class="row">
 					<strong>{n.title}</strong>
-					<span class="chip {n.read ? 'done' : ''}">{n.read ? 'Read' : 'New'}</span>
+					<span class="chip {n.read ? 'done' : 'info'}">{n.read ? 'Read' : 'New'}</span>
 				</div>
-				<p style="margin: var(--space-xs) 0 0;">{n.body}</p>
+				<p class="tight-top">{n.body}</p>
 			</div>
 		{/each}
 	{/if}
@@ -78,10 +78,12 @@
 	<h2>Preferences</h2>
 	{#if showPrefs}
 		<form onsubmit={savePrefs}>
-			<label><input type="checkbox" bind:checked={prefs.plan_reminders} /> Plan reminders</label><br />
-			<label><input type="checkbox" bind:checked={prefs.mock_results} /> Mock results</label><br />
-			<label><input type="checkbox" bind:checked={prefs.reports} /> Report updates</label><br />
-			<label><input type="checkbox" bind:checked={prefs.content_updates} /> Source and content corrections</label><br /><br />
+			<div class="prefs">
+				<label><input type="checkbox" bind:checked={prefs.plan_reminders} /> Plan reminders</label>
+				<label><input type="checkbox" bind:checked={prefs.mock_results} /> Mock results</label>
+				<label><input type="checkbox" bind:checked={prefs.reports} /> Report updates</label>
+				<label><input type="checkbox" bind:checked={prefs.content_updates} /> Source and content corrections</label>
+			</div>
 			<button class="btn primary" type="submit" disabled={busy}>Save preferences</button>
 		</form>
 	{:else}
@@ -90,3 +92,30 @@
 		</button>
 	{/if}
 </div>
+
+<svelte:head>
+	<title>Notifications | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.prefs {
+		display: grid;
+		gap: 2px;
+		margin-bottom: var(--space-lg);
+	}
+
+	.prefs label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-sm);
+		min-height: 44px;
+		padding: 0 var(--space-md);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: background-color var(--dur-fast) var(--ease-out);
+	}
+
+	.prefs label:hover {
+		background: var(--color-surface-hover);
+	}
+</style>

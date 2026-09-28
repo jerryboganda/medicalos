@@ -118,7 +118,13 @@ test('members can report a post and see only their own report status', async ({ 
 	await page.getByRole('button', { name: 'Report', exact: true }).click();
 	await page.getByLabel('Reason').selectOption('harassment');
 	await page.getByLabel('Note (optional, up to 500 characters)').fill('Private context for moderators');
+	const reportResponsePromise = page.waitForResponse(
+		(response) =>
+			response.url().includes(`/v1/community/groups/${groupId}/posts/post-1/reports`) &&
+			response.request().method() === 'POST'
+	);
 	await page.getByRole('button', { name: 'Send report' }).click();
+	await reportResponsePromise;
 
 	expect(sentReport).toMatchObject({
 		reason: 'harassment',

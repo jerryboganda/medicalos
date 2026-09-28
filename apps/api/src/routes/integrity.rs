@@ -191,9 +191,7 @@ pub async fn record_integrity_event(
     if let Some(session_id) = auto_submit {
         let Json(submit_receipt) = crate::routes::practice::submit(
             State(state.clone()),
-            AuthUser {
-                user_id: user.user_id,
-            },
+            AuthUser::plain(user.user_id),
             Path(session_id),
         )
         .await?;
@@ -245,7 +243,7 @@ pub async fn process_due_auto_submits(state: &Arc<AppState>) -> ApiResult<usize>
         let user_id: Uuid = row.try_get("user_id")?;
         match crate::routes::practice::submit(
             State(state.clone()),
-            AuthUser { user_id },
+            AuthUser::plain(user_id),
             Path(session_id),
         )
         .await

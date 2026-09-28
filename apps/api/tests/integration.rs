@@ -29,6 +29,8 @@ struct OidcTestProvider {
     expected_challenge: Arc<tokio::sync::Mutex<String>>,
     nonce: Arc<tokio::sync::Mutex<String>>,
     subject: Arc<tokio::sync::Mutex<String>>,
+    /// Extra ID-token claims (Zitadel roles, amr, email) for platform sign-in.
+    extra_claims: Arc<tokio::sync::Mutex<Value>>,
 }
 
 async fn oidc_test_discovery(State(provider): State<OidcTestProvider>) -> axum::Json<Value> {
@@ -68,7 +70,7 @@ async fn oidc_test_token(
     }
 
     let now = chrono::Utc::now().timestamp();
-    let claims = serde_json::json!({
+    let mut claims = serde_json::json!({
         "iss": provider.issuer,
         "sub": provider.subject.lock().await.clone(),
         "aud": "medical-os-test-client",
@@ -76,6 +78,11 @@ async fn oidc_test_token(
         "iat": now,
         "nonce": provider.nonce.lock().await.clone()
     });
+    if let Some(extra) = provider.extra_claims.lock().await.as_object() {
+        for (key, value) in extra {
+            claims[key] = value.clone();
+        }
+    }
     let id_token = jsonwebtoken::encode(
         &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
         &claims,
@@ -95,6 +102,10 @@ async fn oidc_test_token(
 }
 
 async fn setup() -> Arc<AppState> {
+    setup_with(None).await
+}
+
+async fn setup_with(zitadel: Option<api::state::ZitadelConfig>) -> Arc<AppState> {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/medos_ci".into());
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -131,6 +142,7 @@ async fn setup() -> Arc<AppState> {
         oidc_credential_key: Some("test-oidc-encryption-key-with-32-plus-chars".into()),
         public_api_base_url: "http://127.0.0.1:8080/api".into(),
         public_app_url: "http://127.0.0.1:5173".into(),
+        zitadel,
     })
 }
 
@@ -5411,6 +5423,7 @@ async fn coach_daily_allowance_enforced() {
         oidc_credential_key: Some("test-oidc-encryption-key-with-32-plus-chars".into()),
         public_api_base_url: "http://127.0.0.1:8080/api".into(),
         public_app_url: "http://127.0.0.1:5173".into(),
+        zitadel: None,
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
@@ -19823,6 +19836,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
         expected_challenge: Arc::new(tokio::sync::Mutex::new(String::new())),
         nonce: Arc::new(tokio::sync::Mutex::new(String::new())),
         subject: Arc::new(tokio::sync::Mutex::new("learner-subject-1".into())),
+        extra_claims: Arc::new(tokio::sync::Mutex::new(serde_json::json!({}))),
     };
     let provider_app = Router::new()
         .route(
@@ -23910,4 +23924,251 @@ async fn mock_types_and_time_analysis() {
     assert_json_keys(ch2, &["chapter", "total", "correct", "time_seconds"]);
     assert_eq!(ch2["time_seconds"], 0);
     assert_eq!(ch2["total"], 1);
+}
+
+/// Plan auth-zitadel phase 1: the API is Zitadel's OIDC client. A sign-in
+/// creates the account on first use (never linking by email), snapshots the
+/// project roles and the MFA fact onto the session, and /v1/me reports the
+/// resulting permissions.
+#[tokio::test]
+async fn platform_sign_in_maps_zitadel_roles_and_mfa_onto_the_session() {
+    let _g = LOCK.lock().await;
+    let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind Zitadel fixture");
+    let issuer = format!("http://{}", provider_listener.local_addr().unwrap());
+    let state = setup_with(Some(api::state::ZitadelConfig {
+        issuer: issuer.clone(),
+        client_id: "medical-os-test-client".into(),
+        client_secret: "test-oidc-client-secret".into(),
+        project_id: Some("medical-os-project".into()),
+        google_idp_id: Some("google-idp".into()),
+        apple_idp_id: None,
+    }))
+    .await;
+    let app = router(state.clone());
+    let provider = OidcTestProvider {
+        issuer: issuer.clone(),
+        expected_challenge: Arc::new(tokio::sync::Mutex::new(String::new())),
+        nonce: Arc::new(tokio::sync::Mutex::new(String::new())),
+        subject: Arc::new(tokio::sync::Mutex::new("zitadel-user-1".into())),
+        extra_claims: Arc::new(tokio::sync::Mutex::new(serde_json::json!({}))),
+    };
+    let provider_app = Router::new()
+        .route(
+            "/.well-known/openid-configuration",
+            axum::routing::get(oidc_test_discovery),
+        )
+        .route("/jwks", axum::routing::get(oidc_test_jwks))
+        .route("/token", axum::routing::post(oidc_test_token))
+        .with_state(provider.clone());
+    let provider_task = tokio::spawn(async move {
+        axum::serve(provider_listener, provider_app)
+            .await
+            .expect("serve Zitadel fixture");
+    });
+
+    // One full round trip: start -> IdP -> callback -> ticket -> session.
+    async fn sign_in(
+        app: &Router,
+        provider: &OidcTestProvider,
+        claims: Value,
+    ) -> Result<String, String> {
+        let (status, body) = call(app.clone(), request("GET", "/v1/auth/start", None, None)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let url = url::Url::parse(body["authorization_url"].as_str().unwrap()).unwrap();
+        let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        *provider.expected_challenge.lock().await = query["code_challenge"].clone();
+        *provider.nonce.lock().await = query["nonce"].clone();
+        *provider.extra_claims.lock().await = claims;
+        let response = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!(
+                    "/api/v1/auth/oidc/callback?code=approved-code&state={}",
+                    query["state"]
+                ),
+                None,
+                None,
+            ))
+            .await
+            .expect("platform callback");
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("callback location")
+            .to_owned();
+        let Some((_, ticket)) = location.split_once("#ticket=") else {
+            return Err(location);
+        };
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/auth/oidc/complete",
+                None,
+                Some(serde_json::json!({ "ticket": ticket })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{session}");
+        Ok(session["token"].as_str().unwrap().to_owned())
+    }
+
+    let (_, options) = call(
+        app.clone(),
+        request("GET", "/v1/auth/providers", None, None),
+    )
+    .await;
+    assert_eq!(
+        options,
+        serde_json::json!({ "platform": true, "google": true, "apple": false })
+    );
+
+    // The start URL asks Zitadel for roles, the project audience and, for a
+    // named IdP, skips the chooser.
+    let (_, started) = call(
+        app.clone(),
+        request("GET", "/v1/auth/start?idp=google", None, None),
+    )
+    .await;
+    let scope = url::Url::parse(started["authorization_url"].as_str().unwrap())
+        .unwrap()
+        .query_pairs()
+        .find(|(key, _)| key == "scope")
+        .map(|(_, value)| value.into_owned())
+        .unwrap();
+    for expected in [
+        "openid",
+        "email",
+        "urn:zitadel:iam:org:projects:roles",
+        "urn:zitadel:iam:org:project:id:medical-os-project:aud",
+        "urn:zitadel:iam:org:idp:id:google-idp",
+    ] {
+        assert!(
+            scope.split(' ').any(|s| s == expected),
+            "{expected} in {scope}"
+        );
+    }
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/auth/start?idp=apple", None, None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unconfigured IdP");
+
+    // First sign-in: an owner with a second factor.
+    let email = format!("owner-{}@example.test", Uuid::new_v4());
+    let owner_claims = serde_json::json!({
+        "email": email,
+        "email_verified": true,
+        "amr": ["pwd", "mfa"],
+        "urn:zitadel:iam:org:project:roles": {
+            "platform_owner": { "281": "medical-os.localhost" }
+        }
+    });
+    let token = sign_in(&app, &provider, owner_claims)
+        .await
+        .expect("owner signs in");
+    let (status, me) = call(app.clone(), request("GET", "/v1/me", Some(&token), None)).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_json_keys(
+        &me,
+        &[
+            "user_id",
+            "email",
+            "mfa",
+            "roles",
+            "permissions",
+            "institutions",
+        ],
+    );
+    assert_eq!(me["email"], email.as_str());
+    assert_eq!(me["mfa"], true);
+    assert_eq!(me["roles"], serde_json::json!(["platform_owner"]));
+    assert!(me["permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("owner_dashboard")));
+    let owner_id = me["user_id"].as_str().unwrap().to_owned();
+
+    // Same Zitadel user, no roles, password only: same account, no privilege.
+    let token = sign_in(
+        &app,
+        &provider,
+        serde_json::json!({ "email": email, "email_verified": true, "amr": ["pwd"] }),
+    )
+    .await
+    .expect("returning sign-in");
+    let (_, me) = call(app.clone(), request("GET", "/v1/me", Some(&token), None)).await;
+    assert_eq!(me["user_id"], owner_id.as_str());
+    assert_eq!(me["mfa"], false);
+    assert_eq!(me["permissions"], serde_json::json!([]));
+
+    // A different Zitadel user whose email matches an existing password
+    // account is refused, not silently linked.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({ "email": "taken@example.test", "password": "longenough" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    *provider.subject.lock().await = "zitadel-user-2".into();
+    let refused = sign_in(
+        &app,
+        &provider,
+        serde_json::json!({ "email": "taken@example.test", "email_verified": true }),
+    )
+    .await;
+    assert_eq!(
+        refused,
+        Err("http://127.0.0.1:5173/login/sso/callback?error=sso_failed".to_string())
+    );
+
+    // An unverified email never creates an account.
+    *provider.subject.lock().await = "zitadel-user-3".into();
+    let unverified = sign_in(
+        &app,
+        &provider,
+        serde_json::json!({ "email": "new@example.test", "email_verified": false }),
+    )
+    .await;
+    assert!(unverified.is_err());
+
+    // Password sessions carry no platform roles.
+    let password_token = register_and_login(app.clone()).await;
+    let (_, me) = call(
+        app.clone(),
+        request("GET", "/v1/me", Some(&password_token), None),
+    )
+    .await;
+    assert_eq!(me["roles"], serde_json::json!([]));
+    assert_eq!(me["mfa"], false);
+    provider_task.abort();
+}
+
+/// Without Zitadel settings the login page offers no platform buttons and
+/// the start endpoint refuses (no dead buttons, TRUST-01).
+#[tokio::test]
+async fn platform_sign_in_is_off_without_zitadel_config() {
+    let _g = LOCK.lock().await;
+    let app = router(setup().await);
+    let (_, options) = call(
+        app.clone(),
+        request("GET", "/v1/auth/providers", None, None),
+    )
+    .await;
+    assert_eq!(
+        options,
+        serde_json::json!({ "platform": false, "google": false, "apple": false })
+    );
+    let (status, _) = call(app, request("GET", "/v1/auth/start", None, None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

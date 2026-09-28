@@ -75,6 +75,7 @@ migrations!(
     "0058_pack_download_receipts",
     "0059_core04_tenant_rls",
     "0060_event_jobs",
+    "0061_zitadel_identity",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

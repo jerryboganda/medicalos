@@ -1,0 +1,15 @@
+{
+	"name": "Medical Learning OS",
+	"short_name": "Medical OS",
+	"description": "One connected learning record for your whole medical education.",
+	"start_url": "./today",
+	"scope": "./",
+	"display": "standalone",
+	"orientation": "any",
+	"background_color": "#09090f",
+	"theme_color": "#09090f",
+	"categories": ["education", "medical"],
+	"icons": [
+		{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+	]
+}

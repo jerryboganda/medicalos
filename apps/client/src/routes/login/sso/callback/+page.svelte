@@ -34,6 +34,6 @@
 		<p class="error-text" role="alert">{error}</p>
 		<a class="btn" href={`${base}/login`}>Return to sign in</a>
 	{:else}
-		<p class="muted">Connecting your institution account to your learning record…</p>
+		<p class="muted is-loading">Connecting your institution account to your learning record…</p>
 	{/if}
 </section>

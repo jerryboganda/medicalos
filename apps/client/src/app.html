@@ -2,7 +2,25 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="theme-color" content="#09090f" />
+		<meta name="color-scheme" content="dark light" />
+		<meta name="description" content="One connected learning record for your whole medical education." />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<title>Medical Learning OS</title>
+		<script>
+			// Apply the saved light reading theme before first paint (§7.3) so
+			// the page never flashes dark first. Mirrors $lib/theme.svelte.ts.
+			try {
+				if (localStorage.getItem('mlos_theme') === 'light') {
+					document.documentElement.dataset.theme = 'light';
+					document.querySelector('meta[name="theme-color"]').content = '#f7f6fb';
+				}
+			} catch {}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

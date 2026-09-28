@@ -11,10 +11,33 @@
 	let institutionId = $state('');
 	let busy = $state(false);
 	let error = $state('');
+	// Platform sign-in (Zitadel) buttons appear only when it is configured.
+	let options = $state({ platform: false, google: false, apple: false });
 
-	onMount(() => {
+	onMount(async () => {
 		institutionId = new URLSearchParams(window.location.search).get('institution') ?? '';
+		try {
+			options = await Api.signInOptions();
+		} catch {
+			/* offline or older API: password sign-in still works */
+		}
 	});
+
+	async function platformSignIn(idp) {
+		if (busy) return;
+		busy = true;
+		error = '';
+		try {
+			const { authorization_url } = await Api.startPlatformSignIn(idp);
+			window.location.assign(authorization_url);
+		} catch (err) {
+			error =
+				err instanceof ApiError
+					? err.message
+					: 'Sign-in is unavailable right now. Check your connection and try again.';
+			busy = false;
+		}
+	}
 
 	async function submit(event) {
 		event.preventDefault();
@@ -60,12 +83,37 @@
 	}
 </script>
 
-<section class="card">
+<section class="card login-card">
 	<h1>{mode === 'signin' ? 'Welcome back' : 'Create your account'}</h1>
-	<p class="muted">One connected learning record for your whole medical education.</p>
+	<p class="muted lede">One connected learning record for your whole medical education.</p>
 
 	{#if error}
 		<p class="error-text" role="alert">{error}</p>
+	{/if}
+
+	{#if options.platform && mode === 'signin'}
+		<div class="platform">
+			<button
+				class="btn primary wide-btn"
+				type="button"
+				disabled={busy}
+				data-testid="platform-sign-in"
+				onclick={() => platformSignIn()}
+			>
+				Continue with email
+			</button>
+			{#if options.google}
+				<button class="btn wide-btn" type="button" disabled={busy} onclick={() => platformSignIn('google')}>
+					Continue with Google
+				</button>
+			{/if}
+			{#if options.apple}
+				<button class="btn wide-btn" type="button" disabled={busy} onclick={() => platformSignIn('apple')}>
+					Continue with Apple
+				</button>
+			{/if}
+		</div>
+		<p class="muted divider"><span>Or use your password</span></p>
 	{/if}
 
 	<form onsubmit={submit}>
@@ -93,7 +141,7 @@
 			/>
 		</label>
 		<button
-			class="btn primary"
+			class="btn {options.platform ? '' : 'primary'} wide-btn"
 			type="submit"
 			disabled={busy}
 			data-loading={busy}
@@ -104,8 +152,8 @@
 	</form>
 
 	{#if mode === 'signin'}
-		<section aria-label="Institution sign-in">
-			<p class="muted">Signing in through your institution?</p>
+		<section class="sso" aria-label="Institution sign-in">
+			<p class="muted divider"><span>Signing in through your institution?</span></p>
 			<label class="field" for="sso-institution-id">
 				<span>Institution ID</span>
 				<input
@@ -142,3 +190,58 @@
 			: 'Already have an account? Sign in'}
 	</button>
 </section>
+
+<svelte:head>
+	<title>Sign in | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.login-card {
+		justify-self: center;
+		width: min(100%, 440px);
+		box-sizing: border-box;
+		padding: var(--space-2xl) var(--space-xl);
+		box-shadow: var(--shadow-3);
+	}
+
+	.login-card h1 {
+		margin-bottom: var(--space-sm);
+	}
+
+	.login-card .lede {
+		margin: 0 0 var(--space-xl);
+		font-size: var(--text-body);
+	}
+
+	.wide-btn {
+		width: 100%;
+	}
+
+	.sso {
+		margin-top: var(--space-xl);
+	}
+
+	.platform {
+		display: grid;
+		gap: var(--space-sm);
+		margin-bottom: var(--space-lg);
+	}
+
+	/* "Signing in through your institution?" sits on a hairline divider. */
+	.divider {
+		display: flex;
+		align-items: center;
+		gap: var(--space-md);
+		margin: 0 0 var(--space-lg);
+		font-size: var(--text-sm);
+		text-align: center;
+	}
+
+	.divider::before,
+	.divider::after {
+		content: '';
+		flex: 1;
+		height: 1px;
+		background: var(--color-border);
+	}
+</style>

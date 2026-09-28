@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
 // Coach v1 in the browser: only answered questions are coach-ready, the
 // answer quotes reviewed material, and the daily AI allowance refuses

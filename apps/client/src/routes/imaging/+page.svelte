@@ -103,6 +103,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Image studies | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Image studies</h1>
 <p class="intro muted">
 	Licensed educational images are shown in their original colors. These fictional teaching cases are
@@ -292,7 +296,7 @@
 				<div class="findings" data-testid="image-findings">
 					<h3>Teaching findings</h3>
 					{#if loadingFindings}
-						<p class="muted" role="status">Loading findings…</p>
+						<p class="muted is-loading" role="status">Loading findings…</p>
 					{:else if findingsError}
 						<p class="error-text" role="alert">{findingsError}</p>
 					{:else if Object.hasOwn(findingsByCase, selectedCase.case_id)}

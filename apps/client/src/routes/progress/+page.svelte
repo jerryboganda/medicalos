@@ -1,4 +1,7 @@
 <script lang="ts">
+	// Mastery bands read as status chips: icon + colour + the band word (§7.3).
+	const BAND_TONE = { weak: 'error', developing: 'warn', strong: 'done' };
+
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { Api } from '$lib/api';
@@ -113,7 +116,7 @@
 <h1>Progress</h1>
 
 {#if loading}
-	<p class="muted">Loading your record…</p>
+	<p class="muted is-loading">Loading your record…</p>
 {:else if learner.length === 0}
 	<div class="card">
 		<p class="muted">
@@ -133,20 +136,20 @@
 						{chapter.mastery_index === null ? '—' : `${chapter.mastery_index}%`}
 					</strong>
 				</span>
-				<span>Evidence<strong style="font-size: var(--text-body-lg);">{chapter.evidence_level.replace('_', ' ')}</strong></span>
+				<span>Evidence<strong class="evidence-level">{chapter.evidence_level.replace('_', ' ')}</strong></span>
 			</div>
 		</div>
 	{/each}
 
 	<div class="card">
 		<h2>Mastery map</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Bands come from your real ability estimates (config thresholds:
 			weak / developing / strong). Drill into one system, restrict to a
 			difficulty, or add a trend window — every number here traces to
 			attempts.
 		</p>
-		<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+		<div class="form-row">
 			<label class="field" for="heat-system">
 				<span>System</span>
 				<select id="heat-system" bind:value={drillSystem} onchange={loadHeatmap}>
@@ -198,10 +201,10 @@
 		{:else}
 			{#each heatSystems as sys (sys.system_id)}
 				<h3>{sys.system_name}</h3>
-				<ul style="font-size: var(--text-sm);">
+				<ul class="bare-list band-list small">
 					{#each sys.chapters as ch (ch.chapter_id)}
 						<li>
-							{ch.chapter_name} — <strong>{ch.band}</strong>
+							{ch.chapter_name} — <strong class="chip {BAND_TONE[ch.band] ?? ''}">{ch.band}</strong>
 							{#if ch.evidence_count !== null}, {ch.evidence_count} answer(s){/if}
 							{#if ch.filtered_accuracy !== undefined && ch.filtered_accuracy !== null}
 								· accuracy at this filter: {ch.filtered_accuracy}%
@@ -215,14 +218,14 @@
 
 	<div class="card">
 		<h2>Plan timeline</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Every revision of today's plan, oldest rule first: why it changed,
 			whether the agent or you made it, and whether it was undone.
 		</p>
 		{#if revisions.length === 0}
 			<p class="muted">No revisions today — the plan is unchanged.</p>
 		{:else}
-			<ol style="font-size: var(--text-sm);">
+			<ol class="timeline small">
 				{#each revisions as r (r.id)}
 					<li data-testid="plan-revision">
 						<strong>v{r.to_version}</strong>
@@ -257,7 +260,7 @@
 					</strong></span
 				>
 			</div>
-			<p class="muted" style="font-size: var(--text-sm);">{debt.note}</p>
+			<p class="muted small">{debt.note}</p>
 		{/if}
 	</div>
 
@@ -266,10 +269,10 @@
 		{#if policyUnavailable}
 			<p class="muted">The policy read-out is unavailable right now.</p>
 		{:else if policy}
-			<p class="muted" style="font-size: var(--text-sm);">
+			<p class="muted small">
 				{policy.estimator.counted_evidence}. K rule: {policy.estimator.k_rule}.
 			</p>
-			<ul style="font-size: var(--text-sm);">
+			<ul class="small">
 				{#each policy.selection_rules as rule (rule)}
 					<li>{rule}</li>
 				{/each}
@@ -280,7 +283,7 @@
 					estimator's state appears here.
 				</p>
 			{:else}
-				<ul style="font-size: var(--text-sm);">
+				<ul class="small">
 					{#each policy.your_chapters as ch (ch.chapter)}
 						<li>
 							{ch.chapter}: ability {ch.ability === null
@@ -294,3 +297,55 @@
 		{/if}
 	</div>
 {/if}
+
+<svelte:head>
+	<title>Progress | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.evidence-level {
+		font-size: var(--text-body-lg);
+		text-transform: capitalize;
+	}
+
+	.band-list {
+		display: grid;
+		gap: var(--space-sm);
+		margin-bottom: var(--space-lg);
+	}
+
+	.timeline {
+		position: relative;
+		margin: 0;
+		padding: 0 0 0 var(--space-xl);
+		list-style: none;
+	}
+
+	.timeline::before {
+		content: '';
+		position: absolute;
+		left: 7px;
+		top: 6px;
+		bottom: 6px;
+		width: 2px;
+		border-radius: var(--radius-pill);
+		background: var(--color-border-strong);
+	}
+
+	.timeline li {
+		position: relative;
+		padding-bottom: var(--space-md);
+	}
+
+	.timeline li::before {
+		content: '';
+		position: absolute;
+		left: calc(-1 * var(--space-xl) + 3px);
+		top: 6px;
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--color-surface);
+		box-shadow: inset 0 0 0 2px var(--color-accent);
+	}
+</style>

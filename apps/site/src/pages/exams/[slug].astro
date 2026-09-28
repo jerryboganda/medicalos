@@ -17,8 +17,8 @@ const { exam } = Astro.props;
 	title={exam.name}
 	description={exam.summary}
 >
-	<section>
-		<p><a href="/exams/">← All exams</a></p>
+	<section class="page-head">
+		<p><a class="back-link" href="/exams/">← All exams</a></p>
 		<h1>{exam.name}</h1>
 		<p>
 			<span class={`status ${exam.status === 'in-development' ? 'dev' : ''}`}>

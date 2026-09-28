@@ -1,24 +1,32 @@
 ---
-// Ft1 · mast-headed footer — wordmark + tagline band, a few links, and an
-// honest colophon line. Shared across every page of the site.
-import { siteName, tagline } from '../lib/site.js';
+// Ft5 · statement footer — the promise in display type, then the links and
+// an honest colophon. Shared across every page of the site.
+import { siteName } from '../lib/site.js';
 
 const year = new Date().getFullYear();
 ---
 
-<footer class="foot">
-	<a class="foot-brand" href="/">{siteName}</a>
-	<p class="foot-tagline">{tagline}</p>
-	<nav aria-label="Footer">
-		<a href="/exams/">Exams</a>
-		<a href="/pricing/">Pricing</a>
-		<a href="/help/">Help</a>
-		<a href="/legal/terms/">Terms</a>
-		<a href="/legal/privacy/">Privacy</a>
-	</nav>
-	<p class="colophon">
-		© {year} {siteName}. Pilot software: the live app serves a synthetic pilot
-		exam for testing, and no published content pack exists yet. Nothing on this
-		site is medical advice.
-	</p>
+<footer class="site-footer">
+	<div class="inner">
+		<p class="statement">Plans you can undo. Numbers you can <em>trace</em>.</p>
+		<div class="foot-row">
+			<a class="site-brand" href="/">
+				<img src="/favicon.svg" alt="" width="28" height="28" />
+				<span>{siteName}</span>
+			</a>
+			<nav class="foot-nav" aria-label="Footer">
+				<a href="/exams/">Exams</a>
+				<a href="/pricing/">Pricing</a>
+				<a href="/help/">Help</a>
+				<a href="/download/">Download</a>
+				<a href="/legal/terms/">Terms</a>
+				<a href="/legal/privacy/">Privacy</a>
+			</nav>
+		</div>
+		<p class="colophon">
+			© {year} {siteName}. Pilot software: the live app serves a synthetic pilot
+			exam for testing, and no published content pack exists yet. Nothing on this
+			site is medical advice.
+		</p>
+	</div>
 </footer>

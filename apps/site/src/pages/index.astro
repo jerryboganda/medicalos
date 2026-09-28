@@ -1,54 +1,123 @@
 ---
-// Narrative Workflow landing — the product loop (aim → plan → practice →
-// evidence) told in numbered stages. Every stage names shipped features
-// only; every CTA routes to the live app's free tier (TRUST-01).
+// Marquee Hero landing — the product loop (aim → plan → practice → evidence)
+// as a live diagram beside the promise, then the four stages, then what the
+// product honestly is not. Every stage names shipped features only; every
+// CTA routes to the live app's free tier (TRUST-01).
 import Base from '../layouts/Base.astro';
 import { appUrl, productStages } from '../lib/site.js';
 ---
 
 <Base current="/" description="A medical learning OS that plans your day, times your practice, and turns every attempt into honest evidence. Start free.">
 	<section class="hero">
-		<p class="stages-line">
-			<strong>1.0</strong> aim · <strong>2.0</strong> plan · <strong>3.0</strong> practice · <strong>4.0</strong> evidence
-		</p>
-		<h1>Study what the plan chooses, and trust what the numbers say.</h1>
-		<p class="prose">
-			A learning OS for medical exams: it plans your day around your time
-			budget, runs practice that survives a dropped connection, and reports
-			evidence from your own attempts — never a readiness score it cannot
-			prove.
-		</p>
-		<div class="actions">
-			<a class="btn primary" href={`${appUrl}/today`}>Try five questions — no account</a>
-			<a class="btn" href={`${appUrl}/login`}>Create a free account</a>
+		<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+		<div class="hero-copy enter-stagger">
+			<p><span class="status dev">Pilot · content in development</span></p>
+			<h1>Study what the plan chooses, and trust what the numbers say.</h1>
+			<p class="prose">
+				A learning OS for medical exams: it plans your day around your time
+				budget, runs practice that survives a dropped connection, and reports
+				evidence from your own attempts — never a readiness score it cannot
+				prove.
+			</p>
+			<div class="actions">
+				<a class="btn primary" href={`${appUrl}/today`}>Try five questions — no account</a>
+				<a class="btn" href={`${appUrl}/login`}>Create a free account</a>
+			</div>
 		</div>
+
+		<figure class="loop" aria-label="The learning loop: aim, plan, practice, evidence — and back to aim.">
+			<svg viewBox="0 0 100 100" aria-hidden="true">
+				<defs>
+					<linearGradient id="loop-gradient" x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0" class="loop-stop-a" />
+						<stop offset="1" class="loop-stop-b" />
+					</linearGradient>
+				</defs>
+				<circle class="loop-track" cx="50" cy="50" r="46" />
+				<circle
+					class="loop-arc"
+					cx="50"
+					cy="50"
+					r="46"
+					pathLength="100"
+					stroke-dasharray="100"
+					transform="rotate(-90 50 50)"
+				/>
+			</svg>
+			<div class="loop-orbit" aria-hidden="true"></div>
+			<div class="loop-core" aria-hidden="true">
+				<img src="/favicon.svg" alt="" width="44" height="44" />
+				<span>One connected learning record</span>
+			</div>
+			{
+				productStages.map((stage, n) => (
+					<span class="loop-node" style={`--n: ${n}`} aria-hidden="true">
+						<b>{n + 1}</b>
+						{stage.name}
+					</span>
+				))
+			}
+		</figure>
 	</section>
 
-	{
-		productStages.map((stage) => (
-			<section class="stage">
-				<div>
-					<div class="stage-label">{stage.label}</div>
-					<h2>{stage.name}</h2>
-				</div>
-				<p class="prose">{stage.text}</p>
-			</section>
-		))
-	}
+	<section aria-labelledby="loop-title">
+		<div class="page-head">
+			<h2 id="loop-title">One loop, four stages</h2>
+			<p class="prose">
+				Every screen in the app belongs to one of these stages, and each one
+				feeds the next.
+			</p>
+		</div>
+		<ol class="stages">
+			{
+				productStages.map((stage) => (
+					<li class="stage reveal-on-scroll">
+						<span class="stage-label">{stage.label}</span>
+						<h3>{stage.name}</h3>
+						<p>{stage.text}</p>
+					</li>
+				))
+			}
+		</ol>
+	</section>
 
-	<section>
-		<h2>What this is not</h2>
-		<p class="prose">
-			Not a finished question bank: the live app serves a synthetic pilot
-			exam while content packs are built and clinically reviewed. Not a
-			crystal ball: there is no readiness score, percentile, or pass
-			prediction, because none can be honestly validated yet. Not free of
-			charge forever: paid tiers are planned, and prices will appear here
-			when they are decided — not before.
+	<section aria-labelledby="not-title">
+		<h2 id="not-title">What this is not</h2>
+		<ul class="honest">
+			<li class="reveal-on-scroll">
+				<strong>Not a finished question bank.</strong>
+				<p>
+					The live app serves a synthetic pilot exam while content packs are
+					built and clinically reviewed.
+				</p>
+			</li>
+			<li class="reveal-on-scroll">
+				<strong>Not a crystal ball.</strong>
+				<p>
+					There is no readiness score, percentile, or pass prediction, because
+					none can be honestly validated yet.
+				</p>
+			</li>
+			<li class="reveal-on-scroll">
+				<strong>Not free of charge forever.</strong>
+				<p>
+					Paid tiers are planned, and prices will appear here when they are
+					decided — not before.
+				</p>
+			</li>
+		</ul>
+	</section>
+
+	<section class="cta-band reveal-on-scroll" aria-labelledby="cta-title">
+		<h2 id="cta-title">Run the whole loop on the pilot exam today.</h2>
+		<p>
+			Set a time budget, get a plan, practice, and watch your evidence build —
+			real product behaviour on fixture content.
 		</p>
-		<p class="muted">
-			<a href="/exams/">See the exam registry</a> ·
-			<a href="/pricing/">Read the pricing plan</a>
-		</p>
+		<div class="actions">
+			<a class="btn primary" href={`${appUrl}/today`}>Open the pilot</a>
+			<a class="btn" href="/exams/">See the exam registry</a>
+			<a class="btn ghost" href="/pricing/">Read the pricing plan</a>
+		</div>
 	</section>
 </Base>

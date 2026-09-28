@@ -22,7 +22,7 @@ use std::time::Duration;
 use url::{Host, Url};
 use uuid::Uuid;
 
-use crate::auth::{issue_session, new_session_token, sha256_hex, AuthUser};
+use crate::auth::{issue_session_with, new_session_token, sha256_hex, AuthUser};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -91,7 +91,7 @@ pub struct OidcProviderView {
     )
 )]
 pub struct StartInstitutionSsoResponse {
-    authorization_url: String,
+    pub(crate) authorization_url: String,
 }
 
 #[derive(Serialize)]
@@ -129,7 +129,9 @@ fn secure_or_loopback(url: &Url) -> bool {
         "http" => match url.host() {
             Some(Host::Ipv4(address)) => address.is_loopback(),
             Some(Host::Ipv6(address)) => address.is_loopback(),
-            Some(Host::Domain("localhost")) => true,
+            // *.localhost is reserved for loopback (RFC 6761); the local
+            // Orca stack serves Zitadel at auth.medicalos.localhost.
+            Some(Host::Domain(host)) => host == "localhost" || host.ends_with(".localhost"),
             _ => false,
         },
         _ => false,
@@ -160,6 +162,11 @@ fn validate_issuer(issuer: &str) -> ApiResult<()> {
 }
 
 fn callback_uri(state: &AppState, institution_id: Uuid) -> ApiResult<String> {
+    api_url(state, &format!("/v1/auth/oidc/callback/{institution_id}"))
+}
+
+/// A URL under the public API prefix that OIDC providers redirect back to.
+pub(crate) fn api_url(state: &AppState, suffix: &str) -> ApiResult<String> {
     let mut url = Url::parse(&state.public_api_base_url).map_err(|_| ApiError::internal())?;
     if !secure_or_loopback(&url)
         || !url.username().is_empty()
@@ -171,15 +178,12 @@ fn callback_uri(state: &AppState, institution_id: Uuid) -> ApiResult<String> {
     {
         return Err(ApiError::internal());
     }
-    let path = format!(
-        "{}/v1/auth/oidc/callback/{institution_id}",
-        url.path().trim_end_matches('/')
-    );
+    let path = format!("{}{suffix}", url.path().trim_end_matches('/'));
     url.set_path(&path);
     Ok(url.to_string())
 }
 
-fn frontend_callback_uri(state: &AppState, ticket: Option<&str>) -> ApiResult<String> {
+pub(crate) fn frontend_callback_uri(state: &AppState, ticket: Option<&str>) -> ApiResult<String> {
     let mut url = Url::parse(&state.public_app_url).map_err(|_| ApiError::internal())?;
     if !secure_or_loopback(&url)
         || !url.username().is_empty()
@@ -199,7 +203,7 @@ fn frontend_callback_uri(state: &AppState, ticket: Option<&str>) -> ApiResult<St
     Ok(url.to_string())
 }
 
-fn oidc_http_client() -> ApiResult<reqwest::Client> {
+pub(crate) fn oidc_http_client() -> ApiResult<reqwest::Client> {
     reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(8))
@@ -637,15 +641,19 @@ pub async fn complete(
     if req.ticket.len() < 32 || req.ticket.len() > 128 {
         return Err(ApiError::unauthorized());
     }
-    let user_id = sqlx::query_scalar::<_, Uuid>(
+    // Platform sign-ins (platform_auth.rs) carry roles and the MFA fact on
+    // the ticket; institution SSO tickets carry none.
+    let handoff = sqlx::query(
         "DELETE FROM oidc_login_tickets
          WHERE token_hash = $1 AND expires_at > now()
-         RETURNING user_id",
+         RETURNING user_id, roles, mfa",
     )
     .bind(sha256_hex(&req.ticket))
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(ApiError::unauthorized)?;
-    let token = issue_session(&state.pool, user_id).await?;
+    let user_id: Uuid = handoff.try_get("user_id")?;
+    let roles: Vec<String> = handoff.try_get("roles")?;
+    let token = issue_session_with(&state.pool, user_id, &roles, handoff.try_get("mfa")?).await?;
     Ok(Json(CompleteOidcResponse { token }))
 }

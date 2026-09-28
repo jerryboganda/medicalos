@@ -47,3 +47,7 @@ Default five-role vocabulary; each label string equals its role name. See `docs/
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
+
+## Deployment target — Orca Desktop (local) only
+
+The project is developed and run **locally on Orca Desktop** (WSL distro `oet-ci`, stack at `/home/ci/medicalos-local`, app at http://localhost:8081). Treat the live production server as out of scope: do not target, verify, or plan work against it unless the owner explicitly asks. "Deploy" means: push to `main` (CI builds the images), then pull and restart the Orca stack. See `docs/deployment/orca-desktop.md`.

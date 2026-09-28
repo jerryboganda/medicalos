@@ -28,7 +28,7 @@ crates/domain-contracts  Shared rules, native + wasm (e.g. QB-11 option counts)
 crates/competition-scoring  Shared duel/league scoring (native + wasm)
 crates/scheduler         Shared plan/schedule rules (native + wasm)
 crates/telemetry         Shared tracing init
-packages/design-system   §7.1 design tokens shared by client and site
+packages/design-system   Locked design system (design.md): §7.1 tokens, components, motion — shared by client and site
 docs/adr                 Architecture decision records (lazy)
 docs/requirements        Traceability ledger, coverage map, analytics taxonomy
 docs/deployment          Production runbooks (VPS, deploy workflow)
@@ -52,6 +52,12 @@ tests/e2e                Playwright suites (client against the real API; site st
 - Phase program: `.scratch/phase-0-decisions/` … `.scratch/phase-7-advanced/` (created per phase)
 - Issue tracker: local markdown under `.scratch/` — see [`docs/agents/issue-tracker.md`](./docs/agents/issue-tracker.md)
 - Handoff for implementation agents: [`AGENT_IMPLEMENTATION_HANDOFF.md`](./AGENT_IMPLEMENTATION_HANDOFF.md)
+- UI design system (read before any UI work): [`design.md`](./design.md). Code in [`packages/design-system/`](./packages/design-system/): `tokens.css`, `base.css`, `components.css`, `layout.css` and `motion.css`, loaded together through `index.css` by both apps.
+- Client shell and navigation:
+  - [`apps/client/src/routes/+layout.svelte`](./apps/client/src/routes/+layout.svelte): side rail, tab bar, sheet, quick jump, route transitions.
+  - [`apps/client/src/lib/nav.ts`](./apps/client/src/lib/nav.ts): the one list of destinations.
+  - [`apps/client/src/app.css`](./apps/client/src/app.css): shell and session-workspace styles.
+- Visual evidence: CI uploads the `ui-gallery` artifact (key screens, desktop and phone, dark and light) on every run.
 
 ## Status
 

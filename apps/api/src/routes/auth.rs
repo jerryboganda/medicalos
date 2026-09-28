@@ -114,7 +114,12 @@ pub async fn login(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(ApiError::unauthorized)?;
-    if !verify_password(&req.password, &user.password_hash) {
+    // Accounts created through Zitadel have no local password to check.
+    let password_ok = user
+        .password_hash
+        .as_deref()
+        .is_some_and(|hash| verify_password(&req.password, hash));
+    if !password_ok {
         return Err(ApiError::unauthorized());
     }
     let token = issue_session(&state.pool, user.id).await?;
