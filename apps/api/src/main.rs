@@ -90,6 +90,7 @@ async fn main() {
         zitadel: zitadel_from_env(),
     });
     api::routes::integrity::spawn_auto_submit_worker(state.clone());
+    api::routes::jobs::spawn_jobs_worker(state.clone());
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("bind 8080");
