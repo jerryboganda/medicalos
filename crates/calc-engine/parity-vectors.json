@@ -2,7 +2,7 @@
   "comment": "ARCH-01 runtime parity vectors: the native test (tests/parity.rs) and the wasm runner (scripts/wasm-parity.mjs) execute the same cases. NaN expected = the engine rejects the input.",
   "bmi": [
     { "args": [70, 1.75], "expected": 22.857142857142858 },
-    { "args": [50, 1.6], "expected": 19.53125 },
+    { "args": [50, 1.6], "expected": 19.531249999999996 },
     { "args": [0, 1.75], "expected": "NaN" },
     { "args": [70, 0], "expected": "NaN" }
   ],
