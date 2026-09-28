@@ -140,6 +140,14 @@ clauses stripped across rows). Production verified `fef8486`.
 Remaining B3: CORE-04, AI-05, AI-14, INST-06 — larger slices queued
 for the next stretch.
 
+**2026-09-28 — B3 CORE-04 landed**: PR #16 (row-level security
+tenant isolation, migration 0059) green and production-verified
+`0c2a52b` after a production incident: the first deploy crash-looped the
+API because the least-privilege production role cannot CREATE ROLE —
+fixed by guarding the confined-role creation behind a CREATEROLE check
+(RLS arms regardless) and extending the deploy health wait for
+migration-heavy startups (Codex). Remaining B3: AI-05, AI-14, INST-06.
+
 Pace reference: the last stretch converted ~45 IDs in 3 days of agent stretches.
 At that pace the 25 engineering-ready IDs ≈ 1.5–3 weeks of batched agent work
 once billing is fixed.
