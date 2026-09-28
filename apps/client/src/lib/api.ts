@@ -20,6 +20,8 @@ import type { CompleteOidcResponse } from './generated/oidc/CompleteOidcResponse
 import type { OidcProviderUpdate } from './generated/oidc/OidcProviderUpdate';
 import type { OidcProviderView } from './generated/oidc/OidcProviderView';
 import type { StartInstitutionSsoResponse } from './generated/oidc/StartInstitutionSsoResponse';
+import type { SignInOptions } from './generated/auth/SignInOptions';
+import type { MeView } from './generated/auth/MeView';
 import type { CreateNoteResponse } from './generated/notes/CreateNoteResponse';
 import type { DeleteNoteResponse } from './generated/notes/DeleteNoteResponse';
 import type { ListNotesResponse } from './generated/notes/ListNotesResponse';
@@ -261,6 +263,10 @@ export type { CompleteOidcResponse } from './generated/oidc/CompleteOidcResponse
 export type { OidcProviderUpdate } from './generated/oidc/OidcProviderUpdate';
 export type { OidcProviderView } from './generated/oidc/OidcProviderView';
 export type { StartInstitutionSsoResponse } from './generated/oidc/StartInstitutionSsoResponse';
+export type { SignInOptions } from './generated/auth/SignInOptions';
+export type { MeView } from './generated/auth/MeView';
+export type { MeInstitution } from './generated/auth/MeInstitution';
+export type { Permission } from './generated/auth/Permission';
 export type { CeActivityRequest } from './generated/career/CeActivityRequest';
 export type { CeActivityResponse } from './generated/career/CeActivityResponse';
 export type { PortfolioCreateRequest } from './generated/career/PortfolioCreateRequest';
@@ -669,6 +675,13 @@ export const Api = {
 			`/v1/admin/institutions/${encodeURIComponent(institutionId)}/sso/oidc`,
 			body
 		),
+	/** Which platform sign-in buttons exist (Zitadel configured?). Public. */
+	signInOptions: () => call<SignInOptions>('GET', '/v1/auth/providers'),
+	/** Platform sign-in through Zitadel; ends at /login/sso/callback#ticket=. */
+	startPlatformSignIn: (idp?: 'google' | 'apple') =>
+		call<StartInstitutionSsoResponse>('GET', `/v1/auth/start${idp ? `?idp=${idp}` : ''}`),
+	/** Who am I, which platform/institution permissions do I hold. */
+	me: () => call<MeView>('GET', '/v1/me'),
 	startInstitutionSso: (institutionId: string) =>
 		call<StartInstitutionSsoResponse>(
 			'GET',

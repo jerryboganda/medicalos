@@ -11,10 +11,33 @@
 	let institutionId = $state('');
 	let busy = $state(false);
 	let error = $state('');
+	// Platform sign-in (Zitadel) buttons appear only when it is configured.
+	let options = $state({ platform: false, google: false, apple: false });
 
-	onMount(() => {
+	onMount(async () => {
 		institutionId = new URLSearchParams(window.location.search).get('institution') ?? '';
+		try {
+			options = await Api.signInOptions();
+		} catch {
+			/* offline or older API: password sign-in still works */
+		}
 	});
+
+	async function platformSignIn(idp) {
+		if (busy) return;
+		busy = true;
+		error = '';
+		try {
+			const { authorization_url } = await Api.startPlatformSignIn(idp);
+			window.location.assign(authorization_url);
+		} catch (err) {
+			error =
+				err instanceof ApiError
+					? err.message
+					: 'Sign-in is unavailable right now. Check your connection and try again.';
+			busy = false;
+		}
+	}
 
 	async function submit(event) {
 		event.preventDefault();
@@ -68,6 +91,31 @@
 		<p class="error-text" role="alert">{error}</p>
 	{/if}
 
+	{#if options.platform && mode === 'signin'}
+		<div class="platform">
+			<button
+				class="btn primary wide-btn"
+				type="button"
+				disabled={busy}
+				data-testid="platform-sign-in"
+				onclick={() => platformSignIn()}
+			>
+				Continue with email
+			</button>
+			{#if options.google}
+				<button class="btn wide-btn" type="button" disabled={busy} onclick={() => platformSignIn('google')}>
+					Continue with Google
+				</button>
+			{/if}
+			{#if options.apple}
+				<button class="btn wide-btn" type="button" disabled={busy} onclick={() => platformSignIn('apple')}>
+					Continue with Apple
+				</button>
+			{/if}
+		</div>
+		<p class="muted divider"><span>Or use your password</span></p>
+	{/if}
+
 	<form onsubmit={submit}>
 		<label class="field" for="email">
 			<span>Email</span>
@@ -93,7 +141,7 @@
 			/>
 		</label>
 		<button
-			class="btn primary wide-btn"
+			class="btn {options.platform ? '' : 'primary'} wide-btn"
 			type="submit"
 			disabled={busy}
 			data-loading={busy}
@@ -171,6 +219,12 @@
 
 	.sso {
 		margin-top: var(--space-xl);
+	}
+
+	.platform {
+		display: grid;
+		gap: var(--space-sm);
+		margin-bottom: var(--space-lg);
 	}
 
 	/* "Signing in through your institution?" sits on a hairline divider. */
