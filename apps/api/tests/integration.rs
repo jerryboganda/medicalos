@@ -7226,6 +7226,54 @@ async fn pregen_tutoring_generated_and_cached() {
         .iter()
         .all(|resource| resource["tutoring_cards"].as_array().unwrap().is_empty()));
 
+    // OFF-01: every verified batch carries a signed download receipt that
+    // verifies against the manifest's public key and covers the exact checksums.
+    let receipt = &before_answer_resources["receipt"];
+    assert_eq!(receipt["device_id"], "device-a");
+    assert_eq!(receipt["exam_id"], ids.exam_id.to_string());
+    let receipt_checksums: Vec<String> = receipt["checksums"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_owned())
+        .collect();
+    let resource_checksums: Vec<String> = before_answer_resources["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["checksum"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(receipt_checksums, resource_checksums);
+    let issued_at = receipt["issued_at"].as_str().unwrap().to_owned();
+    let message = api::routes::packs::pack_download_receipt_message(
+        "device-a",
+        ids.exam_id,
+        &issued_at,
+        &receipt_checksums,
+    );
+    let key_bytes: [u8; 32] = hex_bytes(before_tutor_answer["verification_key"].as_str().unwrap())
+        .try_into()
+        .expect("verification key is 32 bytes");
+    let verifying_key =
+        ed25519_dalek::VerifyingKey::from_bytes(&key_bytes).expect("verification key parses");
+    let sig_bytes: [u8; 64] = hex_bytes(receipt["signature"].as_str().unwrap())
+        .try_into()
+        .expect("signature is 64 bytes");
+    let signature = ed25519_dalek::Signature::from_slice(&sig_bytes).expect("signature parses");
+    assert!(
+        verifying_key
+            .verify_strict(message.as_bytes(), &signature)
+            .is_ok(),
+        "receipt signature must verify against the manifest key"
+    );
+    let receipt_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pack_download_receipts WHERE device_id = 'device-a'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("receipt rows");
+    assert!(receipt_rows >= 1, "receipts are recorded server-side");
+
     // A tutor answer receives its cards with the immediate feedback; the
     // session detail also restores them after a reload.
     let (status, created) = call(

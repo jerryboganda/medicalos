@@ -30,6 +30,16 @@ function canonicalValue(value: unknown): string {
   throw new Error('Unexpected offline resource field.');
 }
 
+function receiptFor(ids: string[]) {
+  return {
+    device_id: deviceId,
+    exam_id: examId,
+    issued_at: new Date().toISOString(),
+    checksums: ids.map((id) => resource(id, questionIds.indexOf(id)).checksum),
+    signature: 'mock-receipt-signature'
+  };
+}
+
 function resource(id: string, index: number) {
   const content = {
     question_version_id: id,
@@ -175,7 +185,7 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))) })
+      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))), receipt: receiptFor(ids) })
     });
   });
 
@@ -343,7 +353,7 @@ test('browser quota exhaustion keeps the pack incomplete and reports the limit',
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))) })
+      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))), receipt: receiptFor(ids) })
     });
   });
   await page.goto('/offline');

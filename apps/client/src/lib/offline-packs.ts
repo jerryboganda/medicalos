@@ -19,6 +19,15 @@ interface PackRecord {
 	downloaded_count: number;
 	byte_count: number;
 	saved_at: string;
+	receipts?: PackDownloadReceipt[];
+}
+
+interface PackDownloadReceipt {
+	device_id: string;
+	exam_id: string;
+	issued_at: string;
+	checksums: string[];
+	signature: string;
 }
 
 interface EncryptedResource {
@@ -456,6 +465,19 @@ export async function downloadPack(
 			batchResources.push(resource);
 		}
 		if (found.size !== batch.length) throw new Error('The server returned an unexpected pack batch. Resume to retry it.');
+		// OFF-01: the receipt must cover exactly the checksums this device just
+		// verified, or the batch is not attributable to a rights-checked delivery.
+		const receipt = response.receipt;
+		const batchChecksums = batchResources.map((resource) => resource.checksum);
+		if (
+			!receipt ||
+			receipt.device_id !== id ||
+			receipt.exam_id !== examId ||
+			JSON.stringify(receipt.checksums) !== JSON.stringify(batchChecksums)
+		) {
+			throw new Error('The signed download receipt did not cover this verified batch. Resume to retry it.');
+		}
+		pack.receipts = [...(pack.receipts ?? []), receipt].slice(-50);
 		await assertStorageCapacity(batchResources);
 		const encryptedBatch: EncryptedResource[] = [];
 		for (const resource of batchResources) {
