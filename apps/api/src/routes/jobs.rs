@@ -73,7 +73,10 @@ pub async fn process_due_jobs(state: &Arc<AppState>) -> ApiResult<usize> {
                     (
                         "failed",
                         None,
-                        Some(format!("dead-letter after {attempts} attempts: {error}")),
+                        Some(format!(
+                            "dead-letter after {attempts} attempts: {}",
+                            describe_error(&error)
+                        )),
                     )
                 } else {
                     // Exponential backoff: 1, 2, 4, 8 ... minutes, capped at an hour.
