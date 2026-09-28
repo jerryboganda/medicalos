@@ -126,6 +126,12 @@ canonicalized to the standard `tested` vocabulary with run links;
 LIB-08, OFF-02, OPS-04, OPS-01 flipped to `tested`. OFF-01 receipt slice
 in review (PR #14); signing secret confirmed provisioned.
 
+**2026-09-28 — B2 ✅ landed**: PR #14 (OFF-01 verified download
+receipts, migration 0058) green and production-verified `26565fa`;
+LIB-08, OFF-02, OPS-04, OPS-01 -> `tested`; 18 narrative rows
+canonicalized; OFF-01 -> `tested` with attestation (PROT-02) and licensed
+media (LIB-09) named as the remaining external boundaries.
+
 Pace reference: the last stretch converted ~45 IDs in 3 days of agent stretches.
 At that pace the 25 engineering-ready IDs ≈ 1.5–3 weeks of batched agent work
 once billing is fixed.
