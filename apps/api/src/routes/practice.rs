@@ -2241,6 +2241,28 @@ pub async fn submit(
         });
     }
 
+    // AI-05: warm one-tap tutoring cards in the background for tutor
+    // sessions (best effort — the session detail seam still generates
+    // lazily if the job has not landed yet).
+    if initial.preset == "tutor" {
+        let versions: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT question_version_id FROM session_items
+              WHERE session_id = $1 ORDER BY item_index LIMIT 20",
+        )
+        .bind(sid)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+        for qvid in versions {
+            let _ = crate::routes::jobs::enqueue(
+                &state.pool,
+                "pregen_tutoring_cards",
+                serde_json::json!({ "question_version_id": qvid }),
+                Some(user.user_id),
+            )
+            .await;
+        }
+    }
     let stored = sqlx::query_scalar::<_, String>(
         "UPDATE practice_sessions
          SET result_payload = COALESCE(result_payload, $2)
