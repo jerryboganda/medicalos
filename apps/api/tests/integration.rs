@@ -24252,3 +24252,102 @@ async fn platform_sign_in_is_off_without_zitadel_config() {
     let (status, _) = call(app, request("GET", "/v1/auth/start", None, None)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// Auth-hardening slice: operator-assisted password reset. The role-session
+/// gate admits a platform operator; the reset revokes every live session
+/// (a stolen session must not survive it) and the new password verifies
+/// while the old one is dead.
+#[tokio::test]
+async fn admin_reset_password_revokes_sessions_and_reauths() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+
+    let email = format!("resetme-{}@example.test", Uuid::new_v4());
+    let (status, reg) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({"email": email, "password": "old password 1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reg}");
+    let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "old password 1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let victim = login["token"].as_str().unwrap().to_owned();
+
+    // Plain sessions cannot reset passwords.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/admin/users/{user_id}/reset-password"),
+            Some(&victim),
+            Some(serde_json::json!({"new_password": "new password 99"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "admin_required", "{body}");
+
+    // A platform operator resets it.
+    let operator = operator_session(&state, &app, true).await;
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/admin/users/{user_id}/reset-password"),
+            Some(&operator),
+            Some(serde_json::json!({"new_password": "new password 99"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["reset"], serde_json::json!(true), "{body}");
+
+    // The victim's live session died with the reset.
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&victim), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "stolen session must die");
+
+    // The old password is dead; the new one signs in.
+    let (status, _) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "old password 1"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "new password 99"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    assert_json_keys(&login, &["token"]);
+}

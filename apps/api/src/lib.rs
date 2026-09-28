@@ -46,6 +46,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             delete(routes::accounts::revoke_device),
         )
         .route("/v1/me/account", delete(routes::accounts::delete_account))
+        .route(
+            "/v1/admin/users/{user_id}/reset-password",
+            post(routes::accounts::admin_reset_password),
+        )
         .route("/v1/exams", get(routes::exams::list_exams))
         .route(
             "/v1/admin/exams/{exam_id}/specs",
@@ -722,6 +726,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route(
             "/api/v1/me/account",
             delete(routes::accounts::delete_account),
+        )
+        .route(
+            "/api/v1/admin/users/{user_id}/reset-password",
+            post(routes::accounts::admin_reset_password),
         )
         .route("/api/v1/exams", get(routes::exams::list_exams))
         .route(
