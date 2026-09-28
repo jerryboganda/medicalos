@@ -55,3 +55,61 @@ Requirement IDs: §6.3 (accounts and sign-in), §18.1 (roles and tenancy), §19.
   - an unverified email is refused;
   - password sessions carry no roles.
 - **Unchanged:** every existing test, `ADMIN_TOKEN` handlers, password login and institution SSO.
+
+## Phase 2: production identity plumbing + admin access off the shared token
+
+Status: in-progress (2026-09-28, ZCode)
+
+Requirement IDs: §6.3, §18.1, §25, CORE-01, CORE-07, ADMIN-06, OPS-02.
+
+### Problem
+
+Phase 1 shipped the code but production cannot use it:
+
+- **No IdP env reaches production.** `deploy.yml` and `infra/vps/deploy.sh`
+  pass no `ZITADEL_*`, so `/v1/auth/providers` serves `false/false/false` and
+  platform sign-in 404s — expected until the owner decides where production
+  Zitadel runs (owner gate, below), but the plumbing must exist first.
+- **Admin routes need a person.** `require_admin` accepts only the shared
+  `ADMIN_TOKEN`. Production passes none, so every admin route is
+  `admin_disabled` in the live deployment: editorial work is impossible.
+
+### 2a — deploy plumbing (inert until the owner sets secrets)
+
+- Pass `ZITADEL_ISSUER`, `ZITADEL_CLIENT_ID`, `ZITADEL_CLIENT_SECRET` (plus
+  optional `ZITADEL_PROJECT_ID`, `ZITADEL_IDP_GOOGLE`, `ZITADEL_IDP_APPLE`)
+  from new repo secrets `VPS_ZITADEL_*` through the `deploy-vps` env and the
+  API container, mirroring the `OIDC_CREDENTIAL_KEY` pattern.
+- Fail the deploy loudly on a partial trio (any of the three set without all
+  three) — the API would otherwise silently disable platform sign-in.
+- Re-sync `infra/vps/deploy.sh` with the inline script (the 90×2s health wait
+  landed only in the workflow copy) — the files claim to be kept in sync.
+- **Owner gate:** where production Zitadel runs (Zitadel Cloud / on-VPS
+  container / dedicated host). Until decided and the secrets set, the
+  providers endpoint staying all-false is the designed state.
+
+### 2b — admin access: role sessions accepted at the same seam
+
+- `require_admin(user, provided)` accepts EITHER a session holding
+  `Permission::PlatformOps` with MFA (via the existing `AuthUser::require`),
+  OR the legacy `ADMIN_TOKEN` when configured — CI/local e2e keep the token
+  path unchanged; the signature change makes all ~70 call sites compile-check.
+- A privileged role without MFA falls through to the token path; if both
+  paths fail, the honest error wins (`mfa_required` over `admin_required`
+  when the session holds the permission but not the factor).
+- Full per-route permission mapping (authors → `ContentAuthor` routes,
+  reviewers → `ClinicalApprove` routes) stays a later slice; today the whole
+  console gates on `PlatformOps`, which only `platform_owner` grants.
+- Client: no functional change needed — admin pages already send the bearer
+  session, and the server now accepts it; the `mlos_admin` localStorage
+  entry stays as the local-dev escape hatch until cutover.
+
+### Acceptance (phase 2)
+
+- Integration tests: `platform_owner` + MFA session reaches an admin route
+  with no `x-admin-token`; the same role without MFA gets `mfa_required`
+  (and passes with the legacy token as break-glass); a plain session with a
+  wrong token still gets `admin_required`; with `ADMIN_TOKEN` unset the
+  `admin_disabled` behavior is unchanged.
+- Deploy workflow green; providers endpoint still all-false (no secrets set).
+- No production behavior change until the owner's IdP decision.
