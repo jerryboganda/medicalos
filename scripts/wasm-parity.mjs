@@ -21,6 +21,7 @@ const fns = {
 let failures = 0;
 let cases = 0;
 for (const [name, casesForFn] of Object.entries(vectors)) {
+  if (name === 'comment') continue;
   const fn = fns[name];
   if (typeof fn !== 'function') {
     console.error(`parity: missing wasm export parity_${name}`);
