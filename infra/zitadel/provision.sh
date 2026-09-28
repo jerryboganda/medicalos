@@ -35,7 +35,9 @@ medical_reviewer:Medical reviewer
 examiner:Examiner"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
-CURL=(curl -sS --fail-with-body -H "Authorization: Bearer $PAT" -H "Content-Type: application/json")
+# Zitadel answers 503 for a few seconds after /debug/ready while its
+# projections catch up; curl retries 503 (a transient error) with backoff.
+CURL=(curl -sS --fail-with-body --retry 20 --retry-delay 3 -H "Authorization: Bearer $PAT" -H "Content-Type: application/json")
 [ -n "${CONNECT_TO:-}" ] && CURL+=(--connect-to "$CONNECT_TO")
 
 api() { # method path [json]
