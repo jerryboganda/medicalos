@@ -653,8 +653,13 @@ async fn admin_assessment_run(state: &AppState, run_id: Uuid) -> ApiResult<Admin
     .ok_or_else(|| ApiError::not_found("run_not_found"))
 }
 
-fn require_admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
+fn require_admin(
+    state: &AppState,
+    user: &crate::auth::AuthUser,
+    headers: &axum::http::HeaderMap,
+) -> ApiResult<()> {
     state.require_admin(
+        user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
@@ -697,10 +702,10 @@ pub struct PendingScenarioAssessmentsResponse {
 
 pub async fn pending_assessments(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<PendingScenarioAssessmentsResponse>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let rows = sqlx::query_as::<_, PendingScenarioAssessment>(
         r#"SELECT run.id AS run_id, scenario.title AS scenario,
                   version.version AS scenario_version, run.finished_at,
@@ -751,11 +756,11 @@ pub struct AdminScenarioAssessment {
 
 pub async fn admin_assessment(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(run_id): Path<Uuid>,
 ) -> ApiResult<Json<AdminScenarioAssessment>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let run = admin_assessment_run(&state, run_id).await?;
     let finished_at = run.finished_at.ok_or_else(|| {
         ApiError::conflict("run_not_finished", "finish the station before assessment")
@@ -872,7 +877,7 @@ pub async fn record_assessment(
     Path(run_id): Path<Uuid>,
     Json(req): Json<ScenarioAssessmentRequest>,
 ) -> ApiResult<(StatusCode, Json<ScenarioAssessmentReceipt>)> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &reviewer, &headers)?;
     let mut tx = state.pool.begin().await?;
     let run = sqlx::query_as::<_, AssessmentTarget>(
         r#"SELECT user_id, scenario_version_id, transcript, finished_at
@@ -1166,10 +1171,10 @@ pub async fn appeal_scenario_assessment(
 
 pub async fn list_scenario_assessment_appeals(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<ScenarioAssessmentAppealQueueResponse>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let appeals = sqlx::query_as::<_, ScenarioAssessmentAppealQueueItem>(
         r#"SELECT appeal.id AS appeal_id, appeal.run_id, scenario.title AS scenario,
 		          version.version AS scenario_version, appeal.reason, appeal.created_at
@@ -1203,11 +1208,11 @@ struct ScenarioAssessmentAppealDetailRow {
 
 pub async fn get_scenario_assessment_appeal(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(appeal_id): Path<Uuid>,
 ) -> ApiResult<Json<ScenarioAssessmentAppeal>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let appeal = sqlx::query_as::<_, ScenarioAssessmentAppealDetailRow>(
         r#"SELECT appeal.id AS appeal_id, appeal.run_id, appeal.reason, appeal.created_at,
 		          scenario.title AS scenario, version.version AS scenario_version,
@@ -1242,7 +1247,7 @@ pub async fn review_scenario_assessment_appeal(
     Path(appeal_id): Path<Uuid>,
     Json(req): Json<ScenarioAssessmentAppealReviewRequest>,
 ) -> ApiResult<(StatusCode, Json<ScenarioAssessmentAppealReviewResponse>)> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &reviewer, &headers)?;
     let decision = match req.decision.as_str() {
         "confirmed" => ScenarioAppealDecision::Confirmed,
         "reassessment_required" => ScenarioAppealDecision::ReassessmentRequired,

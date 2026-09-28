@@ -1497,7 +1497,7 @@ pub async fn prize_review(
     Json(req): Json<PrizeReviewReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     for handle in req.flag.unwrap_or_default() {
         sqlx::query!(
             "UPDATE competition_entries SET flagged = true

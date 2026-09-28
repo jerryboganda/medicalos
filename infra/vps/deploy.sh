@@ -15,6 +15,21 @@ PUBLIC_API_BASE_URL="${PUBLIC_API_BASE_URL:-https://medicalos.polytronx.com/api}
 PUBLIC_APP_URL="${PUBLIC_APP_URL:-https://medicalos.polytronx.com}"
 OIDC_CREDENTIAL_KEY="${OIDC_CREDENTIAL_KEY:-}"
 PACK_SIGNING_KEY="${PACK_SIGNING_KEY:-}"
+# Platform sign-in (Zitadel) — empty = disabled at runtime (password login
+# and institution SSO keep working). The trio below is all-or-nothing: the
+# API silently disables platform sign-in when any is missing, so a partial
+# set must fail loudly here instead.
+ZITADEL_ISSUER="${ZITADEL_ISSUER:-}"
+ZITADEL_CLIENT_ID="${ZITADEL_CLIENT_ID:-}"
+ZITADEL_CLIENT_SECRET="${ZITADEL_CLIENT_SECRET:-}"
+ZITADEL_PROJECT_ID="${ZITADEL_PROJECT_ID:-}"
+ZITADEL_IDP_GOOGLE="${ZITADEL_IDP_GOOGLE:-}"
+ZITADEL_IDP_APPLE="${ZITADEL_IDP_APPLE:-}"
+if [ -n "${ZITADEL_ISSUER}${ZITADEL_CLIENT_ID}${ZITADEL_CLIENT_SECRET}" ]; then
+  for v in ZITADEL_ISSUER ZITADEL_CLIENT_ID ZITADEL_CLIENT_SECRET; do
+    [ -n "${!v}" ] || { echo "$v is empty: ZITADEL_ISSUER, ZITADEL_CLIENT_ID and ZITADEL_CLIENT_SECRET are required together" >&2; exit 1; }
+  done
+fi
 # The GHCR packages for this repo are public: pulls are anonymous, no
 # registry login is wired through CI by design. (A failed `docker login`
 # here once masked a no-op deploy as success — the script must fail loudly
@@ -52,6 +67,12 @@ docker run -d --name medicalos-api --restart unless-stopped \
   -e PUBLIC_APP_URL="$PUBLIC_APP_URL" \
   -e OIDC_CREDENTIAL_KEY="$OIDC_CREDENTIAL_KEY" \
   -e PACK_SIGNING_KEY="$PACK_SIGNING_KEY" \
+  -e ZITADEL_ISSUER="$ZITADEL_ISSUER" \
+  -e ZITADEL_CLIENT_ID="$ZITADEL_CLIENT_ID" \
+  -e ZITADEL_CLIENT_SECRET="$ZITADEL_CLIENT_SECRET" \
+  -e ZITADEL_PROJECT_ID="$ZITADEL_PROJECT_ID" \
+  -e ZITADEL_IDP_GOOGLE="$ZITADEL_IDP_GOOGLE" \
+  -e ZITADEL_IDP_APPLE="$ZITADEL_IDP_APPLE" \
   -e MIN_TIME_LIMIT_SECONDS=30 \
   -e FREE_DAILY_QUESTIONS=10 \
   "$API_IMAGE"
@@ -67,7 +88,10 @@ docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || 
 echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
 
 echo "[medicalos] health-check (API + web through the container network)"
-for i in $(seq 1 30); do
+# Migrations 0050-0059 (incl. RLS + backfills) can push API startup past
+# 60s under load — allow 90 iterations x 2s. (Kept in sync with the inline
+# deploy-vps script in .github/workflows/deploy.yml.)
+for i in $(seq 1 90); do
   # The debian-slim API image has no wget/curl: probe from a throwaway
   # curl container on the same network instead.
   if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
@@ -75,7 +99,7 @@ for i in $(seq 1 30); do
     echo "[medicalos] api + web healthy"
     break
   fi
-  [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
+  [ "$i" -eq 90 ] && { echo "stack never became healthy" >&2; exit 1; }
   sleep 2
 done
 

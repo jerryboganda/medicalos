@@ -1114,7 +1114,7 @@ pub async fn create_competition(
     Json(req): Json<CreateCompetitionReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     if req.title.trim().is_empty() || req.question_ids.len() < 3 || req.question_ids.len() > 500 {
         return Err(ApiError::unprocessable(
             "invalid_competition",

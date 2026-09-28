@@ -49,7 +49,28 @@ pub struct ZitadelConfig {
 
 impl AppState {
     /// Admin gate shared by mock configuration and the editorial console.
-    pub fn require_admin(&self, provided: Option<&str>) -> Result<(), crate::error::ApiError> {
+    /// A session holding `PlatformOps` with a second factor passes (§18.1,
+    /// §25 — checked through `authz`); the shared `ADMIN_TOKEN` stays valid
+    /// as the operator break-glass while the role cutover is pending.
+    pub fn require_admin(
+        &self,
+        user: &crate::auth::AuthUser,
+        provided: Option<&str>,
+    ) -> Result<(), crate::error::ApiError> {
+        if user
+            .permissions()
+            .contains(&crate::authz::Permission::PlatformOps)
+        {
+            if user.mfa {
+                return Ok(());
+            }
+            if provided.is_none() {
+                // The role alone is not enough without the second factor;
+                // `require` returns exactly that mfa_required error.
+                return user.require(crate::authz::Permission::PlatformOps);
+            }
+            // A presented token still gets the legacy check below.
+        }
         match (&self.admin_token, provided) {
             (Some(expected), Some(got)) if expected == got => Ok(()),
             (Some(_), _) => Err(crate::error::ApiError::forbidden(

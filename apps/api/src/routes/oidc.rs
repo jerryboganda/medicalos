@@ -115,8 +115,9 @@ pub struct OidcCallbackQuery {
     pub error: Option<String>,
 }
 
-fn require_admin(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
+fn require_admin(state: &AppState, user: &AuthUser, headers: &HeaderMap) -> ApiResult<()> {
     state.require_admin(
+        user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
@@ -291,9 +292,9 @@ pub async fn get_provider(
     State(state): State<Arc<AppState>>,
     Path(institution_id): Path<Uuid>,
     headers: HeaderMap,
-    _user: AuthUser,
+    user: AuthUser,
 ) -> ApiResult<Json<OidcProviderView>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let row = sqlx::query(
         "SELECT issuer, client_id, enabled, client_secret_ciphertext IS NOT NULL AS secret_configured
          FROM institution_oidc_providers WHERE institution_id = $1",
@@ -317,7 +318,7 @@ pub async fn configure_provider(
     user: AuthUser,
     Json(req): Json<ConfigureOidcReq>,
 ) -> ApiResult<Json<OidcProviderView>> {
-    require_admin(&state, &headers)?;
+    require_admin(&state, &user, &headers)?;
     let issuer = req.issuer.trim();
     let client_id = req.client_id.trim();
     validate_issuer(issuer)?;

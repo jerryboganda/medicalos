@@ -48,9 +48,13 @@ pub struct ExamRegistryResponse {
     exams: Vec<ExamRegistryItem>,
 }
 
-fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
+fn admin(
+    state: &AppState,
+    user: &crate::auth::AuthUser,
+    headers: &axum::http::HeaderMap,
+) -> ApiResult<()> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)
+    state.require_admin(user, provided)
 }
 
 pub async fn list_exams(
@@ -85,12 +89,12 @@ pub struct ExamSpecReq {
 
 pub async fn create_exam_spec(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(exam_id): Path<Uuid>,
     Json(req): Json<ExamSpecReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &headers)?;
+    admin(&state, &user, &headers)?;
     if !req.config.is_object() {
         return Err(ApiError::unprocessable(
             "invalid_exam_config",
@@ -150,12 +154,12 @@ pub struct AssessmentFormReq {
 
 pub async fn create_assessment_form(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(spec_id): Path<Uuid>,
     Json(req): Json<AssessmentFormReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &headers)?;
+    admin(&state, &user, &headers)?;
     if req.name.trim().is_empty() || req.assessment_family.trim().is_empty() {
         return Err(ApiError::unprocessable(
             "invalid_assessment_form",
@@ -419,12 +423,12 @@ pub async fn readiness(
 /// of a consuming LMS is a separate activity (§18.5) and is never claimed here.
 pub async fn qti_export(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(exam_id): Path<Uuid>,
 ) -> Result<axum::response::Response, ApiError> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let rows = sqlx::query!(
         r#"SELECT qv.id, qv.lead_in, qv.options, qv.correct_index
            FROM question_versions qv

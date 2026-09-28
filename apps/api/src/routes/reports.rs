@@ -365,11 +365,12 @@ pub async fn my_reports(
 /// ADMIN-06/QB-16: unresolved issue queue, one row per affected question version.
 pub async fn review_queue(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: HeaderMap,
     Query(params): Query<QueueParams>,
 ) -> ApiResult<Json<AdminReportsResponse>> {
     state.require_admin(
+        &user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
@@ -461,6 +462,7 @@ pub async fn resolve(
     Json(req): Json<ResolveReportReq>,
 ) -> ApiResult<Json<ResolveQuestionReportResponse>> {
     state.require_admin(
+        &user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
