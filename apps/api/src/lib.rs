@@ -31,6 +31,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/v1/auth/oidc/complete", post(routes::oidc::complete))
         .route("/v1/auth/start", get(routes::platform_auth::start))
+        .route("/v1/auth/providers", get(routes::platform_auth::providers))
         .route(
             "/v1/auth/oidc/callback",
             get(routes::platform_auth::callback),
@@ -701,6 +702,10 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         )
         .route("/api/v1/auth/oidc/complete", post(routes::oidc::complete))
         .route("/api/v1/auth/start", get(routes::platform_auth::start))
+        .route(
+            "/api/v1/auth/providers",
+            get(routes::platform_auth::providers),
+        )
         .route(
             "/api/v1/auth/oidc/callback",
             get(routes::platform_auth::callback),

@@ -42,6 +42,28 @@ pub struct StartQuery {
     pub idp: Option<String>,
 }
 
+/// Which sign-in buttons the login page may show (no dead buttons, TRUST-01).
+#[derive(Serialize)]
+#[cfg_attr(
+    feature = "type-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "auth/SignInOptions.ts")
+)]
+pub struct SignInOptions {
+    pub platform: bool,
+    pub google: bool,
+    pub apple: bool,
+}
+
+pub async fn providers(State(state): State<Arc<AppState>>) -> Json<SignInOptions> {
+    let cfg = state.zitadel.as_ref();
+    Json(SignInOptions {
+        platform: cfg.is_some(),
+        google: cfg.is_some_and(|cfg| cfg.google_idp_id.is_some()),
+        apple: cfg.is_some_and(|cfg| cfg.apple_idp_id.is_some()),
+    })
+}
+
 fn config(state: &AppState) -> ApiResult<&ZitadelConfig> {
     state
         .zitadel

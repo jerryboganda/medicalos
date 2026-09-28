@@ -23837,6 +23837,16 @@ async fn platform_sign_in_maps_zitadel_roles_and_mfa_onto_the_session() {
         Ok(session["token"].as_str().unwrap().to_owned())
     }
 
+    let (_, options) = call(
+        app.clone(),
+        request("GET", "/v1/auth/providers", None, None),
+    )
+    .await;
+    assert_eq!(
+        options,
+        serde_json::json!({ "platform": true, "google": true, "apple": false })
+    );
+
     // The start URL asks Zitadel for roles, the project audience and, for a
     // named IdP, skips the chooser.
     let (_, started) = call(
@@ -23962,4 +23972,23 @@ async fn platform_sign_in_maps_zitadel_roles_and_mfa_onto_the_session() {
     assert_eq!(me["roles"], serde_json::json!([]));
     assert_eq!(me["mfa"], false);
     provider_task.abort();
+}
+
+/// Without Zitadel settings the login page offers no platform buttons and
+/// the start endpoint refuses (no dead buttons, TRUST-01).
+#[tokio::test]
+async fn platform_sign_in_is_off_without_zitadel_config() {
+    let _g = LOCK.lock().await;
+    let app = router(setup().await);
+    let (_, options) = call(
+        app.clone(),
+        request("GET", "/v1/auth/providers", None, None),
+    )
+    .await;
+    assert_eq!(
+        options,
+        serde_json::json!({ "platform": false, "google": false, "apple": false })
+    );
+    let (status, _) = call(app, request("GET", "/v1/auth/start", None, None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
