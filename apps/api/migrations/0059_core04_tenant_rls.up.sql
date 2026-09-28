@@ -28,18 +28,25 @@ ALTER TABLE interoperability_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cohorts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cohort_members ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation ON institutions;
 CREATE POLICY tenant_isolation ON institutions
     USING (id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON institution_members;
 CREATE POLICY tenant_isolation ON institution_members
     USING (institution_id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON institution_programs;
 CREATE POLICY tenant_isolation ON institution_programs
     USING (institution_id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON external_identities;
 CREATE POLICY tenant_isolation ON external_identities
     USING (institution_id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON interoperability_receipts;
 CREATE POLICY tenant_isolation ON interoperability_receipts
     USING (institution_id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON cohorts;
 CREATE POLICY tenant_isolation ON cohorts
     USING (institution_id = ANY (string_to_array(current_setting('app.institution_ids', true), ',')::uuid[]));
+DROP POLICY IF EXISTS tenant_isolation ON cohort_members;
 CREATE POLICY tenant_isolation ON cohort_members
     USING (EXISTS (
         SELECT 1 FROM cohorts c
