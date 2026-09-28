@@ -30,6 +30,16 @@ function canonicalValue(value: unknown): string {
   throw new Error('Unexpected offline resource field.');
 }
 
+function receiptFor(ids: string[]) {
+  return {
+    device_id: deviceId,
+    exam_id: examId,
+    issued_at: new Date().toISOString(),
+    checksums: ids.map((id) => resource(id, questionIds.indexOf(id)).checksum),
+    signature: 'mock-receipt-signature'
+  };
+}
+
 function resource(id: string, index: number) {
   const content = {
     question_version_id: id,
@@ -155,13 +165,6 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
       contentType: 'application/json',
       body: JSON.stringify({ session_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' })
     });
-  });
-  const receiptFor = (ids: string[]) => ({
-    device_id: deviceId,
-    exam_id: examId,
-    issued_at: new Date().toISOString(),
-    checksums: ids.map((id) => resource(id, questionIds.indexOf(id)).checksum),
-    signature: 'mock-receipt-signature'
   });
   await page.route('**/v2/packs/*/manifest*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
