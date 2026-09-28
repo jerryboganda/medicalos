@@ -341,8 +341,15 @@ struct ArticleVersionRow {
     effective_to: Option<chrono::NaiveDate>,
 }
 
-fn require_article_admin(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
-    state.require_admin(headers.get("x-admin-token").and_then(|v| v.to_str().ok()))
+fn require_article_admin(
+    state: &AppState,
+    user: &crate::auth::AuthUser,
+    headers: &HeaderMap,
+) -> ApiResult<()> {
+    state.require_admin(
+        user,
+        headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
+    )
 }
 
 fn normalize_jurisdiction(value: Option<&str>) -> ApiResult<Option<String>> {
@@ -570,7 +577,7 @@ pub async fn admin_list_articles(
     _user: AuthUser,
     headers: HeaderMap,
 ) -> ApiResult<Json<AdminArticleListResponse>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     let articles = sqlx::query_as::<_, AdminArticleSummary>(
         r#"SELECT a.id AS article_id, a.slug, a.title, av.id AS version_id,
                   av.version, av.status, av.jurisdiction, av.effective_from,
@@ -592,7 +599,7 @@ pub async fn create_article(
     headers: HeaderMap,
     Json(req): Json<CreateArticleRequest>,
 ) -> ApiResult<Json<AdminArticleVersion>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     let slug = req.slug.trim().to_string();
     if !valid_article_slug(&slug) {
         return Err(ApiError::unprocessable(
@@ -670,7 +677,7 @@ pub async fn create_article_version(
     headers: HeaderMap,
     Path(article_id): Path<Uuid>,
 ) -> ApiResult<Json<AdminArticleVersion>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     let mut tx = state.pool.begin().await?;
     let exists = sqlx::query_scalar::<_, Uuid>("SELECT id FROM articles WHERE id = $1 FOR UPDATE")
         .bind(article_id)
@@ -766,7 +773,7 @@ pub async fn get_admin_article_version(
     headers: HeaderMap,
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<AdminArticleVersion>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     Ok(Json(
         fetch_admin_article_version(&state, article_id, version_id).await?,
     ))
@@ -779,7 +786,7 @@ pub async fn update_article_draft(
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateArticleDraftRequest>,
 ) -> ApiResult<Json<AdminArticleVersion>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     let fields = clean_article_draft(
         &req.body,
         &req.source_ref,
@@ -844,7 +851,7 @@ pub async fn publish_article_draft(
     headers: HeaderMap,
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<PublishArticleResponse>> {
-    require_article_admin(&state, &headers)?;
+    require_article_admin(&state, &user, &headers)?;
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ArticleVersionRow>(
         r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,
@@ -1634,13 +1641,13 @@ fn validate_media_metadata(req: &mut MediaReq) -> ApiResult<()> {
 
 pub async fn attach_media(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(article_id): Path<Uuid>,
     Json(mut req): Json<MediaReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let url = req.url.trim().to_owned();
     let parsed_url = url::Url::parse(&url).ok();
     if parsed_url.as_ref().is_none_or(|parsed| {
@@ -1804,7 +1811,7 @@ pub async fn create_image_case(
     Json(mut req): Json<ImageCaseReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let title = req.title.trim();
     if title.is_empty() || title.len() > 200 {
         return Err(ApiError::unprocessable(
@@ -2369,14 +2376,14 @@ pub async fn get_image_case(
 
 pub async fn admin_image_case_concepts(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(case_id): Path<Uuid>,
 ) -> ApiResult<Json<ImageCaseConceptsResponse>> {
     let provided = headers
         .get("x-admin-token")
         .and_then(|value| value.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let case_exists = sqlx::query_scalar::<_, Uuid>("SELECT id FROM image_cases WHERE id = $1")
         .bind(case_id)
         .fetch_optional(&state.pool)
@@ -2402,7 +2409,7 @@ pub async fn set_admin_image_case_concepts(
     let provided = headers
         .get("x-admin-token")
         .and_then(|value| value.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     if req.concept_ids.len() > 50 {
         return Err(ApiError::unprocessable(
             "too_many_image_concepts",
@@ -2515,7 +2522,7 @@ pub async fn create_image_annotation(
     Json(req): Json<ImageAnnotationReq>,
 ) -> ApiResult<(StatusCode, Json<ImageAnnotationCreatedResponse>)> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     if req.image_index < 0 {
         return Err(ApiError::unprocessable(
             "invalid_image_index",
@@ -2588,11 +2595,11 @@ pub async fn create_image_annotation(
 
 pub async fn list_image_annotations(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<AdminImageAnnotationListResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let rows = sqlx::query!(
         r#"SELECT a.id, a.case_id, c.title AS case_title, a.image_index,
                   a.x_percent, a.y_percent, a.body, a.created_at,
@@ -2648,7 +2655,7 @@ pub async fn review_image_annotation(
     Json(req): Json<ImageAnnotationReviewReq>,
 ) -> ApiResult<Json<ImageAnnotationReviewResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let decision = match req.decision.as_str() {
         "approved" => ImageAnnotationDecision::Approved,
         "rejected" => ImageAnnotationDecision::Rejected,

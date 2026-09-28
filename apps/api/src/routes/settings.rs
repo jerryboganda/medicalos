@@ -308,7 +308,7 @@ pub async fn update_settings(
     Json(req): Json<SettingsReq>,
 ) -> ApiResult<Json<AdminSettingsUpdateResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     validate_settings(&req)?;
 
     let mut pairs: Vec<(&str, Value)> = Vec::new();
@@ -415,11 +415,11 @@ pub async fn update_settings(
 
 pub async fn get_settings(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<AdminSettingsResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let rows = sqlx::query("SELECT key, value FROM app_settings")
         .fetch_all(&state.pool)
         .await?;

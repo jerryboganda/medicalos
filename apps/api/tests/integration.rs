@@ -23926,6 +23926,86 @@ async fn mock_types_and_time_analysis() {
     assert_eq!(ch2["total"], 1);
 }
 
+/// Plan auth-zitadel phase 2: admin routes accept a platform-operator
+/// session (role + second factor) with no shared token, while the legacy
+/// token stays valid as the operator break-glass during the cutover.
+#[tokio::test]
+async fn platform_operator_session_administers_without_the_shared_token() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+
+    let owner = operator_session(&state, &app, true).await;
+    let (status, dash) = call(
+        app.clone(),
+        request("GET", "/v1/admin/dashboard", Some(&owner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{dash}");
+}
+
+/// A privileged role without its second factor is told `mfa_required` — the
+/// honest error for a privileged session — and the legacy token remains the
+/// break-glass path; plain sessions keep the existing token semantics.
+#[tokio::test]
+async fn privileged_role_without_mfa_is_refused_until_second_factor_or_token() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+
+    let no_mfa = operator_session(&state, &app, false).await;
+
+    let (status, body) = call(
+        app.clone(),
+        request("GET", "/v1/admin/dashboard", Some(&no_mfa), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "mfa_required", "{body}");
+
+    let (status, body) = call(
+        app.clone(),
+        admin_req("GET", "/v1/admin/dashboard", Some(&no_mfa), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Unchanged legacy semantics: a plain session with a wrong token is
+    // `admin_required`, and without any token configured it would be
+    // `admin_disabled` (covered by the e2e suite's no-token expectation).
+    let plain = register_and_login(app.clone()).await;
+    let (status, body) = call(
+        app.clone(),
+        request("GET", "/v1/admin/dashboard", Some(&plain), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "admin_required", "{body}");
+}
+
+/// Register a learner and mint a `platform_owner` session carrying (or not
+/// carrying) the MFA fact — the seam the Zitadel sign-in fills in production.
+async fn operator_session(state: &Arc<AppState>, app: &Router, mfa: bool) -> String {
+    let (status, reg) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/register",
+            None,
+            Some(serde_json::json!({
+                "email": format!("owner-{}@example.test", Uuid::new_v4()),
+                "password": "correct horse"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reg}");
+    let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
+    api::auth::issue_session_with(&state.pool, user_id, &["platform_owner"], mfa)
+        .await
+        .expect("operator session")
+}
+
 /// Plan auth-zitadel phase 1: the API is Zitadel's OIDC client. A sign-in
 /// creates the account on first use (never linking by email), snapshots the
 /// project roles and the MFA fact onto the session, and /v1/me reports the

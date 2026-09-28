@@ -19,9 +19,13 @@ use crate::error::{ApiError, ApiResult};
 use crate::seed::QuestionOption;
 use crate::state::AppState;
 
-fn admin(state: &AppState, headers: &axum::http::HeaderMap) -> ApiResult<()> {
+fn admin(
+    state: &AppState,
+    user: &crate::auth::AuthUser,
+    headers: &axum::http::HeaderMap,
+) -> ApiResult<()> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)
+    state.require_admin(user, provided)
 }
 
 // ---- AI-18: pre-generated tutoring ------------------------------------------
@@ -156,11 +160,14 @@ pub(crate) async fn ensure_pregen(pool: &PgPool, vid: Uuid) -> ApiResult<Vec<Tut
 /// learners may read cards only after an eligible tutor answer.
 pub async fn generate_pregen(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: HeaderMap,
     Path(vid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(headers.get("x-admin-token").and_then(|v| v.to_str().ok()))?;
+    state.require_admin(
+        &user,
+        headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
+    )?;
     let cards = ensure_pregen(&state.pool, vid).await?;
     if cards.is_empty() {
         return Err(ApiError::forbidden(
@@ -200,7 +207,7 @@ pub async fn set_flag(
     headers: axum::http::HeaderMap,
     Json(req): Json<FlagReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &headers)?;
+    admin(&state, &user, &headers)?;
     if req.key.is_empty() || req.key.len() > 100 {
         return Err(ApiError::unprocessable(
             "invalid_key",
@@ -593,7 +600,7 @@ pub async fn add_member(
     // Tenant-scoped authority (CORE-04): institution admins manage their own
     // membership; the global admin token stays valid for operator tooling.
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    let via_admin_token = state.require_admin(provided).is_ok();
+    let via_admin_token = state.require_admin(&user, provided).is_ok();
     if !via_admin_token {
         let staff = sqlx::query!(
             "SELECT 1 AS one FROM institution_members
@@ -1706,7 +1713,7 @@ pub async fn create_scenario(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateScenarioReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &headers)?;
+    admin(&state, &user, &headers)?;
     let slug = req.slug.trim();
     if slug.is_empty() || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err(ApiError::unprocessable(
@@ -1766,7 +1773,7 @@ pub async fn create_scenario_version(
     Path(scenario_id): Path<Uuid>,
     Json(req): Json<CreateScenarioVersionReq>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
-    admin(&state, &headers)?;
+    admin(&state, &user, &headers)?;
     validate_scenario_rubric(&req.rubric, &req.state_machine)?;
 
     let mut tx = state.pool.begin().await?;
@@ -1910,7 +1917,7 @@ pub async fn submit_transcript_correction(
     .ok_or_else(|| ApiError::not_found("run_not_found"))?;
     let via_admin_token = {
         let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-        state.require_admin(provided).is_ok()
+        state.require_admin(&user, provided).is_ok()
     };
     if run.user_id != user.user_id && !via_admin_token {
         return Err(ApiError::forbidden(

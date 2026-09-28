@@ -188,7 +188,7 @@ pub async fn create_mock(
     Json(req): Json<CreateMockReq>,
 ) -> ApiResult<Json<CreateMockResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(provided)?;
+    state.require_admin(&user, provided)?;
     let title = req.title.trim();
     if title.is_empty() || title.len() > 200 {
         return Err(ApiError::unprocessable(

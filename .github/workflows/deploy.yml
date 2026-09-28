@@ -201,11 +201,17 @@ jobs:
         env:
           OIDC_CREDENTIAL_KEY: ${{ secrets.VPS_OIDC_CREDENTIAL_KEY }}
           PACK_SIGNING_KEY: ${{ secrets.VPS_PACK_SIGNING_KEY }}
+          ZITADEL_ISSUER: ${{ secrets.VPS_ZITADEL_ISSUER }}
+          ZITADEL_CLIENT_ID: ${{ secrets.VPS_ZITADEL_CLIENT_ID }}
+          ZITADEL_CLIENT_SECRET: ${{ secrets.VPS_ZITADEL_CLIENT_SECRET }}
+          ZITADEL_PROJECT_ID: ${{ secrets.VPS_ZITADEL_PROJECT_ID }}
+          ZITADEL_IDP_GOOGLE: ${{ secrets.VPS_ZITADEL_IDP_GOOGLE }}
+          ZITADEL_IDP_APPLE: ${{ secrets.VPS_ZITADEL_IDP_APPLE }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: OIDC_CREDENTIAL_KEY,PACK_SIGNING_KEY
+          envs: OIDC_CREDENTIAL_KEY,PACK_SIGNING_KEY,ZITADEL_ISSUER,ZITADEL_CLIENT_ID,ZITADEL_CLIENT_SECRET,ZITADEL_PROJECT_ID,ZITADEL_IDP_GOOGLE,ZITADEL_IDP_APPLE
           # Inline the script (script_file + script_arguments silently sent
           # NOTHING in v1: the debug log showed empty CMD with success).
           # The script content is identical to infra/vps/deploy.sh — keep
@@ -218,6 +224,14 @@ jobs:
             REGISTRY='ghcr.io/jerryboganda'
             PUBLIC_API_BASE_URL='https://medicalos.polytronx.com/api'
             PUBLIC_APP_URL='https://medicalos.polytronx.com'
+            # Platform sign-in (Zitadel). All-or-nothing: the API silently
+            # disables platform sign-in when any of the trio is missing, so
+            # a partial secret set must fail the deploy instead.
+            if [ -n "${ZITADEL_ISSUER}${ZITADEL_CLIENT_ID}${ZITADEL_CLIENT_SECRET}" ]; then
+              for v in ZITADEL_ISSUER ZITADEL_CLIENT_ID ZITADEL_CLIENT_SECRET; do
+                [ -n "${!v}" ] || { echo "$v is empty: ZITADEL_ISSUER, ZITADEL_CLIENT_ID and ZITADEL_CLIENT_SECRET are required together" >&2; exit 1; }
+              done
+            fi
             if [ "${#PACK_SIGNING_KEY}" -lt 32 ] || [ -z "${PACK_SIGNING_KEY//[[:space:]]/}" ]; then
               echo "VPS_PACK_SIGNING_KEY must contain at least 32 non-whitespace bytes" >&2
               exit 1
@@ -246,6 +260,12 @@ jobs:
               -e PUBLIC_APP_URL="$PUBLIC_APP_URL" \
               -e OIDC_CREDENTIAL_KEY="${OIDC_CREDENTIAL_KEY:-}" \
               -e PACK_SIGNING_KEY="$PACK_SIGNING_KEY" \
+              -e ZITADEL_ISSUER="${ZITADEL_ISSUER:-}" \
+              -e ZITADEL_CLIENT_ID="${ZITADEL_CLIENT_ID:-}" \
+              -e ZITADEL_CLIENT_SECRET="${ZITADEL_CLIENT_SECRET:-}" \
+              -e ZITADEL_PROJECT_ID="${ZITADEL_PROJECT_ID:-}" \
+              -e ZITADEL_IDP_GOOGLE="${ZITADEL_IDP_GOOGLE:-}" \
+              -e ZITADEL_IDP_APPLE="${ZITADEL_IDP_APPLE:-}" \
               -e MIN_TIME_LIMIT_SECONDS=30 \
               -e FREE_DAILY_QUESTIONS=10 \
               "$API_IMAGE"
