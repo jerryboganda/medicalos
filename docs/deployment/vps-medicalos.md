@@ -54,7 +54,39 @@ Live surfaces (2026-09-19, owner-directed):
    health-check `/healthz` through the API container, report versions.
 3. `production-verify` curls the live domain: `/api/version.json` carries
    the deployed SHA, `/` serves the app shell, the JS entry bundle
-   returns 200, `/api/healthz` returns `ok`.
+   returns 200, `/api/healthz` returns `ok`. It first verifies with cosign
+   that the exact `:$SHA` API and web images carry a keyless signature from
+   this repository's `deploy.yml` on `refs/heads/main` (OPS-03) — an
+   unsigned or re-tagged image fails the deploy. Follow-up hardening, not
+   done yet: run the same `cosign verify` on the VPS itself before
+   `docker run` (needs the cosign binary on the box).
+
+## Backups and restore (off-site)
+
+The nightly `platform-backup` pg_dump keeps 7 nights **on-box** only. For
+an off-site copy, install `infra/vps/backup-offsite.sh` as a nightly
+systemd timer (or cron `0 3 * * *`) after configuring the destination once:
+
+    rclone config create medicalos-offsite <backend> ...
+
+The script refuses to run without the remote (no silent fake backups),
+dumps `medicalos` from `platform-postgres`, uploads via rclone, verifies
+the remote copy by size, prunes remote copies older than 30 days, and
+keeps the two newest local dumps for quick restores. The destination
+backend is the owner input recorded in `.scratch/owner-inputs-requested.md`.
+
+**Restore drill (required before any public beta; not yet executed):**
+
+1. Pick the newest remote dump: `rclone ls medicalos-offsite:medicalos-db`.
+2. Copy it to the VPS and gunzip it.
+3. Restore into a SCRATCH database, never over the live one:
+   `docker exec -i platform-postgres psql -U medicalos -d medicalos_restore_test < dump.sql`.
+4. Verify: row counts on `users`, `question_versions`, `auth_sessions`
+   match the pre-incident ledger; `select max(updated_at) from plans` is
+   within the expected RPO window; the API boots against the restored
+   database with `DATABASE_URL` pointed at a scratch port.
+5. Record the wall-clock time taken — that measured number is the RTO the
+   master plan's targets are checked against, not an assumption.
 
 ## Secrets (repo-level, owner decision)
 
