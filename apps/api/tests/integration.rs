@@ -271,7 +271,6 @@ async fn pack_resources(
 async fn core04_tenant_rls_confines_least_privilege_reads() {
     let _g = LOCK.lock().await;
     let state = setup().await;
-    let app = router(state.clone());
     seed::seed(&state.pool).await.expect("seed");
 
     // Two tenants, one cohort each, on the owner connection the app uses.
