@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
 // EX-07 in the browser: the seeded mock's form is deterministic (both
 // chapter-1 questions; keys A and B) so answering A on both yields exactly

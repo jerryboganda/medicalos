@@ -11,7 +11,7 @@ import { appUrl, paymentNote, tiers } from '../lib/site.js';
 	title="Pricing"
 	description="Five tiers: Free, Student, Pro, Ultimate, Institutional. Prices are to be announced — this page shows what each tier is planned to include, honestly."
 >
-	<section>
+	<section class="page-head">
 		<h1>Pricing</h1>
 		<p class="prose">
 			Five tiers, no lifetime plan. Free is live today. The paid tiers and
@@ -23,7 +23,7 @@ import { appUrl, paymentNote, tiers } from '../lib/site.js';
 	<div class="tiers">
 		{
 			tiers.map((tier) => (
-				<div class="tier">
+				<div class:list={['tier', { live: tier.status === 'available' }]}>
 					<h3>{tier.name}</h3>
 					<p class="muted small">{tier.blurb}</p>
 					<p class="price">

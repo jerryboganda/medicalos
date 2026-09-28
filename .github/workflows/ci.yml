@@ -206,6 +206,15 @@ jobs:
       - name: API logs on failure
         if: failure()
         run: cat api.log
+      # Design evidence (design.md): key screens, desktop + phone, dark + light.
+      - name: Upload UI gallery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-gallery
+          path: tests/e2e/screenshots
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload Playwright failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

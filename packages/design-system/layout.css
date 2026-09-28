@@ -1,0 +1,86 @@
+/*
+ * Layout utilities — the named replacements for inline style="" layout.
+ * Keep this list short: if a pattern is used once, it belongs in the page's
+ * own <style>; if it recurs, it belongs here.
+ */
+
+/* Title on the left, meta (chips/actions) on the right; wraps on narrow. */
+.row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-sm) var(--space-md);
+}
+
+.row > :first-child {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* A wrapping group of buttons/chips. */
+.cluster {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-sm);
+}
+
+/* Fields and their submit button on one line, bottoms aligned. */
+.form-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: var(--space-md);
+	margin-bottom: var(--space-lg);
+}
+
+.form-row > .field {
+	flex: 1 1 11rem;
+	margin-bottom: 0;
+}
+
+.bare-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.plain-fieldset {
+	border: 0;
+	padding: 0;
+	margin: 0 0 var(--space-md);
+}
+
+.flush {
+	margin: 0;
+}
+
+.small {
+	font-size: var(--text-sm);
+}
+
+.lede {
+	font-size: var(--text-body-lg);
+	color: var(--color-text-secondary);
+	max-width: var(--measure);
+}
+
+.wrap-anywhere {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.pre-wrap {
+	white-space: pre-wrap;
+}
+
+/* Vertical rhythm helpers for the few places a paragraph sits tight. */
+.tight {
+	margin-block: var(--space-xs);
+}
+
+.tight-top {
+	margin-top: var(--space-xs);
+	margin-bottom: 0;
+}

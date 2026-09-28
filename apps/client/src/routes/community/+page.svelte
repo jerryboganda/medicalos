@@ -330,12 +330,16 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Community | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Community</h1>
 
 {#if profile && !profile.opted_in}
 	<div class="card">
 		<h2>Opt in with a handle</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Nothing about you is shared until you pick a handle. Handles are
 			public within the community; your account, notes, and record never
 			are.
@@ -356,11 +360,11 @@
 
 	<div class="card">
 		<h2>Duels</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Challenge someone by handle. They accept or decline — a link never
 			enters anyone automatically.
 		</p>
-		<form onsubmit={challenge} style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+		<form class="form-row" onsubmit={challenge}>
 			<label class="field" for="duel-handle">
 				<span>Opponent handle</span>
 				<input id="duel-handle" bind:value={duelHandle} data-testid="duel-handle" />
@@ -374,7 +378,7 @@
 			</button>
 		</form>
 		{#if lastShare}
-			<p class="muted" style="font-size: var(--text-sm);">
+			<p class="muted small">
 				Share token: <code>{lastShare}</code>
 			</p>
 		{/if}
@@ -413,14 +417,14 @@
 
 	<div class="card">
 		<h2>Groups</h2>
-		<form onsubmit={createGroup} style="display:flex; gap:12px; align-items:end;">
+		<form class="form-row" onsubmit={createGroup}>
 			<label class="field" for="group-name">
 				<span>New group</span>
 				<input id="group-name" placeholder="Anatomy cram" />
 			</label>
 			<button class="btn" type="submit" disabled={busy}>Create</button>
 		</form>
-		<div style="margin-top: var(--space-md);">
+		<div class="all-groups">
 			<h3>All groups</h3>
 			{#if groups.length === 0}
 				<p class="muted">No groups exist yet — create the first one.</p>
@@ -436,7 +440,7 @@
 							>
 								{g.name}
 							</button>
-							<span class="muted" style="font-size: var(--text-sm);">
+							<span class="muted small">
 								{g.members} member(s)
 							</span>
 						</li>
@@ -541,7 +545,7 @@
 					{#if reportQueueState === 'failed'}
 						<p class="muted">The report queue could not be loaded.</p>
 					{:else if reportQueueState === 'loading'}
-						<p class="muted">Loading reports…</p>
+						<p class="muted is-loading">Loading reports…</p>
 					{:else if reportQueue?.length === 0}
 						<p class="muted">No reports need review.</p>
 					{:else}
@@ -598,7 +602,7 @@
 {#if cards.length > 0 || unavailableCards.length > 0}
 	<div class="card">
 		<h2>Share cards</h2>
-		<p class="muted" style="font-size: var(--text-sm);">
+		<p class="muted small">
 			Real numbers from your own record only. Cards never contain question
 			content, and nothing is shared until you share it.
 		</p>
@@ -607,7 +611,7 @@
 				<strong class="share-headline">{card.headline}</strong>
 				<span class="muted">{card.subline}</span>
 				<span class="muted small">{card.detail}</span>
-				<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+				<div class="cluster share-actions">
 					<button
 						class="btn"
 						type="button"
@@ -635,3 +639,13 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.all-groups {
+		margin-top: var(--space-md);
+	}
+
+	.share-actions {
+		margin-top: var(--space-sm);
+	}
+</style>

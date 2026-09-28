@@ -181,7 +181,7 @@
 
 <p><a href={`${base}/scenarios`}>← Published stations</a></p>
 {#if busy && !run}
-	<p class="muted" role="status">Loading station…</p>
+	<p class="muted is-loading" role="status">Loading station…</p>
 {:else if error}
 	<p class="error-text" role="alert">{error}</p>
 	<button class="btn" type="button" onclick={loadRun}>Retry</button>

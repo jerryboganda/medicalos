@@ -60,9 +60,9 @@
 	}
 </script>
 
-<section class="card">
+<section class="card login-card">
 	<h1>{mode === 'signin' ? 'Welcome back' : 'Create your account'}</h1>
-	<p class="muted">One connected learning record for your whole medical education.</p>
+	<p class="muted lede">One connected learning record for your whole medical education.</p>
 
 	{#if error}
 		<p class="error-text" role="alert">{error}</p>
@@ -93,7 +93,7 @@
 			/>
 		</label>
 		<button
-			class="btn primary"
+			class="btn primary wide-btn"
 			type="submit"
 			disabled={busy}
 			data-loading={busy}
@@ -104,8 +104,8 @@
 	</form>
 
 	{#if mode === 'signin'}
-		<section aria-label="Institution sign-in">
-			<p class="muted">Signing in through your institution?</p>
+		<section class="sso" aria-label="Institution sign-in">
+			<p class="muted divider"><span>Signing in through your institution?</span></p>
 			<label class="field" for="sso-institution-id">
 				<span>Institution ID</span>
 				<input
@@ -142,3 +142,52 @@
 			: 'Already have an account? Sign in'}
 	</button>
 </section>
+
+<svelte:head>
+	<title>Sign in | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.login-card {
+		justify-self: center;
+		width: min(100%, 440px);
+		box-sizing: border-box;
+		padding: var(--space-2xl) var(--space-xl);
+		box-shadow: var(--shadow-3);
+	}
+
+	.login-card h1 {
+		margin-bottom: var(--space-sm);
+	}
+
+	.login-card .lede {
+		margin: 0 0 var(--space-xl);
+		font-size: var(--text-body);
+	}
+
+	.wide-btn {
+		width: 100%;
+	}
+
+	.sso {
+		margin-top: var(--space-xl);
+	}
+
+	/* "Signing in through your institution?" sits on a hairline divider. */
+	.divider {
+		display: flex;
+		align-items: center;
+		gap: var(--space-md);
+		margin: 0 0 var(--space-lg);
+		font-size: var(--text-sm);
+		text-align: center;
+	}
+
+	.divider::before,
+	.divider::after {
+		content: '';
+		flex: 1;
+		height: 1px;
+		background: var(--color-border);
+	}
+</style>

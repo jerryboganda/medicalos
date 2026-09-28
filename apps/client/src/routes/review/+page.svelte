@@ -82,7 +82,7 @@
 <h1>Review</h1>
 
 {#if loading}
-	<p class="muted">Loading your queue…</p>
+	<p class="muted is-loading">Loading your queue…</p>
 {:else if error}
 	<p class="error-text" role="alert">{error}</p>
 	<button class="btn" type="button" onclick={load}>Retry</button>
@@ -99,15 +99,16 @@
 	</div>
 {:else}
 	<div class="card" data-testid="review-card">
-		<span class="chip">{current.kind === 'due' ? 'Due' : 'New'}</span>
-		<p style="font-size: var(--text-body-lg);">{current.front}</p>
+		<span class="chip {current.kind === 'due' ? 'warn' : 'info'}">{current.kind === 'due' ? 'Due' : 'New'}</span>
+		<p class="front">{current.front}</p>
 		{#if revealed}
-			<hr style="border: none; border-top: 1px solid var(--color-surface-elevated);" />
-			<p data-testid="back">{current.back}</p>
-			<p class="muted" style="font-size: var(--text-sm);">
+			<div class="back-face">
+			<hr />
+			<p class="back" data-testid="back">{current.back}</p>
+			<p class="muted small">
 				Rate honestly — the schedule needs real recall, not kindness.
 			</p>
-			<div style="display:flex; gap:12px; flex-wrap:wrap;">
+			<div class="cluster">
 				{#each RATINGS as r (r.key)}
 					<button
 						class="btn {r.cls}"
@@ -120,6 +121,7 @@
 					</button>
 				{/each}
 			</div>
+			</div>
 		{:else}
 			<button class="btn primary" type="button" data-testid="reveal" onclick={() => (revealed = true)}>
 				Show answer
@@ -127,3 +129,32 @@
 		{/if}
 	</div>
 {/if}
+
+<svelte:head>
+	<title>Review | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.front {
+		margin: var(--space-lg) 0;
+		font-family: var(--font-display);
+		font-size: var(--text-xl);
+		line-height: 1.35;
+	}
+
+	.back-face {
+		transform-origin: 50% 0;
+		animation: card-flip var(--dur-slow) var(--ease-out) backwards;
+	}
+
+	.back {
+		font-size: var(--text-body-lg);
+	}
+
+	@keyframes card-flip {
+		from {
+			opacity: 0;
+			transform: perspective(900px) rotateX(-14deg) translateY(-6px);
+		}
+	}
+</style>

@@ -1,0 +1,10 @@
+# CI-parity environment for running tests/e2e against the local stack:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d
+# Matches the e2e job env in .github/workflows/ci.yml. Production-like
+# staging uses the plain compose file (30s time-limit floor, 20-sample
+# community statistics).
+services:
+  medicalos-api:
+    environment:
+      MIN_TIME_LIMIT_SECONDS: "5"
+      COMMUNITY_MIN_SAMPLE: "2"
