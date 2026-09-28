@@ -259,13 +259,15 @@ jobs:
             docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
             echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
             echo "[medicalos] health-check (API + web through the container network)"
-            for i in $(seq 1 30); do
+            # Migrations 0050-0059 (incl. RLS + backfills) can push API
+            # startup past 60s under load — allow 90 iterations x 2s.
+            for i in $(seq 1 90); do
               if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
                 && docker run --rm --network platform curlimages/curl:8.5.0 -sf "http://medicalos-web/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
                 echo "[medicalos] api + web healthy"
                 break
               fi
-              [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
+              [ "$i" -eq 90 ] && { echo "stack never became healthy" >&2; exit 1; }
               sleep 2
             done
             echo "[medicalos] live on medicalos.polytronx.com @ $SHA"
