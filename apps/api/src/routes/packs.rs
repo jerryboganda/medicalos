@@ -125,8 +125,8 @@ pub struct PackResourcesResponse {
 pub struct PackDownloadReceipt {
     pub device_id: String,
     pub exam_id: Uuid,
-    #[cfg_attr(feature = "type-export", ts(type = "string"))]
-    pub issued_at: chrono::DateTime<chrono::Utc>,
+    /// RFC3339 — this exact string is part of the signed payload.
+    pub issued_at: String,
     pub checksums: Vec<String>,
     pub signature: String,
 }
@@ -886,7 +886,7 @@ pub async fn pack_resources(
     let receipt = PackDownloadReceipt {
         device_id: req.device_id.clone(),
         exam_id,
-        issued_at,
+        issued_at: issued_at_rfc3339,
         checksums,
         signature,
     };
