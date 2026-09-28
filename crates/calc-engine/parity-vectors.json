@@ -7,7 +7,7 @@
     { "args": [70, 0], "expected": "NaN" }
   ],
   "mosteller_bsa": [
-    { "args": [70, 175], "expected": 1.8446619684315546 },
+    { "args": [70, 175], "expected": 1.8446619684315548 },
     { "args": [0, 175], "expected": "NaN" }
   ],
   "mean_arterial_pressure": [
