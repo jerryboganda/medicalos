@@ -6,19 +6,27 @@
 -- existing handler seams and cross-tenant admin surfaces are unaffected;
 -- wiring the app pool onto a least-privilege role is the follow-on slice.
 
+-- The confined role only exists where the applying role may create roles
+-- (CI, DBA sessions). The production application role is least-privilege —
+-- without CREATEROLE the migration still applies and RLS still arms; the
+-- viewer role is then provisioned by the DBA before any confined tool runs.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medos_tenant_viewer') THEN
-        CREATE ROLE medos_tenant_viewer NOLOGIN;
+    IF EXISTS (
+        SELECT 1 FROM pg_roles
+        WHERE rolname = CURRENT_USER AND rolcreaterole
+    ) THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medos_tenant_viewer') THEN
+            CREATE ROLE medos_tenant_viewer NOLOGIN;
+        END IF;
+        GRANT medos_tenant_viewer TO CURRENT_USER;
+        GRANT USAGE ON SCHEMA public TO medos_tenant_viewer;
+        GRANT SELECT ON institutions, institution_members, institution_programs,
+            external_identities, interoperability_receipts, cohorts, cohort_members
+            TO medos_tenant_viewer;
     END IF;
 END
 $$;
-
-GRANT medos_tenant_viewer TO CURRENT_USER;
-GRANT USAGE ON SCHEMA public TO medos_tenant_viewer;
-GRANT SELECT ON institutions, institution_members, institution_programs,
-    external_identities, interoperability_receipts, cohorts, cohort_members
-    TO medos_tenant_viewer;
 
 ALTER TABLE institutions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE institution_members ENABLE ROW LEVEL SECURITY;
