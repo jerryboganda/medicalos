@@ -71,7 +71,7 @@ pub fn platform_grants(role: &str) -> &'static [Permission] {
     }
 }
 
-/// `institution_members.role` values (migration 0060 CHECK). Institution
+/// `institution_members.role` values (migration 0061 CHECK). Institution
 /// authors/reviewers/examiners hold no institution permission yet.
 pub fn institution_grants(role: &str) -> &'static [Permission] {
     match role {

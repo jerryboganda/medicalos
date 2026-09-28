@@ -23,7 +23,7 @@ Requirement IDs: §6.3 (accounts and sign-in), §18.1 (roles and tenancy), §19.
 
 ## Phase 1 (this slice): additive, nothing removed
 
-- **Migration `0060_zitadel_identity`:**
+- **Migration `0061_zitadel_identity`:**
   - `users.idp_subject`, and `password_hash` becomes nullable;
   - `auth_sessions` and `oidc_login_tickets` gain `roles` and `mfa`;
   - new table `platform_login_states`;
