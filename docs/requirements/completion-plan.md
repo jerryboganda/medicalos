@@ -132,6 +132,14 @@ LIB-08, OFF-02, OPS-04, OPS-01 -> `tested`; 18 narrative rows
 canonicalized; OFF-01 -> `tested` with attestation (PROT-02) and licensed
 media (LIB-09) named as the remaining external boundaries.
 
+**2026-09-28 — B3 partial**: ARCH-01 -> tested (wasm runtime
+parity spike: calc-engine cdylib + node-executed shared parity vectors,
+PR #15) and ARCH-02 -> tested (issues 42/43 closed: numeric wire types,
+scenario request contracts verified already landed; 14 stale caveat
+clauses stripped across rows). Production verified `fef8486`.
+Remaining B3: CORE-04, AI-05, AI-14, INST-06 — larger slices queued
+for the next stretch.
+
 Pace reference: the last stretch converted ~45 IDs in 3 days of agent stretches.
 At that pace the 25 engineering-ready IDs ≈ 1.5–3 weeks of batched agent work
 once billing is fixed.
