@@ -89,11 +89,17 @@ jobs:
           name: sqlx-offline-cache
           path: .sqlx
           include-hidden-files: true
-      # ARCH-01: shared core compiles for the web build too (no wasm runtime
-      # tests yet; a wasm test harness arrives when core-wasm bindings exist)
+      # ARCH-01: shared core compiles for the web build and runs with the same
+      # observable results in a wasm runtime (parity vectors + node execution)
       - name: Shared core builds for wasm32
         run: |
           cargo build -p domain-contracts -p calc-engine -p competition-scoring -p scheduler --target wasm32-unknown-unknown
+          cargo build -p calc-engine --target wasm32-unknown-unknown --features parity --release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Wasm runtime parity check
+        run: node scripts/wasm-parity.mjs
 
   client:
     # SvelteKit SPA shared by web/PWA and Tauri shells (ADR 0003)
