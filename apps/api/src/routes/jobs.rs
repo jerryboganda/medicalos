@@ -81,7 +81,7 @@ pub async fn process_due_jobs(state: &Arc<AppState>) -> ApiResult<usize> {
                     (
                         "pending",
                         Some(chrono::Duration::minutes(delay)),
-                        Some(truncate_error(&error)),
+                        Some(describe_error(&error)),
                     )
                 };
                 sqlx::query(
@@ -105,13 +105,8 @@ pub async fn process_due_jobs(state: &Arc<AppState>) -> ApiResult<usize> {
     Ok(processed)
 }
 
-fn truncate_error(error: &ApiError) -> String {
-    let text = error.to_string();
-    if text.len() > 500 {
-        format!("{}…", &text[..500])
-    } else {
-        text
-    }
+fn describe_error(error: &ApiError) -> String {
+    format!("{}: {}", error.code, error.message)
 }
 
 /// The closed set of job kinds. Adding orchestration work means adding a
