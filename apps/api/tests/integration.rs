@@ -507,7 +507,7 @@ async fn ai14_cross_member_perimeter_blocks_private_surfaces() {
     // private surfaces.
     for (method, path) in [
         ("GET", "/v1/me/institutions"),
-        ("GET", "/v1/me/notes"),
+        ("GET", "/v1/notes"),
         ("GET", "/v1/me/coach-memory"),
         ("GET", "/v1/me/plan/next-action"),
         ("GET", "/v1/me/today"),
