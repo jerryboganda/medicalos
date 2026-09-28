@@ -276,11 +276,9 @@ async fn core04_tenant_rls_confines_least_privilege_reads() {
     // Two tenants, one cohort each, on the owner connection the app uses.
     let inst_a = Uuid::new_v4();
     let inst_b = Uuid::new_v4();
-    for (id, code) in [(inst_a, "RLS_A"), (inst_b, "RLS_B")] {
-        sqlx::query("INSERT INTO institutions (id, code, name) VALUES ($1, $2, $3)")
+    for id in [inst_a, inst_b] {
+        sqlx::query("INSERT INTO institutions (id, name) VALUES ($1, 'Fictional tenant')")
             .bind(id)
-            .bind(code)
-            .bind("Fictional tenant")
             .execute(&state.pool)
             .await
             .expect("institution");
