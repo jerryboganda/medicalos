@@ -134,6 +134,57 @@ jobs:
       - name: Build site
         run: npm run build -w @medical-os/site
 
+  zitadel:
+    # auth-zitadel phase 0: the identity provider's setup is code — pinned
+    # Zitadel boots, infra/zitadel/provision.sh creates the project, roles,
+    # API client and owner grant, and a second run changes nothing.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zitadel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Zitadel (same settings as infra/local)
+        run: |
+          mkdir -p /tmp/zitadel
+          docker run -d --name zitadel --network host -u 0             -v /tmp/zitadel:/zitadel/bootstrap             -e ZITADEL_MASTERKEY=ci-only-masterkey-32-characters!             -e ZITADEL_PORT=8083             -e ZITADEL_EXTERNALDOMAIN=localhost             -e ZITADEL_EXTERNALPORT=8083             -e ZITADEL_EXTERNALSECURE=false             -e ZITADEL_TLS_ENABLED=false             -e ZITADEL_DATABASE_POSTGRES_DSN="postgresql://postgres:postgres@localhost:5432/zitadel?sslmode=disable"             -e ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED=false             -e ZITADEL_SYSTEMDEFAULTS_PASSWORDHASHER_VERIFIERS=argon2             -e ZITADEL_FIRSTINSTANCE_ORG_NAME="Medical OS"             -e ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=owner             -e ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD='Ci-Owner-Pass-1!'             -e ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false             -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME=provisioner             -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME=Provisioner             -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z             -e ZITADEL_FIRSTINSTANCE_PATPATH=/zitadel/bootstrap/provisioner.pat             ghcr.io/zitadel/zitadel:v4.16.0 start-from-init --masterkeyFromEnv --tlsMode disabled
+          for i in $(seq 1 90); do
+            curl -sf http://localhost:8083/debug/ready >/dev/null && sudo test -s /tmp/zitadel/provisioner.pat && break
+            [ "$i" -eq 90 ] && { docker logs zitadel | tail -60; exit 1; }
+            sleep 2
+          done
+          sudo chmod -R a+r /tmp/zitadel
+          curl -sf http://localhost:8083/.well-known/openid-configuration | jq -e '.issuer == "http://localhost:8083"'
+      - name: Provision twice (second run must change nothing)
+        env:
+          ZITADEL_URL: http://localhost:8083
+          ZITADEL_PAT_FILE: /tmp/zitadel/provisioner.pat
+          API_CALLBACK_URL: http://localhost:8081/api/v1/auth/oidc/callback
+          APP_LOGOUT_URL: http://localhost:8081/login
+          OWNER_USERNAME: owner
+          OUT_ENV: /tmp/zitadel.env
+        run: |
+          bash infra/zitadel/provision.sh | tee first.log
+          grep -q '^created project' first.log
+          grep -q '^created app' first.log
+          grep -q '^created grant platform_owner' first.log
+          grep -q '^ZITADEL_CLIENT_SECRET=.' /tmp/zitadel.env
+          bash infra/zitadel/provision.sh | tee second.log
+          if grep -q '^created' second.log; then echo "provision.sh is not idempotent" >&2; exit 1; fi
+      - name: Zitadel logs on failure
+        if: failure()
+        run: docker logs zitadel | tail -200
+
   e2e:
     # Browser end-to-end of the web build against the real API (§27.1)
     needs: rust
