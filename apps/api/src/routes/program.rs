@@ -297,6 +297,7 @@ pub struct CohortSummary {
     pub cohort_id: Uuid,
     pub name: String,
     pub program_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub members: i64,
 }
 
@@ -415,7 +416,9 @@ pub struct SetProgramCurriculumResponse {
 pub struct ProgramCurriculumCoverageChapter {
     pub chapter_id: Uuid,
     pub chapter: String,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub learners_with_evidence: Option<i64>,
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub attempts: Option<i64>,
     pub coverage_percent: Option<f64>,
 }
@@ -432,7 +435,9 @@ pub struct ProgramCurriculumCoverageChapter {
 )]
 pub struct ProgramCurriculumCoverageResponse {
     pub program_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub cohort_size: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub minimum_group_size: i64,
     pub suppressed: bool,
     pub chapters: Vec<ProgramCurriculumCoverageChapter>,
@@ -484,9 +489,12 @@ pub struct InstitutionAuditResponse {
 )]
 pub struct InstitutionAnalyticsChapter {
     pub chapter: Option<String>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub attempts: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub correct: i64,
     pub accuracy: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub learners: i64,
 }
 
@@ -502,11 +510,13 @@ pub struct InstitutionAnalyticsChapter {
 )]
 pub struct InstitutionAnalyticsResponse {
     pub cohort_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub cohort_size: i64,
     pub suppressed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub minimum: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chapters: Option<Vec<InstitutionAnalyticsChapter>>,

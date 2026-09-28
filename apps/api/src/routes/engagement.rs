@@ -39,6 +39,7 @@ pub struct EngagementDailyGoal {
     unit: String,
     target: i32,
     answered_today: i32,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     minutes_today: i64,
     met: bool,
 }
@@ -1458,9 +1459,11 @@ pub struct StartCompetitionEntryReq {
 #[serde(deny_unknown_fields)]
 pub struct AnswerCompetitionQuestionReq {
     pub question_version_id: Uuid,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub chosen_index: i64,
     pub idempotency_key: Uuid,
     #[serde(default)]
+    #[cfg_attr(feature = "type-export", ts(type = "number | null"))]
     pub elapsed_ms: Option<i64>,
 }
 
@@ -1530,7 +1533,9 @@ pub struct CompetitionSubmittedResponse {
     pub submitted: bool,
     pub entry_id: Uuid,
     pub score: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub questions: i64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub total_time_ms: i64,
 }
 
@@ -1561,12 +1566,15 @@ pub enum CompetitionAttemptStep {
     )
 )]
 pub struct CompetitionLeaderboardEntry {
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub rank: i64,
     pub handle: String,
     pub score: f32,
     pub accuracy: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub questions_attempted: i64,
     pub average_response_time_ms: f64,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub total_time_ms: i64,
     pub is_me: bool,
     pub prize_eligible: bool,

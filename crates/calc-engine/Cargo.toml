@@ -5,3 +5,15 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+
+[features]
+# ARCH-01: exposes the extern "C" parity seam compiled into the wasm cdylib.
+parity = []
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dev-dependencies]
+# float_roundtrip: the parity vectors must parse to the exact f64 the wasm
+# runtime produces; serde_json's fast path can be off by one ulp.
+serde_json = { workspace = true, features = ["float_roundtrip"] }

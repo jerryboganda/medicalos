@@ -145,6 +145,7 @@ pub struct AdminReport {
     pub category: String,
     pub reporter_feedback: Vec<ReportFeedback>,
     pub feedback_truncated: bool,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub report_count: i64,
     #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub first_reported_at: chrono::DateTime<chrono::Utc>,
@@ -189,6 +190,7 @@ pub struct ResolveQuestionReportResponse {
     pub status: String,
     pub question_version_id: Uuid,
     pub corrected_version_id: Option<Uuid>,
+    #[cfg_attr(feature = "type-export", ts(type = "number"))]
     pub resolved_reports: u64,
     pub notified_reporters: usize,
 }

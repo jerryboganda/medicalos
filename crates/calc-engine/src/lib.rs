@@ -243,3 +243,6 @@ mod tests {
         assert!(convert_unit(f64::MAX, "", "L", "mL").is_err());
     }
 }
+
+#[cfg(feature = "parity")]
+pub mod parity;

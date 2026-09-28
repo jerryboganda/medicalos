@@ -12,4 +12,4 @@ difficulty: string | null,
 /**
  * PROG-01 trend: recent-window accuracy (days) alongside the overall one.
  */
-trend_days: bigint | null, };
+trend_days: number | null, };
