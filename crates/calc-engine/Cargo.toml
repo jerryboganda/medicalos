@@ -14,4 +14,6 @@ parity = []
 crate-type = ["lib", "cdylib"]
 
 [dev-dependencies]
-serde_json = { workspace = true }
+# float_roundtrip: the parity vectors must parse to the exact f64 the wasm
+# runtime produces; serde_json's fast path can be off by one ulp.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
