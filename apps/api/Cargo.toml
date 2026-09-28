@@ -24,6 +24,7 @@ sha2 = { workspace = true }
 url = { workspace = true }
 openidconnect = { workspace = true }
 chacha20poly1305 = { workspace = true }
+base64 = "0.22"
 ed25519-dalek = { workspace = true }
 tower-http = { workspace = true }
 calamine = "0.36.1"
@@ -36,5 +37,4 @@ type-export = ["dep:ts-rs"]
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-base64 = "0.22"
 jsonwebtoken = "9"

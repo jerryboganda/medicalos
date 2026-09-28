@@ -22,6 +22,7 @@ pub mod mock;
 pub mod notes;
 pub mod oidc;
 pub mod packs;
+pub mod platform_auth;
 pub mod practice;
 pub mod program;
 pub mod reports;

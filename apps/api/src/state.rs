@@ -30,6 +30,21 @@ pub struct AppState {
     pub public_api_base_url: String,
     /// Browser origin where the SPA's OIDC handoff page is served.
     pub public_app_url: String,
+    /// Platform identity provider. None = platform sign-in disabled
+    /// (password login and institution SSO keep working).
+    pub zitadel: Option<ZitadelConfig>,
+}
+
+/// The API's confidential OIDC client at Zitadel (infra/zitadel/provision.sh).
+pub struct ZitadelConfig {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// Project whose roles become platform roles (audience scope).
+    pub project_id: Option<String>,
+    /// Zitadel IdP ids behind the "Continue with Google/Apple" buttons.
+    pub google_idp_id: Option<String>,
+    pub apple_idp_id: Option<String>,
 }
 
 impl AppState {

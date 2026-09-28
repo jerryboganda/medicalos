@@ -2,6 +2,24 @@
 // library so integration tests exercise the same router (tdd: one seam).
 use sqlx::postgres::PgPoolOptions;
 
+fn env_opt(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+/// Platform sign-in is on only when all three client settings are present.
+fn zitadel_from_env() -> Option<api::state::ZitadelConfig> {
+    Some(api::state::ZitadelConfig {
+        issuer: env_opt("ZITADEL_ISSUER")?,
+        client_id: env_opt("ZITADEL_CLIENT_ID")?,
+        client_secret: env_opt("ZITADEL_CLIENT_SECRET")?,
+        project_id: env_opt("ZITADEL_PROJECT_ID"),
+        google_idp_id: env_opt("ZITADEL_IDP_GOOGLE"),
+        apple_idp_id: env_opt("ZITADEL_IDP_APPLE"),
+    })
+}
+
 #[tokio::main]
 async fn main() {
     telemetry::init();
@@ -69,6 +87,7 @@ async fn main() {
             .unwrap_or_else(|_| "http://127.0.0.1:8080/api".into()),
         public_app_url: std::env::var("PUBLIC_APP_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
+        zitadel: zitadel_from_env(),
     });
     api::routes::integrity::spawn_auto_submit_worker(state.clone());
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")

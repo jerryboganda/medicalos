@@ -56,6 +56,17 @@ pub fn new_session_token() -> NewSession {
 /// Create the shared application session for password and OIDC logins.
 /// Locking the user row makes single-active-session revocation atomic.
 pub async fn issue_session(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResult<String> {
+    issue_session_with(pool, user_id, &[], false).await
+}
+
+/// Same session, carrying the platform-role snapshot and the MFA fact from a
+/// Zitadel sign-in (authz.rs reads both on every request).
+pub async fn issue_session_with(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    roles: &[String],
+    mfa: bool,
+) -> ApiResult<String> {
     let mut tx = pool.begin().await?;
     let user = sqlx::query(
         "SELECT single_active_session FROM users
@@ -77,12 +88,14 @@ pub async fn issue_session(pool: &sqlx::PgPool, user_id: Uuid) -> ApiResult<Stri
     }
     let session = new_session_token();
     sqlx::query(
-        "INSERT INTO auth_sessions (token_hash, user_id, expires_at)
-         VALUES ($1, $2, $3)",
+        "INSERT INTO auth_sessions (token_hash, user_id, expires_at, roles, mfa)
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(sha256_hex(&session.token))
     .bind(user_id)
     .bind(session.expires_at)
+    .bind(roles)
+    .bind(mfa)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -98,6 +111,22 @@ pub fn sha256_hex(input: &str) -> String {
 
 pub struct AuthUser {
     pub user_id: Uuid,
+    /// Zitadel platform roles snapshotted at sign-in (empty for password
+    /// and institution-SSO sessions). Checked through `authz`.
+    pub roles: Vec<String>,
+    /// The sign-in used a second factor.
+    pub mfa: bool,
+}
+
+impl AuthUser {
+    /// A server-side actor acting as `user_id` with no platform roles.
+    pub fn plain(user_id: Uuid) -> Self {
+        Self {
+            user_id,
+            roles: Vec::new(),
+            mfa: false,
+        }
+    }
 }
 
 impl FromRequestParts<Arc<AppState>> for AuthUser {
@@ -111,15 +140,18 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or_else(ApiError::unauthorized)?;
         let token_hash = sha256_hex(raw);
-        let row = sqlx::query!(
-            "SELECT user_id FROM auth_sessions WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL",
-            token_hash
+        let row = sqlx::query(
+            "SELECT user_id, roles, mfa FROM auth_sessions
+             WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL",
         )
+        .bind(token_hash)
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
         Ok(AuthUser {
-            user_id: row.user_id,
+            user_id: row.try_get("user_id")?,
+            roles: row.try_get("roles")?,
+            mfa: row.try_get("mfa")?,
         })
     }
 }
