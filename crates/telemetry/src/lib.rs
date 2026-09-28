@@ -28,7 +28,7 @@ fn init_with_otlp(filter: tracing_subscriber::EnvFilter) {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "medicalos-api".into());
     let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(exporter)
+        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
         .with_resource(opentelemetry_sdk::Resource::new(vec![
             opentelemetry::KeyValue::new("service.name", service_name),
         ]))
@@ -37,8 +37,9 @@ fn init_with_otlp(filter: tracing_subscriber::EnvFilter) {
     // The batch exporter owns its own flush scheduling; the process-lifetime
     // provider is intentionally never shut down.
     std::mem::forget(provider);
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
         .init();
 }
