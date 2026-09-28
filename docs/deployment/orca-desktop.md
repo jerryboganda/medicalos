@@ -159,6 +159,41 @@ schtasks /create /tn "medicalos-local-backup" /sc daily /st 03:30 /tr "\"C:\Prog
   (Option A only) the Orca engine distro via `wsl --unregister <its-distro>`.
   `D:\wsl\oet-ci` is never touched by any step here.
 
+## K. Identity provider (Zitadel)
+
+The stack runs Zitadel v4.16.0 (`zitadel` service) at
+**http://auth.medicalos.localhost:8083**. Windows resolves `*.localhost` to
+loopback, and the API container reaches the same URL through a network
+alias. It uses its own `zitadel` database on the stack's Postgres, created
+by the one-shot `zitadel-db` service. It uses the built-in login: no extra
+container, 0.5 CPU and 768 MB.
+
+1. **Set the secrets.** In `infra/local/.env` set `ZITADEL_MASTERKEY`, exactly
+   32 characters (`openssl rand -hex 16`). **Keep it.** Losing it makes
+   Zitadel's encrypted data unreadable. Also set `ZITADEL_ADMIN_PASSWORD`,
+   which needs upper and lower case, a digit and a symbol.
+2. **Start Zitadel.** Run `docker compose up -d zitadel` and wait for
+   `docker compose ps zitadel` to show `healthy`.
+3. **Provision it.** This is idempotent, so you can re-run it any time:
+   ```bash
+   docker compose cp zitadel:/zitadel/bootstrap/provisioner.pat ./provisioner.pat
+   ZITADEL_URL=http://auth.medicalos.localhost:8083 ZITADEL_PAT_FILE=./provisioner.pat    API_CALLBACK_URL=http://localhost:8081/api/v1/auth/oidc/callback    APP_LOGOUT_URL=http://localhost:8081/login OWNER_USERNAME=owner    OUT_ENV=./.env.zitadel bash ../zitadel/provision.sh
+   rm provisioner.pat
+   ```
+   It creates the `medical-os` project, the platform roles and the API's
+   OIDC client, and grants `owner` the `platform_owner` role.
+4. **Connect the API.** Append `.env.zitadel` to `.env` (both are
+   gitignored), then run `docker compose up -d medicalos-api`. The login page
+   now shows **Continue with email**.
+5. **Sign in.** Sign in as `owner` with `ZITADEL_ADMIN_PASSWORD`. Privileged
+   permissions need a second factor, so enrol an authenticator in the Zitadel
+   console (http://auth.medicalos.localhost:8083/ui/console) and sign in
+   again. `GET /api/v1/me` then lists `owner_dashboard` and the rest.
+
+Google and Apple sign-in need their developer credentials first. Once you
+have them, add each IdP in the Zitadel console and set `ZITADEL_IDP_GOOGLE`
+or `ZITADEL_IDP_APPLE` to the IdP id.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |

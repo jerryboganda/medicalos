@@ -26,7 +26,13 @@ if [ -z "$PAT" ] && [ -n "${ZITADEL_PAT_FILE:-}" ]; then PAT="$(tr -d '\r\n' < "
 OUT_ENV="${OUT_ENV:-./.env.zitadel}"
 PROJECT_NAME="medical-os"
 APP_NAME="medical-os-api"
-ROLES="platform_owner:Platform owner support:Support billing_admin:Billing administrator author:Author medical_reviewer:Medical reviewer examiner:Examiner"
+# key:display name, one per line (display names contain spaces).
+ROLES="platform_owner:Platform owner
+support:Support
+billing_admin:Billing administrator
+author:Author
+medical_reviewer:Medical reviewer
+examiner:Examiner"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 CURL=(curl -sS --fail-with-body -H "Authorization: Bearer $PAT" -H "Content-Type: application/json")
@@ -50,16 +56,15 @@ fi
 
 # ---- roles (authz.rs platform_grants) ---------------------------------------
 EXISTING_ROLES="$(api POST "/management/v1/projects/$PROJECT_ID/roles/_search" '{}' | jq -r '.result[]?.key')"
-for pair in $ROLES; do
-  key="${pair%%:*}"; name="${pair#*:}"
+while IFS=: read -r key name; do
   if grep -qx "$key" <<<"$EXISTING_ROLES"; then
     echo "exists  role $key"
   else
     api POST "/management/v1/projects/$PROJECT_ID/roles" \
-      "$(jq -n --arg k "$key" --arg n "${name//_/ }" '{roleKey:$k,displayName:$n}')" >/dev/null
+      "$(jq -n --arg k "$key" --arg n "$name" '{roleKey:$k,displayName:$n}')" >/dev/null
     echo "created role $key"
   fi
-done
+done <<<"$ROLES"
 
 # ---- the API's confidential OIDC app ------------------------------------------
 APP="$(api POST "/management/v1/projects/$PROJECT_ID/apps/_search" "{\"queries\":[$(eq nameQuery name "$APP_NAME")]}" | jq -c '.result[0] // empty')"
@@ -92,8 +97,10 @@ fi
 
 # ---- owner grant (optional) ------------------------------------------------------
 if [ -n "${OWNER_USERNAME:-}" ]; then
-  OWNER_ID="$(api POST /management/v1/users/_search "{\"queries\":[$(eq userNameQuery userName "$OWNER_USERNAME")]}" | jq -r '.result[0].id // empty')"
-  [ -n "$OWNER_ID" ] || { echo "owner user $OWNER_USERNAME not found" >&2; exit 1; }
+  # Zitadel may store the username with its org domain (owner@org.domain).
+  USERS="$(api POST /management/v1/users/_search "{\"queries\":[{\"userNameQuery\":{\"userName\":$(jq -Rn --arg v "$OWNER_USERNAME" '$v'),\"method\":\"TEXT_QUERY_METHOD_STARTS_WITH\"}}]}")"
+  OWNER_ID="$(jq -r --arg u "$OWNER_USERNAME" '[.result[]? | select(.userName == $u or (.userName | startswith($u + "@")))][0].id // empty' <<<"$USERS")"
+  [ -n "$OWNER_ID" ] || { echo "owner user $OWNER_USERNAME not found; users seen: $(jq -c '[.result[]?.userName]' <<<"$USERS")" >&2; exit 1; }
   GRANTED="$(api POST /management/v1/users/grants/_search "{\"queries\":[{\"userIdQuery\":{\"userId\":\"$OWNER_ID\"}},{\"projectIdQuery\":{\"projectId\":\"$PROJECT_ID\"}}]}" | jq -r '.result[0].id // empty')"
   if [ -z "$GRANTED" ]; then
     api POST "/management/v1/users/$OWNER_ID/grants" "{\"projectId\":\"$PROJECT_ID\",\"roleKeys\":[\"platform_owner\"]}" >/dev/null
