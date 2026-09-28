@@ -268,6 +268,112 @@ async fn pack_resources(
 }
 
 #[tokio::test]
+async fn core04_tenant_rls_confines_least_privilege_reads() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    seed::seed(&state.pool).await.expect("seed");
+
+    // Two tenants, one cohort each, on the owner connection the app uses.
+    let inst_a = Uuid::new_v4();
+    let inst_b = Uuid::new_v4();
+    for id in [inst_a, inst_b] {
+        sqlx::query("INSERT INTO institutions (id, name) VALUES ($1, 'Fictional tenant')")
+            .bind(id)
+            .execute(&state.pool)
+            .await
+            .expect("institution");
+    }
+    let cohort_a = Uuid::new_v4();
+    let cohort_b = Uuid::new_v4();
+    for (cohort_id, institution_id) in [(cohort_a, inst_a), (cohort_b, inst_b)] {
+        sqlx::query(
+            "INSERT INTO cohorts (id, institution_id, name) VALUES ($1, $2, 'Fictional cohort')",
+        )
+        .bind(cohort_id)
+        .bind(institution_id)
+        .execute(&state.pool)
+        .await
+        .expect("cohort");
+    }
+
+    // The application role keeps its default owner bypass: both cohorts are
+    // visible to the existing handler seams.
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM cohorts WHERE institution_id = ANY($1)")
+            .bind(&[inst_a, inst_b][..])
+            .fetch_one(&state.pool)
+            .await
+            .expect("owner count");
+    assert_eq!(
+        total, 2,
+        "owner role bypasses RLS so handler seams are unchanged"
+    );
+
+    let confined_reads = |tenant: Uuid| {
+        let pool = state.pool.clone();
+        async move {
+            let mut tx = pool.begin().await.expect("tx");
+            sqlx::query("SET LOCAL ROLE medos_tenant_viewer")
+                .execute(&mut *tx)
+                .await
+                .expect("set role");
+            sqlx::query("SELECT set_config('app.institution_ids', $1, true)")
+                .bind(tenant.to_string())
+                .execute(&mut *tx)
+                .await
+                .expect("set tenant scope");
+            let scoped: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM cohorts WHERE institution_id = $1")
+                    .bind(tenant)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .expect("scoped count");
+            let cross_tenant: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM cohorts WHERE institution_id <> $1")
+                    .bind(tenant)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .expect("cross tenant count");
+            sqlx::query("ROLLBACK")
+                .execute(&mut *tx)
+                .await
+                .expect("rollback");
+            (scoped, cross_tenant)
+        }
+    };
+
+    let (scoped, cross_tenant) = confined_reads(inst_a).await;
+    assert_eq!(scoped, 1, "the listed tenant is readable");
+    assert_eq!(
+        cross_tenant, 0,
+        "no other tenant leaks through row-level security"
+    );
+
+    let (scoped_b, cross_tenant_b) = confined_reads(inst_b).await;
+    assert_eq!(scoped_b, 1, "the other tenant is readable on its own scope");
+    assert_eq!(
+        cross_tenant_b, 0,
+        "no reverse leak through row-level security"
+    );
+
+    // Without the setting the confined role sees nothing at all.
+    let mut tx = state.pool.begin().await.expect("tx");
+    sqlx::query("SET LOCAL ROLE medos_tenant_viewer")
+        .execute(&mut *tx)
+        .await
+        .expect("set role");
+    let unscoped: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cohorts")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("unscoped count");
+    sqlx::query("ROLLBACK")
+        .execute(&mut *tx)
+        .await
+        .expect("rollback");
+    assert_eq!(unscoped, 0, "no tenant scope means no rows");
+}
+
+#[tokio::test]
 async fn xp_competitions_coverage_flow() {
     let _g = LOCK.lock().await;
     let state = setup().await;

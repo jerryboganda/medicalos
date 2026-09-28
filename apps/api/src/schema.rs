@@ -73,6 +73,7 @@ migrations!(
     "0056_img04_anatomy_links",
     "0057_ex07_mock_types_and_time",
     "0058_pack_download_receipts",
+    "0059_core04_tenant_rls",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
