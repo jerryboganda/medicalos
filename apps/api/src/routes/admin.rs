@@ -2869,7 +2869,7 @@ pub async fn review_extraction_report(
     Path(report_id): Path<Uuid>,
     Json(req): Json<ReviewExtractionReportReq>,
 ) -> ApiResult<(StatusCode, Json<AdminExtractionReport>)> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_admin(&reviewer, admin_headers(&headers))?;
     if !matches!(req.decision.as_str(), "approved" | "rejected") {
         return Err(ApiError::unprocessable(
             "invalid_review_decision",

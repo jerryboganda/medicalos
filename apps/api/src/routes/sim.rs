@@ -877,7 +877,7 @@ pub async fn record_assessment(
     Path(run_id): Path<Uuid>,
     Json(req): Json<ScenarioAssessmentRequest>,
 ) -> ApiResult<(StatusCode, Json<ScenarioAssessmentReceipt>)> {
-    require_admin(&state, &user, &headers)?;
+    require_admin(&state, &reviewer, &headers)?;
     let mut tx = state.pool.begin().await?;
     let run = sqlx::query_as::<_, AssessmentTarget>(
         r#"SELECT user_id, scenario_version_id, transcript, finished_at
@@ -1247,7 +1247,7 @@ pub async fn review_scenario_assessment_appeal(
     Path(appeal_id): Path<Uuid>,
     Json(req): Json<ScenarioAssessmentAppealReviewRequest>,
 ) -> ApiResult<(StatusCode, Json<ScenarioAssessmentAppealReviewResponse>)> {
-    require_admin(&state, &user, &headers)?;
+    require_admin(&state, &reviewer, &headers)?;
     let decision = match req.decision.as_str() {
         "confirmed" => ScenarioAppealDecision::Confirmed,
         "reassessment_required" => ScenarioAppealDecision::ReassessmentRequired,

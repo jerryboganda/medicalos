@@ -574,7 +574,7 @@ async fn fetch_admin_article_version(
 
 pub async fn admin_list_articles(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: HeaderMap,
 ) -> ApiResult<Json<AdminArticleListResponse>> {
     require_article_admin(&state, &user, &headers)?;
@@ -769,7 +769,7 @@ pub async fn create_article_version(
 
 pub async fn get_admin_article_version(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: HeaderMap,
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<AdminArticleVersion>> {

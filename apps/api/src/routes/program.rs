@@ -203,7 +203,7 @@ pub struct FlagReq {
 
 pub async fn set_flag(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<FlagReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -1709,7 +1709,7 @@ fn validate_scenario_rubric(
 
 pub async fn create_scenario(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateScenarioReq>,
 ) -> ApiResult<Json<serde_json::Value>> {

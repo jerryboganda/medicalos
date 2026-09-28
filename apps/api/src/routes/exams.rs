@@ -89,7 +89,7 @@ pub struct ExamSpecReq {
 
 pub async fn create_exam_spec(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(exam_id): Path<Uuid>,
     Json(req): Json<ExamSpecReq>,
@@ -154,7 +154,7 @@ pub struct AssessmentFormReq {
 
 pub async fn create_assessment_form(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     headers: axum::http::HeaderMap,
     Path(spec_id): Path<Uuid>,
     Json(req): Json<AssessmentFormReq>,
