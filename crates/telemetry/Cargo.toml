@@ -19,6 +19,6 @@ otlp = [
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry = { version = "0.27", optional = true }
-opentelemetry_sdk = { version = "0.27", optional = true, features = ["http-proto", "reqwest-blocking-client"] }
+opentelemetry_sdk = { version = "0.27", optional = true, features = ["trace", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.27", optional = true, features = ["http-proto", "reqwest-blocking-client"] }
 tracing-opentelemetry = { version = "0.28", optional = true }
