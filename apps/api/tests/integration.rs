@@ -509,7 +509,7 @@ async fn ai14_cross_member_perimeter_blocks_private_surfaces() {
         ("GET", "/v1/me/institutions"),
         ("GET", "/v1/notes"),
         ("GET", "/v1/me/coach-memory"),
-        ("GET", "/v1/me/plan/next-action"),
+        ("GET", "/v1/me/plan/next-action?available_minutes=30"),
         ("GET", "/v1/me/today"),
         ("GET", "/v1/me/packs"),
     ] {
