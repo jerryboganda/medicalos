@@ -6,7 +6,7 @@ use calc_engine::{bmi, mean_arterial_pressure, mosteller_bsa};
 const VECTORS: &str = include_str!("../parity-vectors.json");
 
 fn run(name: &str, f: impl Fn(f64, f64) -> Result<f64, calc_engine::InvalidInput>) {
-    let vectors = serde_json::from_str(VECTORS).expect("parity vectors parse");
+    let vectors: serde_json::Value = serde_json::from_str(VECTORS).expect("parity vectors parse");
     for entry in vectors[name].as_array().expect("vector list") {
         let args = entry["args"].as_array().expect("args");
         let expected = &entry["expected"];
