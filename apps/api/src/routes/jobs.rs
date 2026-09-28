@@ -83,14 +83,14 @@ pub async fn process_due_jobs(state: &Arc<AppState>) -> ApiResult<usize> {
                     let delay = std::cmp::min(60, 2_i64.pow(attempts.min(6) as u32 - 1));
                     (
                         "pending",
-                        Some(chrono::Duration::minutes(delay)),
+                        Some(chrono::Utc::now() + chrono::Duration::minutes(delay)),
                         Some(describe_error(&error)),
                     )
                 };
                 sqlx::query(
                     "UPDATE event_jobs
                         SET status = $2, attempts = $3,
-                            run_after = COALESCE($4::timestamptz, run_after),
+                            run_after = COALESCE($4, run_after),
                             last_error = $5, updated_at = now()
                       WHERE id = $1",
                 )
