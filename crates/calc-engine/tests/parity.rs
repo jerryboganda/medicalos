@@ -10,10 +10,12 @@ fn run(name: &str, f: impl Fn(f64, f64) -> Result<f64, calc_engine::InvalidInput
     for entry in vectors[name].as_array().expect("vector list") {
         let args = entry["args"].as_array().expect("args");
         let expected = &entry["expected"];
+        // The wasm seam maps a rejected input to NaN; the native side agrees.
         let actual = f(
             args[0].as_f64().expect("arg"),
             args[1].as_f64().expect("arg"),
-        );
+        )
+        .unwrap_or(f64::NAN);
         if expected.is_string() {
             assert_eq!(expected.as_str(), Some("NaN"), "only NaN strings are used");
             assert!(actual.is_nan(), "{name}: expected rejection, got {actual}");
