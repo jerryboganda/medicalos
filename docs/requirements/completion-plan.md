@@ -148,6 +148,11 @@ fixed by guarding the confined-role creation behind a CREATEROLE check
 (RLS arms regardless) and extending the deploy health wait for
 migration-heavy startups (Codex). Remaining B3: AI-05, AI-14, INST-06.
 
+**2026-09-28 — B3 AI-05 landed**: PR #17 (durable event job queue,
+migration 0060) green and production-verified `1d74cc8`; a one-off
+command-palette flake in Codex's new ui-gallery spec passed on rerun.
+Remaining B3: AI-14, INST-06.
+
 Pace reference: the last stretch converted ~45 IDs in 3 days of agent stretches.
 At that pace the 25 engineering-ready IDs ≈ 1.5–3 weeks of batched agent work
 once billing is fixed.
