@@ -57,7 +57,7 @@
 </p>
 
 {#if busy}
-	<p class="muted" role="status">Loading published stations…</p>
+	<p class="muted is-loading" role="status">Loading published stations…</p>
 {:else if error}
 	<p class="error-text" role="alert">{error}</p>
 	<button class="btn" type="button" onclick={loadScenarios}>Retry</button>

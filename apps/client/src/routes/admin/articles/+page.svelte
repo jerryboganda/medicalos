@@ -305,7 +305,7 @@
 				</button>
 			</div>
 			{#if loading}
-				<p role="status">Loading articles…</p>
+				<p class="is-loading" role="status">Loading articles…</p>
 			{:else if articles.length === 0}
 				<p class="muted">No article versions yet. Create a draft to start the library.</p>
 			{:else}

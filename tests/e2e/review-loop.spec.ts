@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
 // SR-01/02 in the browser: deck and cards arrive through the API, the
 // learner reviews through the real UI, and the rating persists (the card

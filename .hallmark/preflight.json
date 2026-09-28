@@ -1,9 +1,13 @@
 {
-  "date": "2026-09-18",
-  "framework": "sveltekit-spa (apps/client, adapter-static)",
-  "palette": "packages/design-system/tokens.css — owner-locked, master plan §7.1 (dark canvas #09090F, action #7C3AED, accent #A78BFA, 4pt spacing)",
-  "fonts": ["Fraunces display (fontsource)", "Manrope body (fontsource)"],
-  "motion": "motion-cut (no animation libraries)",
+  "date": "2026-09-28",
+  "framework": "sveltekit-spa (apps/client, adapter-static) + astro (apps/site)",
+  "design_md": "design.md at repo root — system-managed project; pages share the system (diversification inverted)",
+  "palette": "packages/design-system/tokens.css — owner-locked §7.1 (dark canvas #09090F, action #7C3AED, accent #A78BFA) + light reading + high-contrast overrides",
+  "fonts": [
+    "Fraunces 600 display (fontsource)",
+    "Manrope 400/600/700 body (fontsource)"
+  ],
+  "motion": "motion-on, dependency-free: CSS motion tokens + View Transitions API + @starting-style (packages/design-system/motion.css)",
   "spacing": "4pt --space-* scale in tokens.css",
-  "notes": "System is owner-locked via master plan §7.1 — treats as design.md-managed: pages share the system, diversification inverted."
+  "notes": "Every page reads design.md; shared UI lives in packages/design-system (index.css imports all layers)."
 }

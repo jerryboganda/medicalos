@@ -9,4 +9,4 @@
 	});
 </script>
 
-<p class="muted">Loading…</p>
+<p class="muted is-loading">Loading…</p>

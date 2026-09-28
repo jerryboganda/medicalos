@@ -172,6 +172,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>Image annotation review | Medical Learning OS</title>
+</svelte:head>
+
 <h1>Image annotation review</h1>
 <p class="muted intro">
 	Place plain-text teaching notes on licensed images. A different authorized reviewer must make the

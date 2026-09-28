@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 // The e2e CI job runs the API with MIN_TIME_LIMIT_SECONDS=5; the 15-second
 // session leaves time to verify integrity signals before auto-submit.
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 async function expectIntegritySignal(

@@ -1,7 +1,7 @@
 ---
-// N6 · newspaper masthead — issue line, centred wordmark, inline link row,
-// double rule. Shared across every page of the site.
-import { siteName, tagline } from '../lib/site.js';
+// N5 · floating pill — sticky, blurred, one primary action. Shared across
+// every page; the pill stays put during cross-document view transitions.
+import { appUrl, siteName } from '../lib/site.js';
 
 let { current } = Astro.props;
 
@@ -13,22 +13,21 @@ const links = [
 ];
 ---
 
-<header>
-	<p class="mast-issue-line">
-		<span>{tagline}</span>
-		<span>Pilot · content in development</span>
-	</p>
-	<a class="mast-brand" href="/">{siteName}</a>
-	<nav class="mast-nav" aria-label="Site">
-		{
-			links.map((link) => (
-				<a
-					href={link.href}
-					aria-current={current === link.href ? 'page' : undefined}
-				>
-					{link.label}
-				</a>
-			))
-		}
-	</nav>
+<header class="site-header">
+	<div class="pill">
+		<a class="site-brand" href="/">
+			<img src="/favicon.svg" alt="" width="28" height="28" />
+			<span>{siteName}</span>
+		</a>
+		<nav class="site-nav" aria-label="Site">
+			{
+				links.map((link) => (
+					<a href={link.href} aria-current={current === link.href ? 'page' : undefined}>
+						{link.label}
+					</a>
+				))
+			}
+		</nav>
+		<a class="btn small" href={`${appUrl}/today`}>Open the app</a>
+	</div>
 </header>

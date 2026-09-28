@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test';
 // once real answered attempts exist, and the honest unavailability reasons
 // show before that.
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
 test('community page renders share cards from real data', async ({ page }) => {
 	const email = `e2e-share-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;

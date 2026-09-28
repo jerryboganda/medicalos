@@ -1,7 +1,7 @@
 {
   "name": "@medical-os/design-system",
   "private": true,
-  "version": "0.1.0",
-  "description": "Shared tokens and (from Phase 1) Svelte components for the app client and Astro site.",
-  "main": "tokens.css"
+  "version": "0.2.0",
+  "description": "The locked design system (/design.md) shared by the app client and the Astro site: tokens, base, components, layout utilities, motion, and the brand emblem.",
+  "main": "index.css"
 }

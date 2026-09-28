@@ -71,7 +71,7 @@
 </p>
 
 {#if loading}
-	<p class="muted">Loading…</p>
+	<p class="muted is-loading">Loading…</p>
 {:else if questions.length === 0}
 	<div class="card">
 		<p class="muted">
@@ -94,14 +94,16 @@
 		</label>
 
 		{#if thread.length > 0}
-			{#each thread as turn, i (turn.who + turn.text)}
-				<p style="margin: var(--space-sm) 0;">
-					<strong>{turn.who === 'you' ? 'You' : 'Coach'}:</strong>
-					<span data-testid={turn.who === 'coach' ? 'coach-answer' : `you-${i}`}>
-						{turn.text}
-					</span>
-				</p>
-			{/each}
+			<ol class="thread bare-list" aria-label="Conversation">
+				{#each thread as turn, i (turn.who + turn.text)}
+					<li class="bubble" class:mine={turn.who === 'you'}>
+						<strong class="who">{turn.who === 'you' ? 'You' : 'Coach'}:</strong>
+						<span data-testid={turn.who === 'coach' ? 'coach-answer' : `you-${i}`}>
+							{turn.text}
+						</span>
+					</li>
+				{/each}
+			</ol>
 		{/if}
 
 		{#if error}
@@ -136,10 +138,49 @@
 		>
 			{busy ? 'Thinking…' : 'Ask the Coach'}
 		</button>
-		<p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-md);">
+		<p class="muted small coach-note">
 			The Coach answers only from this question's reviewed material and your
 			own attempt. Daily AI allowance applies; everything else keeps working
 			when it runs out.
 		</p>
 	</div>
 {/if}
+
+<svelte:head>
+	<title>Coach | Medical Learning OS</title>
+</svelte:head>
+
+<style>
+	.thread {
+		display: grid;
+		gap: var(--space-md);
+		margin: var(--space-lg) 0;
+	}
+
+	.bubble {
+		display: grid;
+		gap: var(--space-xs);
+		max-width: min(88%, 38rem);
+		padding: var(--space-md) var(--space-lg);
+		border-radius: var(--radius-card) var(--radius-card) var(--radius-card) var(--radius-sm);
+		border: 1px solid var(--color-border);
+		background: var(--color-surface-elevated);
+		animation: mlos-rise var(--dur-slow) var(--ease-out) backwards;
+	}
+
+	.bubble.mine {
+		justify-self: end;
+		border-radius: var(--radius-card) var(--radius-card) var(--radius-sm) var(--radius-card);
+		border-color: color-mix(in oklab, var(--color-accent) 35%, transparent);
+		background: var(--color-action-wash);
+	}
+
+	.who {
+		color: var(--color-text-secondary);
+		font-size: var(--text-xs);
+	}
+
+	.coach-note {
+		margin-top: var(--space-md);
+	}
+</style>
