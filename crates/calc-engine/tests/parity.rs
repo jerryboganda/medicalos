@@ -19,7 +19,10 @@ fn run(name: &str, f: impl Fn(f64, f64) -> Result<f64, calc_engine::InvalidInput
             assert!(actual.is_nan(), "{name}: expected rejection, got {actual}");
         } else {
             let want = expected.as_f64().expect("numeric expectation");
-            assert_eq!(actual, want, "{name}: native result must match the parity vector");
+            assert_eq!(
+                actual, want,
+                "{name}: native result must match the parity vector"
+            );
         }
     }
 }
