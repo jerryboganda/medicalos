@@ -24001,7 +24001,7 @@ async fn operator_session(state: &Arc<AppState>, app: &Router, mfa: bool) -> Str
     .await;
     assert_eq!(status, StatusCode::OK, "{reg}");
     let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
-    api::auth::issue_session_with(&state.pool, user_id, &["platform_owner"], mfa)
+    api::auth::issue_session_with(&state.pool, user_id, &["platform_owner".to_string()], mfa)
         .await
         .expect("operator session")
 }
