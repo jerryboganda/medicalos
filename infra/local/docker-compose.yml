@@ -1,0 +1,92 @@
+# Local staging stack for Orca Desktop (docs/deployment/orca-desktop.md).
+# Mirrors the VPS topology at reduced size; every image is prebuilt by
+# .github/workflows/deploy.yml — nothing compiles on this machine
+# (AGENTS.md compute policy). All host ports are loopback-only and the web
+# nginx.conf expects the API service to be named exactly `medicalos-api`.
+# Compose's default per-project network provides service-name DNS.
+name: medicalos-local
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: medicalos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/local/.env}
+      POSTGRES_DB: medicalos
+    # Tuned for one local staging app, not the shared platform instance.
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=50"]
+    volumes:
+      - medos-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicalos -d medicalos"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    cpus: 0.5
+    mem_limit: 512m
+    restart: unless-stopped
+
+  medicalos-api:
+    # Applies apps/api/migrations on first boot (api::schema::apply_up).
+    image: ghcr.io/jerryboganda/medicalos-api:${IMAGE_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://medicalos:${POSTGRES_PASSWORD}@postgres:5432/medicalos
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8081/api}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8081}
+      PACK_SIGNING_KEY: ${PACK_SIGNING_KEY:?set PACK_SIGNING_KEY (>=32 bytes) in infra/local/.env}
+      MIN_TIME_LIMIT_SECONDS: "30"
+      FREE_DAILY_QUESTIONS: "10"
+      # Local admin-console token (x-admin-token header; client stores it in
+      # localStorage['mlos_admin']). Unset in .env = admin routes disabled.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    ports:
+      # Host side 18080: in the shared engine distro, 8080 belongs to
+      # another project (Freebuff2API). Container-internal stays 8080.
+      - "127.0.0.1:18080:8080"
+    # debian-slim ships no curl/wget; bash /dev/tcp GETs /healthz and greps ok.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ok <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    cpus: 0.5
+    mem_limit: 512m
+    restart: unless-stopped
+
+  medicalos-web:
+    image: ghcr.io/jerryboganda/medicalos-web:${IMAGE_TAG:-latest}
+    depends_on:
+      - medicalos-api
+    ports:
+      - "127.0.0.1:8081:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    cpus: 0.25
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # Marketing site (ADR 0002). Its GHCR image is new (deploy.yml site-image
+  # job) — until it exists, deploy the core stack without this profile.
+  medicalos-site:
+    profiles: ["full"]
+    image: ghcr.io/jerryboganda/medicalos-site:${IMAGE_TAG:-latest}
+    ports:
+      - "127.0.0.1:8082:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    cpus: 0.1
+    mem_limit: 64m
+    restart: unless-stopped
+
+volumes:
+  medos-pgdata:

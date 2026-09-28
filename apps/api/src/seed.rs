@@ -88,6 +88,48 @@ async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiErro
 }
 
 pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
+    // Idempotency: `api --seed` may be re-run against an already-seeded
+    // database (local exploration), and re-inserting would violate
+    // exams_code_key. Return the existing fixture instead. Integration
+    // tests truncate in setup(), so they always take the full-seed path.
+    // Runtime sqlx (not query!) so no offline-cache entry is needed.
+    let exam_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM exams WHERE code = 'PILT' ORDER BY id LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+    if let Some(exam_id) = exam_id {
+        let nil = Uuid::nil();
+        let chapters: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'chapter'
+             ORDER BY display_order, id LIMIT 3",
+        )
+        .bind(exam_id)
+        .fetch_all(pool)
+        .await?;
+        let versions: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT qv.id FROM question_versions qv
+             JOIN curriculum_nodes c ON c.id = qv.chapter_id
+             WHERE c.exam_id = $1 ORDER BY qv.id LIMIT 5",
+        )
+        .bind(exam_id)
+        .fetch_all(pool)
+        .await?;
+        let pick = |v: &[Uuid], i: usize| v.get(i).copied().unwrap_or(nil);
+        return Ok(SeedIds {
+            exam_id,
+            chapter1: pick(&chapters, 0),
+            chapter2: pick(&chapters, 1),
+            chapter3: pick(&chapters, 2),
+            question_versions: [
+                pick(&versions, 0),
+                pick(&versions, 1),
+                pick(&versions, 2),
+                pick(&versions, 3),
+                pick(&versions, 4),
+            ],
+        });
+    }
+
     let exam_id = Uuid::new_v4();
     sqlx::query!(
         "INSERT INTO exams (id, code, name, official_source_url, aliases)

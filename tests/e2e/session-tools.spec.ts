@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const API = 'http://127.0.0.1:8080';
+const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
 test('session tools autosave notes and marks and replay an offline answer', async ({
 	page

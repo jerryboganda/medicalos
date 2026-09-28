@@ -42,6 +42,29 @@ test('question report flow records a report from the session UI', async ({
 	// The POST's 200 asserts the report is recorded; the panel surfaces
 	// either the first acknowledgement or the deduplicated replay notice.
 	await expect(page.getByTestId('report-done')).toBeVisible();
+
+	// Cleanup: this report is real and would keep the fixture question out
+	// of plan sizing (open reports shrink a chapter's task), breaking specs
+	// that run later on the same seeded database. Resolve it so the suite is
+	// order-independent and re-runnable.
+	const adminToken = process.env.ADMIN_TOKEN;
+	if (!adminToken) throw new Error('ADMIN_TOKEN required for report cleanup');
+	const api = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
+	const queue = await (
+		await fetch(`${api}/v1/admin/reports`, { headers: { 'x-admin-token': adminToken } })
+	).json();
+	for (const entry of queue.reports ?? []) {
+		const resolved = await fetch(`${api}/v1/reports/${entry.report_id}/resolve`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'x-admin-token': adminToken },
+			body: JSON.stringify({
+				status: 'resolved_rejected',
+				resolution_note: 'E2E cleanup: fixture restored',
+				correction_note: null
+			})
+		});
+		expect(resolved.ok, 'cleanup resolve status').toBe(true);
+	}
 });
 
 test('admin resolves a grouped report with private feedback and a public correction note', async ({ page }) => {
