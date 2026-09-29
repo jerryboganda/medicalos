@@ -576,10 +576,24 @@ async fn link_identity(
     Ok(member)
 }
 
+/// Percent-encode for query values (RFC 3986 unreserved set passes).
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(*byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
 fn form_encode(pairs: &[(&str, &str)]) -> String {
     pairs
         .iter()
-        .map(|(k, v)| format!("{k}={}", URL_SAFE_NO_PAD.encode(v)))
+        .map(|(k, v)| format!("{}={}", percent_encode(k), percent_encode(v)))
         .collect::<Vec<_>>()
         .join("&")
 }
