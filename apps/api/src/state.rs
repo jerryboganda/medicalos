@@ -33,6 +33,10 @@ pub struct AppState {
     /// Platform identity provider. None = platform sign-in disabled
     /// (password login and institution SSO keep working).
     pub zitadel: Option<ZitadelConfig>,
+    /// INST-06: PKCS#8 PEM private key this tool signs LTI 1.3 deep-linking
+    /// responses with; its public half is served at /v1/lti/jwks.json.
+    /// None = LTI 1.3 disabled (QTI export keeps working).
+    pub lti_tool_key: Option<String>,
 }
 
 /// The API's confidential OIDC client at Zitadel (infra/zitadel/provision.sh).
