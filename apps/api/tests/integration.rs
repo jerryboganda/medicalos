@@ -24495,10 +24495,10 @@ async fn role_permissions_gate_each_admin_surface() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
 
-    let author = role_session(&state, &app, &["author"]).await;
-    let reviewer = role_session(&state, &app, &["medical_reviewer"]).await;
-    let examiner = role_session(&state, &app, &["examiner"]).await;
-    let support = role_session(&state, &app, &["support"]).await;
+    let author = role_session_with(&state, &app, &["author"], true).await;
+    let reviewer = role_session_with(&state, &app, &["medical_reviewer"], true).await;
+    let examiner = role_session_with(&state, &app, &["examiner"], true).await;
+    let support = role_session_with(&state, &app, &["support"], true).await;
 
     // ContentAuthor: concepts create is theirs.
     let (status, body) = call(
