@@ -180,8 +180,6 @@ fn mint_id_token(
 #[tokio::test]
 async fn lti13_login_launch_deeplink_round_trip() {
     let state = setup_lti().await;
-    let app = Router::new();
-    let _ = app; // the real router carries the LTI routes
     let app = api::router(state.clone());
     api::seed::seed(&state.pool).await.expect("seed");
 
