@@ -789,7 +789,7 @@ pub async fn update_article_draft(
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateArticleDraftRequest>,
 ) -> ApiResult<Json<AdminArticleVersion>> {
-    require_article_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers, Permission::ContentAuthor)?;
     let fields = clean_article_draft(
         &req.body,
         &req.source_ref,
@@ -854,7 +854,7 @@ pub async fn publish_article_draft(
     headers: HeaderMap,
     Path((article_id, version_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<PublishArticleResponse>> {
-    require_article_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers, Permission::ClinicalApprove)?;
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ArticleVersionRow>(
         r#"SELECT a.id AS article_id, av.id AS version_id, a.slug, a.title,

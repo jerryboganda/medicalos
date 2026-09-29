@@ -22,6 +22,7 @@ fn require_permission(
     state.require_permission(
         user,
         headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
+        Permission::ContentAuthor,
     )
 }
 
