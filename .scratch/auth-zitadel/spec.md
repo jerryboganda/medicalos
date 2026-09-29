@@ -113,3 +113,25 @@ Phase 1 shipped the code but production cannot use it:
   `admin_disabled` behavior is unchanged.
 - Deploy workflow green; providers endpoint still all-false (no secrets set).
 - No production behavior change until the owner's IdP decision.
+
+## Phase 3: role-aware admin routes (ADMIN-06 tail)
+
+Status: in-progress (2026-09-29, ZCode)
+
+`require_permission(user, provided, permission)` replaces the single
+`PlatformOps` gate: each admin route names its §18.1 permission; the legacy
+token path is unchanged (the operator token stays full-authority). A role
+without the route's permission gets `permission_required`; every privileged
+permission still demands MFA. Ambiguous routes stay `PlatformOps`.
+
+| Permission | Routes |
+|---|---|
+| ContentAuthor | hierarchy create/update, question create/search, JSON/file import + rollback, content rights CRUD, concepts (all), extraction create/get/list, article admin + create, image case/annotation create + concept mapping, source-change lifecycle, pregen generation, variant create, scenario create/version |
+| ClinicalApprove | assessment workflow transitions, extraction report review, image annotation review, psychometric screening queue |
+| ExamConfigure | exam spec create, assessment form create, mock create/list, QTI export |
+| ExamAssess | scenario assessment get/record/pending, scenario appeal list/get/review |
+| ReportTriage | report queue/resolve, incidents create/list/update, prize review |
+| PlatformOps (unchanged) | dashboard, audit log, ai-admin, settings, flags, recovery drills, coach regression, OIDC provider config |
+
+Refusals keep the honest codes: `permission_required` (role lacks the
+permission), `mfa_required` (role has it, no second factor).

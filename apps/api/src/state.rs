@@ -57,19 +57,36 @@ impl AppState {
         user: &crate::auth::AuthUser,
         provided: Option<&str>,
     ) -> Result<(), crate::error::ApiError> {
-        if user
-            .permissions()
-            .contains(&crate::authz::Permission::PlatformOps)
-        {
+        self.require_permission(user, provided, crate::authz::Permission::PlatformOps)
+    }
+
+    /// Role-aware admin gate (ADMIN-06): each route names the §18.1
+    /// permission it needs. A role holding that permission with a second
+    /// factor passes; the operator token keeps working for every route.
+    pub fn require_permission(
+        &self,
+        user: &crate::auth::AuthUser,
+        provided: Option<&str>,
+        permission: crate::authz::Permission,
+    ) -> Result<(), crate::error::ApiError> {
+        if user.permissions().contains(&permission) {
             if user.mfa {
                 return Ok(());
             }
             if provided.is_none() {
                 // The role alone is not enough without the second factor;
                 // `require` returns exactly that mfa_required error.
-                return user.require(crate::authz::Permission::PlatformOps);
+                return user.require(permission);
             }
             // A presented token still gets the legacy check below.
+        }
+        if !user.roles.is_empty() && provided.is_none() {
+            // A platform-role session lacking this permission is told so
+            // honestly — `admin_required` would misdirect it to the token.
+            return Err(crate::error::ApiError::forbidden(
+                "permission_required",
+                "your account does not have permission for this action",
+            ));
         }
         match (&self.admin_token, provided) {
             (Some(expected), Some(got)) if expected == got => Ok(()),

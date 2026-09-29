@@ -18,6 +18,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::seed::QuestionOption;
 use crate::state::AppState;
@@ -159,7 +160,7 @@ pub async fn create_node(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateNodeReq>,
 ) -> ApiResult<Json<CreateNodeResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     if !matches!(req.kind.as_str(), "subject" | "system" | "chapter") {
         return Err(ApiError::unprocessable(
             "invalid_kind",
@@ -212,7 +213,7 @@ pub async fn update_node(
     Path(node_id): Path<Uuid>,
     Json(req): Json<UpdateNodeReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     if let Some(status) = &req.status {
         if !matches!(status.as_str(), "active" | "retired") {
             return Err(ApiError::unprocessable(
@@ -479,7 +480,7 @@ pub async fn create_question(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateQuestionReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     validate_question(&req)?;
     let mut conn = state.pool.acquire().await?;
     // §19.3 editorial workflow: authored items are born drafts and reach
@@ -736,7 +737,7 @@ pub async fn assessment_workflow(
     headers: axum::http::HeaderMap,
     Json(req): Json<AssessmentWorkflowReq>,
 ) -> ApiResult<Json<AssessmentWorkflowResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ClinicalApprove)?;
     if req.version_ids.is_empty() {
         return Err(ApiError::unprocessable(
             "invalid_request",
@@ -777,7 +778,7 @@ pub async fn search_questions(
     headers: axum::http::HeaderMap,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let pattern = format!("%{}%", q.get("q").map(String::as_str).unwrap_or(""));
     let chapter_id = q
         .get("chapter_id")
@@ -1546,7 +1547,7 @@ pub async fn import(
     headers: axum::http::HeaderMap,
     Json(req): Json<ImportReq>,
 ) -> ApiResult<Json<AdminImportResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let ImportReq {
         exam_id,
         dry_run,
@@ -1571,7 +1572,7 @@ pub async fn import_file(
     Query(query): Query<ImportFileQuery>,
     body: Bytes,
 ) -> ApiResult<Json<AdminImportResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -1602,7 +1603,7 @@ pub async fn rollback_import(
     headers: axum::http::HeaderMap,
     Path(batch_id): Path<Uuid>,
 ) -> ApiResult<Json<RollbackImportResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let batch = sqlx::query!(
         "SELECT status, summary, exam_id FROM import_batches WHERE id = $1",
         batch_id
@@ -1729,9 +1730,11 @@ pub async fn audit_log(
 /// the key, or it carries 3+ open reports. Screening only — never verdicts.
 pub async fn psychometric_screening(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
+    headers: axum::http::HeaderMap,
     Path(vid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    state.require_permission(&user, admin_headers(&headers), Permission::ClinicalApprove)?;
     let totals = sqlx::query!(
         r#"SELECT
              COALESCE(COUNT(*), 0) AS "attempts!",
@@ -1795,7 +1798,7 @@ pub async fn psychometric_queue(
     headers: axum::http::HeaderMap,
     Query(q): Query<QueueParams>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ClinicalApprove)?;
     let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let rows = sqlx::query!(
         r#"SELECT t.vid,
@@ -1994,7 +1997,7 @@ pub async fn create_content_rights(
     headers: axum::http::HeaderMap,
     Json(req): Json<ContentRightsReq>,
 ) -> ApiResult<Json<CreateContentRightsResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let ref_code = req.ref_code.trim().to_uppercase();
     if ref_code.is_empty() || ref_code.len() > 60 {
         return Err(ApiError::unprocessable(
@@ -2226,7 +2229,7 @@ pub async fn list_content_rights(
     user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<ContentRightsResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let rows = sqlx::query_as::<_, ContentRightsRow>(
         r#"SELECT id, ref_code, licensor, territory, permitted_uses,
                   valid_from, valid_to, notes, revoked_at, revoked_by, revocation_note,
@@ -2321,7 +2324,7 @@ pub async fn revoke_content_rights(
     Path(rights_id): Path<Uuid>,
     Json(req): Json<RevokeContentRightsReq>,
 ) -> ApiResult<Json<RevokeContentRightsResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let reason = req.reason.trim();
     if reason.is_empty() || reason.chars().count() > 500 {
         return Err(ApiError::unprocessable(
@@ -2700,7 +2703,7 @@ pub async fn list_extraction_reports(
     user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<AdminExtractionReportListResponse>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let query = format!("{EXTRACTION_REPORT_SELECT} ORDER BY report.created_at DESC LIMIT 100");
     let rows = sqlx::query_as::<_, ExtractionReportRow>(&query)
         .fetch_all(&state.pool)
@@ -2719,7 +2722,7 @@ pub async fn get_extraction_report(
     headers: axum::http::HeaderMap,
     Path(report_id): Path<Uuid>,
 ) -> ApiResult<Json<AdminExtractionReport>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     Ok(Json(extraction_report_json(
         extraction_report(&state, report_id).await?,
     )?))
@@ -2731,7 +2734,7 @@ pub async fn create_extraction_report(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateExtractionReportReq>,
 ) -> ApiResult<(StatusCode, Json<AdminExtractionReport>)> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     let source_label = req.source_label.trim();
     let parser_version = req.parser_version.trim();
     let rights_ref = req.rights_ref.trim().to_ascii_uppercase();
@@ -2869,7 +2872,11 @@ pub async fn review_extraction_report(
     Path(report_id): Path<Uuid>,
     Json(req): Json<ReviewExtractionReportReq>,
 ) -> ApiResult<(StatusCode, Json<AdminExtractionReport>)> {
-    state.require_admin(&reviewer, admin_headers(&headers))?;
+    state.require_permission(
+        &reviewer,
+        admin_headers(&headers),
+        Permission::ClinicalApprove,
+    )?;
     if !matches!(req.decision.as_str(), "approved" | "rejected") {
         return Err(ApiError::unprocessable(
             "invalid_review_decision",
@@ -3036,7 +3043,7 @@ pub async fn create_incident(
     headers: axum::http::HeaderMap,
     Json(req): Json<IncidentReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ReportTriage)?;
     let title = req.title.trim();
     if title.is_empty() || title.len() > 200 {
         return Err(ApiError::unprocessable(
@@ -3077,7 +3084,7 @@ pub async fn list_incidents(
     user: AuthUser,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ReportTriage)?;
     let rows = sqlx::query!(
         r#"SELECT id, title, severity, status,
                   created_at AS "created_at?", resolved_at AS "resolved_at?"
@@ -3107,7 +3114,7 @@ pub async fn update_incident(
     Path(incident_id): Path<Uuid>,
     Json(req): Json<IncidentUpdateReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ReportTriage)?;
     if !matches!(req.status.as_str(), "mitigated" | "resolved" | "open") {
         return Err(ApiError::unprocessable(
             "invalid_status",
@@ -3168,7 +3175,7 @@ pub async fn create_variant(
     Path(question_id): Path<Uuid>,
     Json(req): Json<VariantReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(&user, admin_headers(&headers))?;
+    state.require_permission(&user, admin_headers(&headers), Permission::ContentAuthor)?;
     validate_hint_length(req.hint.as_deref())?;
     if req
         .rights_ref

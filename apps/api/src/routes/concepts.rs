@@ -9,13 +9,15 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-fn require_admin(state: &AppState, user: &AuthUser, headers: &HeaderMap) -> ApiResult<()> {
-    state.require_admin(
+fn require_permission(state: &AppState, user: &AuthUser, headers: &HeaderMap) -> ApiResult<()> {
+    state.require_permission(
         user,
         headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
+        Permission::ContentAuthor,
     )
 }
 
@@ -205,7 +207,7 @@ pub async fn list(
     user: AuthUser,
     headers: HeaderMap,
 ) -> ApiResult<Json<AdminConceptListResponse>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let rows = sqlx::query!(
         r#"SELECT c.id, c.canonical_key, c.current_version,
                   v.display_name, v.definition
@@ -235,7 +237,7 @@ pub async fn create(
     headers: HeaderMap,
     Json(req): Json<CreateConceptReq>,
 ) -> ApiResult<Json<CreateConceptResponse>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let key = normalized_key(&req.canonical_key)?;
     let name = required_text(&req.display_name, "display_name", 200)?;
     let definition = required_text(&req.definition, "definition", 4000)?;
@@ -293,7 +295,7 @@ pub async fn create_version(
     Path(concept_id): Path<Uuid>,
     Json(req): Json<NewVersionReq>,
 ) -> ApiResult<Json<CreateConceptVersionResponse>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let name = required_text(&req.display_name, "display_name", 200)?;
     let definition = required_text(&req.definition, "definition", 4000)?;
     let mut tx = state.pool.begin().await?;
@@ -346,7 +348,7 @@ pub async fn node_mappings(
     headers: HeaderMap,
     Path(node_id): Path<Uuid>,
 ) -> ApiResult<Json<NodeConceptsResponse>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let node = sqlx::query_scalar::<_, Uuid>("SELECT id FROM curriculum_nodes WHERE id = $1")
         .bind(node_id)
         .fetch_optional(&state.pool)
@@ -387,7 +389,7 @@ pub async fn set_node_mappings(
     Path(node_id): Path<Uuid>,
     Json(req): Json<SetNodeConceptsReq>,
 ) -> ApiResult<Json<SetNodeConceptsResponse>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let mut ids = req.concept_ids;
     ids.sort_unstable();
     if ids.windows(2).any(|pair| pair[0] == pair[1]) {

@@ -15,17 +15,19 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::seed::QuestionOption;
 use crate::state::AppState;
 
-fn admin(
+fn require_permission(
     state: &AppState,
     user: &crate::auth::AuthUser,
     headers: &axum::http::HeaderMap,
+    permission: Permission,
 ) -> ApiResult<()> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(user, provided)
+    state.require_permission(user, provided, permission)
 }
 
 // ---- AI-18: pre-generated tutoring ------------------------------------------
@@ -164,9 +166,10 @@ pub async fn generate_pregen(
     headers: HeaderMap,
     Path(vid): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    state.require_admin(
+    state.require_permission(
         &user,
         headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
+        Permission::ContentAuthor,
     )?;
     let cards = ensure_pregen(&state.pool, vid).await?;
     if cards.is_empty() {
@@ -207,7 +210,7 @@ pub async fn set_flag(
     headers: axum::http::HeaderMap,
     Json(req): Json<FlagReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers, Permission::PlatformOps)?;
     if req.key.is_empty() || req.key.len() > 100 {
         return Err(ApiError::unprocessable(
             "invalid_key",
@@ -1713,7 +1716,7 @@ pub async fn create_scenario(
     headers: axum::http::HeaderMap,
     Json(req): Json<CreateScenarioReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers, Permission::ContentAuthor)?;
     let slug = req.slug.trim();
     if slug.is_empty() || !slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err(ApiError::unprocessable(
@@ -1773,7 +1776,7 @@ pub async fn create_scenario_version(
     Path(scenario_id): Path<Uuid>,
     Json(req): Json<CreateScenarioVersionReq>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
-    admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers, Permission::ContentAuthor)?;
     validate_scenario_rubric(&req.rubric, &req.state_machine)?;
 
     let mut tx = state.pool.begin().await?;

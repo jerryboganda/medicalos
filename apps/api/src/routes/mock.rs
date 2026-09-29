@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::routes::practice::PoolQuestion;
 use crate::state::AppState;
@@ -188,7 +189,7 @@ pub async fn create_mock(
     Json(req): Json<CreateMockReq>,
 ) -> ApiResult<Json<CreateMockResponse>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(&user, provided)?;
+    state.require_permission(&user, provided, Permission::ExamConfigure)?;
     let title = req.title.trim();
     if title.is_empty() || title.len() > 200 {
         return Err(ApiError::unprocessable(
