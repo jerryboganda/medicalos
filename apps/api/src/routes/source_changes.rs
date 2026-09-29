@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
