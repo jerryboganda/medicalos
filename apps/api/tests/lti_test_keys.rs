@@ -1,5 +1,6 @@
 //! Fixed RSA fixtures for the LTI 1.3 mocked-platform tests.
-pub(crate) const TEST_TOOL_KEY_PEM: &str = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3SBAOu/fTjYEw
+pub(crate) const TEST_TOOL_KEY_PEM: &str =
+    "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3SBAOu/fTjYEw
 keWOiMz6mMF70K8S2h2Kpo7nxpKYNseVn/X+IDUNokoobkaOB58HKLFt0QR0zqid
 Vvo4SUuytvMECPXRM6MrE+oB7Ux8treL3LS2ZS2jbqCir3pTEOb7X586Pz1p+XxQ
 jdqrtyDiw9QzL2eiqusS3wUSaoaSf56qxOS3K+uw4fqVo1/mDl7uLdH1ceeP3ZoM
