@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_identities (platform_id, subject, user_id) VALUES ($1, $2, $3)\n         ON CONFLICT (platform_id, subject) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4008d87141ac7069e1dff8fab874d41f71abbffe3937fb872b896d6d19cd4acc"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_launch_states WHERE state = $1 AND expires_at > now()\n         RETURNING nonce, platform_id, target_link_uri, message_type",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "target_link_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "message_type",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "96ea4152447ffaa487d6b9b36f9c7eba921c3aa178eee425142b41dfe414718e"
+}

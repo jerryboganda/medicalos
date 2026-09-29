@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM lti_deep_link_pends WHERE user_id = $1 AND expires_at > now()\n         RETURNING platform_id, settings",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "settings",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1e71bb28b1db0a7058dc7a877bc97d22f4cd95140d32a4eb7043062fd372e90f"
+}

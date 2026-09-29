@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_deep_link_pends (user_id, platform_id, settings, expires_at)\n             VALUES ($1, $2, $3, now() + make_interval(mins => $4))\n             ON CONFLICT (user_id) DO UPDATE SET\n                platform_id = $2, settings = $3, expires_at = now() + make_interval(mins => $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93fd2490505474d2a69adfc400f785ae1a83be8a5bd48c00972edb2859906ec7"
+}

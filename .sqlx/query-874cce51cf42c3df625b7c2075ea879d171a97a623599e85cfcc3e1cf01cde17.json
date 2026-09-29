@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_launch_states (state, nonce, platform_id, target_link_uri, message_type, expires_at)\n         VALUES ($1, $2, $3, $4, $5, now() + make_interval(mins => $6))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "874cce51cf42c3df625b7c2075ea879d171a97a623599e85cfcc3e1cf01cde17"
+}
