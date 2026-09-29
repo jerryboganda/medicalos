@@ -123,6 +123,7 @@ async fn spawn_mock_platform() -> String {
         .await
         .expect("bind mock LMS");
     let addr = listener.local_addr().expect("addr");
+    use rsa::traits::PublicKeyParts;
     let public =
         rsa::RsaPublicKey::from_public_key_pem(TEST_PLATFORM_PUBLIC_PEM).expect("platform pub key");
     let n = URL_SAFE_NO_PAD.encode(public.n().to_bytes_be());

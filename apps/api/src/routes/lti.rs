@@ -7,7 +7,7 @@
 //! are signed with `LTI_TOOL_PRIVATE_KEY`. No UI here — launches answer
 //! JSON; a browser handoff page is a UI-gated follow-up.
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Form, Json};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -28,8 +28,8 @@ use crate::state::AppState;
 const LTI_VERSION: &str = "1.3.0";
 const MESSAGE_RESOURCE_LINK: &str = "LtiResourceLinkRequest";
 const MESSAGE_DEEP_LINK: &str = "LtiDeepLinkingRequest";
-const STATE_TTL_MINUTES: i64 = 10;
-const DEEP_LINK_TTL_MINUTES: i64 = 30;
+const STATE_TTL_MINUTES: i32 = 10;
+const DEEP_LINK_TTL_MINUTES: i32 = 30;
 const TOOL_KID: &str = "medicalos-lti-1";
 
 fn lti_claim(name: &str) -> String {
@@ -259,6 +259,7 @@ pub async fn launch(
 pub async fn jwks(State(state): State<Arc<AppState>>) -> ApiResult<impl IntoResponse> {
     let pem = tool_key(&state)?;
     use rsa::pkcs8::DecodePrivateKey;
+    use rsa::traits::PublicKeyParts;
     let key = rsa::RsaPrivateKey::from_pkcs8_pem(pem).map_err(|_| ApiError::internal())?;
     let public = key.to_public_key();
     let n = public.n().to_bytes_be();
@@ -318,8 +319,6 @@ pub async fn deep_links(
     .await?
     .ok_or_else(ApiError::internal)?;
 
-    use rsa::pkcs8::DecodePrivateKey;
-    let key = rsa::RsaPrivateKey::from_pkcs8_pem(pem).map_err(|_| ApiError::internal())?;
     let encoding_key = jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes())
         .map_err(|_| ApiError::internal())?;
 
@@ -505,9 +504,9 @@ async fn verify_platform_token(
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
     validation.set_issuer(&[issuer]);
     validation.set_audience(&[client_id]);
-    let (_, payload) = jsonwebtoken::decode::<Value>(id_token, &decoding_key, &validation)
+    let token_data = jsonwebtoken::decode::<Value>(id_token, &decoding_key, &validation)
         .map_err(|_| ApiError::unauthorized())?;
-    Ok(payload.claims)
+    Ok(token_data.claims)
 }
 
 /// Link (once) the LMS subject to an app account: the linked row wins, then
