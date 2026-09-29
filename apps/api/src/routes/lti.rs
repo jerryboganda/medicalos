@@ -21,7 +21,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::issue_session_with;
-use crate::authz::{require_in, Permission};
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -411,13 +411,22 @@ pub async fn register_platform(
     Path(institution_id): Path<Uuid>,
     Json(req): Json<RegisterPlatformReq>,
 ) -> ApiResult<Json<RegisteredPlatform>> {
-    require_in(
-        &state.pool,
-        &user,
+    // The institution surface's own pattern (as add_member): the creator /
+    // institution admin role decides, checked directly against membership.
+    let staff = sqlx::query!(
+        "SELECT 1 AS one FROM institution_members
+         WHERE institution_id = $1 AND user_id = $2 AND role = 'admin'",
         institution_id,
-        Permission::InstitutionAdmin,
+        user.user_id
     )
+    .fetch_optional(&state.pool)
     .await?;
+    if staff.is_none() {
+        return Err(ApiError::forbidden(
+            "admin_required",
+            "LTI platforms are registered by the institution's admins",
+        ));
+    }
     for (value, code) in [
         (&req.issuer, "invalid_issuer"),
         (&req.client_id, "invalid_client_id"),
