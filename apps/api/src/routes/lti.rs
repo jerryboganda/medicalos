@@ -16,7 +16,6 @@ use chrono::Utc;
 use rand::RngCore;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -264,13 +263,12 @@ pub async fn jwks(State(state): State<Arc<AppState>>) -> ApiResult<impl IntoResp
     let public = key.to_public_key();
     let n = public.n().to_bytes_be();
     let e = public.e().to_bytes_be();
-    let kid = format!("{:x}", Sha256::digest(&n))[..16].to_string();
     Ok(Json(json!({
         "keys": [{
             "kty": "RSA",
             "alg": "RS256",
             "use": "sig",
-            "kid": kid,
+            "kid": TOOL_KID,
             "n": URL_SAFE_NO_PAD.encode(n),
             "e": URL_SAFE_NO_PAD.encode(e),
         }]
