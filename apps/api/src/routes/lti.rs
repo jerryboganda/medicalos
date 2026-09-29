@@ -433,11 +433,13 @@ pub async fn register_platform(
         (&req.auth_login_url, "invalid_auth_login_url"),
         (&req.key_set_url, "invalid_key_set_url"),
     ] {
-        let ok = !value.trim().is_empty()
+        let value = value.trim();
+        let is_url = code.ends_with("login_url")
+            || code.ends_with("key_set_url")
+            || code == "invalid_issuer";
+        let ok = !value.is_empty()
             && value.len() <= 500
-            && (code.starts_with("invalid_auth")
-                || code.starts_with("invalid_key")
-                || value.starts_with("https://"));
+            && (!is_url || value.starts_with("https://") || value.starts_with("http://"));
         if !ok {
             return Err(ApiError::unprocessable(code, format!("{code} rejected")));
         }
