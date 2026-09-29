@@ -1,0 +1,27 @@
+# AX audit — local runs, 2026-09-29, worktree D:/Projects/medicalos-ax @ zcode/ax-protocol (post ponytail-review script)
+
+## Clean run against the real repo (gate expectation: exit 0)
+$ node scripts/ax-audit.mjs
+AX audit: clean (152 ledger rows, 1 STATE files checked).
+exit=0
+
+## Negative test — fixtures with evidence-free claims (expect exit 1, 2 findings)
+$ node scripts/ax-audit.mjs (cwd=/tmp/ax-neg fixtures)
+AX docs/requirements/traceability.md: row A-1 claims tested with an empty Evidence cell
+AX .scratch\eff\STATE.md: gate "e2e" marked PASS with empty raw-output evidence
+
+AX audit: 2 finding(s). No gate passes without raw output evidence.
+exit=1 (expected 1)
+
+## Cross-link check — every path referenced in new/edited docs (expect all OK)
+OK  docs/agents/agent-experience.md
+OK  docs/agents/issue-tracker.md
+OK  docs/requirements/traceability.md
+OK  AGENT_IMPLEMENTATION_HANDOFF.md
+OK  scripts/ax-audit.mjs
+OK  scripts/trust01-audit.mjs
+OK  scripts/verify-migrations.sh
+OK  scripts/wasm-parity.mjs
+OK  infra/zitadel/provision.sh
+OK  .scratch/e2e-local.sh
+OK  docs/adr

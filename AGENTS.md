@@ -16,11 +16,23 @@ Every frontend, backend, or full-stack task in this repository MUST run through 
 
 ### Codex delegations
 
-Delegated implementation tasks inherit this file (Codex reads `AGENTS.md`) and have the full suite in `.codex/skills/`. Keep delegation prompts pointed at this mandate.
+Delegated implementation tasks inherit this file (Codex reads `AGENTS.md`) and have the full suite in `.codex/skills/`. Keep delegation prompts pointed at this mandate. A delegation prompt must name the effort's `.scratch/<slug>/STATE.md` path and require a final STATE.md update before the completion report.
 
 ### Updating
 
 Refresh all three suites with `npx skills update` (sources: `mattpocock/skills`, `dietrichgebert/ponytail`, `nutlope/hallmark`).
+
+## Agent Experience (AX) protocol — MANDATORY FOR EVERY TASK
+
+Every effort externalizes its working memory to disk: conversation context compacts and dies at session end, the STATE file persists. Full protocol: `docs/agents/agent-experience.md`.
+
+1. **Every effort maintains `.scratch/<feature-slug>/STATE.md` from its first edit**: objective, decided constraints, do-not-touch, completed items with evidence, active diffs, verification gates, exact next action.
+2. **No verification gate may be marked PASS without raw output evidence** — a GitHub Actions run URL plus the job name, or a trimmed log under `.scratch/<slug>/evidence/`. "Should pass" is not a result; NOT RUN stays visible.
+3. **Work the loop**: PLAN → EXECUTE → VERIFY → RECORD STATE → CHECK GIT (`git status`/`git diff` must match the recorded diffs) → next. Before any context refresh or session end, update STATE.md first — a fresh context reconstructs from STATE.md + git, never from old conversation memory.
+4. **Shared worktree**: before starting, reconcile with `git status` + recent commits — another agent's uncommitted diff is do-not-touch. Concurrent efforts isolate via linked git worktrees branched off `origin/main`.
+5. **On close**: flip ledger IDs per `docs/requirements/traceability.md`'s own update rule, then close the STATE file.
+
+Enforced in CI by `scripts/ax-audit.mjs` (evidence-less PASS/tested claims fail the build), next to the TRUST-01 audit.
 
 ## Compute workload policy — STRICT RULES
 

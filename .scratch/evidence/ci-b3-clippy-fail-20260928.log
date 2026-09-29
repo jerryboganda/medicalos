@@ -1,0 +1,61 @@
+rust	Clippy	﻿2026-09-28T12:57:56.1221350Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings
+rust	Clippy	2026-09-28T12:57:56.1221741Z ^[[36;1mcargo clippy --workspace --all-targets -- -D warnings^[[0m
+rust	Clippy	2026-09-28T12:57:56.1276151Z shell: /usr/bin/bash -e {0}
+rust	Clippy	2026-09-28T12:57:56.1276371Z env:
+rust	Clippy	2026-09-28T12:57:56.1276540Z   CARGO_TERM_COLOR: always
+rust	Clippy	2026-09-28T12:57:56.1276954Z   DATABASE_URL: ***localhost:5432/medos_ci
+rust	Clippy	2026-09-28T12:57:56.1277213Z   CARGO_HOME: /home/runner/.cargo
+rust	Clippy	2026-09-28T12:57:56.1277428Z   CARGO_INCREMENTAL: 0
+rust	Clippy	2026-09-28T12:57:56.1277782Z   CACHE_ON_FAILURE: false
+rust	Clippy	2026-09-28T12:57:56.1277973Z ##[endgroup]
+rust	Clippy	2026-09-28T12:57:56.3330428Z ^[[1m^[[92m    Updating^[[0m crates.io index
+rust	Clippy	2026-09-28T12:57:56.7395400Z ^[[1m^[[92m     Locking^[[0m 354 packages to latest compatible versions
+rust	Clippy	2026-09-28T12:57:56.7410080Z ^[[1m^[[92m      Adding^[[0m argon2 v0.5.3 ^[[1m^[[33m(available: v0.6.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7479934Z ^[[1m^[[92m      Adding^[[0m base64 v0.22.1 ^[[1m^[[33m(available: v0.23.1)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7519185Z ^[[1m^[[92m      Adding^[[0m chacha20poly1305 v0.10.1 ^[[1m^[[33m(available: v0.11.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7651629Z ^[[1m^[[92m      Adding^[[0m ed25519-dalek v2.2.0 ^[[1m^[[33m(available: v3.0.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7724266Z ^[[1m^[[92m      Adding^[[0m generic-array v0.14.7 ^[[1m^[[33m(available: v0.14.9)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7893757Z ^[[1m^[[92m      Adding^[[0m jsonwebtoken v9.3.1 ^[[1m^[[33m(available: v11.1.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.7913401Z ^[[1m^[[92m      Adding^[[0m matchit v0.8.4 ^[[1m^[[33m(available: v0.8.6)^[[0m
+rust	Clippy	2026-09-28T12:57:56.8077203Z ^[[1m^[[92m      Adding^[[0m rand v0.8.8 ^[[1m^[[33m(available: v0.10.3)^[[0m
+rust	Clippy	2026-09-28T12:57:56.8280416Z ^[[1m^[[92m      Adding^[[0m sha2 v0.10.9 ^[[1m^[[33m(available: v0.11.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.8317112Z ^[[1m^[[92m      Adding^[[0m sqlx v0.8.6 ^[[1m^[[33m(available: v0.9.0)^[[0m
+rust	Clippy	2026-09-28T12:57:56.8523957Z ^[[1m^[[92m      Adding^[[0m tower-http v0.6.11 ^[[1m^[[33m(available: v0.7.1)^[[0m
+rust	Clippy	2026-09-28T12:57:57.6538347Z ^[[1m^[[92m Downloading^[[0m crates ...
+rust	Clippy	2026-09-28T12:57:57.8225935Z ^[[1m^[[92m  Downloaded^[[0m tokio-rustls v0.26.6
+rust	Clippy	2026-09-28T12:57:57.9257049Z ^[[1m^[[92m    Checking^[[0m tokio-rustls v0.26.6
+rust	Clippy	2026-09-28T12:57:57.9331090Z ^[[1m^[[92m    Checking^[[0m calc-engine v0.1.0 (/home/runner/work/medicalos/medicalos/crates/calc-engine)
+rust	Clippy	2026-09-28T12:57:57.9370326Z ^[[1m^[[92m    Checking^[[0m scheduler v0.1.0 (/home/runner/work/medicalos/medicalos/crates/scheduler)
+rust	Clippy	2026-09-28T12:57:57.9408514Z ^[[1m^[[92m    Checking^[[0m telemetry v0.1.0 (/home/runner/work/medicalos/medicalos/crates/telemetry)
+rust	Clippy	2026-09-28T12:57:58.2042496Z ^[[1m^[[92m    Checking^[[0m hyper-rustls v0.27.10
+rust	Clippy	2026-09-28T12:57:58.2337088Z ^[[1m^[[92m    Checking^[[0m domain-contracts v0.1.0 (/home/runner/work/medicalos/medicalos/crates/domain-contracts)
+rust	Clippy	2026-09-28T12:57:58.2384731Z ^[[1m^[[92m    Checking^[[0m competition-scoring v0.1.0 (/home/runner/work/medicalos/medicalos/crates/competition-scoring)
+rust	Clippy	2026-09-28T12:57:58.3129345Z ^[[1m^[[92m    Checking^[[0m reqwest v0.12.28
+rust	Clippy	2026-09-28T12:57:58.6785583Z ^[[1m^[[92m    Checking^[[0m oauth2 v5.0.0
+rust	Clippy	2026-09-28T12:57:59.0681776Z ^[[1m^[[92m    Checking^[[0m openidconnect v4.0.1
+rust	Clippy	2026-09-28T12:58:00.3049984Z ^[[1m^[[92m    Checking^[[0m api v0.1.0 (/home/runner/work/medicalos/medicalos/apps/api)
+rust	Clippy	2026-09-28T12:58:09.6587826Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+rust	Clippy	2026-09-28T12:58:09.6588362Z    ^[[1m^[[94m--> ^[[0mapps/api/tests/integration.rs:458:9
+rust	Clippy	2026-09-28T12:58:09.6588735Z     ^[[1m^[[94m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6589295Z ^[[1m^[[94m458^[[0m ^[[1m^[[94m|^[[0m     let (_, learner_a) = register_and_login(app.clone()).await;
+rust	Clippy	2026-09-28T12:58:09.6596806Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91m^^^^^^^^^^^^^^^[[0m   ^[[1m^[[94m-------------------------------------^[[0m ^[[1m^[[94mthis expression has type `std::string::String`^[[0m
+rust	Clippy	2026-09-28T12:58:09.6597797Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6598308Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91mexpected `String`, found `(_, _)`^[[0m
+rust	Clippy	2026-09-28T12:58:09.6598760Z     ^[[1m^[[94m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6599324Z     ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected struct `^[[1m^[[35mstd::string::String^[[0m`
+rust	Clippy	2026-09-28T12:58:09.6600221Z                 found tuple `^[[1m^[[35m(_, _)^[[0m`
+rust	Clippy	2026-09-28T12:58:09.6600478Z 
+rust	Clippy	2026-09-28T12:58:09.6600706Z ^[[1m^[[91merror[E0308]^[[0m^[[1m: mismatched types^[[0m
+rust	Clippy	2026-09-28T12:58:09.6601203Z    ^[[1m^[[94m--> ^[[0mapps/api/tests/integration.rs:459:9
+rust	Clippy	2026-09-28T12:58:09.6601603Z     ^[[1m^[[94m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6602096Z ^[[1m^[[94m459^[[0m ^[[1m^[[94m|^[[0m     let (_, learner_b) = register_and_login(app.clone()).await;
+rust	Clippy	2026-09-28T12:58:09.6603118Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91m^^^^^^^^^^^^^^^[[0m   ^[[1m^[[94m-------------------------------------^[[0m ^[[1m^[[94mthis expression has type `std::string::String`^[[0m
+rust	Clippy	2026-09-28T12:58:09.6603807Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6604273Z     ^[[1m^[[94m|^[[0m         ^[[1m^[[91mexpected `String`, found `(_, _)`^[[0m
+rust	Clippy	2026-09-28T12:58:09.6604714Z     ^[[1m^[[94m|^[[0m
+rust	Clippy	2026-09-28T12:58:09.6605238Z     ^[[1m^[[94m= ^[[0m^[[1mnote^[[0m: expected struct `^[[1m^[[35mstd::string::String^[[0m`
+rust	Clippy	2026-09-28T12:58:09.6605795Z                 found tuple `^[[1m^[[35m(_, _)^[[0m`
+rust	Clippy	2026-09-28T12:58:09.6606050Z 
+rust	Clippy	2026-09-28T12:58:14.4925683Z ^[[1mFor more information about this error, try `rustc --explain E0308`.^[[0m
+rust	Clippy	2026-09-28T12:58:14.5043441Z ^[[1m^[[91merror^[[0m: could not compile `api` (test "integration") due to 2 previous errors
+rust	Clippy	2026-09-28T12:58:14.5840495Z ##[error]Process completed with exit code 101.
