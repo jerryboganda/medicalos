@@ -1,12 +1,17 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT pass_mark_percent FROM mocks WHERE id = $1",
+  "query": "SELECT pass_mark_percent, mock_type FROM mocks WHERE id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
         "name": "pass_mark_percent",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "mock_type",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -15,8 +20,9 @@
       ]
     },
     "nullable": [
+      false,
       false
     ]
   },
-  "hash": "59c6c4ce28c8e6a6147caba80d925f5497887b410d5d03c4c3f8c2f23b1b533d"
+  "hash": "f986e9db39058d4e99a3608b38f464bada84e9a0d2b708e6f87e7c17652f855e"
 }

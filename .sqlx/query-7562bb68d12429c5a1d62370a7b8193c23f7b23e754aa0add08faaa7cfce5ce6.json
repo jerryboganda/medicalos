@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO login_throttle (email, consecutive_failures, locked_until, updated_at)\n             VALUES ($1, $2, $3, now())\n             ON CONFLICT (email) DO UPDATE SET\n                consecutive_failures = $2,\n                locked_until = $3,\n                updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7562bb68d12429c5a1d62370a7b8193c23f7b23e754aa0add08faaa7cfce5ce6"
+}

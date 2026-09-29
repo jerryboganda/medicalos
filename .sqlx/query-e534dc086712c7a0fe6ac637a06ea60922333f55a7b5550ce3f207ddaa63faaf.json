@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                COALESCE(SUM(elapsed_ms) / 1000, 0)::BIGINT AS \"answered_time_seconds!\",\n                COUNT(*)::BIGINT AS \"timed_answered_count!\"\n               FROM attempts\n               WHERE session_id = $1\n                 AND chosen_index IS NOT NULL\n                 AND elapsed_ms IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "answered_time_seconds!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "timed_answered_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "e534dc086712c7a0fe6ac637a06ea60922333f55a7b5550ce3f207ddaa63faaf"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT m.id, m.title, m.pass_mark_percent, m.attempts_allowed,\n                  m.time_limit_seconds, m.late_sync_grace_seconds,\n                  m.integrity_policy, m.away_timeout_seconds,\n                  (SELECT COUNT(*) FROM mock_attempts ma\n                   WHERE ma.mock_id = m.id AND ma.user_id = $1) AS \"used!\"\n           FROM mocks m ORDER BY m.created_at",
+  "query": "SELECT m.id, m.title, m.pass_mark_percent, m.attempts_allowed,\n                  m.time_limit_seconds, m.late_sync_grace_seconds,\n                  m.integrity_policy, m.away_timeout_seconds, m.mock_type,\n                  (SELECT COUNT(*) FROM mock_attempts ma\n                   WHERE ma.mock_id = m.id AND ma.user_id = $1) AS \"used!\"\n           FROM mocks m ORDER BY m.created_at",
   "describe": {
     "columns": [
       {
@@ -45,6 +45,11 @@
       },
       {
         "ordinal": 8,
+        "name": "mock_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
         "name": "used!",
         "type_info": "Int8"
       }
@@ -63,8 +68,9 @@
       false,
       false,
       true,
+      false,
       null
     ]
   },
-  "hash": "1fe714419a4b3104b6135400c30dfd7b7495d7d20a35dca81ff8a3f2c3c6f545"
+  "hash": "4159b46757172127ff9eeddaf2ce78cde57056167d5034184198f8dc46e38c15"
 }
