@@ -8,7 +8,6 @@
 mod lti_test_keys;
 
 use axum::body::Body;
-use axum::extract::State;
 use axum::http::{header, Request, StatusCode};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -123,6 +122,7 @@ async fn spawn_mock_platform() -> String {
         .await
         .expect("bind mock LMS");
     let addr = listener.local_addr().expect("addr");
+    use rsa::pkcs8::DecodePublicKey;
     use rsa::traits::PublicKeyParts;
     let public =
         rsa::RsaPublicKey::from_public_key_pem(TEST_PLATFORM_PUBLIC_PEM).expect("platform pub key");
