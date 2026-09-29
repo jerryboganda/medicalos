@@ -1,6 +1,6 @@
 # STATE — agent-experience
 
-Updated: 2026-09-29 23:15 (+0500)
+Updated: 2026-09-29 23:45 (+0500)
 Requirement IDs: none (process/docs infrastructure)
 Branch: `zcode/ax-protocol` (worktree `D:\Projects\medicalos-ax`, cut from `origin/main` @ `7485cae`)
 
@@ -10,7 +10,7 @@ Make the AX protocol mandatory for every future task in this repo: persistent pe
 
 ## Status
 
-All changes written; local gates PASS; commit + PR next.
+PR #27 open and fully green (all five CI jobs); awaiting owner merge.
 
 ## Decided
 
@@ -44,10 +44,10 @@ All changes written; local gates PASS; commit + PR next.
 
 | Gate | Runs where | Status | Raw-output evidence |
 |---|---|---|---|
-| `node scripts/ax-audit.mjs` | local + ci.yml `client` job | PASS | [evidence/ax-audit-local-2026-09-29.txt](evidence/ax-audit-local-2026-09-29.txt) — clean, 152 ledger rows, 1 STATE file, exit 0 (local; CI run pending below) |
+| `node scripts/ax-audit.mjs` | local + ci.yml `client` job | PASS | [evidence/ax-audit-local-2026-09-29.txt](evidence/ax-audit-local-2026-09-29.txt) — local exit 0 **and** CI step green: run [36604766833](https://github.com/jerryboganda/medicalos/actions/runs/36604766833) client job, "AX audit: clean (152 ledger rows, 1 STATE files checked)" |
 | Audit negative test (catches evidence-free claims) | local fixtures | PASS | same evidence file — exit 1 with 2 findings on bad fixtures |
 | Cross-links in new/edited docs resolve | local check | PASS | same evidence file — all 20 paths OK |
-| PR CI (rust / client / site / e2e) | GitHub Actions on PR | NOT RUN | — run URL recorded in a follow-up commit after push |
+| PR CI (rust / client / site / zitadel / e2e) | GitHub Actions run [36604766833](https://github.com/jerryboganda/medicalos/actions/runs/36604766833) | PASS | all five jobs success (rust 10m49s, client incl. AX audit, site, zitadel, e2e 4m33s) |
 
 ## Blockers / owner inputs
 
@@ -55,7 +55,7 @@ None.
 
 ## Next action
 
-Stage exactly the files in Active diffs → commit on `zcode/ax-protocol` → push → open PR to `main` → record the Actions run URL in the gates table (follow-up commit on this branch).
+Owner merges PR #27 — from then on the protocol is live on `main` and every future effort (ZCode or Codex) starts at its STATE.md. This STATE file closes at merge; no ledger rows to flip (no §29 IDs).
 
 ## Log
 
@@ -63,3 +63,4 @@ Stage exactly the files in Active diffs → commit on `zcode/ax-protocol` → pu
 - 2026-09-29 22:55 — protocol doc + 4 mandate edits + audit script written.
 - 2026-09-29 23:05 — audit clean (152 rows, 1 STATE file), negative test verified, cross-links verified; evidence saved.
 - 2026-09-29 23:15 — ponytail-review: 2 findings applied (existsSync shrink, sync-marker comment), script re-verified, evidence regenerated. Lean. Ship.
+- 2026-09-29 23:45 — PR #27 all five CI jobs green (run 36604766833); AX audit step verified green in CI log; effort closed pending merge.
