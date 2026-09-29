@@ -188,7 +188,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
     // The institution's staff registers the campus LMS as a platform.
     let (status, staff_reg, staff_token) = register(&app, "lms-staff@example.test").await;
     assert_eq!(status, StatusCode::OK, "{staff_reg}");
-    let staff_id: uuid::Uuid = staff_reg["user_id"].as_str().unwrap().parse().unwrap();
+    let _staff_id: uuid::Uuid = staff_reg["user_id"].as_str().unwrap().parse().unwrap();
     let (status, inst) = call(
         app.clone(),
         Request::builder()
@@ -213,7 +213,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
         app.clone(),
         Request::builder()
             .method("POST")
-            .uri(&format!("/v1/institutions/{institution_id}/members"))
+            .uri(format!("/v1/institutions/{institution_id}/members").as_str())
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::AUTHORIZATION, format!("Bearer {staff_token}"))
             .body(Body::from(
@@ -228,7 +228,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
         app.clone(),
         Request::builder()
             .method("POST")
-            .uri(&format!(
+            .uri(format!(
                 "/v1/institutions/{institution_id}/interop/lti-platforms"
             ))
             .header(header::CONTENT_TYPE, "application/json")
@@ -375,7 +375,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
     // Deep linking: launch as the staff user (linked by verified email),
     // then sign a response over chosen content items.
     let dl_nonce = "dl-nonce";
-    let dl_token = mint_id_token(
+    let _dl_token = mint_id_token(
         dl_nonce,
         "lms-staff@example.test",
         "LtiDeepLinkingRequest",
