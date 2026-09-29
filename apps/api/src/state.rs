@@ -80,6 +80,14 @@ impl AppState {
             }
             // A presented token still gets the legacy check below.
         }
+        if !user.roles.is_empty() && provided.is_none() {
+            // A platform-role session lacking this permission is told so
+            // honestly — `admin_required` would misdirect it to the token.
+            return Err(crate::error::ApiError::forbidden(
+                "permission_required",
+                "your account does not have permission for this action",
+            ));
+        }
         match (&self.admin_token, provided) {
             (Some(expected), Some(got)) if expected == got => Ok(()),
             (Some(_), _) => Err(crate::error::ApiError::forbidden(
