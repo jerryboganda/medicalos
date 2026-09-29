@@ -52,6 +52,26 @@ docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
   exit 1
 }
 
+# OPS-03: verify the deploy workflow's keyless signatures ON the VPS before
+# anything is recreated — an unsigned or re-tagged image aborts the deploy
+# with the current containers still serving.
+COSIGN_VERSION="${COSIGN_VERSION:-2.4.1}"
+if ! command -v cosign >/dev/null 2>&1; then
+  echo "[medicalos] installing cosign v$COSIGN_VERSION"
+  curl -sfL "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64" \
+    -o /usr/local/bin/cosign
+  chmod +x /usr/local/bin/cosign
+fi
+COSIGN_ID_REGEXP='^https://github.com/jerryboganda/medicalos/\.github/workflows/deploy\.yml@refs/heads/main$'
+for image in "$API_IMAGE" "$WEB_IMAGE"; do
+  cosign verify "$image" \
+    --certificate-identity-regexp "$COSIGN_ID_REGEXP" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    >/dev/null \
+    || { echo "signature verification failed for $image — aborting before any container is touched" >&2; exit 1; }
+  echo "[medicalos] signature verified: $image"
+done
+
 for net in platform nginx-proxy-manager_default; do
   docker network inspect "$net" >/dev/null 2>&1 \
     || { echo "missing docker network $net" >&2; exit 1; }
