@@ -2,6 +2,8 @@
 //! API, never through internals. Tests serialize on a shared schema-wiping
 //! fixture because the CI database is a single ephemeral PostgreSQL.
 
+mod lti_test_keys;
+
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -143,6 +145,7 @@ async fn setup_with(zitadel: Option<api::state::ZitadelConfig>) -> Arc<AppState>
         public_api_base_url: "http://127.0.0.1:8080/api".into(),
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel,
+        lti_tool_key: None,
     })
 }
 
@@ -5544,6 +5547,7 @@ async fn coach_daily_allowance_enforced() {
         public_api_base_url: "http://127.0.0.1:8080/api".into(),
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel: None,
+        lti_tool_key: None,
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");

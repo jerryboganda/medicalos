@@ -18,6 +18,7 @@ pub mod integrity;
 pub mod jobs;
 pub mod leagues;
 pub mod library;
+pub mod lti;
 pub mod marks;
 pub mod mock;
 pub mod notes;

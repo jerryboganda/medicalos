@@ -26,6 +26,9 @@ openidconnect = { workspace = true }
 chacha20poly1305 = { workspace = true }
 base64 = "0.22"
 ed25519-dalek = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rsa = "0.9"
+jsonwebtoken = "9"
 tower-http = { workspace = true }
 calamine = "0.36.1"
 csv = "1.4.0"
@@ -37,4 +40,3 @@ type-export = ["dep:ts-rs"]
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-jsonwebtoken = "9"

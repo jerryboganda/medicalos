@@ -514,6 +514,17 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             post(routes::program::record_interop),
         )
         .route(
+            "/v1/institutions/{institution_id}/interop/lti-platforms",
+            post(routes::lti::register_platform),
+        )
+        .route(
+            "/v1/lti/login",
+            get(routes::lti::login_get).post(routes::lti::login_post),
+        )
+        .route("/v1/lti/launch", post(routes::lti::launch))
+        .route("/v1/lti/jwks.json", get(routes::lti::jwks))
+        .route("/v1/lti/deep-links", post(routes::lti::deep_links))
+        .route(
             "/v1/institutions/{institution_id}/audit",
             get(routes::program::institution_audit),
         )
@@ -1208,6 +1219,17 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/institutions/{institution_id}/interop",
             post(routes::program::record_interop),
         )
+        .route(
+            "/api/v1/institutions/{institution_id}/interop/lti-platforms",
+            post(routes::lti::register_platform),
+        )
+        .route(
+            "/api/v1/lti/login",
+            get(routes::lti::login_get).post(routes::lti::login_post),
+        )
+        .route("/api/v1/lti/launch", post(routes::lti::launch))
+        .route("/api/v1/lti/jwks.json", get(routes::lti::jwks))
+        .route("/api/v1/lti/deep-links", post(routes::lti::deep_links))
         .route(
             "/api/v1/institutions/{institution_id}/audit",
             get(routes::program::institution_audit),
