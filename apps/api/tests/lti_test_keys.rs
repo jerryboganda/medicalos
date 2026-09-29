@@ -1,5 +1,5 @@
 //! Fixed RSA fixtures for the LTI 1.3 mocked-platform tests.
-const TEST_TOOL_KEY_PEM: &str = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3SBAOu/fTjYEw
+pub(crate) const TEST_TOOL_KEY_PEM: &str = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3SBAOu/fTjYEw
 keWOiMz6mMF70K8S2h2Kpo7nxpKYNseVn/X+IDUNokoobkaOB58HKLFt0QR0zqid
 Vvo4SUuytvMECPXRM6MrE+oB7Ux8treL3LS2ZS2jbqCir3pTEOb7X586Pz1p+XxQ
 jdqrtyDiw9QzL2eiqusS3wUSaoaSf56qxOS3K+uw4fqVo1/mDl7uLdH1ceeP3ZoM
@@ -27,7 +27,7 @@ uQaHR/yw4mOg3bju7dsAFJX8Jr6YL/Uo7n7KpumVuXcUzmw+PuUPIx89Oa8NjjWL
 pzWwTnIgawy8qmg8zmKURaFk
 ";
 
-const TEST_PLATFORM_KEY_PEM: &str =
+pub(crate) const TEST_PLATFORM_KEY_PEM: &str =
     "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDQowGxNHXBL5o0
 MGRz3Qm+OlVu1pjiiHLNK0ov9Y9ZMWLfJ6487PGAq58nfFJyrWFayR4xo5ug1hlk
 rECIUpH45+vhOQhfWHsKafSL2/TCEcaxrz83IsNwGUtBTPlRCb7DvvO18ycSBA+Y
@@ -56,7 +56,7 @@ V4J0jLJ7brPm0iNcgIprluzkNKu5haXwvjAIFuROd7PBL0WizuV8epKwmAyu+bEi
 Zgg5oFp7BIi2Dg2ptm1mHgDe
 ";
 
-const TEST_PLATFORM_PUBLIC_PEM: &str =
+pub(crate) const TEST_PLATFORM_PUBLIC_PEM: &str =
     "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0KMBsTR1wS+aNDBkc90J
 vjpVbtaY4ohyzStKL/WPWTFi3yeuPOzxgKufJ3xScq1hWskeMaOboNYZZKxAiFKR
 +Ofr4TkIX1h7Cmn0i9v0whHGsa8/NyLDcBlLQUz5UQm+w77ztfMnEgQPmKK79n89

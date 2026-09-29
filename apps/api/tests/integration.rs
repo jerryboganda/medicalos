@@ -2,8 +2,6 @@
 //! API, never through internals. Tests serialize on a shared schema-wiping
 //! fixture because the CI database is a single ephemeral PostgreSQL.
 
-mod lti_test_keys;
-
 use std::sync::Arc;
 
 use axum::body::Body;
