@@ -160,7 +160,7 @@ pub async fn launch(
     )
     .fetch_optional(&state.pool)
     .await?
-    .ok_or_else(|| ApiError::unauthorized())?;
+    .ok_or_else(ApiError::unauthorized)?;
 
     let platform = sqlx::query!(
         "SELECT id, institution_id, issuer, client_id, deployment_id, key_set_url
@@ -172,7 +172,6 @@ pub async fn launch(
     .ok_or_else(ApiError::unauthorized)?;
 
     let payload = verify_platform_token(
-        &state,
         pem,
         &params.id_token,
         &platform.issuer,
@@ -227,7 +226,9 @@ pub async fn launch(
 
     // Deep-linking requests park the platform's settings against the staff
     // user; the signed response is built later by POST /v1/lti/deep-links.
-    let deep_link_settings = payload.get(&lti_claim("deep_linking_settings")).cloned();
+    let deep_link_settings = payload
+        .get(lti_claim("deep_linking_settings").as_str())
+        .cloned();
     if message_type == MESSAGE_DEEP_LINK {
         sqlx::query!(
             "INSERT INTO lti_deep_link_pends (user_id, platform_id, settings, expires_at)
@@ -248,8 +249,8 @@ pub async fn launch(
         "user_id": user_id,
         "message_type": message_type,
         "target_link_uri": row.target_link_uri,
-        "resource_link": payload.get(&lti_claim("resource_link")),
-        "roles": payload.get(&lti_claim("roles")),
+        "resource_link": payload.get(lti_claim("resource_link").as_str()),
+        "roles": payload.get(lti_claim("roles").as_str()),
         "deep_linking_settings": deep_link_settings,
     })))
 }
@@ -464,7 +465,6 @@ pub async fn register_platform(
 // ---- internals ---------------------------------------------------------------
 
 async fn verify_platform_token(
-    state: &AppState,
     _pem: &str,
     id_token: &str,
     issuer: &str,
@@ -532,7 +532,7 @@ async fn link_identity(
     let email = payload["email"]
         .as_str()
         .map(str::to_lowercase)
-        .filter(|email| payload["email_verified"].as_bool() == Some(true))
+        .filter(|_| payload["email_verified"].as_bool() == Some(true))
         .ok_or_else(|| {
             ApiError::forbidden(
                 "launch_unlinked",
