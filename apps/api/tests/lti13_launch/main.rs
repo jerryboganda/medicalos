@@ -484,8 +484,9 @@ async fn lti13_login_launch_deeplink_round_trip() {
     let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
     validation.set_audience(&["client-123"]);
     validation.validate_exp = true;
-    let (_, claims) =
-        jsonwebtoken::decode::<Value>(response_jwt, &key, &validation).expect("verify response");
+    let claims = jsonwebtoken::decode::<Value>(response_jwt, &key, &validation)
+        .expect("verify response")
+        .claims;
     assert_eq!(
         claims["https://purl.imsglobal.org/spec/lti/claim/message_type"],
         "LtiDeepLinkingResponse"
