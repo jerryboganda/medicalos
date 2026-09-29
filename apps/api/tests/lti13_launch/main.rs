@@ -99,6 +99,7 @@ fn get_request(uri: &str) -> Request<Body> {
         .expect("get request")
 }
 
+/// Registration answers with the account; the token comes from a login.
 async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
     let (status, body) = call(
         app.clone(),
@@ -112,7 +113,20 @@ async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
             .expect("register"),
     )
     .await;
-    let token = body["token"].as_str().unwrap_or_default().to_owned();
+    let (login_status, login) = call(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/v1/auth/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({"email": email, "password": "correct horse"}).to_string(),
+            ))
+            .expect("login"),
+    )
+    .await;
+    assert_eq!(login_status, StatusCode::OK, "{login}");
+    let token = login["token"].as_str().unwrap_or_default().to_owned();
     (status, body, token)
 }
 
