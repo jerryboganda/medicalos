@@ -13,6 +13,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -369,11 +370,12 @@ pub async fn review_queue(
     headers: HeaderMap,
     Query(params): Query<QueueParams>,
 ) -> ApiResult<Json<AdminReportsResponse>> {
-    state.require_admin(
+    state.require_permission(
         &user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
+        Permission::ReportTriage,
     )?;
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let rows = sqlx::query(
@@ -461,11 +463,12 @@ pub async fn resolve(
     Path(report_id): Path<Uuid>,
     Json(req): Json<ResolveReportReq>,
 ) -> ApiResult<Json<ResolveQuestionReportResponse>> {
-    state.require_admin(
+    state.require_permission(
         &user,
         headers
             .get("x-admin-token")
             .and_then(|value| value.to_str().ok()),
+        Permission::ReportTriage,
     )?;
     if !matches!(req.status.as_str(), "resolved_fixed" | "resolved_rejected") {
         return Err(ApiError::unprocessable(

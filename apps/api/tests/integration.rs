@@ -24106,6 +24106,17 @@ async fn privileged_role_without_mfa_is_refused_until_second_factor_or_token() {
 /// Register a learner and mint a `platform_owner` session carrying (or not
 /// carrying) the MFA fact — the seam the Zitadel sign-in fills in production.
 async fn operator_session(state: &Arc<AppState>, app: &Router, mfa: bool) -> String {
+    role_session_with(state, app, &["platform_owner"], mfa).await
+}
+
+/// Register a learner and mint a session carrying the given platform roles
+/// (and the MFA fact) — the seam a Zitadel sign-in fills in production.
+async fn role_session_with(
+    state: &Arc<AppState>,
+    app: &Router,
+    roles: &[&str],
+    mfa: bool,
+) -> String {
     let (status, reg) = call(
         app.clone(),
         request(
@@ -24113,7 +24124,7 @@ async fn operator_session(state: &Arc<AppState>, app: &Router, mfa: bool) -> Str
             "/v1/auth/register",
             None,
             Some(serde_json::json!({
-                "email": format!("owner-{}@example.test", Uuid::new_v4()),
+                "email": format!("role-{}@example.test", Uuid::new_v4()),
                 "password": "correct horse"
             })),
         ),
@@ -24121,9 +24132,10 @@ async fn operator_session(state: &Arc<AppState>, app: &Router, mfa: bool) -> Str
     .await;
     assert_eq!(status, StatusCode::OK, "{reg}");
     let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
-    api::auth::issue_session_with(&state.pool, user_id, &["platform_owner".to_string()], mfa)
+    let roles: Vec<String> = roles.iter().map(|r| r.to_string()).collect();
+    api::auth::issue_session_with(&state.pool, user_id, &roles, mfa)
         .await
-        .expect("operator session")
+        .expect("role session")
 }
 
 /// Plan auth-zitadel phase 1: the API is Zitadel's OIDC client. A sign-in
@@ -24470,4 +24482,91 @@ async fn admin_reset_password_revokes_sessions_and_reauths() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     assert_json_keys(&login, &["token"]);
+}
+
+/// Auth-zitadel phase 3: each §18.1 role reaches its own admin surfaces and
+/// is refused elsewhere — permission_required, never a silent pass — while
+/// the operator token keeps working on every route (already covered by the
+/// admin_req-based suites).
+#[tokio::test]
+async fn role_permissions_gate_each_admin_surface() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+
+    let author = role_session(&state, &app, &["author"]).await;
+    let reviewer = role_session(&state, &app, &["medical_reviewer"]).await;
+    let examiner = role_session(&state, &app, &["examiner"]).await;
+    let support = role_session(&state, &app, &["support"]).await;
+
+    // ContentAuthor: concepts create is theirs.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/admin/concepts",
+            Some(&author),
+            Some(serde_json::json!({
+                "canonical_key": "role-test-concept",
+                "display_name": "Role test",
+                "definition": "Created by an author role session."
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // ClinicalApprove: the psychometric screening view is the reviewer's.
+    let vid = ids.question_versions[0];
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/admin/psychometrics/{vid}"),
+            Some(&reviewer),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // ExamAssess: the pending scenario assessment queue is the examiner's.
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "GET",
+            "/v1/admin/scenarios/runs/pending-assessment",
+            Some(&examiner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // ReportTriage: the report queue is support's.
+    let (status, body) = call(
+        app.clone(),
+        request("GET", "/v1/admin/reports", Some(&support), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // And each role is refused outside its lane — honestly.
+    for (token, path) in [
+        (&author, "/v1/admin/reports".to_string()),
+        (&author, format!("/v1/admin/psychometrics/{vid}")),
+        (&examiner, "/v1/admin/concepts".to_string()),
+        (
+            &support,
+            "/v1/admin/scenarios/runs/pending-assessment".to_string(),
+        ),
+    ] {
+        let (status, body) = call(app.clone(), request("GET", &path, Some(token), None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert_eq!(
+            body["error"]["code"], "permission_required",
+            "{path}: {body}"
+        );
+    }
 }

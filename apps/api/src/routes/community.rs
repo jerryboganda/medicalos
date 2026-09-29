@@ -14,6 +14,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
+use crate::authz::Permission;
 use crate::error::{ApiError, ApiResult};
 use crate::routes::engagement::{CompetitionLeaderboardEntry, CompetitionLeaderboardResponse};
 use crate::state::AppState;
@@ -1497,7 +1498,7 @@ pub async fn prize_review(
     Json(req): Json<PrizeReviewReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
-    state.require_admin(&user, provided)?;
+    state.require_permission(&user, provided, Permission::ReportTriage)?;
     for handle in req.flag.unwrap_or_default() {
         sqlx::query!(
             "UPDATE competition_entries SET flagged = true

@@ -14,12 +14,12 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
-fn require_admin(
+fn require_permission(
     state: &AppState,
     user: &crate::auth::AuthUser,
     headers: &HeaderMap,
 ) -> ApiResult<()> {
-    state.require_admin(
+    state.require_permission(
         user,
         headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
     )
@@ -50,7 +50,7 @@ pub async fn register_passage(
     headers: HeaderMap,
     Json(req): Json<RegisterPassageReq>,
 ) -> ApiResult<Json<Value>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let source_ref = clean_text(
         &req.source_ref,
         500,
@@ -157,7 +157,7 @@ pub async fn link_dependency(
     Path(passage_id): Path<Uuid>,
     Json(req): Json<LinkDependencyReq>,
 ) -> ApiResult<Json<Value>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let mut tx = state.pool.begin().await?;
     let passage = sqlx::query("SELECT id FROM source_passages WHERE id = $1 FOR SHARE")
         .bind(passage_id)
@@ -426,7 +426,7 @@ pub async fn record_change(
     Path(passage_id): Path<Uuid>,
     Json(req): Json<RecordChangeReq>,
 ) -> ApiResult<Json<Value>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let revision = clean_text(
         &req.source_revision,
         160,
@@ -613,7 +613,7 @@ pub async fn get_change(
     headers: HeaderMap,
     Path(event_id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     let mut conn = state.pool.acquire().await?;
     Ok(Json(case_json_on(&mut conn, event_id).await?))
 }
@@ -927,7 +927,7 @@ pub async fn resolve_task(
     Path(task_id): Path<Uuid>,
     Json(req): Json<ResolveTaskReq>,
 ) -> ApiResult<Json<Value>> {
-    require_admin(&state, &user, &headers)?;
+    require_permission(&state, &user, &headers)?;
     if !matches!(
         req.resolution.as_str(),
         "reviewed_current" | "corrected" | "retired"
