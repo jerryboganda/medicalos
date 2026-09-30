@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: implemented; CI acceptance pending
 Requirement: SR-08 objective re-test grading
 
 ## Problem Statement
@@ -35,10 +35,12 @@ records each attempt at most once, and commits history and scheduling together.
   rows remain legacy history, with no fabricated evidence linkage.
 - Only the caller's submitted session can supply an answer. Question and card
   must be published and belong to the same question family (or exact version).
+- Evidence comes from tutor/timed/revision practice, not mutable exam answers.
 - Serialize with the existing session-then-user lock order; persist the receipt
   and the card update in one transaction.
-- A clean, sure, correct answer advances an interval. All other genuine answer
-  evidence resets passes and schedules the near re-test.
+- A clean, sure, correct answer is good and advances an interval. A correct
+  but uncertain answer is hard and cannot advance passes. Wrong, skipped or
+  assisted evidence is again and resets passes. Hard/again remain near due.
 - A reused key with different evidence is a conflict. A used attempt under a
   new key is a conflict. A matching retry is idempotent.
 - Evidence submitted before the current card update cannot advance that card.

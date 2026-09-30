@@ -1801,13 +1801,14 @@ async fn enroll_missed_questions_in_retest_queue(
     let due = now + chrono::Duration::days(first_interval_days);
 
     sqlx::query(
-        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
+        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at, enrolled_session_id)
            SELECT DISTINCT
                $2 AS user_id,
                qv.id AS question_version_id,
                0 AS passes,
                $3 AS due,
-               $4 AS updated_at
+               $4 AS updated_at,
+               $1 AS enrolled_session_id
            FROM session_items si
            JOIN question_versions qv ON qv.id = si.question_version_id
            LEFT JOIN attempts a
@@ -1825,7 +1826,8 @@ async fn enroll_missed_questions_in_retest_queue(
            ON CONFLICT (user_id, question_version_id) DO UPDATE SET
                passes = 0,
                due = EXCLUDED.due,
-               updated_at = EXCLUDED.updated_at"#,
+               updated_at = EXCLUDED.updated_at,
+               enrolled_session_id = EXCLUDED.enrolled_session_id"#,
     )
     .bind(sid)
     .bind(user_id)

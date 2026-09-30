@@ -143,7 +143,7 @@ async fn question_publication_denies_missing_revoked_expired_and_wrong_use_right
     let (status, body) = call(
         app.clone(),
         admin_req(
-            "POST",
+            "PATCH",
             &format!("/v1/admin/content-rights/{revoked_id}/revoke"),
             Some(&author),
             Some(serde_json::json!({"reason": "Synthetic fixture revocation"})),
@@ -481,7 +481,7 @@ async fn question_publication_waits_for_concurrent_rights_revocation() {
         call(
             revoke_app,
             admin_req(
-                "POST",
+                "PATCH",
                 &format!("/v1/admin/content-rights/{rights_id}/revoke"),
                 Some(&revoke_token),
                 Some(serde_json::json!({"reason": "Concurrent synthetic revocation"})),

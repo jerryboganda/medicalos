@@ -807,8 +807,10 @@ async fn retest_queue_and_note_collections_and_screening() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                    "idempotency_key": "rt-key-1"})),
+            Some(
+                serde_json::json!({"item_index": 0, "chosen_index": 1, "confidence": "sure",
+                                    "idempotency_key": "rt-key-1"}),
+            ),
         ),
     )
     .await;
@@ -819,6 +821,18 @@ async fn retest_queue_and_note_collections_and_screening() {
         .parse()
         .unwrap();
 
+    let (status, submission) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submission}");
+
     // Wrong re-test: compresses to +1 day and resets passes.
     let (status, r1) = call(
         app.clone(),
@@ -827,7 +841,7 @@ async fn retest_queue_and_note_collections_and_screening() {
             "/v1/me/retests/result",
             Some(&token),
             Some(
-                serde_json::json!({"question_version_id": vid, "correct": false,
+                serde_json::json!({"question_version_id": vid, "session_id": sid, "item_index": 0,
                                     "idempotency_key": "rt-res-1"}),
             ),
         ),
@@ -836,6 +850,17 @@ async fn retest_queue_and_note_collections_and_screening() {
     assert_eq!(status, StatusCode::OK, "{r1}");
     assert_eq!(r1["passes"], 0);
 
+    let (correct_sid, correct_vid) = full_platform_retests::submitted_practice(
+        &app,
+        &token,
+        ids.chapter3,
+        Some(0),
+        "sure",
+        false,
+    )
+    .await;
+    assert_eq!(correct_vid, vid);
+
     let (status, r2) = call(
         app.clone(),
         request(
@@ -843,7 +868,7 @@ async fn retest_queue_and_note_collections_and_screening() {
             "/v1/me/retests/result",
             Some(&token),
             Some(
-                serde_json::json!({"question_version_id": vid, "correct": true,
+                serde_json::json!({"question_version_id": vid, "session_id": correct_sid, "item_index": 0,
                                     "idempotency_key": "rt-res-2"}),
             ),
         ),
@@ -8272,6 +8297,17 @@ async fn settings_admin_gate_and_update() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
+    // Create genuine submitted evidence before this test sets the free
+    // allowance to zero; the re-test interval must still use live settings.
+    let (retest_sid, retest_vid) = full_platform_retests::submitted_practice(
+        &app,
+        &token,
+        ids.chapter3,
+        Some(0),
+        "sure",
+        false,
+    )
+    .await;
 
     let (status, defaults) = call(
         app.clone(),
@@ -8404,8 +8440,9 @@ async fn settings_admin_gate_and_update() {
             "/v1/me/retests/result",
             Some(&token),
             Some(serde_json::json!({
-                "question_version_id": ids.question_versions[1],
-                "correct": true,
+                "question_version_id": retest_vid,
+                "session_id": retest_sid,
+                "item_index": 0,
                 "idempotency_key": "settings-retest-interval"
             })),
         ),
@@ -13998,7 +14035,15 @@ async fn retest_serves_unattempted_family_variant() {
     )
     .await;
     let learner = register_and_login(app.clone()).await;
-    let original = ids.question_versions[0];
+    let (original_sid, original) = full_platform_retests::submitted_practice(
+        &app,
+        &learner,
+        ids.chapter3,
+        Some(1),
+        "sure",
+        false,
+    )
+    .await;
 
     // The learner failed the original: a re-test card exists (+1 day).
     let (status, res) = call(
@@ -14009,7 +14054,7 @@ async fn retest_serves_unattempted_family_variant() {
             Some(&learner),
             Some(serde_json::json!({
                 "question_version_id": format!("{original}"),
-                "correct": false, "idempotency_key": "variant-res-1"
+                "session_id": original_sid, "item_index": 0, "idempotency_key": "variant-res-1"
             })),
         ),
     )
@@ -14159,6 +14204,31 @@ async fn retest_serves_unattempted_family_variant() {
         serde_json::json!(format!("{original}")),
         "{queue}"
     );
+
+    // A real submitted sibling answer grades the original card.
+    let (status, variant_result) = call(
+        app,
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&learner),
+            Some(serde_json::json!({
+                "question_version_id": original, "session_id": sid, "item_index": 0,
+                "idempotency_key": "variant-graded-receipt"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{variant_result}");
+    assert_eq!(
+        variant_result["card_version_id"],
+        serde_json::json!(original)
+    );
+    assert_eq!(
+        variant_result["question_version_id"],
+        serde_json::json!(variant)
+    );
+    assert_eq!(variant_result["rating"], "again", "{variant_result}");
 }
 
 #[tokio::test]
@@ -24685,6 +24755,19 @@ async fn qotd_reminder_honours_preferences_quiet_hours_and_dedupes() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        // This fixture must be eligible at every UTC hour. The quiet-hours
+        // case below explicitly sets its own wrapping window afterwards.
+        let (status, preferences) = call(
+            app.clone(),
+            request(
+                "PATCH",
+                "/v1/me/notifications",
+                Some(token),
+                Some(serde_json::json!({"quiet_hours_start": 0, "quiet_hours_end": 0})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{preferences}");
     }
 
     let token_a = register_and_login(app.clone()).await;

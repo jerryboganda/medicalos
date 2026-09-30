@@ -47,6 +47,16 @@
 
 ## Release acceptance
 
+- The account candidate run 36783972136 passed format, migration and Clippy,
+  then stopped with two rights-test method errors (POST instead of PATCH) and
+  a pre-existing QOTD fixture dependent on daytime UTC. Fixes retain actual
+  revocation and quiet-hour assertions and configure eligible fixture users
+  with an explicitly empty quiet window.
+- The re-test regression commit 66bf2cf in run 36784150909 proved a genuine
+  grading defect: HTTP 200 and passes=1 for a correctness claim with no answer.
+  The expected status was 422. Receipt-based grading, atomic scheduling and
+  single-use/replay cases require the follow-up implementation run.
+
 No deployment, real-provider acceptance, clinical approval, device-matrix run,
 student beta or production disaster-recovery drill is claimed by this record.
 CI restore testing uses the disposable database and synthetic data only.

@@ -138,7 +138,7 @@ test('learner reviews devices, revokes another device, and signs out by revoking
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/account');
 
-	await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible();
 	await expect(page.getByTestId('nav-account')).toHaveAttribute('aria-current', 'page');
 	await expect(page.locator('nav[aria-label="Quick navigation"] a')).toHaveCount(5);
 	await expect(page.getByTestId(`device-${currentDeviceId}`)).toContainText('Current device');

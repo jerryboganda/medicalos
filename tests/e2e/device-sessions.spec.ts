@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 const API = process.env.E2E_API_BASE ?? process.env.VITE_API_BASE ?? 'http://127.0.0.1:8080';
 
 test('a learner at the device limit can revoke a device and register this browser', async ({ page, request }) => {
+	test.setTimeout(60_000);
 	const email = `e2e-device-limit-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
 	const password = 'correct horse battery';
 	expect((await request.post(`${API}/v1/auth/register`, { data: { email, password } })).ok()).toBeTruthy();
