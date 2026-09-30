@@ -418,6 +418,49 @@ async fn question_workflow_fails_closed_when_legacy_author_is_unknown() {
     assert_eq!(question_status, "draft");
 }
 
+#[tokio::test]
+async fn question_submission_rolls_back_when_its_audit_cannot_be_written() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let version = create_question(&app, &author, ids.chapter1, None).await;
+    sqlx::query(
+        "ALTER TABLE audit_events ADD CONSTRAINT reject_fixture_submit_audit
+         CHECK (action <> 'assessment_submitted') NOT VALID",
+    )
+    .execute(&state.pool)
+    .await
+    .expect("inject audit write failure");
+    let (status, result) = workflow(app.clone(), &author, "submit", [version]).await;
+    sqlx::query("ALTER TABLE audit_events DROP CONSTRAINT reject_fixture_submit_audit")
+        .execute(&state.pool)
+        .await
+        .expect("remove audit failure fixture");
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(
+        result["results"][0]["error"]["code"], "internal",
+        "{result}"
+    );
+    let (status, search) = call(
+        app,
+        admin_req("GET", "/v1/admin/questions", Some(&author), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{search}");
+    let item = search["questions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["version_id"] == serde_json::json!(version))
+        .expect("draft remains visible");
+    assert_eq!(
+        item["status"], "draft",
+        "failed audit must not submit the draft: {search}"
+    );
+}
+
 async fn wait_for_blocked_statement(pool: &sqlx::PgPool, fragment: &str) {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
