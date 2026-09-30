@@ -49,6 +49,32 @@ Live surfaces (2026-09-19, owner-directed):
   the TLS hop regardless of which layer sets it). Do NOT raise the max-age
   until a full certificate renewal cycle has succeeded under it; if the
   certificate ever breaks, removal is a one-line redeploy.
+- Platform identity provider (Zitadel, owner decision 2026-09-30): the
+  deploy script starts a capped `medicalos-zitadel` container (default
+  0.2 CPU / 256 MB — override with `VPS_ZITADEL_CPUS` / `VPS_ZITADEL_MEMORY`)
+  **only when all four inputs exist**: the GitHub secrets
+  `VPS_ZITADEL_DB_PASSWORD`, `VPS_ZITADEL_MASTERKEY` (exactly 32 chars),
+  `VPS_ZITADEL_ADMIN_PASSWORD` and `VPS_ZITADEL_EXTERNAL_URL`. Missing
+  inputs = platform sign-in stays disabled; nothing is started. One-time
+  owner steps to activate:
+  1. DBA step on platform-postgres (the deploy credentials cannot do it):
+     `CREATE USER medicalos_zitadel WITH PASSWORD '...'; CREATE DATABASE
+     medicalos_zitadel OWNER medicalos_zitadel;`
+  2. Set the four GitHub secrets above.
+  3. DNS: point `auth.medicalos.polytronx.com` at the VPS; add an NPM proxy
+     host for it with a certificate, forwarding to
+     `http://medicalos-zitadel:8080` (the API container reaches Zitadel
+     through the same external URL).
+  4. After the deploy starts Zitadel healthy, run
+     `infra/zitadel/provision.sh` against the external URL (see
+     `docs/deployment/orca-desktop.md` §K for the pattern), then set the
+     `VPS_ZITADEL_ISSUER` / `VPS_ZITADEL_CLIENT_ID` /
+     `VPS_ZITADEL_CLIENT_SECRET` GitHub secrets — the existing deploy
+     plumbing forwards them to the API and platform sign-in goes live.
+  Capacity note: Zitadel is a Go service and 256 MB is tight; if it
+  crash-loops, raise `VPS_ZITADEL_MEMORY` and redeploy — the variables
+  exist so a bump is a one-secret change.
+
 - Backups: the `medicalos` database is inside platform-postgres, so the
   nightly `platform-backup` pg_dump covers it (7 nights on-box).
 
