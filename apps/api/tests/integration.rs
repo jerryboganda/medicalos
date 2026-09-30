@@ -21,6 +21,9 @@ use uuid::Uuid;
 
 use api::{router, schema, seed, state::AppState};
 
+#[path = "full_platform/readiness.rs"]
+mod full_platform_readiness;
+
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone)]
