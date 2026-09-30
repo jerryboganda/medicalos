@@ -19,9 +19,11 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: Arc<state::AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readiness))
         // Same-origin production prefix: nginx serves the API under /api/
         // (medicalos.polytronx.com/api/* -> medicalos-api:8080/*).
         .route("/api/healthz", get(health_json))
+        .route("/api/readyz", get(readiness))
         .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
@@ -1448,6 +1450,30 @@ async fn healthz() -> &'static str {
 async fn health_json() -> axum::Json<serde_json::Value> {
     // JSON twin for the plain-text healthz (lets the deploy probe parse it).
     axum::Json(serde_json::json!({"status": "ok"}))
+}
+
+async fn readiness(
+    axum::extract::State(state): axum::extract::State<Arc<state::AppState>>,
+) -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+    let available = matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            sqlx::query_scalar!("SELECT 1").fetch_one(&state.pool),
+        )
+        .await,
+        Ok(Ok(_))
+    );
+    if available {
+        (
+            axum::http::StatusCode::OK,
+            axum::Json(serde_json::json!({"status": "ok"})),
+        )
+    } else {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"status": "unavailable"})),
+        )
+    }
 }
 
 async fn version() -> axum::Json<serde_json::Value> {

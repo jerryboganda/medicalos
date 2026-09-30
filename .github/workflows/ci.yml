@@ -52,6 +52,14 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
       - name: Tests
         run: cargo test --workspace -- --test-threads=1
+      - name: Install backup transport for the disposable restore drill
+        run: sudo apt-get update -qq && sudo apt-get install -y rclone
+      - name: Backup failure-path checks
+        run: bash scripts/verify-backup-offsite.sh
+      - name: Restore disposable database from verified off-site copy
+        env:
+          DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/verify-backup-restore.sh
       # ARCH-02: Rust DTOs own generated client contracts. Keep the first
       # export bootstrap green, then reject any stale checked-in declarations.
       - name: Export Rust-owned TypeScript contracts
@@ -133,6 +141,8 @@ jobs:
         run: npm install
       - name: Build site
         run: npm run build -w @medical-os/site
+      - name: Exact-revision release policy tests
+        run: node --test scripts/release-ci-gate.test.cjs
 
   zitadel:
     # auth-zitadel phase 0: the identity provider's setup is code — pinned
