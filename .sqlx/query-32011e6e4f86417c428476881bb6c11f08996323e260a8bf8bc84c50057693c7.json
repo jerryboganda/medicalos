@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT es.user_id, es.qotd_exam_id,\n                  COALESCE(np.plan_reminders, TRUE) AS \"plan_reminders!\",\n                  COALESCE(np.quiet_hours_start, 22) AS \"quiet_hours_start!\",\n                  COALESCE(np.quiet_hours_end, 7) AS \"quiet_hours_end!\"\n           FROM engagement_settings es\n           JOIN users u ON u.id = es.user_id AND u.deleted_at IS NULL\n           LEFT JOIN notification_preferences np ON np.user_id = es.user_id\n           WHERE es.qotd_enabled = TRUE\n             AND es.qotd_exam_id IS NOT NULL\n             AND NOT EXISTS (\n                 SELECT 1 FROM qotd_answers a\n                 WHERE a.user_id = es.user_id AND a.day = CURRENT_DATE)\n             AND NOT EXISTS (\n                 SELECT 1 FROM notifications n\n                 WHERE n.user_id = es.user_id AND n.category = 'plan'\n                   AND n.deep_link = '/today'\n                   AND n.created_at::date = CURRENT_DATE)\n           LIMIT 500",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "qotd_exam_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "plan_reminders!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "quiet_hours_start!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "quiet_hours_end!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "32011e6e4f86417c428476881bb6c11f08996323e260a8bf8bc84c50057693c7"
+}
