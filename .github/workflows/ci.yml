@@ -143,6 +143,13 @@ jobs:
         run: npm run build -w @medical-os/site
       - name: Exact-revision release policy tests
         run: node --test scripts/release-ci-gate.test.cjs
+      - name: Validate Orca compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-compose-password
+          PACK_SIGNING_KEY: ci-only-compose-signing-key-32-characters
+          ZITADEL_MASTERKEY: ci-only-masterkey-32-characters!
+          ZITADEL_ADMIN_PASSWORD: Ci-Owner-Pass-1!
+        run: docker compose -f infra/local/docker-compose.yml config --quiet
 
   zitadel:
     # auth-zitadel phase 0: the identity provider's setup is code — pinned

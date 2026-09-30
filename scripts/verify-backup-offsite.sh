@@ -46,6 +46,9 @@ for scenario in success unconfigured upload-failed corrupt dump-failed invalid-r
   else
     [[ "$scenario" != success ]] || { cat "$WORK/$scenario/output"; exit 1; }
     ! grep -q '^rclone delete ' "$MOCK_LOG"
+    if [[ "$scenario" == dump-failed ]]; then
+      [[ -z "$(find "$WORK/$scenario/backups" -type f -name 'medicalos-*' -print -quit)" ]]
+    fi
   fi
   echo "PASS backup $scenario"
 done

@@ -74,7 +74,7 @@ pub async fn register_device(
     if existing
         .as_ref()
         .and_then(|row| row.revoked_at.as_ref())
-        .is_some_and(|revoked_at| auth_session.created_at < *revoked_at)
+        .is_some_and(|revoked_at| auth_session.created_at <= *revoked_at)
     {
         return Err(ApiError::conflict(
             "device_revoked",

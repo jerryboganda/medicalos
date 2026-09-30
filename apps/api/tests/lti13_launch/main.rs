@@ -9,8 +9,7 @@ mod lti_test_keys;
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::Router;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde_json::{json, Value};
@@ -145,28 +144,6 @@ fn mock_platform_jwks() -> Value {
     }]})
 }
 
-/// The browser-facing LMS endpoints remain a loopback HTTP fixture. Launch
-/// verification receives the platform's signing key through an in-process
-/// JWKS transport.
-async fn spawn_mock_platform() -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock LMS");
-    let addr = listener.local_addr().expect("addr");
-    let jwks = mock_platform_jwks();
-    let app = Router::new().route(
-        "/jwks.json",
-        get(move || {
-            let jwks = jwks.clone();
-            async move { Json(jwks) }
-        }),
-    );
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve mock LMS");
-    });
-    format!("http://{addr}")
-}
-
 struct MockJwksTransport {
     allowed_url: String,
     jwks: Value,
@@ -235,7 +212,7 @@ fn mint_id_token(
 
 #[tokio::test]
 async fn lti13_login_launch_deeplink_round_trip() {
-    let lms_base = spawn_mock_platform().await;
+    let lms_base = "http://lms.example.test".to_string();
     let jwks_transport = Arc::new(MockJwksTransport {
         allowed_url: format!("{lms_base}/jwks.json"),
         jwks: mock_platform_jwks(),

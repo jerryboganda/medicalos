@@ -72,15 +72,17 @@ The repo is private, so its GHCR packages are private too.
    - `POSTGRES_PASSWORD` — any strong string.
    - `PACK_SIGNING_KEY` — generate: `openssl rand -base64 48` (must be
      ≥ 32 non-whitespace bytes or the API refuses to boot).
-   - `IMAGE_TAG` — pin to the SHA of the deploy you want (default `latest`
-     tracks the last green `main` deploy; both tags exist on GHCR).
+   - `IMAGE_TAG` — pin to the full source SHA of the accepted `main` release.
+     The image workflow now waits for a successful `ci.yml` push run for that
+     exact SHA and rejects a superseded main revision. `latest` alone is not
+     acceptance evidence. Confirm image jobs finished before pulling.
 2. Deploy — pick one:
    - **Orca GUI:** Stacks → New → pick `infra/local/docker-compose.yml` as
      the compose file and `infra/local/.env` as its env file → Deploy. Orca
      runs `docker compose up -d` and gives you per-container CPU/RAM charts.
    - **CLI:** `cd "/d/Projects/Medical OS/infra/local" && docker compose up -d`
      (first pull is ~400 MB of images, once).
-3. First boot order: postgres healthy → api applies the 57 migrations (watch
+3. First boot order: postgres healthy → api applies the checked-in migrations (watch
    `docker compose logs -f medicalos-api` once) → web up.
 4. Seed demo content (as you chose): `docker compose exec medicalos-api api --seed`.
 
@@ -90,7 +92,8 @@ The repo is private, so its GHCR packages are private too.
 bash infra/local/verify.sh
 ```
 
-Checks `/healthz` = ok, the SvelteKit shell, the static
+Checks `/healthz` = ok, database-dependent `/readyz` directly and through the
+same-origin proxy, the SvelteKit shell, the static
 `/api/version.json` provenance file, and the `/api/` proxy — then opens:
 
 | URL | What |
@@ -99,27 +102,31 @@ Checks `/healthz` = ok, the SvelteKit shell, the static
 | http://127.0.0.1:18080 | API directly (debugging; 18080 because 8080 belongs to another project on the shared engine) |
 | http://localhost:8082 | Marketing site (after step G) |
 
-**Admin console.** Admin access in this app is a logged-in user account plus
-the shared `ADMIN_TOKEN` (there is no separate admin role): register an
-account in the app, then set `localStorage.setItem('mlos_admin', '<ADMIN_TOKEN
-from infra/local/.env>')` in the browser and reload — the client sends it as
-the `x-admin-token` header, and `/api/v1/admin/*` requires both the session
-and the token (session-only → 401, token-only → 401, both → 200).
+**Admin console.** A Zitadel role grants only its named permissions, and
+privileged operations require a multi-factor sign-in. Authors, medical
+reviewers and the platform owner have distinct permissions; content approval
+also preserves the separate-author requirement. See `apps/api/src/authz.rs`
+and `infra/zitadel/provision.sh` for the current role mapping.
+
+The configured `ADMIN_TOKEN` remains an operator break-glass path alongside
+an authenticated application session. The client reads it from
+`localStorage['mlos_admin']` and sends `x-admin-token`. Handle it as a privileged
+credential; never include its value in screenshots, reports or source files.
+Without a qualifying role/MFA or the configured token, admin operations return
+an authorization error. A token without an application session is insufficient.
 
 ## G. Marketing site (profile `full`)
 
-`medicalos-site` needs its GHCR image, produced by the `site-image` job in
-`deploy.yml` — which waits for the next owner-mandated **repo PUBLIC →
-build/verify → PRIVATE** CI window (private-repo Actions billing limit).
-When the image exists:
+`medicalos-site` needs its GHCR image, produced by the CI-gated `site-image`
+job in `deploy.yml`. Repository visibility and billing changes require their
+own authorization; this deployment procedure does not change them. When the
+accepted SHA's image exists:
 
 ```bash
 docker compose --profile full up -d   # from infra/local
 ```
 
-Sooner fallback (explicit, justified exception to the compute policy — an
-Astro build is seconds-light): `npm install && npm run build -w @medical-os/site`,
-then point any static server at `apps/site/dist`. Prefer the CI image.
+Builds remain in GitHub Actions under the repository compute policy.
 
 ## H. Update & rollback
 

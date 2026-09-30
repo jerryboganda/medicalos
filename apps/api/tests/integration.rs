@@ -23,6 +23,8 @@ use api::{router, schema, seed, state::AppState};
 
 #[path = "full_platform/lti.rs"]
 mod full_platform_lti;
+#[path = "full_platform/question_rights.rs"]
+mod full_platform_question_rights;
 #[path = "full_platform/readiness.rs"]
 mod full_platform_readiness;
 #[path = "full_platform/sessions.rs"]
@@ -5243,8 +5245,8 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(status, StatusCode::OK, "{applied2}");
     let batch2: Uuid = applied2["batch_id"].as_str().unwrap().parse().unwrap();
 
-    // Imported items go through the same §19.3 gate before pool entry:
-    // a second admin submits the batch, the importer approves and publishes.
+    // Imported items keep their true author through the §19.3 gate:
+    // the importer submits and a different operator approves and publishes.
     let co_reviewer = register_and_login(app.clone()).await;
     let vids: Vec<Uuid> = applied2["created"]
         .as_array()
@@ -5257,7 +5259,7 @@ async fn editorial_hierarchy_question_and_import_flow() {
         admin_req(
             "POST",
             "/v1/admin/assessment-workflow",
-            Some(&co_reviewer),
+            Some(&token),
             Some(serde_json::json!({"action": "submit", "version_ids": vids})),
         ),
     )
@@ -5271,7 +5273,7 @@ async fn editorial_hierarchy_question_and_import_flow() {
             admin_req(
                 "POST",
                 "/v1/admin/assessment-workflow",
-                Some(&token),
+                Some(&co_reviewer),
                 Some(serde_json::json!({"action": action, "version_ids": vids})),
             ),
         )
@@ -13104,6 +13106,15 @@ async fn assessment_author_reviewer_publisher_separation() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "SEPARATION-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     // A fresh chapter so pool visibility is provable without seed noise.
     let (status, node) = call(
@@ -13133,7 +13144,8 @@ async fn assessment_author_reviewer_publisher_separation() {
         ],
         "correct_index": 0,
         "key_learning_point": "Authors cannot approve their own items.",
-        "source_ref": "Fixture"
+        "source_ref": "Fixture",
+        "rights_ref": "SEPARATION-FIXTURE"
     });
     let (status, created) = call(
         app.clone(),
@@ -13188,7 +13200,8 @@ async fn assessment_author_reviewer_publisher_separation() {
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "approved", "{wf}");
 
-    // The reviewer may publish — only the author is barred.
+    // A different operator may publish through the fixture's break-glass
+    // token; role-specific publication refusal is covered separately.
     let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "published", "{wf}");
@@ -13539,6 +13552,15 @@ async fn reserved_family_form_session_and_ai_gate() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "RESERVED-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     // Fresh chapter so pool visibility is provable without seed noise.
     let (status, node) = call(
@@ -13575,7 +13597,8 @@ async fn reserved_family_form_session_and_ai_gate() {
                 ],
                 "correct_index": 0,
                 "key_learning_point": "Reserved families stay behind their form.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "RESERVED-FIXTURE"
             })),
         ),
     )
@@ -13791,6 +13814,15 @@ async fn assisted_evidence_never_becomes_community_signal() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "ASSISTED-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
     let coached = register_and_login(app.clone()).await;
     let clean = register_and_login(app.clone()).await;
     let declared = register_and_login(app.clone()).await;
@@ -13828,7 +13860,8 @@ async fn assisted_evidence_never_becomes_community_signal() {
                 ],
                 "correct_index": 0,
                 "key_learning_point": "Assisted answers are not community evidence.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "ASSISTED-FIXTURE"
             })),
         ),
     )
@@ -13953,6 +13986,15 @@ async fn retest_serves_unattempted_family_variant() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "FAMILY-VARIANT-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
     let learner = register_and_login(app.clone()).await;
     let original = ids.question_versions[0];
 
@@ -14005,7 +14047,8 @@ async fn retest_serves_unattempted_family_variant() {
                 ],
                 "correct_index": 1,
                 "key_learning_point": "Variants probe the same concept differently.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "FAMILY-VARIANT-FIXTURE"
             })),
         ),
     )
@@ -19722,6 +19765,15 @@ async fn variants_trends_drills_regression_and_qti() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "VARIANT-SOURCE-RIGHTS",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     let (status, denied_search) = call(
         app.clone(),

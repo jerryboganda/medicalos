@@ -156,6 +156,23 @@ async fn device_revocation_retires_every_bound_bearer_and_blocks_pack_opens() {
     );
     assert_eq!(old_key_registration["error"]["code"], "device_revoked");
 
+    // Fix the timestamp boundary deterministically: a session no newer than
+    // the revocation must fail closed, including an equal transaction time.
+    sqlx::query!(
+        "UPDATE auth_sessions SET created_at =
+         (SELECT revoked_at FROM user_devices WHERE id = $1)
+         WHERE token_hash = $2",
+        device_a_id.parse::<Uuid>().unwrap(),
+        api::auth::sha256_hex(&legacy_unbound_token)
+    )
+    .execute(&state.pool)
+    .await
+    .expect("equal revocation timestamp fixture");
+    let (status, same_timestamp) =
+        register_device(&app, &legacy_unbound_token, "session-device-a").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{same_timestamp}");
+    assert_eq!(same_timestamp["error"]["code"], "device_revoked");
+
     let (status, _) = call(
         app.clone(),
         request("GET", "/v1/me/today", Some(&device_a_token), None),
