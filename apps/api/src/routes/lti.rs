@@ -647,6 +647,7 @@ fn is_public_ip(address: IpAddr) -> bool {
                 && !address.is_unspecified()
                 && !address.is_multicast()
                 && !address.is_broadcast()
+                && !address.is_documentation()
                 && octets[0] != 0
                 && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
                 // IANA's IPv4 registry (https://www.iana.org/assignments/iana-ipv4-special-registry)
@@ -658,11 +659,7 @@ fn is_public_ip(address: IpAddr) -> bool {
                         && octets[2] == 0
                         && !matches!(octets[3], 9 | 10))
                         || (octets[1] == 88 && octets[2] == 99)))
-                && !(octets[0] == 198
-                    && (octets[1] == 18
-                        || octets[1] == 19
-                        || (octets[1] == 51 && octets[2] == 100)))
-                && !(octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                && !(octets[0] == 198 && matches!(octets[1], 18 | 19))
                 && octets[0] < 224
         }
         IpAddr::V6(address) => {
