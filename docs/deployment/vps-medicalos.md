@@ -42,13 +42,13 @@ Live surfaces (2026-09-19, owner-directed):
   - `location = /api/version.json { proxy_pass http://medicalos-web/version.json; }`
     (the deploy SHA proof must come from the static web build, not the API).
 - Security headers: the web container sets `Content-Security-Policy-Report-Only`,
-  `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and
-  `Permissions-Policy` (see `apps/client/security-headers.conf`). HSTS is a
-  TLS-terminator concern and is deliberately NOT set yet: it is sticky and
-  can lock visitors out if the certificate breaks. Once the pilot is stable,
-  add `Strict-Transport-Security: max-age=15552000` to the NPM proxy host
-  (same manual patch block as above), and raise the max-age after a full
-  renewal cycle has succeeded under it.
+  `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+  `Permissions-Policy` and — owner-approved 2026-09-30 —
+  `Strict-Transport-Security: max-age=15552000` at the app level
+  (see `apps/client/security-headers.conf`; browsers honor the header over
+  the TLS hop regardless of which layer sets it). Do NOT raise the max-age
+  until a full certificate renewal cycle has succeeded under it; if the
+  certificate ever breaks, removal is a one-line redeploy.
 - Backups: the `medicalos` database is inside platform-postgres, so the
   nightly `platform-backup` pg_dump covers it (7 nights on-box).
 
