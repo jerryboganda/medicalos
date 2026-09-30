@@ -1,5 +1,11 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-user-token']);
+});
 
 const examId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const chapterId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

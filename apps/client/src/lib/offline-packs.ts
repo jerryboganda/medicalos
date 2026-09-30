@@ -1,4 +1,7 @@
 import { Api, type PackManifest, type PackQuestionResource } from '$lib/api';
+import { browserDeviceId as deviceId } from './device-identity';
+
+export { deviceId };
 
 const DB_NAME = 'medical-os-offline-packs';
 const DB_VERSION = 1;
@@ -106,16 +109,6 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 		transaction.onerror = () => reject(transaction.error ?? new Error('Offline storage write failed.'));
 		transaction.onabort = () => reject(transaction.error ?? new Error('Offline storage write was cancelled.'));
 	});
-}
-
-export function deviceId(): string {
-	const storageKey = 'mlos_pack_device';
-	let value = localStorage.getItem(storageKey);
-	if (!value) {
-		value = crypto.randomUUID();
-		localStorage.setItem(storageKey, value);
-	}
-	return value;
 }
 
 export function packId(examId: string, id = deviceId()): string {

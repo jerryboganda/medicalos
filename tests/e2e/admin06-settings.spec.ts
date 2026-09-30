@@ -1,5 +1,11 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-admin-user-token']);
+});
 
 test('administrator loads and saves live runtime settings', async ({ page }) => {
 	let savedSettings: Record<string, unknown> | undefined;

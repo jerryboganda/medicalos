@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-user-token']);
+});
 
 test('learner protects plan work and refreshes after a stale capacity replan', async ({ page }) => {
 	const planId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

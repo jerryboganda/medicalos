@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-owner-token', 'e2e-history-taker-token']);
+});
 
 test('team lead invites a role, teammate acts, and recipient acknowledges a handover', async ({ page }) => {
 	const runId = '99999999-9999-4999-8999-999999999999';

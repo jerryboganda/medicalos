@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test, type Page } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['community-e2e-token']);
+});
 
 type Post = { post_id: string; body: string; status: string; handle: string; at: string };
 type QueueReport = {

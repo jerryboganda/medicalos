@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-author-token']);
+});
 
 test('admin records extraction gaps and a separate reviewer verifies critical regions', async ({ page }) => {
 	const reportId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';

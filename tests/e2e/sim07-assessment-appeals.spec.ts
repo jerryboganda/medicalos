@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-learner-token', 'e2e-reviewer-token']);
+});
 
 const runId = '77777777-7777-4777-8777-777777777777';
 const appealId = '88888888-8888-4888-8888-888888888888';

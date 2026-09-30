@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-learner-token', 'e2e-editor-token']);
+});
 
 test('learner navigates an ordered stack, reveals findings, and reads approved annotations', async ({ page }) => {
 	const imageCases = [
