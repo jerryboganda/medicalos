@@ -24622,7 +24622,7 @@ async fn qotd_reminder_honours_preferences_quiet_hours_and_dedupes() {
     // c sits inside a quiet window that covers the current UTC hour.
     let hour = {
         use chrono::Timelike;
-        i32::from(chrono::Utc::now().time().hour())
+        chrono::Utc::now().time().hour() as i32
     };
     let start = (hour + 23) % 24;
     let end = (hour + 2) % 24;

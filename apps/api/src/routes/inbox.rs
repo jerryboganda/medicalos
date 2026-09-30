@@ -153,7 +153,7 @@ pub(crate) async fn send_daily_qotd_reminders(state: &AppState) -> ApiResult<usi
         return Ok(0);
     }
     use chrono::Timelike;
-    let now_hour = i32::from(chrono::Utc::now().time().hour());
+    let now_hour = chrono::Utc::now().time().hour() as i32;
     // Learners who never touched their preferences keep the defaults
     // (reminders on, quiet 22–07) — hence the LEFT JOIN with COALESCE.
     // The delivered copy links to /today, where the QOTD card lives.
