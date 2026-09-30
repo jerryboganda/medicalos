@@ -591,11 +591,14 @@ async fn transition_version(
     vid: Uuid,
     note: Option<&str>,
 ) -> ApiResult<serde_json::Value> {
+    let mut tx = state.pool.begin().await?;
     let v = sqlx::query!(
-        r#"SELECT status AS "status!", created_by FROM question_versions WHERE id = $1"#,
+        r#"SELECT status AS "status!", created_by, reviewed_by, rights_ref, source_ref,
+                  source_refs, media_refs
+           FROM question_versions WHERE id = $1 FOR UPDATE"#,
         vid
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
     match action {
@@ -611,10 +614,10 @@ async fn transition_version(
                 "UPDATE question_versions SET status = 'in_review' WHERE id = $1",
                 vid
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
             audit(
-                &state.pool,
+                &mut *tx,
                 actor,
                 "assessment_submitted",
                 "question_version",
@@ -622,6 +625,7 @@ async fn transition_version(
                 json!({}),
             )
             .await?;
+            tx.commit().await?;
             Ok(json!({ "version_id": vid, "status": "in_review" }))
         }
         "approve" | "reject" => {
@@ -651,7 +655,7 @@ async fn transition_version(
                 decision,
                 note
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
             if action == "approve" {
                 sqlx::query!(
@@ -659,18 +663,18 @@ async fn transition_version(
                     vid,
                     actor
                 )
-                .execute(&state.pool)
+                .execute(&mut *tx)
                 .await?;
             } else {
                 sqlx::query!(
-                    "UPDATE question_versions SET status = 'draft' WHERE id = $1",
+                    "UPDATE question_versions SET status = 'draft', reviewed_by = NULL WHERE id = $1",
                     vid
                 )
-                .execute(&state.pool)
+                .execute(&mut *tx)
                 .await?;
             }
             audit(
-                &state.pool,
+                &mut *tx,
                 actor,
                 if action == "approve" {
                     "assessment_approved"
@@ -682,19 +686,11 @@ async fn transition_version(
                 json!({ "decision": decision }),
             )
             .await?;
+            tx.commit().await?;
             Ok(json!({ "version_id": vid, "status": new_status }))
         }
         "publish" => {
-            let mut tx = state.pool.begin().await?;
-            let version = sqlx::query!(
-                r#"SELECT status AS "status!", created_by, rights_ref, source_ref,
-                          source_refs, media_refs
-                   FROM question_versions WHERE id = $1 FOR UPDATE"#,
-                vid
-            )
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+            let version = v;
             if version.status != "approved" {
                 return Err(ApiError::conflict(
                     "invalid_transition",
@@ -705,6 +701,12 @@ async fn transition_version(
                 return Err(ApiError::forbidden(
                     "separation_violation",
                     "the author of an item cannot publish it (§19.3)",
+                ));
+            }
+            if version.reviewed_by.is_none() || version.reviewed_by == version.created_by {
+                return Err(ApiError::forbidden(
+                    "independent_review_required",
+                    "an independent clinical review is required to publish a question",
                 ));
             }
             let rights_ref = version

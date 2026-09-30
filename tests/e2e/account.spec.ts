@@ -206,6 +206,7 @@ test('account deletion is reversible until confirmed and clears local authentica
 	await acknowledgement.check();
 	await confirmation.getByRole('button', { name: 'Cancel' }).click();
 	await expect(confirmation).toBeHidden();
+	await expect(page.getByRole('button', { name: 'Review account deletion' })).toBeFocused();
 	expect(api.requests.some((request) => request.method === 'DELETE' && request.path === '/v1/me/account')).toBe(false);
 
 	await page.getByRole('button', { name: 'Review account deletion' }).click();

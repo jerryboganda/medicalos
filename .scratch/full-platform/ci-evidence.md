@@ -60,3 +60,16 @@
 No deployment, real-provider acceptance, clinical approval, device-matrix run,
 student beta or production disaster-recovery drill is claimed by this record.
 CI restore testing uses the disposable database and synthetic data only.
+
+## Re-test and editorial regression evidence
+
+- Run 36785848450 passed format, migrations and Clippy and 143 of 144 API
+  integration tests. All five receipt-grading cases and the rights cases passed.
+  The remaining assertion incorrectly expected "again" for a correctly answered
+  family variant without confidence; the correct rating is "hard", passes=0.
+- Run 36786239795 confirmed the new editorial regression: a failed submission
+  audit returned an internal error but left the draft in_review. The candidate
+  now locks the version and commits status, review and audit in one transaction.
+  Review failure, independent provenance and competing-decision cases are added.
+- The next exact-source run must pass the complete suite, client builds and
+  browser checks. Gallery artifacts will be inspected after they are generated.

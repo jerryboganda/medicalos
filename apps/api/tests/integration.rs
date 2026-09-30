@@ -14228,7 +14228,11 @@ async fn retest_serves_unattempted_family_variant() {
         variant_result["question_version_id"],
         serde_json::json!(variant)
     );
-    assert_eq!(variant_result["rating"], "again", "{variant_result}");
+    // This sibling's key is B (the original's key is A), and its answer
+    // did not declare certainty. Grade the sibling's key, not the card's.
+    assert_eq!(variant_result["correct"], true, "{variant_result}");
+    assert_eq!(variant_result["rating"], "hard", "{variant_result}");
+    assert_eq!(variant_result["passes"], 0, "{variant_result}");
 }
 
 #[tokio::test]

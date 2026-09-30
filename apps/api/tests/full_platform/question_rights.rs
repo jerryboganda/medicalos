@@ -461,25 +461,166 @@ async fn question_submission_rolls_back_when_its_audit_cannot_be_written() {
     );
 }
 
-async fn wait_for_blocked_statement(pool: &sqlx::PgPool, fragment: &str) {
+#[tokio::test]
+async fn question_review_rolls_back_when_its_audit_cannot_be_written() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    for action in ["approve", "reject"] {
+        let version = create_question(&app, &author, ids.chapter1, None).await;
+        let (_, submitted) = workflow(app.clone(), &author, "submit", [version]).await;
+        assert_eq!(submitted["results"][0]["status"], "in_review");
+        sqlx::query(
+            "ALTER TABLE audit_events ADD CONSTRAINT reject_fixture_review_audit
+             CHECK (action NOT IN ('assessment_approved', 'assessment_rejected')) NOT VALID",
+        )
+        .execute(&state.pool)
+        .await
+        .expect("inject review audit failure");
+        let (status, result) = workflow(app.clone(), &reviewer, action, [version]).await;
+        sqlx::query("ALTER TABLE audit_events DROP CONSTRAINT reject_fixture_review_audit")
+            .execute(&state.pool)
+            .await
+            .expect("remove review audit fixture");
+        assert_eq!(status, StatusCode::OK, "{result}");
+        assert_eq!(
+            result["results"][0]["error"]["code"], "internal",
+            "{result}"
+        );
+        let (_, search) = call(
+            app.clone(),
+            admin_req("GET", "/v1/admin/questions", Some(&author), None),
+        )
+        .await;
+        let item = search["questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["version_id"] == serde_json::json!(version))
+            .expect("in-review item remains visible");
+        assert_eq!(item["status"], "in_review", "{search}");
+        let review_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM assessment_reviews WHERE question_version_id = $1",
+        )
+        .bind(version)
+        .fetch_one(&state.pool)
+        .await
+        .expect("inspect review receipt after rollback");
+        assert_eq!(review_count, 0, "failed {action} must not retain a review");
+    }
+}
+
+#[tokio::test]
+async fn question_publication_requires_recorded_independent_review() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let publisher = register_and_login(app.clone()).await;
+    for author_review in [false, true] {
+        let version = create_question(&app, &author, ids.chapter1, None).await;
+        sqlx::query(
+            "UPDATE question_versions SET status = 'approved',
+             reviewed_by = CASE WHEN $2 THEN created_by ELSE NULL END WHERE id = $1",
+        )
+        .bind(version)
+        .bind(author_review)
+        .execute(&state.pool)
+        .await
+        .expect("model legacy approval without independent provenance");
+        let result = publish_result(&app, &publisher, version).await;
+        assert_eq!(
+            result["error"]["code"], "independent_review_required",
+            "{result}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn question_competing_reviews_commit_only_one_decision() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let version = create_question(&app, &author, ids.chapter1, None).await;
+    let (_, submitted) = workflow(app.clone(), &author, "submit", [version]).await;
+    assert_eq!(submitted["results"][0]["status"], "in_review");
+    let mut held = state
+        .pool
+        .begin()
+        .await
+        .expect("hold question before decisions");
+    sqlx::query("SELECT id FROM question_versions WHERE id = $1 FOR UPDATE")
+        .bind(version)
+        .fetch_one(&mut *held)
+        .await
+        .expect("lock question fixture");
+    let approve_app = app.clone();
+    let approve_token = reviewer.clone();
+    let approve =
+        tokio::spawn(
+            async move { workflow(approve_app, &approve_token, "approve", [version]).await },
+        );
+    wait_for_blocked_statements(&state.pool, "FROM question_versions", 1).await;
+    let reject = tokio::spawn(async move { workflow(app, &reviewer, "reject", [version]).await });
+    wait_for_blocked_statements(&state.pool, "FROM question_versions", 2).await;
+    held.commit()
+        .await
+        .expect("release question for competing reviews");
+    let results = [
+        approve.await.expect("approve task"),
+        reject.await.expect("reject task"),
+    ];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|(_, body)| body["results"][0]["status"].is_string())
+            .count(),
+        1,
+        "{results:?}"
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|(_, body)| body["results"][0]["error"]["code"] == "invalid_transition")
+            .count(),
+        1,
+        "{results:?}"
+    );
+    let review_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM assessment_reviews WHERE question_version_id = $1",
+    )
+    .bind(version)
+    .fetch_one(&state.pool)
+    .await
+    .expect("committed review count");
+    assert_eq!(review_count, 1);
+}
+
+async fn wait_for_blocked_statements(pool: &sqlx::PgPool, fragment: &str, expected: i64) {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        let blocked = sqlx::query_scalar!(
-            r#"SELECT EXISTS (
-                   SELECT 1 FROM pg_stat_activity
+        let blocked: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM pg_stat_activity
                    WHERE wait_event_type = 'Lock' AND query ILIKE $1
-               ) AS "blocked!""#,
-            format!("%{fragment}%")
+               "#,
         )
+        .bind(format!("%{fragment}%"))
         .fetch_one(pool)
         .await
         .expect("inspect test lock wait");
-        if blocked {
+        if blocked >= expected {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "statement did not wait on the locked rights row: {fragment}"
+            "expected {expected} statements waiting on the fixture lock: {fragment}"
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -532,14 +673,14 @@ async fn question_publication_waits_for_concurrent_rights_revocation() {
         )
         .await
     });
-    wait_for_blocked_statement(&state.pool, "UPDATE content_rights").await;
+    wait_for_blocked_statements(&state.pool, "UPDATE content_rights", 1).await;
 
     let publish_app = app.clone();
     let publish_token = reviewer.clone();
     let publish = tokio::spawn(async move {
         workflow(publish_app, &publish_token, "publish", [version_id]).await
     });
-    wait_for_blocked_statement(&state.pool, "FROM content_rights").await;
+    wait_for_blocked_statements(&state.pool, "FROM content_rights", 1).await;
 
     revoke_first
         .commit()

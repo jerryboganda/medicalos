@@ -50,6 +50,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Dependency advisories + licenses
         uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Critical launch regression tests
+        run: cargo test -p api --test integration full_platform -- --test-threads=1
       - name: Tests
         run: cargo test --workspace -- --test-threads=1
       - name: Install backup transport for the disposable restore drill

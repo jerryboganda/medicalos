@@ -29,9 +29,9 @@ inspection has been performed in this work scope.
 
 | Workstream | Remaining work | Acceptance needed |
 |---|---|---|
-| Learning evidence | Replace client-reported re-test correctness with single-use submitted answer receipts; finish queue delivery/SLA behavior | Real API grading, replay, race, variant, assistance and confidence cases |
-| Content safety | Complete article review/rights workflow, source propagation, trusted ingestion and licensed media coverage; verify all publication transitions atomically preserve review state | Independent review provenance, denied invalid grants, extraction quality and quarantine cases |
-| Identity/privacy | Complete the account archive and policy-driven retention/erasure; finish configured identity methods and device-cap recovery | Every user-owned data category, account isolation, session retirement and approved policy |
+| Learning evidence | Accept the implemented submitted-answer re-test receipts in complete CI; finish queue delivery/SLA behavior | Real API grading, replay, race, variant, assistance and confidence cases |
+| Content safety | Accept atomic question transitions; complete article review/rights workflow, runtime rights withdrawal, source propagation, trusted ingestion and licensed media coverage | Independent review provenance, denied invalid grants, extraction quality and quarantine cases |
+| Identity/privacy | Complete the account archive and policy-driven retention/erasure; finish identity methods, single-session UI and server registration enforcement for direct API clients | Every user-owned data category, account isolation, device/session limits and approved policy |
 | Institutional work | Complete LTI browser/deep-link/content handoff and integration acceptance; check remaining enrollment and least-privilege application-pool work | Real tenant/provider handoff and denial of foreign data |
 | AI/planning | Implement real provider routing, bounded cost/policy controls, evaluations and supported languages; complete calendar scopes | Provider failure/fallback, evidence grounding, permission and evaluation gates |
 | Native clients | Complete owned desktop/mobile shells, push, attestation, secure/offline storage, billing and background behavior | Signed builds and supported real-device matrix |
@@ -44,6 +44,16 @@ Each workstream includes existing historical-ID tails; nothing is removed
 because a ledger row says tested. The re-test endpoint's correctness claim and
 the export's partial category coverage demonstrate why source and real flows
 must be checked beyond the label.
+
+The browser now registers before study requests, but the generic server
+authentication extractor still accepts an unbound bearer. Global registration
+and device-cap enforcement for direct API clients remains code work; the
+browser recovery test is not proof of that server-wide boundary.
+
+Question publication checks the grant at publication time. Revoking a grant
+currently changes the rights record only; existing practice and Coach serving
+paths lack an active-grant check. Runtime withdrawal after revocation or expiry
+remains implementation work, alongside the article workflow.
 
 ## External inputs and acceptance
 

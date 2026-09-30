@@ -27,11 +27,18 @@ complete archive or policy-driven erasure; those remain pending. Clinical
 rights records do not establish the authenticity of a license, and extractive
 Coach metadata does not implement a remote provider.
 
-Confirmed pending defects/tails: client-reported re-test correctness;
-non-atomic question submit/approve/reject transitions and their audits;
+Re-test grading now uses submitted answer receipts; its five new regressions
+passed in run 36785848450. The family-variant fixture expected the wrong rating;
+its assertion now checks the variant's actual key and missing-confidence grade.
+Question transitions now share one locked transaction, including review and
+audit writes. The original failed-audit defect was confirmed in run 36786239795.
+Both repairs still require complete exact-source acceptance.
+
+Confirmed pending tails: runtime question withdrawal after rights expiry/revocation;
 article draft publication without independent author/reviewer or rights gates;
-incomplete privacy export; provider/native acceptance. These must not disappear
-behind historical tested labels. Re-test repair proceeds under its own contract.
+incomplete privacy export; generic auth still accepting an unbound bearer;
+provider/native acceptance. These must not disappear
+behind historical tested labels.
 
 ## Ponytail review
 
@@ -42,3 +49,8 @@ validation is needed at an existing unknown-JSON boundary.
 
 Lean already for the account slice. CI, source review and final independent
 review status remain separately recorded; this is not full-platform acceptance.
+
+Editorial repair reuses the existing transition function and transaction, with
+no new abstraction or dependency. One row lock protects all decisions, and
+failed writes roll back status, provenance and audit together. The CI adds a
+targeted regression gate before the retained complete test suite.

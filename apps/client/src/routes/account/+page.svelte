@@ -97,6 +97,7 @@
 	let deleteAcknowledged = $state(false);
 	let deleting = $state(false);
 	let deleteError = $state('');
+	let deleteReviewButton: HTMLButtonElement | undefined;
 	let signedOutHeading = $state('');
 	let signedOutMessage = $state('');
 
@@ -207,6 +208,7 @@
 		deleteConfirmationOpen = false;
 		deleteAcknowledged = false;
 		deleteError = '';
+		deleteReviewButton?.focus();
 	}
 
 	async function deleteAccount() {
@@ -333,6 +335,7 @@
 			type="button"
 			aria-expanded={deleteConfirmationOpen}
 			aria-controls="delete-confirmation"
+			bind:this={deleteReviewButton}
 			disabled={deleting}
 			onclick={openDeleteReview}
 		>
@@ -434,11 +437,7 @@
 	}
 
 	.delete-acknowledgement input {
-		flex: none;
-		width: 20px;
-		height: 20px;
-		margin: 2px 0 0;
-		accent-color: var(--color-action-primary);
+		margin: var(--space-xs) 0 0;
 	}
 
 	.delete-acknowledgement span {
