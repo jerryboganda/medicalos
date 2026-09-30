@@ -69,8 +69,26 @@ test('app gallery', async ({ page }) => {
 		await shoot(page, `app-phone-${theme}-menu-sheet`, false);
 		await page.setViewportSize({ width: 1280, height: 800 });
 		await page.goto('/today');
-		await page.keyboard.press('Control+k');
-		await expect(page.getByTestId('command-palette')).toBeVisible();
+		// The palette toggles from a window keydown listener registered at
+		// hydration; under CI load the first press can land before the
+		// listener exists or while the desktop nav is still hidden. Retry
+		// the keystroke until it sticks instead of racing one press.
+		const palette = page.getByTestId('command-palette');
+		await expect
+			.poll(
+				async () => {
+					await page.keyboard.press('Control+k');
+					try {
+						await palette.waitFor({ state: 'visible', timeout: 1_500 });
+						return true;
+					} catch {
+						return palette.isVisible();
+					}
+				},
+				{ timeout: 20_000, intervals: [500] },
+			)
+			.toBe(true);
+		await expect(palette).toBeVisible();
 		await shoot(page, `app-desktop-${theme}-quick-jump`, false);
 	}
 });
