@@ -152,6 +152,7 @@ pub(crate) async fn send_daily_qotd_reminders(state: &AppState) -> ApiResult<usi
     if !crate::routes::engagement::engagement_global_enabled(state).await? {
         return Ok(0);
     }
+    use chrono::Timelike;
     let now_hour = i32::from(chrono::Utc::now().time().hour());
     // Learners who never touched their preferences keep the defaults
     // (reminders on, quiet 22–07) — hence the LEFT JOIN with COALESCE.

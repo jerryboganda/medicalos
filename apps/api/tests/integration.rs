@@ -24620,7 +24620,10 @@ async fn qotd_reminder_honours_preferences_quiet_hours_and_dedupes() {
     let token_c = register_and_login(app.clone()).await;
     enable_qotd(&app, &token_c, ids.exam_id).await;
     // c sits inside a quiet window that covers the current UTC hour.
-    let hour = i32::from(chrono::Utc::now().time().hour());
+    let hour = {
+        use chrono::Timelike;
+        i32::from(chrono::Utc::now().time().hour())
+    };
     let start = (hour + 23) % 24;
     let end = (hour + 2) % 24;
     let (status, body) = call(
