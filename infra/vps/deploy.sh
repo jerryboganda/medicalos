@@ -169,4 +169,3 @@ if [ -n "$ZMASTERKEY" ] && [ -n "$ZADMIN_PASSWORD" ] && [ -n "$ZEXTERNAL" ]; the
 else
   echo "[medicalos] zitadel: not configured (VPS_ZITADEL_* inputs missing) — platform sign-in stays disabled"
 fi
-

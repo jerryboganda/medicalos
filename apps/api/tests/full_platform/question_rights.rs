@@ -46,6 +46,7 @@ async fn create_question(
     body["version_id"].as_str().unwrap().parse().unwrap()
 }
 
+#[allow(clippy::too_many_arguments)] // Fixture mirrors the rights API fields.
 async fn create_rights(
     app: &Router,
     token: &str,

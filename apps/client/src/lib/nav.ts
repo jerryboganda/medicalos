@@ -32,6 +32,7 @@ export const NAV: NavItem[] = [
 	{ href: '/progress', label: 'Progress', icon: 'progress', group: 'You', testid: 'nav-progress', tab: true, keywords: 'mastery evidence heatmap timeline' },
 	{ href: '/notifications', label: 'Notifications', icon: 'bell', group: 'You', testid: 'nav-notifications', keywords: 'inbox preferences' },
 	{ href: '/community', label: 'Community', icon: 'community', group: 'You', testid: 'nav-community', keywords: 'groups duels profile' },
+	{ href: '/account', label: 'Account', icon: 'community', group: 'You', testid: 'nav-account', keywords: 'profile privacy security devices data export deletion' },
 	{ href: '/faculty', label: 'Faculty', icon: 'faculty', group: 'Workspaces', testid: 'nav-faculty', keywords: 'institution cohorts assignments' },
 	{ href: '/admin', label: 'Console', icon: 'console', group: 'Workspaces', testid: 'nav-admin', keywords: 'editorial admin import settings' }
 ];

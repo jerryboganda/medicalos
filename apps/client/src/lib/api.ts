@@ -698,7 +698,19 @@ async function call<T>(
 	const publicAuthRoute =
 		path.startsWith('/v1/auth/') || /\/sso\/oidc\/start(?:\?|$)/.test(path);
 	if (token && !publicAuthRoute) {
-		await registerBrowserDevice(token);
+		try {
+			await registerBrowserDevice(token);
+		} catch (error) {
+			// A newly signed-in browser at the device limit must still be able
+			// to retire a device or close/export its account. Study requests
+			// remain blocked until registration succeeds.
+			const accountControl =
+				(method === 'GET' && (path === '/v1/me/devices' || path === '/v1/me/export')) ||
+				(method === 'DELETE' && (path === '/v1/me/account' || /^\/v1\/me\/devices\/[^/]+$/.test(path)));
+			if (!(accountControl && error instanceof ApiError && error.status === 403 && error.code === 'devices_exhausted')) {
+				throw error;
+			}
+		}
 		if (auth.token !== token) {
 			throw new ApiError(409, 'session_changed', 'Your sign-in changed. Retry the request.');
 		}

@@ -11,7 +11,7 @@ const viewports = [
 	{ name: 'desktop', width: 1280, height: 800 },
 	{ name: 'phone', width: 390, height: 844 }
 ];
-const pages = ['/today', '/practice', '/progress', '/library', '/coach', '/notifications'];
+const pages = ['/today', '/practice', '/progress', '/library', '/coach', '/notifications', '/account'];
 
 async function shoot(page: Page, name: string, fullPage = true) {
 	await page.waitForLoadState('networkidle');

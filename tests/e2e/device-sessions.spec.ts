@@ -2,6 +2,41 @@ import { expect, test } from '@playwright/test';
 
 const API = process.env.E2E_API_BASE ?? process.env.VITE_API_BASE ?? 'http://127.0.0.1:8080';
 
+test('a learner at the device limit can revoke a device and register this browser', async ({ page, request }) => {
+	const email = `e2e-device-limit-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.test`;
+	const password = 'correct horse battery';
+	expect((await request.post(`${API}/v1/auth/register`, { data: { email, password } })).ok()).toBeTruthy();
+	for (let index = 0; index < 5; index += 1) {
+		const login = await request.post(`${API}/v1/auth/login`, { data: { email, password } });
+		expect(login.ok()).toBeTruthy();
+		const { token } = await login.json();
+		const registration = await request.post(`${API}/v1/me/devices`, {
+			headers: { authorization: `Bearer ${token}` },
+			data: { device_key: `limit-fixture-${index}`, label: `Study device ${index + 1}` }
+		});
+		expect(registration.ok()).toBeTruthy();
+	}
+	const login = await request.post(`${API}/v1/auth/login`, { data: { email, password } });
+	expect(login.ok()).toBeTruthy();
+	const { token } = await login.json();
+	await page.addInitScript((bearer) => localStorage.setItem('mlos_token', bearer), token);
+	await page.goto('/account');
+	await expect(page.getByText('This browser is not registered.', { exact: false })).toBeVisible();
+	await expect(page.getByTestId('device-list').getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(5);
+	await page.getByTestId('device-list').getByRole('button', { name: 'Revoke', exact: true }).first().click();
+	await expect(page.getByTestId('device-list').getByText('Revoked', { exact: true })).toHaveCount(1);
+	await page.reload();
+	await expect(page.getByText('Current device', { exact: true })).toBeVisible();
+	await expect(page.getByText('This browser is not registered.', { exact: false })).toHaveCount(0);
+	const headers = { authorization: `Bearer ${token}` };
+	const response = await request.get(`${API}/v1/me/devices`, { headers });
+	expect(response.ok()).toBeTruthy();
+	const { devices } = await response.json();
+	expect(devices.filter((device: { revoked_at: string | null }) => device.revoked_at === null)).toHaveLength(5);
+	const key = await page.evaluate(() => localStorage.getItem('mlos_pack_device'));
+	expect(devices.some((device: { device_key: string }) => device.device_key === key)).toBe(true);
+});
+
 test('password sign-in binds the browser device and revocation rejects its bearer', async ({
 	page,
 	request
