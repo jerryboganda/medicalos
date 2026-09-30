@@ -27,6 +27,8 @@ mod full_platform_lti;
 mod full_platform_question_rights;
 #[path = "full_platform/readiness.rs"]
 mod full_platform_readiness;
+#[path = "full_platform/retests.rs"]
+mod full_platform_retests;
 #[path = "full_platform/sessions.rs"]
 mod full_platform_sessions;
 
