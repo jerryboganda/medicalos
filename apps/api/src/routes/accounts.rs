@@ -1,13 +1,13 @@
 //! CORE-07: learner-controlled devices and account lifecycle.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::{hash_password, AuthUser};
+use crate::auth::{hash_password, AuthSession, AuthUser};
 use crate::error::{ApiError, ApiResult};
 use crate::routes::admin::{admin_headers, audit};
 use crate::state::AppState;
@@ -21,6 +21,7 @@ pub struct DeviceReq {
 pub async fn register_device(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
+    Extension(session): Extension<AuthSession>,
     Json(req): Json<DeviceReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let key = req.device_key.trim();
@@ -38,33 +39,69 @@ pub async fn register_device(
         .chars()
         .take(100)
         .collect::<String>();
-    // CORE-07: hard device limit — a NEW device beyond max_devices is
-    // refused; re-registering an existing device is always fine.
+    let mut tx = state.pool.begin().await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+
+    let auth_session = sqlx::query!(
+        "SELECT device_id, created_at FROM auth_sessions
+         WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()
+           AND revoked_at IS NULL FOR UPDATE",
+        &session.token_hash,
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+
     let existing = sqlx::query!(
-        "SELECT 1 AS one FROM user_devices
-         WHERE user_id = $1 AND device_key = $2",
+        "SELECT id, revoked_at FROM user_devices
+         WHERE user_id = $1 AND device_key = $2 FOR UPDATE",
         user.user_id,
         key
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    if existing.is_none() {
-        let limit = sqlx::query!(
+
+    // A revoked row can be reactivated only by a session created after the
+    // revocation. Keep this check ahead of the limit check so a legacy bearer
+    // cannot obscure the reason its device registration was refused.
+    if existing
+        .as_ref()
+        .and_then(|row| row.revoked_at.as_ref())
+        .is_some_and(|revoked_at| auth_session.created_at < *revoked_at)
+    {
+        return Err(ApiError::conflict(
+            "device_revoked",
+            "sign in again before registering this revoked device",
+        ));
+    }
+
+    // CORE-07: reactivating a revoked device consumes an active-device slot.
+    if existing.is_none()
+        || existing
+            .as_ref()
+            .is_some_and(|row| row.revoked_at.is_some())
+    {
+        let limit = sqlx::query_scalar!(
             r#"SELECT max_devices AS "max_devices!" FROM users WHERE id = $1"#,
             user.user_id
         )
-        .fetch_one(&state.pool)
-        .await?
-        .max_devices;
-        let active = sqlx::query!(
-            r#"SELECT COUNT(*) AS "n!" FROM user_devices
+        .fetch_one(&mut *tx)
+        .await?;
+        let active = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "active!" FROM user_devices
                WHERE user_id = $1 AND revoked_at IS NULL"#,
             user.user_id
         )
-        .fetch_one(&state.pool)
-        .await?
-        .n;
-        if active >= limit as i64 {
+        .fetch_one(&mut *tx)
+        .await?;
+        if active >= i64::from(limit) {
             return Err(ApiError::forbidden_with_details(
                 "devices_exhausted",
                 format!("device limit reached ({limit}) - revoke a device first"),
@@ -72,20 +109,49 @@ pub async fn register_device(
             ));
         }
     }
-    let id = Uuid::new_v4();
+
+    if auth_session
+        .device_id
+        .as_deref()
+        .is_some_and(|bound| bound != key)
+    {
+        return Err(ApiError::conflict(
+            "device_session_conflict",
+            "this session is already bound to another device",
+        ));
+    }
     let row = sqlx::query!(
         r#"INSERT INTO user_devices (id, user_id, device_key, label)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (user_id, device_key) DO UPDATE
              SET label = EXCLUDED.label, last_seen_at = now(), revoked_at = NULL
            RETURNING id, device_key, label, created_at, last_seen_at"#,
-        id,
+        Uuid::new_v4(),
         user.user_id,
         key,
         label
     )
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await?;
+
+    if auth_session.device_id.is_none() {
+        let bound = sqlx::query!(
+            "UPDATE auth_sessions SET device_id = $1
+             WHERE token_hash = $2 AND user_id = $3 AND device_id IS NULL
+               AND expires_at > now() AND revoked_at IS NULL",
+            key,
+            &session.token_hash,
+            user.user_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if bound != 1 {
+            return Err(ApiError::unauthorized());
+        }
+    }
+
+    tx.commit().await?;
     Ok(Json(json!({
         "device_id": row.id,
         "device_key": row.device_key,
@@ -129,26 +195,33 @@ pub async fn revoke_device(
     user: AuthUser,
     Path(device_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
     let row = sqlx::query!(
-        r#"UPDATE user_devices
-           SET revoked_at = now()
-           WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
-           RETURNING device_key"#,
+        "UPDATE user_devices SET revoked_at = now()
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+         RETURNING device_key",
         device_id,
         user.user_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("device_not_found"))?;
     sqlx::query!(
-        r#"UPDATE auth_sessions
-           SET revoked_at = now()
-           WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL"#,
+        "UPDATE auth_sessions SET revoked_at = now()
+         WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL",
         user.user_id,
         row.device_key
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "revoked": true })))
 }
 
@@ -157,6 +230,13 @@ pub async fn delete_account(
     user: AuthUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut tx = state.pool.begin().await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
     sqlx::query!(
         "UPDATE auth_sessions SET revoked_at = now() WHERE user_id = $1",
         user.user_id

@@ -1,3 +1,19 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use crate::error::ApiResult;
+
+pub type LtiJwksFuture<'a> =
+    Pin<Box<dyn Future<Output = ApiResult<jsonwebtoken::jwk::JwkSet>> + Send + 'a>>;
+
+/// Explicit source for platform JWKS. Production installs the guarded HTTPS
+/// transport; integration fixtures may inject trusted in-process key material.
+pub trait LtiJwksTransport: Send + Sync {
+    fn validate_key_set_url(&self, raw: &str) -> ApiResult<()>;
+    fn fetch_jwks<'a>(&'a self, raw: &'a str) -> LtiJwksFuture<'a>;
+}
+
 pub struct AppState {
     pub pool: sqlx::PgPool,
     /// EX-08 floor for timed sessions; CI/tests lower it for fast E2E.
@@ -37,6 +53,8 @@ pub struct AppState {
     /// responses with; its public half is served at /v1/lti/jwks.json.
     /// None = LTI 1.3 disabled (QTI export keeps working).
     pub lti_tool_key: Option<String>,
+    /// Trusted transport dependency for fetching platform signing keys.
+    pub lti_jwks_transport: Arc<dyn LtiJwksTransport>,
 }
 
 /// The API's confidential OIDC client at Zitadel (infra/zitadel/provision.sh).

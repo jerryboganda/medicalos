@@ -109,6 +109,11 @@ pub fn sha256_hex(input: &str) -> String {
     out.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+#[derive(Clone)]
+pub struct AuthSession {
+    pub token_hash: String,
+}
+
 pub struct AuthUser {
     pub user_id: Uuid,
     /// Zitadel platform roles snapshotted at sign-in (empty for password
@@ -140,18 +145,19 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or_else(ApiError::unauthorized)?;
         let token_hash = sha256_hex(raw);
-        let row = sqlx::query(
+        let row = sqlx::query!(
             "SELECT user_id, roles, mfa FROM auth_sessions
              WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL",
+            &token_hash
         )
-        .bind(token_hash)
         .fetch_optional(&state.pool)
         .await?
         .ok_or_else(ApiError::unauthorized)?;
+        parts.extensions.insert(AuthSession { token_hash });
         Ok(AuthUser {
-            user_id: row.try_get("user_id")?,
-            roles: row.try_get("roles")?,
-            mfa: row.try_get("mfa")?,
+            user_id: row.user_id,
+            roles: row.roles,
+            mfa: row.mfa,
         })
     }
 }

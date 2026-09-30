@@ -21,8 +21,12 @@ use uuid::Uuid;
 
 use api::{router, schema, seed, state::AppState};
 
+#[path = "full_platform/lti.rs"]
+mod full_platform_lti;
 #[path = "full_platform/readiness.rs"]
 mod full_platform_readiness;
+#[path = "full_platform/sessions.rs"]
+mod full_platform_sessions;
 
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -147,6 +151,7 @@ async fn setup_with(zitadel: Option<api::state::ZitadelConfig>) -> Arc<AppState>
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel,
         lti_tool_key: None,
+        lti_jwks_transport: Arc::new(api::routes::lti::GuardedHttpsJwksTransport),
     })
 }
 
@@ -206,6 +211,10 @@ fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) ->
 
 async fn register_and_login(app: Router) -> String {
     let email = format!("learner-{}@example.test", Uuid::new_v4());
+    register_and_login_with_email(app, email).await
+}
+
+async fn register_and_login_with_email(app: Router, email: String) -> String {
     let (_, v) = call(
         app.clone(),
         request(
@@ -5549,6 +5558,7 @@ async fn coach_daily_allowance_enforced() {
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel: None,
         lti_tool_key: None,
+        lti_jwks_transport: Arc::new(api::routes::lti::GuardedHttpsJwksTransport),
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
@@ -10695,7 +10705,8 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     let state = setup().await;
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
-    let token = register_and_login(app.clone()).await;
+    let email = format!("completion-kernel-{}@example.test", Uuid::new_v4());
+    let token = register_and_login_with_email(app.clone(), email.clone()).await;
 
     let (status, device) = call(
         app.clone(),
@@ -10731,6 +10742,26 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{rev}");
     assert_eq!(rev["revoked"], true);
+
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/devices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "revoked bearer must fail");
+
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "correct horse"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "fresh login: {login}");
+    let token = login["token"].as_str().expect("fresh bearer").to_string();
 
     let (status, devices) = call(
         app.clone(),

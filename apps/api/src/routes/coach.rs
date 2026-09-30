@@ -404,13 +404,9 @@ pub async fn coach_turn(
         qv.exam_tip.as_deref(),
         &qv.source_ref,
     );
-    // AI-16 routing: extractive is the always-available qualified baseline;
-    // the OpenAI-compatible adapter takes over when a key is configured —
-    // but ONLY with this same bounded, permitted context.
-    let (adapter, model) = match &state.openai_api_key {
-        Some(_key) => ("openai-compatible", "gpt-4o-mini"),
-        None => ("extractive", "reviewed-content"),
-    };
+    // Coach currently always assembles an extractive answer from reviewed
+    // content; provider configuration does not change the implementation.
+    let (adapter, model) = ("extractive", "reviewed-content");
     let grounded_on = json!([
         {"kind": "question_version", "id": vid, "fields": ["options.rationale", "key_learning_point", "exam_tip", "source_ref"]},
         {"kind": "own_attempt", "chosen_index": att.chosen_index}

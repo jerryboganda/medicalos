@@ -1,6 +1,6 @@
 //! INST-06: LTI 1.3 launch against a mocked campus LMS (1EdTech core
-//! launch + deep linking). The mock platform serves the JWKS the tool
-//! fetches, and the test plays the platform's browser: it follows the
+//! launch + deep linking). The test injects the platform JWKS through a
+//! trusted in-process transport and plays the platform's browser: it follows the
 //! login-initiation redirect, mints the signed id_token the platform would
 //! form-post, and verifies the tool's deep-linking response against the
 //! tool's own JWKS endpoint. API-only — no client surfaces involved.
@@ -17,11 +17,12 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::util::ServiceExt;
 
-use api::state::AppState;
+use api::error::{ApiError, ApiResult};
+use api::state::{AppState, LtiJwksFuture, LtiJwksTransport};
 use lti_test_keys::{TEST_PLATFORM_KEY_PEM, TEST_PLATFORM_PUBLIC_PEM, TEST_TOOL_KEY_PEM};
 
 /// Mirrors integration.rs's setup with the LTI signing key provisioned.
-async fn setup_lti() -> Arc<AppState> {
+async fn setup_lti(jwks_transport: Arc<dyn LtiJwksTransport>) -> Arc<AppState> {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/medos_ci".into());
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -55,6 +56,7 @@ async fn setup_lti() -> Arc<AppState> {
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel: None,
         lti_tool_key: Some(TEST_TOOL_KEY_PEM.into()),
+        lti_jwks_transport: jwks_transport,
     })
 }
 
@@ -130,31 +132,71 @@ async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
     (status, body, token)
 }
 
-/// The mocked platform: serves the JWKS the tool fetches at launch.
-async fn spawn_mock_platform() -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock LMS");
-    let addr = listener.local_addr().expect("addr");
+fn mock_platform_jwks() -> Value {
     use rsa::pkcs8::DecodePublicKey;
     use rsa::traits::PublicKeyParts;
     let public =
         rsa::RsaPublicKey::from_public_key_pem(TEST_PLATFORM_PUBLIC_PEM).expect("platform pub key");
     let n = URL_SAFE_NO_PAD.encode(public.n().to_bytes_be());
     let e = URL_SAFE_NO_PAD.encode(public.e().to_bytes_be());
+    json!({"keys": [{
+        "kty": "RSA", "alg": "RS256", "use": "sig",
+        "kid": "lms-key-1", "n": n, "e": e,
+    }]})
+}
+
+/// The browser-facing LMS endpoints remain a loopback HTTP fixture. Launch
+/// verification receives the platform's signing key through an in-process
+/// JWKS transport.
+async fn spawn_mock_platform() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock LMS");
+    let addr = listener.local_addr().expect("addr");
+    let jwks = mock_platform_jwks();
     let app = Router::new().route(
         "/jwks.json",
-        get(move || async move {
-            Json(json!({"keys": [{
-                "kty": "RSA", "alg": "RS256", "use": "sig",
-                "kid": "lms-key-1", "n": n, "e": e,
-            }]}))
+        get(move || {
+            let jwks = jwks.clone();
+            async move { Json(jwks) }
         }),
     );
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve mock LMS");
     });
     format!("http://{addr}")
+}
+
+struct MockJwksTransport {
+    allowed_url: String,
+    jwks: Value,
+}
+
+impl MockJwksTransport {
+    fn validate_configured_url(&self, raw: &str) -> ApiResult<()> {
+        if raw == self.allowed_url {
+            Ok(())
+        } else {
+            Err(ApiError::unprocessable(
+                "invalid_key_set_url",
+                "the mock platform transport only accepts its configured JWKS URL",
+            ))
+        }
+    }
+}
+
+impl LtiJwksTransport for MockJwksTransport {
+    fn validate_key_set_url(&self, raw: &str) -> ApiResult<()> {
+        self.validate_configured_url(raw)
+    }
+
+    fn fetch_jwks<'a>(&'a self, raw: &'a str) -> LtiJwksFuture<'a> {
+        Box::pin(async move {
+            self.validate_configured_url(raw)?;
+            serde_json::from_value(self.jwks.clone())
+                .map_err(|_| ApiError::unprocessable("invalid_key_set", "the mock JWKS is invalid"))
+        })
+    }
 }
 
 fn mint_id_token(
@@ -193,11 +235,14 @@ fn mint_id_token(
 
 #[tokio::test]
 async fn lti13_login_launch_deeplink_round_trip() {
-    let state = setup_lti().await;
+    let lms_base = spawn_mock_platform().await;
+    let jwks_transport = Arc::new(MockJwksTransport {
+        allowed_url: format!("{lms_base}/jwks.json"),
+        jwks: mock_platform_jwks(),
+    });
+    let state = setup_lti(jwks_transport).await;
     let app = api::router(state.clone());
     api::seed::seed(&state.pool).await.expect("seed");
-
-    let lms_base = spawn_mock_platform().await;
 
     // The institution's staff registers the campus LMS as a platform.
     let (status, staff_reg, staff_token) = register(&app, "lms-staff@example.test").await;

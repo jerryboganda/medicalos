@@ -16,12 +16,15 @@ use chrono::Utc;
 use rand::RngCore;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
+use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::auth::issue_session_with;
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
+use crate::state::{AppState, LtiJwksFuture, LtiJwksTransport};
 
 const LTI_VERSION: &str = "1.3.0";
 const MESSAGE_RESOURCE_LINK: &str = "LtiResourceLinkRequest";
@@ -29,6 +32,8 @@ const MESSAGE_DEEP_LINK: &str = "LtiDeepLinkingRequest";
 const STATE_TTL_MINUTES: i32 = 10;
 const DEEP_LINK_TTL_MINUTES: i32 = 30;
 const TOOL_KID: &str = "medicalos-lti-1";
+const JWKS_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+const JWKS_MAX_BYTES: usize = 1024 * 1024;
 
 fn lti_claim(name: &str) -> String {
     format!("https://purl.imsglobal.org/spec/lti/claim/{name}")
@@ -170,6 +175,7 @@ pub async fn launch(
     .ok_or_else(ApiError::unauthorized)?;
 
     let payload = verify_platform_token(
+        state.lti_jwks_transport.as_ref(),
         pem,
         &params.id_token,
         &platform.issuer,
@@ -424,17 +430,17 @@ pub async fn register_platform(
             "LTI platforms are registered by the institution's admins",
         ));
     }
+    state
+        .lti_jwks_transport
+        .validate_key_set_url(req.key_set_url.trim())?;
     for (value, code) in [
         (&req.issuer, "invalid_issuer"),
         (&req.client_id, "invalid_client_id"),
         (&req.deployment_id, "invalid_deployment_id"),
         (&req.auth_login_url, "invalid_auth_login_url"),
-        (&req.key_set_url, "invalid_key_set_url"),
     ] {
         let value = value.trim();
-        let is_url = code.ends_with("login_url")
-            || code.ends_with("key_set_url")
-            || code == "invalid_issuer";
+        let is_url = code.ends_with("login_url") || code == "invalid_issuer";
         let ok = !value.is_empty()
             && value.len() <= 500
             && (!is_url || value.starts_with("https://") || value.starts_with("http://"));
@@ -443,12 +449,13 @@ pub async fn register_platform(
         }
     }
     let platform_id = Uuid::new_v4();
-    sqlx::query!(
+    let registered = sqlx::query!(
         "INSERT INTO lti_platforms (id, institution_id, issuer, client_id, deployment_id,
                                     auth_login_url, key_set_url, display_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (issuer, client_id, deployment_id) DO UPDATE SET
-            institution_id = $2, auth_login_url = $6, key_set_url = $7, display_name = $8
+            auth_login_url = $6, key_set_url = $7, display_name = $8
+         WHERE lti_platforms.institution_id = EXCLUDED.institution_id
          RETURNING id",
         platform_id,
         institution_id,
@@ -459,8 +466,14 @@ pub async fn register_platform(
         req.key_set_url.trim(),
         req.display_name.trim(),
     )
-    .fetch_one(&state.pool)
+    .fetch_optional(&state.pool)
     .await?;
+    let platform_id = registered.map(|row| row.id).ok_or_else(|| {
+        ApiError::conflict(
+            "lti_platform_conflict",
+            "an LTI platform with these identifiers is already registered",
+        )
+    })?;
     Ok(Json(RegisteredPlatform {
         platform_id,
         institution_id,
@@ -473,28 +486,14 @@ pub async fn register_platform(
 // ---- internals ---------------------------------------------------------------
 
 async fn verify_platform_token(
+    transport: &dyn LtiJwksTransport,
     _pem: &str,
     id_token: &str,
     issuer: &str,
     client_id: &str,
     key_set_url: &str,
 ) -> ApiResult<Value> {
-    let response = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|_| ApiError::internal())?
-        .get(key_set_url)
-        .send()
-        .await
-        .map_err(|_| {
-            ApiError::unprocessable(
-                "key_set_unreachable",
-                "the platform's JWKS could not be fetched",
-            )
-        })?;
-    let jwks: jsonwebtoken::jwk::JwkSet = response.json().await.map_err(|_| {
-        ApiError::unprocessable("invalid_key_set", "the platform's JWKS is not valid JSON")
-    })?;
+    let jwks = transport.fetch_jwks(key_set_url).await?;
 
     let header = jsonwebtoken::decode_header(id_token).map_err(|_| ApiError::unauthorized())?;
     if header.alg != jsonwebtoken::Algorithm::RS256 {
@@ -515,6 +514,180 @@ async fn verify_platform_token(
     let token_data = jsonwebtoken::decode::<Value>(id_token, &decoding_key, &validation)
         .map_err(|_| ApiError::unauthorized())?;
     Ok(token_data.claims)
+}
+
+/// Production transport. Registration and fetching require HTTPS; fetch
+/// resolves once, rejects every non-public answer, pins those addresses,
+/// disables proxies and redirects, and caps the streamed response body.
+pub struct GuardedHttpsJwksTransport;
+
+impl LtiJwksTransport for GuardedHttpsJwksTransport {
+    fn validate_key_set_url(&self, raw: &str) -> ApiResult<()> {
+        parse_jwks_url(raw).map(|_| ())
+    }
+
+    fn fetch_jwks<'a>(&'a self, raw: &'a str) -> LtiJwksFuture<'a> {
+        Box::pin(async move {
+            tokio::time::timeout(JWKS_FETCH_TIMEOUT, async {
+                let url = parse_jwks_url(raw)?;
+                let (domain, addresses) = resolve_public_jwks_host(&url).await?;
+                let mut builder = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .no_proxy();
+                if let Some(domain) = domain {
+                    builder = builder.resolve_to_addrs(&domain, &addresses);
+                }
+                let client = builder.build().map_err(|_| ApiError::internal())?;
+                let mut response = client
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(|_| key_set_unreachable())?;
+                if !response.status().is_success() {
+                    return Err(key_set_unreachable());
+                }
+                if response
+                    .content_length()
+                    .is_some_and(|length| length > JWKS_MAX_BYTES as u64)
+                {
+                    return Err(key_set_too_large());
+                }
+
+                let capacity = response
+                    .content_length()
+                    .unwrap_or_default()
+                    .min(JWKS_MAX_BYTES as u64) as usize;
+                let mut body = Vec::with_capacity(capacity);
+                while let Some(chunk) = response.chunk().await.map_err(|_| key_set_unreachable())? {
+                    if body.len().saturating_add(chunk.len()) > JWKS_MAX_BYTES {
+                        return Err(key_set_too_large());
+                    }
+                    body.extend_from_slice(&chunk);
+                }
+                serde_json::from_slice(&body).map_err(|_| {
+                    ApiError::unprocessable(
+                        "invalid_key_set",
+                        "the platform's JWKS is not valid JSON",
+                    )
+                })
+            })
+            .await
+            .map_err(|_| key_set_unreachable())?
+        })
+    }
+}
+
+fn parse_jwks_url(raw: &str) -> ApiResult<Url> {
+    let invalid = || {
+        ApiError::unprocessable(
+            "invalid_key_set_url",
+            "key_set_url must use HTTPS and identify a public host",
+        )
+    };
+    if raw.is_empty() || raw.len() > 500 {
+        return Err(invalid());
+    }
+    let url = Url::parse(raw).map_err(|_| invalid())?;
+    if url.scheme() != "https"
+        || url.host().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid());
+    }
+    if let Some(address) = match url.host() {
+        Some(Host::Ipv4(address)) => Some(IpAddr::V4(address)),
+        Some(Host::Ipv6(address)) => Some(IpAddr::V6(address)),
+        Some(Host::Domain(_)) | None => None,
+    } {
+        if !is_public_ip(address) {
+            return Err(invalid());
+        }
+    }
+    Ok(url)
+}
+
+async fn resolve_public_jwks_host(url: &Url) -> ApiResult<(Option<String>, Vec<SocketAddr>)> {
+    let port = url.port_or_known_default().ok_or_else(|| {
+        ApiError::unprocessable("invalid_key_set_url", "key_set_url must use HTTPS")
+    })?;
+    let (domain, addresses) = match url.host().ok_or_else(|| {
+        ApiError::unprocessable(
+            "invalid_key_set_url",
+            "key_set_url must identify a public host",
+        )
+    })? {
+        Host::Domain(domain) => {
+            let addresses = tokio::net::lookup_host((domain, port))
+                .await
+                .map_err(|_| key_set_unreachable())?
+                .collect::<Vec<_>>();
+            (Some(domain.to_owned()), addresses)
+        }
+        Host::Ipv4(address) => (None, vec![SocketAddr::new(address.into(), port)]),
+        Host::Ipv6(address) => (None, vec![SocketAddr::new(address.into(), port)]),
+    };
+    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err(ApiError::unprocessable(
+            "invalid_key_set_url",
+            "key_set_url must resolve only to public addresses",
+        ));
+    }
+    Ok((domain, addresses))
+}
+
+fn is_public_ip(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            let octets = address.octets();
+            !address.is_private()
+                && !address.is_loopback()
+                && !address.is_link_local()
+                && !address.is_unspecified()
+                && !address.is_multicast()
+                && !address.is_broadcast()
+                && octets[0] != 0
+                && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
+                // IANA's IPv4 registry (https://www.iana.org/assignments/iana-ipv4-special-registry)
+                // marks 192.0.0.0/24 special-purpose, with .9 and .10 globally
+                // reachable. Don't exclude neighboring 192.0.1.0/24 through
+                // 192.0.255.0/24.
+                && !(octets[0] == 192
+                    && ((octets[1] == 0
+                        && octets[2] == 0
+                        && !matches!(octets[3], 9 | 10))
+                        || (octets[1] == 88 && octets[2] == 99)))
+                && !(octets[0] == 198
+                    && (octets[1] == 18
+                        || octets[1] == 19
+                        || (octets[1] == 51 && octets[2] == 100)))
+                && !(octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                && octets[0] < 224
+        }
+        IpAddr::V6(address) => {
+            let segments = address.segments();
+            segments[0] & 0xe000 == 0x2000
+                && !(segments[0] == 0x2001 && segments[1] <= 0x01ff)
+                && !(segments[0] == 0x2001 && segments[1] == 0x0db8)
+                && segments[0] != 0x2002
+                && !(segments[0] == 0x3fff && segments[1] <= 0x0fff)
+        }
+    }
+}
+
+fn key_set_unreachable() -> ApiError {
+    ApiError::unprocessable(
+        "key_set_unreachable",
+        "the platform's JWKS could not be fetched",
+    )
+}
+
+fn key_set_too_large() -> ApiError {
+    ApiError::unprocessable(
+        "key_set_too_large",
+        "the platform's JWKS exceeds the size limit",
+    )
 }
 
 /// Link (once) the LMS subject to an app account: the linked row wins, then
@@ -594,4 +767,70 @@ fn form_encode(pairs: &[(&str, &str)]) -> String {
         .map(|(k, v)| format!("{}={}", percent_encode(k), percent_encode(v)))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_public_ip, parse_jwks_url};
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    #[test]
+    fn jwks_url_requires_https_without_credentials_or_private_ip_literals() {
+        for url in [
+            "http://lms.example.test/jwks",
+            "https://127.0.0.1/jwks",
+            "https://10.1.2.3/jwks",
+            "https://169.254.10.20/jwks",
+            "https://[::1]/jwks",
+            "https://[fd00::1]/jwks",
+            "https://[::ffff:127.0.0.1]/jwks",
+            "https://user:password@lms.example.test/jwks",
+            "https://lms.example.test/jwks#fragment",
+        ] {
+            assert!(parse_jwks_url(url).is_err(), "accepted unsafe URL {url}");
+        }
+        assert!(parse_jwks_url("https://lms.example.test/jwks").is_ok());
+    }
+
+    #[test]
+    fn dns_answers_must_be_public_unicast_addresses() {
+        for address in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "192.0.2.1",
+            "192.0.0.1",
+            "192.0.0.8",
+            "192.0.0.170",
+            "192.168.1.1",
+            "198.18.0.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "2001:db8::1",
+            "2002::1",
+            "::ffff:127.0.0.1",
+            "fc00::1",
+            "fe80::1",
+            "ff02::1",
+        ] {
+            let address = IpAddr::from_str(address).expect("valid test IP");
+            assert!(!is_public_ip(address), "accepted non-public IP {address}");
+        }
+        for address in [
+            "8.8.8.8",
+            "192.0.0.9",
+            "192.0.0.10",
+            "192.0.1.1",
+            "192.0.255.255",
+            "2606:4700:4700::1111",
+        ] {
+            let address = IpAddr::from_str(address).expect("valid test IP");
+            assert!(is_public_ip(address), "rejected public IP {address}");
+        }
+    }
 }
