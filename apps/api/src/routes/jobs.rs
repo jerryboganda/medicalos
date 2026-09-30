@@ -37,6 +37,28 @@ pub async fn enqueue(
     Ok(id)
 }
 
+/// Enqueue with a delay before the job becomes due (self-rescheduling
+/// maintenance jobs use this).
+pub async fn enqueue_at(
+    pool: &PgPool,
+    kind: &str,
+    payload: serde_json::Value,
+    delay_minutes: i32,
+) -> ApiResult<Uuid> {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO event_jobs (id, kind, payload, run_after)
+         VALUES ($1, $2, $3, now() + make_interval(mins => $4))",
+    )
+    .bind(id)
+    .bind(kind)
+    .bind(payload)
+    .bind(delay_minutes)
+    .execute(pool)
+    .await?;
+    Ok(id)
+}
+
 /// Claim and process due jobs until the tick budget is exhausted. Returns
 /// the number of jobs processed (done, retried, or dead-lettered).
 pub async fn process_due_jobs(state: &Arc<AppState>) -> ApiResult<usize> {
@@ -130,6 +152,18 @@ async fn dispatch(state: &Arc<AppState>, kind: &str, payload: &serde_json::Value
                 .await
                 .map(|_| ())
         }
+        // ENG-01: the hourly QOTD reminder maintenance job — sends the
+        // in-app reminders, prunes finished jobs so the queue stays
+        // bounded, and re-enqueues itself for the next hour.
+        "qotd_reminders" => {
+            let sent = crate::routes::inbox::send_daily_qotd_reminders(state).await?;
+            sqlx::query("DELETE FROM event_jobs WHERE status = 'done' AND updated_at < now() - interval '7 days'")
+                .execute(&state.pool)
+                .await?;
+            enqueue_at(&state.pool, "qotd_reminders", serde_json::json!({}), 60).await?;
+            tracing::info!(sent, "qotd reminder pass complete");
+            Ok(())
+        }
         _ => Err(ApiError::unprocessable(
             "unknown_job_kind",
             "no handler is registered for this job kind",
@@ -141,6 +175,21 @@ async fn dispatch(state: &Arc<AppState>, kind: &str, payload: &serde_json::Value
 /// worker: a fixed tick, a fixed budget, honest logging, no retries in-process.
 pub fn spawn_jobs_worker(state: Arc<AppState>) {
     tokio::spawn(async move {
+        // ENG-01: seed the hourly reminder job once — the handler keeps it
+        // alive by re-enqueueing itself, so this only repairs a cold queue.
+        let pending = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM event_jobs WHERE kind = 'qotd_reminders' AND status = 'pending'",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(0);
+        if pending == 0 {
+            if let Err(error) =
+                enqueue(&state.pool, "qotd_reminders", serde_json::json!({}), None).await
+            {
+                tracing::warn!(?error, "seeding the qotd_reminders job failed");
+            }
+        }
         let mut ticks = tokio::time::interval(std::time::Duration::from_secs(TICK_SECONDS));
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {

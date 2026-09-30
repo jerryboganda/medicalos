@@ -141,6 +141,96 @@ pub async fn deliver(
     Ok(true)
 }
 
+/// ENG-01 reminder tail, in-app half: one factual "question of the day is
+/// ready" notification per learner per day, only when the learner opted
+/// into QOTD with an exam, has not answered today, has plan reminders on,
+/// and is outside their quiet hours. The engagement kill switch silences
+/// everything. Remote delivery waits on the owned push plugin (§20.1).
+/// Copy rules (§2.2): never shaming — the body states availability, never
+/// streaks, guilt, or comparisons.
+pub(crate) async fn send_daily_qotd_reminders(state: &AppState) -> ApiResult<usize> {
+    if !crate::routes::engagement::engagement_global_enabled(state).await? {
+        return Ok(0);
+    }
+    use chrono::Timelike;
+    let now_hour = chrono::Utc::now().time().hour() as i32;
+    // Learners who never touched their preferences keep the defaults
+    // (reminders on, quiet 22–07) — hence the LEFT JOIN with COALESCE.
+    // The delivered copy links to /today, where the QOTD card lives.
+    let candidates = sqlx::query!(
+        r#"SELECT es.user_id, es.qotd_exam_id,
+                  COALESCE(np.plan_reminders, TRUE) AS "plan_reminders!",
+                  COALESCE(np.quiet_hours_start, 22) AS "quiet_hours_start!",
+                  COALESCE(np.quiet_hours_end, 7) AS "quiet_hours_end!"
+           FROM engagement_settings es
+           JOIN users u ON u.id = es.user_id AND u.deleted_at IS NULL
+           LEFT JOIN notification_preferences np ON np.user_id = es.user_id
+           WHERE es.qotd_enabled = TRUE
+             AND es.qotd_exam_id IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM qotd_answers a
+                 WHERE a.user_id = es.user_id AND a.day = CURRENT_DATE)
+             AND NOT EXISTS (
+                 SELECT 1 FROM notifications n
+                 WHERE n.user_id = es.user_id AND n.category = 'plan'
+                   AND n.deep_link = '/today'
+                   AND n.created_at::date = CURRENT_DATE)
+           LIMIT 500"#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut conn = state.pool.acquire().await?;
+    let mut sent = 0;
+    for candidate in candidates {
+        if in_quiet_hours(
+            now_hour,
+            candidate.quiet_hours_start,
+            candidate.quiet_hours_end,
+        ) {
+            continue;
+        }
+        if !candidate.plan_reminders {
+            continue;
+        }
+        // Ensure today's question exists — the same deterministic pick the
+        // GET serves — so the reminder never advertises nothing.
+        let Some(_) = crate::routes::engagement::selected_qotd_id(
+            &mut conn,
+            candidate.qotd_exam_id.expect("qotd_exam_id IS NOT NULL"),
+        )
+        .await?
+        else {
+            continue; // no eligible question today — remind of nothing
+        };
+        if deliver(
+            state,
+            candidate.user_id,
+            "plan",
+            "Question of the day",
+            "A new question of the day is available on your Today page.",
+            Some("/today"),
+        )
+        .await?
+        {
+            sent += 1;
+        }
+    }
+    Ok(sent)
+}
+
+/// A zero-length window is no window; a wrapping window (22 → 07) covers
+/// the midnight crossing.
+fn in_quiet_hours(hour: i32, start: i32, end: i32) -> bool {
+    if start == end {
+        false
+    } else if start < end {
+        hour >= start && hour < end
+    } else {
+        hour >= start || hour < end
+    }
+}
+
 pub async fn inbox(
     State(state): State<Arc<AppState>>,
     user: AuthUser,

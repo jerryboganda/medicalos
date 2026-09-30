@@ -227,7 +227,7 @@ async fn ensure_engagement(state: &AppState, user_id: Uuid) -> ApiResult<()> {
 
 /// Global kill switch: OPS-05-style feature flag `engagement_mechanics`.
 /// Missing flag means enabled (default on).
-async fn engagement_global_enabled(state: &AppState) -> ApiResult<bool> {
+pub(crate) async fn engagement_global_enabled(state: &AppState) -> ApiResult<bool> {
     let row = sqlx::query!(r#"SELECT value FROM feature_flags WHERE key = 'engagement_mechanics'"#)
         .fetch_optional(&state.pool)
         .await?;
@@ -495,7 +495,10 @@ async fn qotd_question_is_eligible(
     .await?)
 }
 
-async fn selected_qotd_id(conn: &mut PgConnection, exam_id: Uuid) -> ApiResult<Option<Uuid>> {
+pub(crate) async fn selected_qotd_id(
+    conn: &mut PgConnection,
+    exam_id: Uuid,
+) -> ApiResult<Option<Uuid>> {
     if let Some(existing) = sqlx::query!(
         "SELECT question_version_id FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
         exam_id
