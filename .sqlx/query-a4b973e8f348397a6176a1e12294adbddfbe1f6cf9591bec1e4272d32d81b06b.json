@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE question_versions SET status = 'draft', reviewed_by = NULL WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4b973e8f348397a6176a1e12294adbddfbe1f6cf9591bec1e4272d32d81b06b"
+}

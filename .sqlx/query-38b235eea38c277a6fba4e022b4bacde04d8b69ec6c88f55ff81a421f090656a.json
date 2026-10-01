@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lti_platforms (id, institution_id, issuer, client_id, deployment_id,\n                                    auth_login_url, key_set_url, display_name)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n         ON CONFLICT (issuer, client_id, deployment_id) DO UPDATE SET\n            auth_login_url = $6, key_set_url = $7, display_name = $8\n         WHERE lti_platforms.institution_id = EXCLUDED.institution_id\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "38b235eea38c277a6fba4e022b4bacde04d8b69ec6c88f55ff81a421f090656a"
+}

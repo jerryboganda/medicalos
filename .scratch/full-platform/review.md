@@ -50,6 +50,11 @@ validation is needed at an existing unknown-JSON boundary.
 Lean already for the account slice. CI, source review and final independent
 review status remain separately recorded; this is not full-platform acceptance.
 
+Inspected the four Account CI gallery images (desktop/phone, dark/light) from
+527f06f. Existing fonts, tokens, cards, navigation and mobile primary tabs are
+preserved; the four Account behavioral checks and real device-limit recovery
+passed in that run. Two unrelated OIDC fixture registrations require repair.
+
 Editorial repair reuses the existing transition function and transaction, with
 no new abstraction or dependency. One row lock protects all decisions, and
 failed writes roll back status, provenance and audit together. The CI adds a

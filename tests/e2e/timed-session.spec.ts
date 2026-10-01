@@ -253,11 +253,15 @@ test('mock warning is server-enforced and integrity listeners stop after leaving
 
 	await page.getByRole('link', { name: 'Medical Learning OS' }).click();
 	await expect(page).toHaveURL(/\/today$/);
+	await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible();
+	await expect(page.getByTestId('session-workspace')).toHaveCount(0);
+	const afterNavigation = await page.evaluate(() => Date.now());
 	const staleListenerRequest = page
 		.waitForRequest(
 			(request) =>
 				request.url().endsWith('/v1/integrity-events') &&
-				request.postDataJSON()?.signal_type === 'window_blur',
+				request.postDataJSON()?.signal_type === 'window_blur' &&
+				Date.parse(request.postDataJSON()?.client_time ?? '') >= afterNavigation,
 			{ timeout: 750 }
 		)
 		.then(

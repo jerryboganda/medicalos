@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) AS \"n!\" FROM user_devices\n               WHERE user_id = $1 AND revoked_at IS NULL",
+  "query": "SELECT COUNT(*) AS \"active!\" FROM user_devices\n               WHERE user_id = $1 AND revoked_at IS NULL",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "n!",
+        "name": "active!",
         "type_info": "Int8"
       }
     ],
@@ -18,5 +18,5 @@
       null
     ]
   },
-  "hash": "58ed23079975e40c8a43b19b7bc62c2e6ac85b42f258815e5e79c04d191ce038"
+  "hash": "dd27c5de73602b10ac67ba7985b93db6d9ff4e0e799235b6e18e2bc046c81f0a"
 }

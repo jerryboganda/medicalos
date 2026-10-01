@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT permitted_uses, asset_refs\n               FROM content_rights\n               WHERE ref_code = $1 AND revoked_at IS NULL\n                 AND valid_from <= CURRENT_DATE\n                 AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)\n               FOR SHARE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "permitted_uses",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "asset_refs",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "57fd77aba4fd416e9f0443b6632f8be5cfb85f3564425c035700288aa51b9dc5"
+}

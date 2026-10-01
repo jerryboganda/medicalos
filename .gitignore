@@ -26,6 +26,7 @@ Cargo.lock
 test-results/
 tests/e2e/screenshots/
 playwright-report/
+.scratch/full-platform/artifacts/
 _ci*.log
 .freebuff/
 

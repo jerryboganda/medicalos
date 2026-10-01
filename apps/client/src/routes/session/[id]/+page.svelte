@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
+	import { beforeNavigate } from '$app/navigation';
 	import { Api, ApiError } from '$lib/api';
 
 	let { data } = $props();
@@ -16,6 +17,11 @@
 	let loadFailed = $state('');
 	let integrityWarning = $state('');
 	let integrityAutoSubmitted = $state(false);
+	let integrityActive = false;
+
+	beforeNavigate(({ from, to }) => {
+		if (to?.route.id !== from?.route.id || to?.params.id !== sid) integrityActive = false;
+	});
 
 	// QB-08: report-a-problem control on answered items.
 	let reportOpen = $state(false);
@@ -180,7 +186,7 @@
 	 * @param {Record<string, number>} [detail]
 	 */
 	async function recordIntegritySignal(signalType, detail = {}) {
-		if ((!session?.deadline && session?.preset !== 'mock') || session.status !== 'open' || result) return;
+		if (!integrityActive || (!session?.deadline && session?.preset !== 'mock') || session?.status !== 'open' || result) return;
 		try {
 			const response = await Api.recordIntegrityEvent({
 				session_id: sid,
@@ -188,6 +194,7 @@
 				detail,
 				client_time: new Date().toISOString()
 			});
+			if (!integrityActive) return;
 			if (response.action === 'warn') {
 				const seconds = Math.max(1, response.away_seconds ?? 0);
 				integrityWarning = `You were away for ${seconds} seconds. This assessment remains open; check your connection before continuing.`;
@@ -917,6 +924,7 @@
 	}
 
 	onMount(() => {
+		integrityActive = true;
 		void load();
 		window.addEventListener('online', onNetworkOnline);
 		const handleVisibilityChange = async () => {
@@ -950,6 +958,7 @@
 		window.addEventListener('blur', reportWindowBlur);
 		window.addEventListener('focus', reportWindowFocus);
 		return () => {
+			integrityActive = false;
 			window.removeEventListener('online', onNetworkOnline);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			document.removeEventListener('fullscreenchange', reportFullscreenExit);

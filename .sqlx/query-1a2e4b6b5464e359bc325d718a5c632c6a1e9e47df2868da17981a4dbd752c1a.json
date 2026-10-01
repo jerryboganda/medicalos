@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE user_devices\n           SET revoked_at = now()\n           WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL\n           RETURNING device_key",
+  "query": "UPDATE user_devices SET revoked_at = now()\n         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL\n         RETURNING device_key",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       false
     ]
   },
-  "hash": "6857f178d34837f5b56dd1bf2155b2151e7f94a49325ed15c6d88cbd40d6aca8"
+  "hash": "1a2e4b6b5464e359bc325d718a5c632c6a1e9e47df2868da17981a4dbd752c1a"
 }

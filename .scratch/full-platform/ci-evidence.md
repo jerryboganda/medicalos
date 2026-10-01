@@ -73,3 +73,23 @@ CI restore testing uses the disposable database and synthetic data only.
   Review failure, independent provenance and competing-decision cases are added.
 - The next exact-source run must pass the complete suite, client builds and
   browser checks. Gallery artifacts will be inspected after they are generated.
+
+## Candidate 527f06f
+
+- Run 36788089142 passed Rust, client, site and Zitadel jobs. All 148 API
+  integration tests passed, including all 20 critical launch regressions.
+  All six backup cases and the disposable full-schema restore passed. The
+  checked-in TypeScript contracts passed drift validation (362 export tests).
+- Browser result: 77 passed, two OIDC failures, one retry-passing flaky check.
+  OIDC fixtures issued synthetic tokens without intercepting the new device
+  registration seam; only those named fixture tokens now use the existing
+  test helper. Genuine tokens continue to the API.
+- Session integrity callbacks now stop before leaving the route and ignore
+  late responses. The cleanup check waits for the next page's rendered heading
+  and rejects newly created blur signals, excluding earlier queued requests.
+- Inspected Account PNGs at 1280px desktop and 390px phone in both themes.
+  Existing type, tokens, cards, rail/mobile menu and five tabs are preserved.
+- The SQLx offline cache was synchronized from this run's Rust artifact,
+  not generated locally. Follow-up exact-source acceptance remains required.
+- The final Luna/max editorial inspection again returned "Your workspace is
+  out of credits. Add credits to continue." Independent review is incomplete.

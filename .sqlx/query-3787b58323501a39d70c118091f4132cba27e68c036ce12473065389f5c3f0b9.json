@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT revoked_at, valid_from, valid_to, permitted_uses,\n                          asset_refs, audiences, seat_limit\n                   FROM content_rights WHERE ref_code = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "valid_from",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "valid_to",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "permitted_uses",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "asset_refs",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "audiences",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "seat_limit",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "3787b58323501a39d70c118091f4132cba27e68c036ce12473065389f5c3f0b9"
+}
