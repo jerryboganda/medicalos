@@ -120,3 +120,10 @@ CI restore testing uses the disposable database and synthetic data only.
 - Runs 36810844176 and 36810848227 stopped at the still-red session-policy
   regression. They do not accept the later transaction fix; the next full run
   must validate the corrected source and both stricter release checks.
+
+## Session-policy API and cache refresh
+
+- Run 36813649924 at source `87b1e69dd4ed15156702e782092f78d07d8000a8` passed Rust, client, site, Zitadel and browser jobs. Critical/full API tests, browser E2E and the no-retry session-cleanup repeat passed.
+- Its offline compile failed only because the committed 437-file cache lacked the getter and active-account update queries. The Rust job's CI artifact contains 438 query files; compared with the checked-in set it adds those two queries, removes the obsolete update query, and leaves the other 436 unchanged. The local cache now exactly matches that artifact.
+- The offline job in run 36813649924 checked the immutable pre-sync tree, so a later exact-source offline pass is required. The same commit also predates the follow-up Account focus-return assertion; its updated browser behavior and current gallery need exact-source acceptance.
+- Inspected the four Account images from that run's gallery: desktop and phone in dark and light themes. Session security uses the existing card, chip and button patterns; the five primary mobile tabs and layout remain unchanged. The later focus change adds no visual styling.

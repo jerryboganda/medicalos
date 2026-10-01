@@ -39,6 +39,7 @@ Add an Account destination to the existing You navigation group and render the c
 - Accept account deletion only when the response confirms `deleted: true`. On success, clear local authentication. Describe the operation as access disablement with records retained; make no erasure or retention-period claim.
 - Read the persisted single-active-session policy from its authenticated API endpoint. Never render an assumed default while the stored value is loading or unavailable.
 - Explain that enabling single-session protection immediately signs out every active session, including the current browser. Require a separate user action after that explanation; on confirmation, send the existing session-policy update and clear local authentication after success.
+- Expose the session confirmation disclosure state to assistive technology and return keyboard focus to its trigger when the learner cancels.
 - Preserve the existing navigation group, tokens, cards, typography, responsive layouts and five primary mobile tabs.
 - Keep response validation and learner-facing state in the page; do not add generated API types or change the device/offline-pack API.
 
@@ -48,6 +49,7 @@ Add an Account destination to the existing You navigation group and render the c
 - Cover device listing, revoking another device, signing out by revoking the current device, partial JSON download content, the reversible deletion review, confirmed DELETE, and local sign-in invalidation.
 - Cover device loading, retry after an API error, and the empty list through observable UI states.
 - Cover authenticated policy read, persisted false/true values, confirmation and cancellation before immediate sign-out, confirmed local sign-out, and retry after a failed policy read.
+- Verify the session confirmation's expanded state and that Cancel restores focus to its trigger.
 - Cover a full device limit where session settings remain usable while study requests stay blocked.
 - Use the existing device-session, shell-navigation, and browser-download E2E patterns as prior art. The agreed seam is the learner page plus intercepted `/v1/me/*` requests.
 

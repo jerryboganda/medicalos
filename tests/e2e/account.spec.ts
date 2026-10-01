@@ -170,10 +170,15 @@ test('learner sees the saved session policy and reviews its sign-out effect befo
 	await page.goto('/account');
 	const security = page.getByRole('region', { name: 'Session security' });
 	await expect(security).toContainText('Single active session Off');
-	await security.getByRole('button', { name: 'Enable single-session protection' }).click();
+	const enable = security.getByRole('button', { name: 'Enable single-session protection' });
+	await expect(enable).toHaveAttribute('aria-expanded', 'false');
+	await expect(enable).toHaveAttribute('aria-controls', 'session-policy-review');
+	await enable.click();
+	await expect(enable).toHaveAttribute('aria-expanded', 'true');
 	await expect(page.getByTestId('session-policy-review')).toContainText(/signs out every active session, including this browser/i);
 	await page.getByTestId('session-policy-review').getByRole('button', { name: 'Cancel' }).click();
 	await expect(page.getByTestId('session-policy-review')).toHaveCount(0);
+	await expect(enable).toBeFocused();
 	await security.getByRole('button', { name: 'Enable single-session protection' }).click();
 	await page.getByTestId('session-policy-review').getByRole('button', { name: 'Enable and sign out' }).click();
 	await expect(page.getByRole('heading', { name: 'Signed out' })).toBeVisible();

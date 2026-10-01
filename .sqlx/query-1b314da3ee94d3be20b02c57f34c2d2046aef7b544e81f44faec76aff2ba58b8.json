@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE users SET single_active_session = $2 WHERE id = $1",
+  "query": "UPDATE users SET single_active_session = $2 WHERE id = $1 AND deleted_at IS NULL",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "330216613295a41e5f5e50dedba09406680a1252067525dc500d6d607d39e01a"
+  "hash": "1b314da3ee94d3be20b02c57f34c2d2046aef7b544e81f44faec76aff2ba58b8"
 }

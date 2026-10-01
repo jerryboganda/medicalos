@@ -110,6 +110,7 @@
 	let deleting = $state(false);
 	let deleteError = $state('');
 	let deleteReviewButton: HTMLButtonElement | undefined;
+	let sessionPolicyButton: HTMLButtonElement | undefined;
 	let signedOutHeading = $state('');
 	let signedOutMessage = $state('');
 
@@ -205,6 +206,11 @@
 			sessionPolicyNotice = '';
 			sessionPolicyReviewOpen = true;
 		}
+	}
+
+	function cancelSessionPolicyReview() {
+		sessionPolicyReviewOpen = false;
+		sessionPolicyButton?.focus();
 	}
 
 	async function revokeDevice(device: Device) {
@@ -397,15 +403,24 @@
 			<p class="tight-top">Single active session <span class="chip" class:done={sessionPolicy} class:info={!sessionPolicy}>{sessionPolicy ? 'On' : 'Off'}</span></p>
 			{#if sessionPolicyError}<p class="danger-text" role="alert" data-testid="session-policy-error">{sessionPolicyError}</p>{/if}
 			{#if sessionPolicyNotice}<p class="feedback" role="status">{sessionPolicyNotice}</p>{/if}
-			<button class="btn" type="button" disabled={savingSessionPolicy} data-loading={savingSessionPolicy} onclick={requestSessionPolicyChange}>
+			<button
+				class="btn"
+				type="button"
+				aria-expanded={sessionPolicyReviewOpen}
+				aria-controls="session-policy-review"
+				bind:this={sessionPolicyButton}
+				disabled={savingSessionPolicy}
+				data-loading={savingSessionPolicy}
+				onclick={requestSessionPolicyChange}
+			>
 				{savingSessionPolicy ? 'Saving…' : sessionPolicy ? 'Allow multiple sessions' : 'Enable single-session protection'}
 			</button>
 			{#if sessionPolicyReviewOpen}
-				<div class="delete-confirmation" data-testid="session-policy-review">
+				<div id="session-policy-review" class="delete-confirmation" data-testid="session-policy-review">
 					<p>Enabling this setting immediately signs out every active session, including this browser. You will need to sign in again; the next sign-in will stay active.</p>
 					<div class="cluster">
 						<button class="btn primary" type="button" disabled={savingSessionPolicy} data-loading={savingSessionPolicy} onclick={() => saveSessionPolicy(true)}>Enable and sign out</button>
-						<button class="btn" type="button" disabled={savingSessionPolicy} onclick={() => (sessionPolicyReviewOpen = false)}>Cancel</button>
+						<button class="btn" type="button" disabled={savingSessionPolicy} onclick={cancelSessionPolicyReview}>Cancel</button>
 					</div>
 				</div>
 			{/if}

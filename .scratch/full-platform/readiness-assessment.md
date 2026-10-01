@@ -21,9 +21,11 @@ Readiness and verified backup/restore changes passed on e70ba45. Candidate
 client/site builds and identity provisioning. Its browser run had 77 passes,
 two OIDC fixture failures and one retry-passing cleanup check. The OIDC fixture
 and late session-callback repairs passed all five jobs in run 36810247581 at
-5b11037c8812b13e6a45ac8566c2b8be4a0488c7. That source predates session-policy
-UI and the later offline-cache and no-retry cleanup gates. The session-policy
-atomicity fix and current Account UI still await exact-source acceptance. See
+5b11037c8812b13e6a45ac8566c2b8be4a0488c7. The session-policy transaction and
+initial Account controls then passed Rust and browser jobs in run 36813649924,
+including the no-retry cleanup repeat. Its offline compile exposed two missing
+SQLx cache entries; the exact CI artifact is now synchronized, and the next
+source must pass the offline gate and the added focus-return regression. See
 ci-evidence.md for all runs.
 
 Recovery testing uses a disposable CI database and synthetic data. Software

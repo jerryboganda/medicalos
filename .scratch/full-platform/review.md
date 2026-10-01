@@ -67,3 +67,13 @@ Editorial repair reuses the existing transition function and transaction, with
 no new abstraction or dependency. One row lock protects all decisions, and
 failed writes roll back status, provenance and audit together. The CI adds a
 targeted regression gate before the retained complete test suite.
+
+Follow-up static inspection found the session-policy query cache was stale and
+the new confirmation needed the existing deletion review's expanded-state and
+focus-return behavior. The cache was synchronized from run 36813649924's exact
+source artifact; the Account disclosure now exposes its state and returns focus
+on Cancel. The 36813649924 Account gallery was inspected in dark/light desktop
+and phone views; existing card/chip/button and mobile-navigation patterns hold.
+The added focus assertion and synchronized cache still need their exact-source
+browser and offline checks. This static inspection is not an independent Luna
+review; prior Luna review attempts also reported workspace credits exhausted.
