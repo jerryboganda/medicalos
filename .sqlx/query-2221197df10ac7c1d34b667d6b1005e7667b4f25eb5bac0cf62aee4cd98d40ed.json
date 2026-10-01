@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.lead_in, qv.options, qv.correct_index,\n                  bool_and(question_rights_active(\n                      'distribution', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                  )) OVER () AS \"all_distribution_rights_active!\"\n           FROM question_versions qv\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE c.exam_id = $1 AND qv.status = 'published'\n           ORDER BY qv.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "all_distribution_rights_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "2221197df10ac7c1d34b667d6b1005e7667b4f25eb5bac0cf62aee4cd98d40ed"
+}
