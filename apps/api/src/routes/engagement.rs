@@ -487,6 +487,9 @@ async fn qotd_question_is_eligible(
                  AND NOT EXISTS (
                      SELECT 1 FROM reserved_questions rq
                      WHERE rq.question_version_id = qv.id)
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                 )
            )"#,
     )
     .bind(question_version_id)
@@ -524,6 +527,9 @@ pub(crate) async fn selected_qotd_id(
                  AND NOT EXISTS (
                      SELECT 1 FROM reserved_questions rq
                      WHERE rq.question_version_id = qv.id)
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                 )
                ORDER BY qv.id
            ), picked AS (
                SELECT id FROM eligible
@@ -633,7 +639,10 @@ async fn qotd_payload(
              AND chapter.exam_id = $2 AND chapter.kind = 'chapter'
              AND NOT EXISTS (
                  SELECT 1 FROM reserved_questions rq
-                 WHERE rq.question_version_id = qv.id)"#,
+                 WHERE rq.question_version_id = qv.id)
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )"#,
         question_id,
         exam_id
     )
@@ -717,7 +726,10 @@ pub async fn answer_qotd(
              AND chapter.exam_id = $2 AND chapter.kind = 'chapter'
              AND NOT EXISTS (
                  SELECT 1 FROM reserved_questions rq
-                 WHERE rq.question_version_id = qv.id)"#,
+                 WHERE rq.question_version_id = qv.id)
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )"#,
         req.question_version_id,
         exam_id
     )
