@@ -19898,7 +19898,7 @@ async fn variants_trends_drills_regression_and_qti() {
         app.clone(),
         &author,
         "VARIANT-SOURCE-RIGHTS",
-        &["display"],
+        &["display", "distribution"],
         &["Fixture"],
         None,
     )
