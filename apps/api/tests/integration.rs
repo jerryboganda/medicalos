@@ -19914,9 +19914,10 @@ async fn variants_trends_drills_regression_and_qti() {
 
     // QB-02: author a second version on an existing family, through the gate.
     let original = ids.question_versions[0];
-    sqlx::query("UPDATE question_versions SET rights_ref = $2 WHERE id = $1")
+    sqlx::query("UPDATE question_versions SET rights_ref = $2, source_ref = $3 WHERE id = $1")
         .bind(original)
         .bind("VARIANT-SOURCE-RIGHTS")
+        .bind("Fixture")
         .execute(&state.pool)
         .await
         .expect("fixture rights provenance");
