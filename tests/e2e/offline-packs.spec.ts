@@ -37,12 +37,12 @@ function canonicalValue(value: unknown): string {
 }
 
 function receiptFor(ids: string[]) {
+  const issued_at = new Date().toISOString();
+  const checksums = ids.map((id) => resource(id, questionIds.indexOf(id)).checksum);
+  const payload = { checksums, device_id: deviceId, exam_id: examId, issued_at };
   return {
-    device_id: deviceId,
-    exam_id: examId,
-    issued_at: new Date().toISOString(),
-    checksums: ids.map((id) => resource(id, questionIds.indexOf(id)).checksum),
-    signature: 'mock-receipt-signature'
+    ...payload,
+    signature: sign(null, Buffer.from(canonicalValue(payload)), signing.privateKey).toString('hex')
   };
 }
 
@@ -368,6 +368,82 @@ test('browser quota exhaustion keeps the pack incomplete and reports the limit',
   await page.getByTestId('pack-download').click();
   await expect(page.getByTestId('pack-error')).toContainText(/storage/i);
   await expect(page.getByTestId('pack-ready')).toHaveCount(0);
+});
+
+test('download rejects an invalid signed receipt before saving its batch', async ({ page }) => {
+  const manifest = signedManifest();
+  let resourceRequests = 0;
+  await page.addInitScript(() => {
+    localStorage.setItem('mlos_token', 'e2e-user-token');
+    localStorage.setItem('mlos_pack_device', 'e2e-device-01');
+  });
+  await page.route('**/v1/me/curriculum', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        chapters: [
+          {
+            chapter_id: chapterId,
+            chapter_name: 'Fictional practice chapter',
+            system: 'Synthetic system',
+            subject: 'Synthetic subject',
+            exam_id: examId,
+            exam: 'Test exam',
+            published_questions: questionIds.length
+          }
+        ]
+      })
+    })
+  );
+  await page.route('**/v1/me/packs', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ leases: [] })
+    })
+  );
+  await page.route('**/v1/packs/lease', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        lease_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        expires_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+        content_as_of: new Date().toISOString(),
+        pack_key: '11'.repeat(32),
+        algorithm: 'AES-GCM-256'
+      })
+    })
+  );
+  await page.route('**/v2/packs/*/manifest*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
+  );
+  await page.route('**/v2/packs/*/resources', async (route) => {
+    const ids = (route.request().postDataJSON() as { question_version_ids: string[] })
+      .question_version_ids;
+    const receipt = receiptFor(ids);
+    receipt.signature = '00'.repeat(64);
+    resourceRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))), receipt })
+    });
+  });
+
+  await page.goto('/offline');
+  await page.evaluate(async () => {
+    if ('serviceWorker' in navigator) await navigator.serviceWorker.ready;
+  });
+  await page.reload();
+  await page.getByTestId(`pack-chapter-${chapterId}`).check();
+  await page.getByTestId('pack-download').click();
+
+  await expect(page.getByTestId('pack-error')).toContainText('signature');
+  await expect(page.getByTestId('pack-partial')).toContainText('0 of 26 questions');
+  await expect(page.getByTestId('pack-open')).toBeDisabled();
+  expect(resourceRequests).toBe(1);
 });
 
 test('invalid manifest signatures are rejected before any question resource is downloaded', async ({ page }) => {
