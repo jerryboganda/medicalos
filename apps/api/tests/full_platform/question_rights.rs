@@ -2690,16 +2690,17 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         .unwrap()
         .iter()
         .any(|item| item["question_version_id"] == question_id.to_string()));
-    let legacy_manifest_url = format!(
-        "/v1/packs/{}/manifest?chapters={}",
-        ids.exam_id, chapter_id
-    );
+    let legacy_manifest_url = format!("/v1/packs/{}/manifest?chapters={}", ids.exam_id, chapter_id);
     let (status, legacy_manifest) = call(
         app.clone(),
         request("GET", &legacy_manifest_url, Some(&learner), None),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "active legacy manifest: {legacy_manifest}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "active legacy manifest: {legacy_manifest}"
+    );
     assert!(legacy_manifest["items"]
         .as_array()
         .unwrap()
@@ -2741,7 +2742,11 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "session without derivative rights: {session_detail}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "session without derivative rights: {session_detail}"
+    );
     assert!(session_detail["items"][0]["tutoring_cards"]
         .as_array()
         .unwrap()
@@ -2761,10 +2766,12 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         StatusCode::OK,
         "pack resources without derivative rights: {resources_without_derivatives}"
     );
-    assert!(resources_without_derivatives["resources"][0]["tutoring_cards"]
-        .as_array()
-        .unwrap()
-        .is_empty());
+    assert!(
+        resources_without_derivatives["resources"][0]["tutoring_cards"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let (status, pregen_without_derivatives) = call(
         app.clone(),
         admin_req(
@@ -2818,7 +2825,10 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         StatusCode::FORBIDDEN,
         "resource request without offline rights: {denied_without_offline}"
     );
-    assert_eq!(denied_without_offline["error"]["code"], "rights_unavailable");
+    assert_eq!(
+        denied_without_offline["error"]["code"],
+        "rights_unavailable"
+    );
 
     set_rights_uses(
         &state.pool,
