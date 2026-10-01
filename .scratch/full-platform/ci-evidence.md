@@ -74,6 +74,21 @@ CI restore testing uses the disposable database and synthetic data only.
 - The next exact-source run must pass the complete suite, client builds and
   browser checks. Gallery artifacts will be inspected after they are generated.
 
+## Session-policy atomicity evidence
+
+- Run 36810363234 failed the new regression against the old implementation.
+  A database check rejected retirement of one existing session. The setting
+  update had already committed; a later sign-in therefore revoked the remaining
+  sessions. The test observed 401 where the preserved sessions must return 200.
+- The setter now takes the same user-row lock as login and commits the setting,
+  all-session retirement and audit as one transaction. An authenticated read
+  route and Account controls were added with honest loading/error states and an
+  explicit warning/confirmation for the immediate sign-out.
+- Run 36810848227 reran the same red regression before the setter fix was in
+  the branch; it confirmed the same 401-after-failed-retirement defect. The
+  transaction and UI changes, including device-limit recovery, still need
+  exact-source GitHub Actions.
+
 ## Candidate 527f06f
 
 - Run 36788089142 passed Rust, client, site and Zitadel jobs. All 148 API
@@ -93,3 +108,15 @@ CI restore testing uses the disposable database and synthetic data only.
   not generated locally. Follow-up exact-source acceptance remains required.
 - The final Luna/max editorial inspection again returned "Your workspace is
   out of credits. Add credits to continue." Independent review is incomplete.
+
+## Browser registration and cleanup follow-up
+
+- Run 36810247581 passed all five jobs at source commit
+  5b11037c8812b13e6a45ac8566c2b8be4a0488c7. The Rust suite, client/site builds,
+  Zitadel provisioning and browser E2E passed after the OIDC fixture
+  registration and late session-integrity callback repairs. This source
+  predates session-policy UI and the stricter offline-cache and no-retry
+  cleanup gates added afterward.
+- Runs 36810844176 and 36810848227 stopped at the still-red session-policy
+  regression. They do not accept the later transaction fix; the next full run
+  must validate the corrected source and both stricter release checks.

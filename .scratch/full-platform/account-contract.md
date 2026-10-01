@@ -22,6 +22,10 @@ Add an Account destination to the existing You navigation group and render the c
 8. As a learner, I want deletion to say that access is disabled while existing records are retained so that I am not told the records were erased.
 9. As a learner, I want successful account deletion to clear this browser's sign-in so that the deleted account is no longer presented as authenticated here.
 10. As a learner, I want malformed API responses to produce a clear error instead of a fabricated device list or export.
+11. As a learner, I want to see my saved single-session setting without an assumed default.
+12. As a learner, I want a plain explanation and explicit confirmation before enabling a setting that signs out every active session, including this browser.
+13. As a learner, I want a failed or unavailable session setting to show a retry rather than a value the server never returned.
+14. As a learner signing in on a new browser at the device limit, I want to manage my session setting while I free a device slot.
 
 ## Implementation Decisions
 
@@ -29,22 +33,26 @@ Add an Account destination to the existing You navigation group and render the c
 - Use the existing account API façade: `Api.listDevices()`, `Api.revokeDevice(id)`, `Api.exportAccount()`, and `Api.deleteAccount()`.
 - Validate the unknown device response as an object containing a `devices` array with the device id/key, label, activity timestamps, and revocation state needed by the UI. Compare `device_key` with the browser's existing device key to identify the current device.
 - Accept a device revoke only when the response confirms `revoked: true`. Revoking the current device clears local authentication and shows a sign-in path.
-- If registration reports the active-device limit, permit only authenticated account list/revoke/export/closure requests so the learner can free a slot. Other registration failures and study requests still fail closed. A real API browser regression fills all five slots, retires one, and registers the new browser on reload.
+- If registration reports the active-device limit, permit only authenticated account list/revoke/export/closure and session-policy read/write requests. Other registration failures and study requests still fail closed. A real API browser regression fills all five slots, retires one, and registers the new browser on reload; the session-policy UI regression covers safe setting changes while a new browser is blocked.
 - Validate export JSON for an account object and arrays named `attempts`, `notes`, `card_reviews`, and `portfolio`. The UI calls `card_reviews` “reviews” in learner-facing copy.
 - Describe the export as partial. Other account-data categories remain pending and are not claimed to be included.
 - Accept account deletion only when the response confirms `deleted: true`. On success, clear local authentication. Describe the operation as access disablement with records retained; make no erasure or retention-period claim.
-- Keep response validation and messages in the page; do not add generated API types or edit the API/auth/offline-pack implementation in this work slice.
+- Read the persisted single-active-session policy from its authenticated API endpoint. Never render an assumed default while the stored value is loading or unavailable.
+- Explain that enabling single-session protection immediately signs out every active session, including the current browser. Require a separate user action after that explanation; on confirmation, send the existing session-policy update and clear local authentication after success.
+- Preserve the existing navigation group, tokens, cards, typography, responsive layouts and five primary mobile tabs.
+- Keep response validation and learner-facing state in the page; do not add generated API types or change the device/offline-pack API.
 
 ## Testing Decisions
 
 - Test the public page through Playwright with synthetic API responses; do not couple the test to Svelte state or private helpers.
 - Cover device listing, revoking another device, signing out by revoking the current device, partial JSON download content, the reversible deletion review, confirmed DELETE, and local sign-in invalidation.
 - Cover device loading, retry after an API error, and the empty list through observable UI states.
+- Cover authenticated policy read, persisted false/true values, confirmation and cancellation before immediate sign-out, confirmed local sign-out, and retry after a failed policy read.
+- Cover a full device limit where session settings remain usable while study requests stay blocked.
 - Use the existing device-session, shell-navigation, and browser-download E2E patterns as prior art. The agreed seam is the learner page plus intercepted `/v1/me/*` requests.
 
 ## Out of Scope
 
-- Backend/API implementation and generated types, owned by the parallel API worker.
 - A complete account archive, hard erasure, retention scheduling, or new privacy features.
 - Claims about which unexported categories exist or how long retained records remain stored.
 - New themes, fonts, visual patterns, or mobile primary tabs.

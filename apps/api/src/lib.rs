@@ -252,7 +252,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/review-debt", get(routes::review::review_debt))
         .route(
             "/v1/me/session-policy",
-            axum::routing::patch(routes::accounts::set_session_policy),
+            get(routes::accounts::get_session_policy).patch(routes::accounts::set_session_policy),
         )
         .route(
             "/v1/admin/articles/{article_id}/media",
@@ -959,7 +959,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/me/review-debt", get(routes::review::review_debt))
         .route(
             "/api/v1/me/session-policy",
-            axum::routing::patch(routes::accounts::set_session_policy),
+            get(routes::accounts::get_session_policy).patch(routes::accounts::set_session_policy),
         )
         .route(
             "/api/v1/admin/articles/{article_id}/media",

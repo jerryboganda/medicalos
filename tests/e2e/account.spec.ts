@@ -16,6 +16,9 @@ type SetupOptions = {
 	devices?: DeviceFixture[];
 	failFirstDeviceList?: boolean;
 	holdFirstDeviceList?: boolean;
+	failFirstSessionPolicy?: boolean;
+	deviceRegistrationExhausted?: boolean;
+	singleActiveSession?: boolean;
 };
 
 const token = 'synthetic-account-token';
@@ -54,6 +57,8 @@ async function setupAccount(page: Page, options: SetupOptions = {}) {
 	const devices = (options.devices ?? devicesFixture).map((device) => ({ ...device }));
 	const requests: ApiRequest[] = [];
 	let listReads = 0;
+	let sessionPolicy = options.singleActiveSession ?? false;
+	let sessionPolicyReads = 0;
 	let accountDeleted = false;
 	let releaseFirstDeviceList!: () => void;
 	let signalFirstDeviceList!: () => void;
@@ -77,6 +82,13 @@ async function setupAccount(page: Page, options: SetupOptions = {}) {
 
 		if (url.pathname === '/v1/me/devices' && request.method() === 'POST') {
 			expect(request.postDataJSON().device_key).toBe(currentDeviceKey);
+			if (options.deviceRegistrationExhausted) {
+				await route.fulfill({
+					status: 403,
+					json: { error: { code: 'devices_exhausted', message: 'device limit reached' } }
+				});
+				return;
+			}
 			await route.fulfill({ status: 200, json: devicesFixture[0] });
 			return;
 		}
@@ -96,6 +108,26 @@ async function setupAccount(page: Page, options: SetupOptions = {}) {
 				}
 			}
 			await route.fulfill({ status: 200, json: { devices } });
+			return;
+		}
+
+		if (url.pathname === '/v1/me/session-policy' && request.method() === 'GET') {
+			sessionPolicyReads += 1;
+			if (options.failFirstSessionPolicy && sessionPolicyReads === 1) {
+				await route.fulfill({
+					status: 503,
+					contentType: 'application/json',
+					body: JSON.stringify({ error: { code: 'unavailable', message: 'Session settings unavailable' } })
+				});
+				return;
+			}
+			await route.fulfill({ status: 200, json: { single_active_session: sessionPolicy } });
+			return;
+		}
+
+		if (url.pathname === '/v1/me/session-policy' && request.method() === 'PATCH') {
+			sessionPolicy = request.postDataJSON()?.single_active_session;
+			await route.fulfill({ status: 200, json: { single_active_session: sessionPolicy } });
 			return;
 		}
 
@@ -132,6 +164,58 @@ async function setupAccount(page: Page, options: SetupOptions = {}) {
 
 	return { requests, firstDeviceListStarted, releaseFirstDeviceList, get listReads() { return listReads; } };
 }
+
+test('learner sees the saved session policy and reviews its sign-out effect before enabling it', async ({ page }) => {
+	const api = await setupAccount(page);
+	await page.goto('/account');
+	const security = page.getByRole('region', { name: 'Session security' });
+	await expect(security).toContainText('Single active session Off');
+	await security.getByRole('button', { name: 'Enable single-session protection' }).click();
+	await expect(page.getByTestId('session-policy-review')).toContainText(/signs out every active session, including this browser/i);
+	await page.getByTestId('session-policy-review').getByRole('button', { name: 'Cancel' }).click();
+	await expect(page.getByTestId('session-policy-review')).toHaveCount(0);
+	await security.getByRole('button', { name: 'Enable single-session protection' }).click();
+	await page.getByTestId('session-policy-review').getByRole('button', { name: 'Enable and sign out' }).click();
+	await expect(page.getByRole('heading', { name: 'Signed out' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Go to sign in' })).toBeVisible();
+	expect(await page.evaluate(() => localStorage.getItem('mlos_token'))).toBeNull();
+	expect(api.requests).toContainEqual({ method: 'GET', path: '/v1/me/session-policy', authorization: `Bearer ${token}` });
+	expect(api.requests).toContainEqual({ method: 'PATCH', path: '/v1/me/session-policy', authorization: `Bearer ${token}` });
+});
+
+test('learner can retry loading a session policy without seeing a default value', async ({ page }) => {
+	await setupAccount(page, { failFirstSessionPolicy: true });
+	await page.goto('/account');
+	const security = page.getByRole('region', { name: 'Session security' });
+	await expect(security.getByTestId('session-policy-error')).toBeVisible();
+	await expect(security.getByText(/Single active session/)).toHaveCount(0);
+	await security.getByRole('button', { name: 'Retry session setting' }).click();
+	await expect(security).toContainText('Single active session Off');
+});
+
+test('learner can change session policy when a new browser has exhausted the device limit', async ({ page }) => {
+	const devices = Array.from({ length: 5 }, (_, index) => ({
+		...devicesFixture[0],
+		device_id: `other-device-${index}`,
+		device_key: `other-device-key-${index}`,
+		label: `Study device ${index + 1}`
+	}));
+	const api = await setupAccount(page, {
+		devices,
+		deviceRegistrationExhausted: true,
+		singleActiveSession: true
+	});
+	await page.goto('/account');
+	const security = page.getByRole('region', { name: 'Session security' });
+	await expect(security).toContainText('Single active session On');
+	await security.getByRole('button', { name: 'Allow multiple sessions' }).click();
+	await expect(security).toContainText('Multiple active sessions are allowed.');
+	expect(api.requests).toContainEqual({
+		method: 'PATCH',
+		path: '/v1/me/session-policy',
+		authorization: `Bearer ${token}`
+	});
+});
 
 test('learner reviews devices, revokes another device, and signs out by revoking this browser', async ({ page }) => {
 	const api = await setupAccount(page);

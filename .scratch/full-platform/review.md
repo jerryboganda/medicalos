@@ -34,6 +34,12 @@ Question transitions now share one locked transaction, including review and
 audit writes. The original failed-audit defect was confirmed in run 36786239795.
 Both repairs still require complete exact-source acceptance.
 
+CORE-07 had another live tail: 36810363234 confirmed that a failed session
+retirement left its policy enabled and later login revoked the old sessions.
+The setting, retirements and audit now share the login user lock and transaction.
+Account reads the stored value and shows the immediate sign-out before explicit
+enable confirmation. Complete CI acceptance remains pending.
+
 Confirmed pending tails: runtime question withdrawal after rights expiry/revocation;
 article draft publication without independent author/reviewer or rights gates;
 incomplete privacy export; generic auth still accepting an unbound bearer;
@@ -53,7 +59,9 @@ review status remain separately recorded; this is not full-platform acceptance.
 Inspected the four Account CI gallery images (desktop/phone, dark/light) from
 527f06f. Existing fonts, tokens, cards, navigation and mobile primary tabs are
 preserved; the four Account behavioral checks and real device-limit recovery
-passed in that run. Two unrelated OIDC fixture registrations require repair.
+passed in that run. The later 5b11037 run passed all five jobs after the OIDC
+fixture registration and late session-callback repairs. It predates the new
+session-policy UI and subsequent offline-cache/no-retry gates.
 
 Editorial repair reuses the existing transition function and transaction, with
 no new abstraction or dependency. One row lock protects all decisions, and

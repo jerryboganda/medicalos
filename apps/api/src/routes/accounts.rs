@@ -266,18 +266,43 @@ pub struct SessionPolicyReq {
     pub single_active_session: bool,
 }
 
+pub async fn get_session_policy(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> ApiResult<Json<serde_json::Value>> {
+    let single_active_session = sqlx::query_scalar!(
+        r#"SELECT single_active_session AS "single_active_session!"
+           FROM users WHERE id = $1 AND deleted_at IS NULL"#,
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(
+        json!({ "single_active_session": single_active_session }),
+    ))
+}
+
 /// When on, the next login retires every prior session for this account.
 pub async fn set_session_policy(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<SessionPolicyReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
     sqlx::query!(
-        "UPDATE users SET single_active_session = $2 WHERE id = $1",
+        "UPDATE users SET single_active_session = $2 WHERE id = $1 AND deleted_at IS NULL",
         user.user_id,
         req.single_active_session
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
     if req.single_active_session {
         // Turning the policy on takes effect immediately for this account.
@@ -286,11 +311,21 @@ pub async fn set_session_policy(
              WHERE user_id = $1 AND revoked_at IS NULL",
             user.user_id
         )
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
     }
+    audit(
+        &mut *tx,
+        user.user_id,
+        "single_active_session_policy_changed",
+        "user",
+        user.user_id,
+        json!({ "single_active_session": req.single_active_session }),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Json(
-        serde_json::json!({ "single_active_session": req.single_active_session }),
+        json!({ "single_active_session": req.single_active_session }),
     ))
 }
 

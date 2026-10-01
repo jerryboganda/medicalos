@@ -56,6 +56,12 @@
 		return devices;
 	}
 
+	function parseSessionPolicy(value: unknown): boolean | null {
+		return isRecord(value) && typeof value.single_active_session === 'boolean'
+			? value.single_active_session
+			: null;
+	}
+
 	function isAccountExport(value: unknown): value is AccountExport {
 		return (
 			isRecord(value) &&
@@ -86,6 +92,12 @@
 	let devices = $state<Device[]>([]);
 	let currentDeviceKey = '';
 	let loadingDevices = $state(true);
+	let sessionPolicy = $state<boolean | null>(null);
+	let loadingSessionPolicy = $state(true);
+	let savingSessionPolicy = $state(false);
+	let sessionPolicyError = $state('');
+	let sessionPolicyNotice = $state('');
+	let sessionPolicyReviewOpen = $state(false);
 	let devicesError = $state('');
 	let deviceContextError = $state('');
 	let deviceNotice = $state('');
@@ -132,6 +144,66 @@
 			}
 		} finally {
 			loadingDevices = false;
+		}
+	}
+
+	async function loadSessionPolicy() {
+		loadingSessionPolicy = true;
+		sessionPolicyError = '';
+		sessionPolicyNotice = '';
+		try {
+			const result = parseSessionPolicy(await Api.sessionPolicy());
+			if (result === null) {
+				sessionPolicyError = 'The server returned an incomplete session setting. Retry to try again.';
+				return;
+			}
+			sessionPolicy = result;
+		} catch (error) {
+			if (!auth.token) {
+				endLocalSession('Signed out', 'Your sign-in has ended. Sign in again to manage this account.');
+			} else {
+				sessionPolicyError = messageFor(error, 'We could not load your session setting. Check your connection and retry.');
+			}
+		} finally {
+			loadingSessionPolicy = false;
+		}
+	}
+
+	async function saveSessionPolicy(singleActiveSession: boolean) {
+		if (savingSessionPolicy) return;
+		savingSessionPolicy = true;
+		sessionPolicyError = '';
+		sessionPolicyNotice = '';
+		try {
+			const saved = parseSessionPolicy(await Api.setSessionPolicy(singleActiveSession));
+			if (saved !== singleActiveSession) {
+				sessionPolicyError = 'The server did not confirm this setting. Retry to check its saved state.';
+				return;
+			}
+			sessionPolicy = saved;
+			sessionPolicyReviewOpen = false;
+			if (saved) {
+				endLocalSession('Signed out', 'Single-session protection is on. Sign in again to continue with your account.');
+			} else {
+				sessionPolicyNotice = 'Multiple active sessions are allowed.';
+			}
+		} catch (error) {
+			if (!auth.token) {
+				endLocalSession('Signed out', 'Your sign-in has ended. Sign in again to manage this account.');
+			} else {
+				sessionPolicyError = messageFor(error, 'We could not save your session setting. Check your connection and retry.');
+			}
+		} finally {
+			savingSessionPolicy = false;
+		}
+	}
+
+	function requestSessionPolicyChange() {
+		if (sessionPolicy === true) void saveSessionPolicy(false);
+		else if (sessionPolicy === false) {
+			sessionPolicyError = '';
+			sessionPolicyNotice = '';
+			sessionPolicyReviewOpen = true;
 		}
 	}
 
@@ -243,6 +315,7 @@
 		}
 		currentDeviceKey = browserDeviceId();
 		await loadDevices();
+		if (auth.token) await loadSessionPolicy();
 	});
 </script>
 
@@ -310,6 +383,33 @@
 			</ul>
 		{/if}
 		{#if deviceNotice}<p class="feedback" role="status">{deviceNotice}</p>{/if}
+	</section>
+
+	<section class="card" aria-labelledby="session-policy-heading">
+		<h2 id="session-policy-heading">Session security</h2>
+		{#if loadingSessionPolicy}
+			<p class="muted is-loading" aria-live="polite" data-testid="session-policy-loading">Loading session setting…</p>
+		{:else if sessionPolicyError && sessionPolicy === null}
+			<p class="danger-text" role="alert" data-testid="session-policy-error">{sessionPolicyError}</p>
+			<button class="btn" type="button" disabled={savingSessionPolicy} onclick={loadSessionPolicy}>Retry session setting</button>
+		{:else if sessionPolicy !== null}
+			<p class="muted">{sessionPolicy ? 'Only the latest sign-in can stay active.' : 'More than one device can stay signed in.'}</p>
+			<p class="tight-top">Single active session <span class="chip" class:done={sessionPolicy} class:info={!sessionPolicy}>{sessionPolicy ? 'On' : 'Off'}</span></p>
+			{#if sessionPolicyError}<p class="danger-text" role="alert" data-testid="session-policy-error">{sessionPolicyError}</p>{/if}
+			{#if sessionPolicyNotice}<p class="feedback" role="status">{sessionPolicyNotice}</p>{/if}
+			<button class="btn" type="button" disabled={savingSessionPolicy} data-loading={savingSessionPolicy} onclick={requestSessionPolicyChange}>
+				{savingSessionPolicy ? 'Saving…' : sessionPolicy ? 'Allow multiple sessions' : 'Enable single-session protection'}
+			</button>
+			{#if sessionPolicyReviewOpen}
+				<div class="delete-confirmation" data-testid="session-policy-review">
+					<p>Enabling this setting immediately signs out every active session, including this browser. You will need to sign in again; the next sign-in will stay active.</p>
+					<div class="cluster">
+						<button class="btn primary" type="button" disabled={savingSessionPolicy} data-loading={savingSessionPolicy} onclick={() => saveSessionPolicy(true)}>Enable and sign out</button>
+						<button class="btn" type="button" disabled={savingSessionPolicy} onclick={() => (sessionPolicyReviewOpen = false)}>Cancel</button>
+					</div>
+				</div>
+			{/if}
+		{/if}
 	</section>
 
 	<section class="card" aria-labelledby="export-heading">

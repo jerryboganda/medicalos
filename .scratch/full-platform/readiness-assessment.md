@@ -18,10 +18,13 @@ It includes session/device revocation, LTI configuration ownership, guarded
 JWKS transport, accurate Coach engine labels and mobile keyboard navigation.
 Readiness and verified backup/restore changes passed on e70ba45. Candidate
 527f06f passed all 148 API integration tests, migrations, backup/restore,
-client/site builds and identity provisioning. Account checks and its four
-theme/size gallery images passed and were inspected. Two OIDC fixture errors
-and a retry-passing session-cleanup check prevented complete browser acceptance.
-Their repairs still need exact-source CI. See ci-evidence.md for all runs.
+client/site builds and identity provisioning. Its browser run had 77 passes,
+two OIDC fixture failures and one retry-passing cleanup check. The OIDC fixture
+and late session-callback repairs passed all five jobs in run 36810247581 at
+5b11037c8812b13e6a45ac8566c2b8be4a0488c7. That source predates session-policy
+UI and the later offline-cache and no-retry cleanup gates. The session-policy
+atomicity fix and current Account UI still await exact-source acceptance. See
+ci-evidence.md for all runs.
 
 Recovery testing uses a disposable CI database and synthetic data. Software
 tests do not establish lawful content, clinical correctness, vendor contracts,
@@ -34,7 +37,7 @@ inspection has been performed in this work scope.
 |---|---|---|
 | Learning evidence | Accept the implemented submitted-answer re-test receipts in complete CI; finish queue delivery/SLA behavior | Real API grading, replay, race, variant, assistance and confidence cases |
 | Content safety | Accept atomic question transitions; complete article review/rights workflow, runtime rights withdrawal, source propagation, trusted ingestion and licensed media coverage | Independent review provenance, denied invalid grants, extraction quality and quarantine cases |
-| Identity/privacy | Complete the account archive and policy-driven retention/erasure; finish identity methods, single-session UI and server registration enforcement for direct API clients | Every user-owned data category, account isolation, device/session limits and approved policy |
+| Identity/privacy | Complete the account archive and policy-driven retention/erasure; accept single-session UI, finish identity methods and enforce device registration for direct API clients | Every user-owned data category, account isolation, device/session limits and approved policy |
 | Institutional work | Complete LTI browser/deep-link/content handoff and integration acceptance; check remaining enrollment and least-privilege application-pool work | Real tenant/provider handoff and denial of foreign data |
 | AI/planning | Implement real provider routing, bounded cost/policy controls, evaluations and supported languages; complete calendar scopes | Provider failure/fallback, evidence grounding, permission and evaluation gates |
 | Native clients | Complete owned desktop/mobile shells, push, attestation, secure/offline storage, billing and background behavior | Signed builds and supported real-device matrix |
@@ -53,10 +56,13 @@ authentication extractor still accepts an unbound bearer. Global registration
 and device-cap enforcement for direct API clients remains code work; the
 browser recovery test is not proof of that server-wide boundary.
 
-The session-policy setter also updates its user outside session retirement's
-transaction. Its failure regression and the read/control UI contract are added;
-the atomic repair is pending its confirmed red result. privacy-data-map.md
-lists the export categories requiring implementation and ownership checks.
+The session-policy failure regression failed on 6f24b09: a rejected retirement
+left the policy enabled, and the next login retired existing sessions. The
+setter now locks the account and commits policy, session retirement and audit
+together. Authenticated read and Account controls preserve the stored value,
+explain immediate sign-out and ask before enabling it. Exact-source acceptance
+is pending. privacy-data-map.md lists categories requiring a fuller archive
+and ownership checks.
 
 Question publication checks the grant at publication time. Revoking a grant
 currently changes the rights record only; existing practice and Coach serving

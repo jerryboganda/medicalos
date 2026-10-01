@@ -705,7 +705,8 @@ async function call<T>(
 			// to retire a device or close/export its account. Study requests
 			// remain blocked until registration succeeds.
 			const accountControl =
-				(method === 'GET' && (path === '/v1/me/devices' || path === '/v1/me/export')) ||
+				(method === 'GET' && (path === '/v1/me/devices' || path === '/v1/me/export' || path === '/v1/me/session-policy')) ||
+				(method === 'PATCH' && path === '/v1/me/session-policy') ||
 				(method === 'DELETE' && (path === '/v1/me/account' || /^\/v1\/me\/devices\/[^/]+$/.test(path)));
 			if (!(accountControl && error instanceof ApiError && error.status === 403 && error.code === 'devices_exhausted')) {
 				throw error;
@@ -750,6 +751,11 @@ export const Api = {
 	/** Who am I, which platform/institution permissions do I hold. */
 	me: () => call<MeView>('GET', '/v1/me'),
 	listDevices: () => call<unknown>('GET', '/v1/me/devices'),
+	sessionPolicy: () => call<unknown>('GET', '/v1/me/session-policy'),
+	setSessionPolicy: (singleActiveSession: boolean) =>
+		call<unknown>('PATCH', '/v1/me/session-policy', {
+			single_active_session: singleActiveSession
+		}),
 	revokeDevice: (deviceId: string) =>
 		call<unknown>('DELETE', `/v1/me/devices/${encodeURIComponent(deviceId)}`),
 	exportAccount: () => call<unknown>('GET', '/v1/me/export'),

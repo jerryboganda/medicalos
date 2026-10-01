@@ -19547,6 +19547,13 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let first_token = first_login["token"].as_str().unwrap().to_string();
+    let (status, initial_policy) = call(
+        app.clone(),
+        request("GET", "/v1/me/session-policy", Some(&first_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "policy read: {initial_policy}");
+    assert_eq!(initial_policy["single_active_session"], false);
 
     // Turn the policy on with the FIRST token: it retires itself (by design,
     // the next login is the surviving one).
@@ -19580,6 +19587,17 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let second_token = second_login["token"].as_str().unwrap().to_string();
+    let (status, enabled_policy) = call(
+        app.clone(),
+        request("GET", "/v1/me/session-policy", Some(&second_token), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "policy persists across sign-in: {enabled_policy}"
+    );
+    assert_eq!(enabled_policy["single_active_session"], true);
 
     // A fresh login retires the previous active session.
     let (_, third_login) = call(
