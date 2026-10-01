@@ -312,6 +312,14 @@ pub async fn queue(
     let due_rows = sqlx::query!(
         r#"SELECT id, front, back, state, card_type, trust, cloze FROM cards
            WHERE user_id = $1 AND suspended = false
+             AND (source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = cards.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
              AND (state->>'state')::int <> 0
              AND (state->>'due')::timestamptz <= $2
            ORDER BY (state->>'due')::timestamptz"#,
@@ -323,6 +331,14 @@ pub async fn queue(
     let new_rows = sqlx::query!(
         r#"SELECT id, front, back, state, card_type, trust, cloze FROM cards
            WHERE user_id = $1 AND suspended = false
+             AND (source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = cards.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
              AND (state->>'state')::int = 0
            ORDER BY created_at"#,
         user.user_id
@@ -679,7 +695,16 @@ pub async fn export_decks(
     for d in &decks {
         let cards = sqlx::query!(
             r#"SELECT front, back, state, suspended, created_at FROM cards
-               WHERE deck_id = $1 AND user_id = $2 ORDER BY created_at"#,
+               WHERE deck_id = $1 AND user_id = $2
+                 AND (source_question_version_id IS NULL OR EXISTS (
+                     SELECT 1 FROM question_versions qv
+                     WHERE qv.id = cards.source_question_version_id
+                       AND qv.status = 'published'
+                       AND question_display_rights_active(
+                           qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                       )
+                 ))
+               ORDER BY created_at"#,
             d.id,
             user.user_id
         )

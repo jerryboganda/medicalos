@@ -256,7 +256,17 @@ pub async fn export_account(
     .fetch_all(&state.pool)
     .await?;
     let notes = sqlx::query!(
-        "SELECT title, body, created_at FROM notes WHERE user_id = $1 ORDER BY created_at",
+        r#"SELECT n.title, n.body, n.created_at FROM notes n
+           WHERE n.user_id = $1
+             AND (n.source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = n.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
+           ORDER BY n.created_at"#,
         user.user_id
     )
     .fetch_all(&state.pool)

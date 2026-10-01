@@ -155,6 +155,14 @@ pub async fn notes_by_concept(
         r#"SELECT n.id, n.title, n.body FROM notes n
            JOIN note_concepts nc ON nc.note_id = n.id
            WHERE n.user_id = $1 AND nc.concept = $2
+             AND (n.source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = n.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
            ORDER BY n.updated_at DESC"#,
         user.user_id,
         concept.to_lowercase()
@@ -394,7 +402,10 @@ pub async fn due_retests(
 ) -> ApiResult<Json<serde_json::Value>> {
     let now = Utc::now();
     let rows = sqlx::query!(
-        r#"SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due
+        r#"SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due,
+                  question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ) AS "rights_active!"
            FROM retest_cards rc
            JOIN question_versions qv ON qv.id = rc.question_version_id
            WHERE rc.user_id = $1 AND rc.due <= $2 AND qv.status = 'published'
@@ -417,6 +428,9 @@ pub async fn due_retests(
                        JOIN question_versions qv2 ON qv2.question_id = q2.id
                        WHERE qv2.id = $1)
                  AND qv.id <> $1 AND qv.status = 'published'
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                 )
                  AND NOT EXISTS (
                      SELECT 1 FROM attempts a
                      WHERE a.question_version_id = qv.id AND a.user_id = $2)
@@ -432,7 +446,8 @@ pub async fn due_retests(
         .await?;
         let (served_id, served_vignette, swapped) = match &variant {
             Some(v) => (v.id, v.vignette.clone(), true),
-            None => (r.question_version_id, r.vignette.clone(), false),
+            None if r.rights_active => (r.question_version_id, r.vignette.clone(), false),
+            None => continue,
         };
         items.push(json!({
             "question_version_id": served_id,
