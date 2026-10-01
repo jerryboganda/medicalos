@@ -45,6 +45,102 @@ async fn register_device(app: &Router, token: &str, key: &str) -> (StatusCode, V
 }
 
 #[tokio::test]
+async fn protected_api_requires_device_binding_and_preserves_account_recovery() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let email = create_password_account(&app).await;
+    let unbound = login_token(&app, &email).await;
+
+    for prefix in ["", "/api"] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "GET",
+                &format!("{prefix}/v1/me/today"),
+                Some(&unbound),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{prefix} study access");
+
+        for path in ["/v1/me/devices", "/v1/me/session-policy", "/v1/me/export"] {
+            let (status, body) = call(
+                app.clone(),
+                request("GET", &format!("{prefix}{path}"), Some(&unbound), None),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{prefix}{path}: {body}");
+        }
+    }
+
+    let (status, policy) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/api/v1/me/session-policy",
+            Some(&unbound),
+            Some(serde_json::json!({"single_active_session": false})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "update account policy: {policy}");
+
+    let (status, device) = register_device(&app, &unbound, "binding-regression-device").await;
+    assert_eq!(status, StatusCode::OK, "register device: {device}");
+    let device_id = device["device_id"].as_str().expect("device id");
+    for prefix in ["", "/api"] {
+        let (status, _) = call(
+            app.clone(),
+            request(
+                "GET",
+                &format!("{prefix}/v1/me/today"),
+                Some(&unbound),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{prefix} bound study access");
+    }
+
+    let fresh_unbound = login_token(&app, &email).await;
+    let (status, revoked) = call(
+        app.clone(),
+        request(
+            "DELETE",
+            &format!("/v1/me/devices/{device_id}"),
+            Some(&fresh_unbound),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoke device from recovery session: {revoked}"
+    );
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/today", Some(&unbound), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "revoked device bearer");
+
+    let (status, deleted) = call(
+        app,
+        request("DELETE", "/v1/me/account", Some(&fresh_unbound), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "delete account from recovery session: {deleted}"
+    );
+}
+
+#[tokio::test]
 async fn session_policy_failure_preserves_policy_and_existing_access() {
     let _guard = LOCK.lock().await;
     let state = setup().await;
