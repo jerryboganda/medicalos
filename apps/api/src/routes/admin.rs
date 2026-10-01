@@ -3436,6 +3436,12 @@ pub async fn run_recovery_drill(
                   correct_index, key_learning_point, exam_tip, source_ref
            FROM question_versions
            WHERE chapter_id = ANY($1) AND status = 'published'
+             AND question_display_rights_active(
+                 rights_ref, source_ref, source_refs, media_refs
+             )
+             AND question_rights_active(
+                 'offline', rights_ref, source_ref, source_refs, media_refs
+             )
            ORDER BY chapter_id, id"#,
         &chapter_ids
     )

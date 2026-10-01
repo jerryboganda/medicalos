@@ -129,6 +129,7 @@ async fn ensure_synthetic_question_rights(pool: &PgPool) -> ApiResult<()> {
     .bind(serde_json::json!([
         "display",
         "derivatives",
+        "offline",
         "distribution"
     ]))
     .bind("Synthetic local/test fixtures only; not a third-party license grant.")

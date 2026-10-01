@@ -55,13 +55,25 @@ pub(crate) async fn ensure_pregen_on(
     vid: Uuid,
 ) -> ApiResult<Vec<TutoringCard>> {
     let qv = sqlx::query!(
-        r#"SELECT correct_index, key_learning_point, options, source_ref
+        r#"SELECT correct_index, key_learning_point, options, source_ref,
+                  question_display_rights_active(
+                      rights_ref, source_ref, source_refs, media_refs
+                  ) AS "display_active!",
+                  question_rights_active(
+                      'derivatives', rights_ref, source_ref, source_refs, media_refs
+                  ) AS "derivatives_active!"
            FROM question_versions WHERE id = $1 AND status = 'published'"#,
         vid
     )
     .fetch_optional(&mut *connection)
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
+    if !qv.display_active {
+        return Err(crate::question_rights::unavailable_error());
+    }
+    if !qv.derivatives_active {
+        return Ok(Vec::new());
+    }
     let restricted: bool = sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1 FROM reserved_questions rq
@@ -171,6 +183,18 @@ pub async fn generate_pregen(
         headers.get("x-admin-token").and_then(|v| v.to_str().ok()),
         Permission::ContentAuthor,
     )?;
+    let derivatives_active: Option<bool> = sqlx::query_scalar(
+        "SELECT question_rights_active(
+             'derivatives', rights_ref, source_ref, source_refs, media_refs
+         )
+         FROM question_versions WHERE id = $1 AND status = 'published'",
+    )
+    .bind(vid)
+    .fetch_optional(&state.pool)
+    .await?;
+    if derivatives_active == Some(false) {
+        return Err(crate::question_rights::unavailable_error());
+    }
     let cards = ensure_pregen(&state.pool, vid).await?;
     if cards.is_empty() {
         return Err(ApiError::forbidden(

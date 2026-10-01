@@ -445,6 +445,12 @@ pub async fn legacy_pack_manifest(
             r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
                FROM question_versions
                WHERE chapter_id = $1 AND status = 'published'
+                 AND question_display_rights_active(
+                     rights_ref, source_ref, source_refs, media_refs
+                 )
+                 AND question_rights_active(
+                     'offline', rights_ref, source_ref, source_refs, media_refs
+                 )
                ORDER BY id"#,
             chapter_id
         )
@@ -582,6 +588,12 @@ pub(crate) async fn tutoring_cards_for_questions(
            FROM pregen_tutoring p
            JOIN question_versions q ON q.id = p.question_version_id
            WHERE p.question_version_id = ANY($1) AND q.status = 'published'
+             AND question_display_rights_active(
+                 q.rights_ref, q.source_ref, q.source_refs, q.media_refs
+             )
+             AND question_rights_active(
+                 'derivatives', q.rights_ref, q.source_ref, q.source_refs, q.media_refs
+             )
              AND NOT EXISTS (
                  SELECT 1 FROM reserved_questions rq
                  JOIN assessment_forms f ON f.id = rq.form_id
@@ -695,8 +707,14 @@ pub async fn pack_manifest(
     }
 
     let published_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM question_versions
-         WHERE chapter_id = ANY($1) AND status = 'published'",
+        "SELECT COUNT(*)::bigint FROM question_versions qv
+         WHERE qv.chapter_id = ANY($1) AND qv.status = 'published'
+           AND question_display_rights_active(
+               qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+           )
+           AND question_rights_active(
+               'offline', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+           )",
     )
     .bind(&chapter_ids)
     .fetch_one(&state.pool)
@@ -715,6 +733,12 @@ pub async fn pack_manifest(
                   key_learning_point, exam_tip, source_ref
            FROM question_versions
            WHERE chapter_id = ANY($1) AND status = 'published'
+             AND question_display_rights_active(
+                 rights_ref, source_ref, source_refs, media_refs
+             )
+             AND question_rights_active(
+                 'offline', rights_ref, source_ref, source_refs, media_refs
+             )
            ORDER BY chapter_id, id"#,
         &chapter_ids
     )
@@ -837,6 +861,12 @@ pub async fn pack_resources(
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE qv.id = ANY($1) AND qv.chapter_id = ANY($2)
              AND c.exam_id = $3 AND qv.status = 'published'
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
+             AND question_rights_active(
+                 'offline', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
            ORDER BY qv.id"#,
         &req.question_version_ids,
         &req.chapters,
@@ -845,6 +875,31 @@ pub async fn pack_resources(
     .fetch_all(&state.pool)
     .await?;
     if rows.len() != req.question_version_ids.len() {
+        let rights_unavailable: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM question_versions qv
+                 JOIN curriculum_nodes c ON c.id = qv.chapter_id
+                 WHERE qv.id = ANY($1) AND qv.chapter_id = ANY($2)
+                   AND c.exam_id = $3 AND qv.status = 'published'
+                   AND (
+                       NOT question_display_rights_active(
+                           qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                       )
+                       OR NOT question_rights_active(
+                           'offline', qv.rights_ref, qv.source_ref,
+                           qv.source_refs, qv.media_refs
+                       )
+                   )
+             )",
+        )
+        .bind(&req.question_version_ids)
+        .bind(&req.chapters)
+        .bind(exam_id)
+        .fetch_one(&state.pool)
+        .await?;
+        if rights_unavailable {
+            return Err(crate::question_rights::unavailable_error());
+        }
         return Err(ApiError::unprocessable(
             "invalid_pack_resources",
             "every requested question must be published in the leased exam chapters",

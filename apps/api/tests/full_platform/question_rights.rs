@@ -81,6 +81,15 @@ async fn create_rights(
     body["rights_id"].as_str().unwrap().parse().unwrap()
 }
 
+async fn set_rights_uses(pool: &sqlx::PgPool, rights_id: Uuid, uses: &[&str]) {
+    sqlx::query("UPDATE content_rights SET permitted_uses = $2 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!(uses))
+        .execute(pool)
+        .await
+        .expect("update synthetic permitted uses");
+}
+
 async fn display_rights_active(
     pool: &sqlx::PgPool,
     rights_ref: Option<&str>,
@@ -2681,6 +2690,21 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         .unwrap()
         .iter()
         .any(|item| item["question_version_id"] == question_id.to_string()));
+    let legacy_manifest_url = format!(
+        "/v1/packs/{}/manifest?chapters={}",
+        ids.exam_id, chapter_id
+    );
+    let (status, legacy_manifest) = call(
+        app.clone(),
+        request("GET", &legacy_manifest_url, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active legacy manifest: {legacy_manifest}");
+    assert!(legacy_manifest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["question_version_id"] == question_id.to_string()));
 
     let resource_request = serde_json::json!({
         "device_id": device_id,
@@ -2706,6 +2730,103 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         5
     );
 
+    set_rights_uses(&state.pool, rights_id, &["display", "offline"]).await;
+    let (status, session_detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "session without derivative rights: {session_detail}");
+    assert!(session_detail["items"][0]["tutoring_cards"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let (status, resources_without_derivatives) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&learner),
+            Some(resource_request.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "pack resources without derivative rights: {resources_without_derivatives}"
+    );
+    assert!(resources_without_derivatives["resources"][0]["tutoring_cards"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let (status, pregen_without_derivatives) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/questions/versions/{question_id}/pregen-tutoring"),
+            Some(&author),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "pregen without derivative rights: {pregen_without_derivatives}"
+    );
+    assert_eq!(
+        pregen_without_derivatives["error"]["code"],
+        "rights_unavailable"
+    );
+
+    set_rights_uses(&state.pool, rights_id, &["display", "derivatives"]).await;
+    for (path, label) in [
+        (manifest_url.as_str(), "v2"),
+        (legacy_manifest_url.as_str(), "legacy"),
+    ] {
+        let (status, manifest_without_offline) =
+            call(app.clone(), request("GET", path, Some(&learner), None)).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{label} manifest without offline rights: {manifest_without_offline}"
+        );
+        assert!(!manifest_without_offline["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["question_version_id"] == question_id.to_string()));
+    }
+    let (status, denied_without_offline) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&learner),
+            Some(resource_request.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "resource request without offline rights: {denied_without_offline}"
+    );
+    assert_eq!(denied_without_offline["error"]["code"], "rights_unavailable");
+
+    set_rights_uses(
+        &state.pool,
+        rights_id,
+        &["display", "derivatives", "offline"],
+    )
+    .await;
+
     let (status, revoked) = call(
         app.clone(),
         admin_req(
@@ -2729,6 +2850,21 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         "revoked pack manifest: {revoked_manifest}"
     );
     assert!(!revoked_manifest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["question_version_id"] == question_id.to_string()));
+    let (status, revoked_legacy_manifest) = call(
+        app.clone(),
+        request("GET", &legacy_manifest_url, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoked legacy manifest: {revoked_legacy_manifest}"
+    );
+    assert!(!revoked_legacy_manifest["items"]
         .as_array()
         .unwrap()
         .iter()
