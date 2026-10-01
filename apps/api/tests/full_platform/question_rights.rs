@@ -2952,8 +2952,7 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
             .unwrap()
             .iter()
             .any(|entry| {
-                entry["handle"] == "rights-competition-learner"
-                    && entry["score"].as_f64().is_some()
+                entry["handle"] == "rights-competition-learner" && entry["score"].as_f64().is_some()
             }),
         "submitted score was lost: {leaderboard}"
     );
@@ -3019,7 +3018,11 @@ async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "create recurring event: {competition}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "create recurring event: {competition}"
+    );
     let series_id = competition["series_id"].as_str().unwrap().to_owned();
 
     sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
@@ -3032,7 +3035,11 @@ async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
         request("GET", "/v1/competitions", Some(&learner), None),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "list ineligible recurrence: {before_restore}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "list ineligible recurrence: {before_restore}"
+    );
     let occurrence_count = before_restore["competitions"]
         .as_array()
         .unwrap()
@@ -3068,7 +3075,11 @@ async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
         request("GET", "/v1/competitions", Some(&learner), None),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "restored recurring pool: {after_restore}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "restored recurring pool: {after_restore}"
+    );
     let restored_occurrence_count = after_restore["competitions"]
         .as_array()
         .unwrap()
