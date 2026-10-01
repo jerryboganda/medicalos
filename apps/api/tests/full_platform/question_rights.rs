@@ -969,6 +969,28 @@ async fn question_display_rights_fail_closed_for_expiry_scope_and_seat_limits() 
         !display_rights_active(&state.pool, Some(wrong_use_ref), &full_sources, &full_media).await
     );
 
+    let missing_source_ref = "DISPLAY-RIGHTS-MISSING-SOURCE";
+    create_rights(
+        &app,
+        &admin,
+        missing_source_ref,
+        &["display"],
+        &[SOURCE_REF, MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        !display_rights_active(
+            &state.pool,
+            Some(missing_source_ref),
+            &full_sources,
+            &full_media
+        )
+        .await
+    );
+
     let missing_media_ref = "DISPLAY-RIGHTS-MISSING-MEDIA";
     create_rights(
         &app,
@@ -992,9 +1014,6 @@ async fn question_display_rights_fail_closed_for_expiry_scope_and_seat_limits() 
     );
 
     assert!(!display_rights_active(&state.pool, None, &full_sources, &full_media).await);
-    assert!(
-        !display_rights_active(&state.pool, Some(active_ref), &[SOURCE_REF], &full_media).await
-    );
 }
 
 #[tokio::test]
