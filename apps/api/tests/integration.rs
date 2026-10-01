@@ -19578,6 +19578,7 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let first_token = first_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &first_token, "first-device").await;
     let (status, initial_policy) = call(
         app.clone(),
         request("GET", "/v1/me/session-policy", Some(&first_token), None),
@@ -19618,6 +19619,7 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let second_token = second_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &second_token, "first-device").await;
     let (status, enabled_policy) = call(
         app.clone(),
         request("GET", "/v1/me/session-policy", Some(&second_token), None),

@@ -100,6 +100,21 @@ fn get_request(uri: &str) -> Request<Body> {
         .expect("get request")
 }
 
+async fn bind_device(app: &Router, token: &str, device_key: &str) {
+    let (status, body) = call(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/v1/me/devices")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::from(json!({"device_key": device_key}).to_string()))
+            .expect("register test device"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 /// Registration answers with the account; the token comes from a login.
 async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
     let (status, body) = call(
@@ -128,20 +143,7 @@ async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
     .await;
     assert_eq!(login_status, StatusCode::OK, "{login}");
     let token = login["token"].as_str().unwrap_or_default().to_owned();
-    let (device_status, device) = call(
-        app.clone(),
-        Request::builder()
-            .method("POST")
-            .uri("/v1/me/devices")
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::AUTHORIZATION, format!("Bearer {token}"))
-            .body(Body::from(
-                json!({"device_key": "lti-test-device"}).to_string(),
-            ))
-            .expect("register test device"),
-    )
-    .await;
-    assert_eq!(device_status, StatusCode::OK, "{device}");
+    bind_device(app, &token, "lti-test-device").await;
     (status, body, token)
 }
 
@@ -386,6 +388,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
         .as_str()
         .expect("session token")
         .to_owned();
+    bind_device(&app, &session_token, "lti-test-device").await;
     assert_eq!(
         launched["user_id"].as_str().unwrap(),
         learner_id.to_string(),
