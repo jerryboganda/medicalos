@@ -2,11 +2,14 @@
 
 Status: in-progress
 
-Progress: CI run 36893686564 confirmed that POST /v1/competitions accepts a
-revoked question set (HTTP 200; expected 422). Current display-rights checks
-now guard creation and recurring-pool selection. Public attempt, answer and
-replay regressions remain in progress; recurring coverage now makes the next
-occurrence due within its seven-day horizon.
+Progress: CI run 36896072254 passed format, migrations, Clippy, dependency
+advisories, site, and Zitadel checks. Its critical integration suite ran 33
+tests successfully and confirmed that replaying a cached question after rights
+revocation still returned HTTP 200 (expected 409). The source now rechecks
+rights during attempt creation, question presentation, answer submission, and
+cached-question replay; a regression also asserts that a denied first start
+persists no attempt. The corrected recurring fixture passed. Current source is
+awaiting exact-SHA CI validation.
 
 ## Problem Statement
 

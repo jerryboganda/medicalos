@@ -1699,7 +1699,10 @@ async fn present_competition_question(
     total_questions: usize,
 ) -> ApiResult<CompetitionQuestion> {
     let row = sqlx::query(
-        "SELECT vignette, lead_in, options, status
+        "SELECT vignette, lead_in, options, status,
+                question_display_rights_active(
+                    rights_ref, source_ref, source_refs, media_refs
+                ) AS rights_active
          FROM question_versions WHERE id = $1",
     )
     .bind(question_version_id)
@@ -1707,7 +1710,8 @@ async fn present_competition_question(
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
     let status: String = row.try_get("status")?;
-    if status != "published" {
+    let rights_active: bool = row.try_get("rights_active")?;
+    if status != "published" || !rights_active {
         return Err(ApiError::conflict(
             "question_unavailable",
             "this competition question is no longer available",
@@ -1775,7 +1779,7 @@ pub async fn start_competition_entry(
     }
     let mut tx = state.pool.begin().await?;
     let competition = sqlx::query(
-        "SELECT starts_at, ends_at, question_ids, status
+        "SELECT starts_at, ends_at, question_ids, status, exam_id
          FROM competitions WHERE id = $1 FOR SHARE",
     )
     .bind(comp_id)
@@ -1785,6 +1789,7 @@ pub async fn start_competition_entry(
     let starts_at: chrono::DateTime<chrono::Utc> = competition.try_get("starts_at")?;
     let ends_at: chrono::DateTime<chrono::Utc> = competition.try_get("ends_at")?;
     let competition_status: String = competition.try_get("status")?;
+    let exam_id: Uuid = competition.try_get("exam_id")?;
     let now = chrono::Utc::now();
     if competition_status == "closed" {
         return Err(ApiError::conflict(
@@ -1825,40 +1830,74 @@ pub async fn start_competition_entry(
         ));
     }
 
-    let mut randomized_questions = question_ids;
-    randomized_questions.shuffle(&mut rand::thread_rng());
-    let first_question_id = randomized_questions[0];
-    let option_count: i64 = sqlx::query_scalar(
-        "SELECT jsonb_array_length(options)::BIGINT FROM question_versions
-         WHERE id = $1 AND status = 'published'",
+    let attempt_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM competition_attempts
+            WHERE competition_id = $1 AND user_id = $2
+        )",
     )
-    .bind(first_question_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| {
-        ApiError::conflict("question_unavailable", "competition question unavailable")
-    })?;
-    let option_count = usize::try_from(option_count).map_err(|_| ApiError::internal())?;
-    if option_count < 2 {
-        return Err(ApiError::internal());
-    }
-    let mut first_option_order: Vec<usize> = (0..option_count).collect();
-    first_option_order.shuffle(&mut rand::thread_rng());
-    sqlx::query(
-        "INSERT INTO competition_attempts
-           (id, competition_id, user_id, handle, question_ids, option_order,
-            question_started_at)
-         VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
-         ON CONFLICT (competition_id, user_id) DO NOTHING",
-    )
-    .bind(Uuid::new_v4())
     .bind(comp_id)
     .bind(user.user_id)
-    .bind(&p.handle)
-    .bind(json!(randomized_questions))
-    .bind(json!(first_option_order))
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
+    if !attempt_exists {
+        let eligible_question_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM question_versions qv
+             JOIN curriculum_nodes node ON node.id = qv.chapter_id
+             WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'
+               AND question_display_rights_active(
+                   qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+               )",
+        )
+        .bind(&question_ids)
+        .bind(exam_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if eligible_question_count != question_ids.len() as i64 {
+            return Err(ApiError::conflict(
+                "question_unavailable",
+                "competition questions are no longer available",
+            ));
+        }
+
+        let mut randomized_questions = question_ids;
+        randomized_questions.shuffle(&mut rand::thread_rng());
+        let first_question_id = randomized_questions[0];
+        let option_count: i64 = sqlx::query_scalar(
+            "SELECT jsonb_array_length(options)::BIGINT FROM question_versions
+             WHERE id = $1 AND status = 'published'
+               AND question_display_rights_active(
+                   rights_ref, source_ref, source_refs, media_refs
+               )",
+        )
+        .bind(first_question_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            ApiError::conflict("question_unavailable", "competition question unavailable")
+        })?;
+        let option_count = usize::try_from(option_count).map_err(|_| ApiError::internal())?;
+        if option_count < 2 {
+            return Err(ApiError::internal());
+        }
+        let mut first_option_order: Vec<usize> = (0..option_count).collect();
+        first_option_order.shuffle(&mut rand::thread_rng());
+        sqlx::query(
+            "INSERT INTO competition_attempts
+               (id, competition_id, user_id, handle, question_ids, option_order,
+                question_started_at)
+             VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
+             ON CONFLICT (competition_id, user_id) DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(comp_id)
+        .bind(user.user_id)
+        .bind(&p.handle)
+        .bind(json!(randomized_questions))
+        .bind(json!(first_option_order))
+        .execute(&mut *tx)
+        .await?;
+    }
     let attempt = sqlx::query(
         "SELECT id, handle, question_ids, current_index, option_order, status
          FROM competition_attempts
@@ -1957,11 +1996,34 @@ pub async fn answer_competition_question(
                 "this answer key was already used for a different response",
             ));
         }
-        return previous
-            .response
-            .clone()
-            .ok_or_else(ApiError::internal)
-            .and_then(decode_competition_attempt_step);
+        let response = previous.response.clone().ok_or_else(ApiError::internal)?;
+        if let Some(question) = response.get("question") {
+            let question_version_id = question
+                .get("question_version_id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(ApiError::internal)?
+                .parse::<Uuid>()
+                .map_err(|_| ApiError::internal())?;
+            let question_displayable: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                    SELECT 1 FROM question_versions qv
+                    WHERE qv.id = $1 AND qv.status = 'published'
+                      AND question_display_rights_active(
+                          qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                      )
+                )",
+            )
+            .bind(question_version_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !question_displayable {
+                return Err(ApiError::conflict(
+                    "question_unavailable",
+                    "this competition question is no longer available",
+                ));
+            }
+        }
+        return decode_competition_attempt_step(response);
     }
     let attempt_status: String = attempt.try_get("status")?;
     if attempt_status == "submitted" {
@@ -2006,7 +2068,10 @@ pub async fn answer_competition_question(
     let option_order: Vec<usize> = serde_json::from_value(attempt.try_get("option_order")?)
         .map_err(|_| ApiError::internal())?;
     let question = sqlx::query(
-        "SELECT correct_index, difficulty, options, status
+        "SELECT correct_index, difficulty, options, status,
+                question_display_rights_active(
+                    rights_ref, source_ref, source_refs, media_refs
+                ) AS rights_active
          FROM question_versions WHERE id = $1",
     )
     .bind(req.question_version_id)
@@ -2014,7 +2079,8 @@ pub async fn answer_competition_question(
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
     let question_status: String = question.try_get("status")?;
-    if question_status != "published" {
+    let rights_active: bool = question.try_get("rights_active")?;
+    if question_status != "published" || !rights_active {
         return Err(ApiError::conflict(
             "question_unavailable",
             "this competition question is no longer available",
@@ -2183,7 +2249,10 @@ pub async fn answer_competition_question(
         let next_question_id = randomized_questions[next_position];
         let next_option_count: i64 = sqlx::query_scalar(
             "SELECT jsonb_array_length(options)::BIGINT FROM question_versions
-             WHERE id = $1 AND status = 'published'",
+             WHERE id = $1 AND status = 'published'
+               AND question_display_rights_active(
+                   rights_ref, source_ref, source_refs, media_refs
+               )",
         )
         .bind(next_question_id)
         .fetch_optional(&mut *tx)

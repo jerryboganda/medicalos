@@ -2716,6 +2716,51 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
     )
     .await;
     assert_eq!(status, StatusCode::OK, "community profile: {profile}");
+
+    sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("revoke rights before the first attempt");
+    let (status, denied_start) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "do not start from revoked competition questions: {denied_start}"
+    );
+    assert_eq!(denied_start["error"]["code"], "question_unavailable");
+    let attempt_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM competition_attempts WHERE competition_id = $1",
+    )
+    .bind(competition_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count attempts after denied start");
+    assert_eq!(attempt_count, 0, "denied start persisted an attempt");
+    sqlx::query(
+        "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
+             valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
+             seat_limit = NULL, asset_refs = $2 WHERE id = $1",
+    )
+    .bind(rights_id)
+    .bind(serde_json::json!([
+        SOURCE_REF,
+        SOURCE_REFS[1],
+        MEDIA_REFS[0]
+    ]))
+    .execute(&state.pool)
+    .await
+    .expect("restore rights after denied first attempt");
+
     let (status, first_step) = call(
         app.clone(),
         request(
