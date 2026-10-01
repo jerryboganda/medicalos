@@ -2586,3 +2586,259 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
 
     let _ = unrelated_card_id;
 }
+
+#[tokio::test]
+async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_replay() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_ref = "COMPETITION-RIGHTS-LIVE";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let mut question_ids = Vec::new();
+    for _ in 0..3 {
+        let question_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+        approve_question(&app, &author, &reviewer, question_id).await;
+        assert_eq!(publish_result(&app, &reviewer, question_id).await["status"], "published");
+        question_ids.push(question_id);
+    }
+
+    let now = chrono::Utc::now();
+    let starts_at = (now - chrono::Duration::minutes(1)).to_rfc3339();
+    let ends_at = (now + chrono::Duration::hours(2)).to_rfc3339();
+    let (status, competition) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&author),
+            Some(serde_json::json!({
+                "title": "Rights-aware competition fixture",
+                "exam_id": ids.exam_id,
+                "question_ids": question_ids,
+                "starts_at": starts_at,
+                "ends_at": ends_at
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create competition: {competition}");
+    let competition_id: Uuid = competition["competition_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, profile) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/profile",
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "community profile: {profile}");
+    let (status, first_step) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "start attempt: {first_step}");
+    let first_question_id = first_step["question"]["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    let answer_body = serde_json::json!({
+        "question_version_id": first_question_id,
+        "chosen_index": 0,
+        "idempotency_key": Uuid::new_v4()
+    });
+    let (status, next_step) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry/answer"),
+            Some(&learner),
+            Some(answer_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "answer first question: {next_step}");
+    let cached_question = next_step["question"].clone();
+    let next_question_id = cached_question["question_version_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+
+    sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("revoke competition question rights");
+
+    let (replay_status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry/answer"),
+            Some(&learner),
+            Some(answer_body),
+        ),
+    )
+    .await;
+    assert_eq!(
+        replay_status,
+        StatusCode::CONFLICT,
+        "stale idempotent replay: {replay}"
+    );
+    assert_eq!(replay["error"]["code"], "question_unavailable", "{replay}");
+    assert!(replay.get("question").is_none(), "stale replay leaked question: {replay}");
+    assert!(
+        !replay.to_string().contains("Synthetic rights fixture vignette"),
+        "stale replay leaked vignette: {replay}"
+    );
+
+    let (resume_status, resume) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(resume_status, StatusCode::CONFLICT, "stale resume: {resume}");
+    assert_eq!(resume["error"]["code"], "question_unavailable", "{resume}");
+
+    let (answer_status, stale_answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry/answer"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "question_version_id": next_question_id,
+                "chosen_index": 0,
+                "idempotency_key": Uuid::new_v4()
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(answer_status, StatusCode::CONFLICT, "stale answer: {stale_answer}");
+    assert_eq!(stale_answer["error"]["code"], "question_unavailable", "{stale_answer}");
+    let saved_answers: Value = sqlx::query_scalar(
+        "SELECT answers FROM competition_attempts WHERE competition_id = $1",
+    )
+    .bind(competition_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("persisted competition answer");
+    assert_eq!(saved_answers.as_array().unwrap().len(), 1, "stale answer mutated attempt");
+
+    sqlx::query(
+        "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
+             valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
+             seat_limit = NULL, asset_refs = $2 WHERE id = $1",
+    )
+    .bind(rights_id)
+    .bind(serde_json::json!([SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]]))
+    .execute(&state.pool)
+    .await
+    .expect("restore competition display rights");
+    let (resume_status, resumed) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(resume_status, StatusCode::OK, "restored resume: {resumed}");
+    assert_eq!(resumed["question"], cached_question, "restored question changed");
+
+    let mut step = resumed;
+    for _ in 0..3 {
+        if step["submitted"] == true {
+            break;
+        }
+        let question_id = step["question"]["question_version_id"]
+            .as_str()
+            .unwrap()
+            .parse::<Uuid>()
+            .unwrap();
+        let (status, next) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry/answer"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "question_version_id": question_id,
+                    "chosen_index": 0,
+                    "idempotency_key": Uuid::new_v4()
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "finish attempt: {next}");
+        step = next;
+    }
+    assert_eq!(step["submitted"], true, "attempt did not submit: {step}");
+
+    sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("revoke rights after submission");
+    let (status, leaderboard) = call(
+        app,
+        request(
+            "GET",
+            &format!("/v1/competitions/{competition_id}/leaderboard"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "preserved leaderboard: {leaderboard}");
+    assert!(
+        leaderboard["entries"].as_array().unwrap().iter().any(|entry| {
+            entry["handle"] == "rights-competition-learner"
+                && entry["score"].as_f64().is_some()
+        }),
+        "submitted score was lost: {leaderboard}"
+    );
+    for content_field in ["question_version_id", "vignette", "lead_in"] {
+        assert!(
+            leaderboard.get(content_field).is_none()
+                && !leaderboard.to_string().contains(content_field),
+            "leaderboard includes question content field {content_field}: {leaderboard}"
+        );
+    }
+}

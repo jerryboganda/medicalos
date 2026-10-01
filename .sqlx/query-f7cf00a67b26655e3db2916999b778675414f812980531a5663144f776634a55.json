@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due,\n                  question_display_rights_active(\n                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                  ) AS \"rights_active!\"\n           FROM retest_cards rc\n           JOIN question_versions qv ON qv.id = rc.question_version_id\n           WHERE rc.user_id = $1 AND rc.due <= $2 AND qv.status = 'published'\n           ORDER BY rc.due",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "passes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "due",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "rights_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f7cf00a67b26655e3db2916999b778675414f812980531a5663144f776634a55"
+}

@@ -1,6 +1,10 @@
 # Recheck question display rights throughout competition attempts
 
-Status: ready-for-agent
+Status: in-progress
+
+Progress: Added the first public-route regression for answer replay, resume,
+stale-answer rejection, restored continuation, and content-free submitted
+scores. Awaiting the CI red run before implementing the guards.
 
 ## Problem Statement
 
