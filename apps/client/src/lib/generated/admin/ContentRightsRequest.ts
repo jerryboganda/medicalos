@@ -2,6 +2,6 @@
 
 export type ContentRightsRequest = { ref_code: string, licensor: string, territory: string | null, 
 /**
- * Content use flags, including private_import and document_extraction.
+ * Content use flags, including distribution, private_import and document_extraction.
  */
 permitted_uses: Array<string>, valid_from: string, valid_to: string | null, notes: string | null, contract_ref: string | null, contract_version: string | null, asset_refs: Array<string>, audiences: Array<string>, seat_limit: number | null, offline_terms: string | null, quotation_limit_words: number | null, ai_terms: string | null, derivative_terms: string | null, attribution: string | null, royalty_terms: string | null, };
