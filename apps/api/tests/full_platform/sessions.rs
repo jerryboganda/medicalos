@@ -45,6 +45,54 @@ async fn register_device(app: &Router, token: &str, key: &str) -> (StatusCode, V
 }
 
 #[tokio::test]
+async fn session_policy_failure_preserves_policy_and_existing_access() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let email = create_password_account(&app).await;
+    let first = login_token(&app, &email).await;
+    let second = login_token(&app, &email).await;
+    let first_hash = api::auth::sha256_hex(&first);
+    sqlx::query(&format!(
+        "ALTER TABLE auth_sessions ADD CONSTRAINT reject_fixture_session_retirement
+         CHECK (token_hash <> '{first_hash}' OR revoked_at IS NULL) NOT VALID"
+    ))
+    .execute(&state.pool)
+    .await
+    .expect("inject owned-session retirement failure");
+    let (status, result) = call(
+        app.clone(),
+        request(
+            "PATCH",
+            "/v1/me/session-policy",
+            Some(&first),
+            Some(serde_json::json!({"single_active_session": true})),
+        ),
+    )
+    .await;
+    sqlx::query("ALTER TABLE auth_sessions DROP CONSTRAINT reject_fixture_session_retirement")
+        .execute(&state.pool)
+        .await
+        .expect("remove session failure fixture");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{result}");
+    // A fresh login must not retire either prior session after a failed enable.
+    let fresh = login_token(&app, &email).await;
+    for token in [&first, &second, &fresh] {
+        let (status, body) = call(
+            app.clone(),
+            request("GET", "/v1/me/today", Some(token), None),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "failed enable must preserve access: {body}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn device_revocation_retires_every_bound_bearer_and_blocks_pack_opens() {
     let _guard = LOCK.lock().await;
     let state = setup().await;
