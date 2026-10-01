@@ -541,6 +541,272 @@ async fn question_publication_requires_recorded_independent_review() {
 }
 
 #[tokio::test]
+async fn learner_routes_stop_serving_question_content_after_rights_are_revoked() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+
+    let parent_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'system' LIMIT 1",
+    )
+    .bind(ids.exam_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("fixture system");
+    let chapter_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO curriculum_nodes (id, exam_id, kind, name, parent_id, display_order)
+         VALUES ($1, $2, 'chapter', $3, $4, 99)",
+    )
+    .bind(chapter_id)
+    .bind(ids.exam_id)
+    .bind(format!("Rights fixture {}", Uuid::new_v4()))
+    .bind(parent_id)
+    .execute(&state.pool)
+    .await
+    .expect("isolated fixture chapter");
+
+    let rights_ref = "QUESTION-RIGHTS-RUNTIME-REVOKE";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let version_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+    approve_question(&app, &author, &reviewer, version_id).await;
+    let result = publish_result(&app, &reviewer, version_id).await;
+    assert_eq!(result["status"], "published", "{result}");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active-rights session: {session}");
+    let session_id = session["session_id"].as_str().expect("session id");
+    assert_eq!(
+        session["items"][0]["question_version_id"],
+        serde_json::json!(version_id)
+    );
+
+    let answer_key = "rights-revocation-answer-replay";
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 1,
+                "idempotency_key": answer_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active-rights answer: {answer}");
+
+    let coach_key = "rights-revocation-coach-replay";
+    let (status, coach) = call(
+        app.clone(),
+        coach_req(
+            &learner,
+            Some(version_id),
+            "explain",
+            "Explain the key point.",
+            coach_key,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active-rights Coach turn: {coach}");
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Synthetic fixture grant ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke rights: {revoked}");
+
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked session detail: {detail}"
+    );
+    assert_eq!(detail["error"]["code"], "rights_unavailable", "{detail}");
+    assert!(!detail
+        .to_string()
+        .contains("Synthetic rights fixture vignette"));
+
+    let (status, replay) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 1,
+                "idempotency_key": answer_key
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked answer replay: {replay}"
+    );
+    assert_eq!(replay["error"]["code"], "rights_unavailable", "{replay}");
+
+    let (status, hint) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}/items/0/hint"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "revoked hint: {hint}");
+    assert_eq!(hint["error"]["code"], "rights_unavailable", "{hint}");
+
+    let (status, coach_replay) = call(
+        app.clone(),
+        coach_req(
+            &learner,
+            Some(version_id),
+            "explain",
+            "Explain the key point.",
+            coach_key,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked Coach replay: {coach_replay}"
+    );
+    assert_eq!(
+        coach_replay["error"]["code"], "rights_unavailable",
+        "{coach_replay}"
+    );
+
+    let (status, history) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/coach/history?question_version_id={version_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked Coach history: {history}"
+    );
+    assert_eq!(history["error"]["code"], "rights_unavailable", "{history}");
+
+    let (status, new_session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "new session: {new_session}"
+    );
+    assert_eq!(new_session["error"]["code"], "empty_pool", "{new_session}");
+
+    let (status, submitted) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/submit"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "aggregate submission survives revoke: {submitted}"
+    );
+    assert_eq!(submitted["total"], 1, "{submitted}");
+    assert!(!submitted
+        .to_string()
+        .contains("Synthetic rights fixture vignette"));
+
+    for action in ["retry", "practice_incorrect"] {
+        let (status, result) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/action"),
+                Some(&learner),
+                Some(serde_json::json!({"action": action})),
+            ),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{action}: {result}"
+        );
+        assert!(
+            matches!(
+                result["error"]["code"].as_str(),
+                Some("empty_pool" | "nothing_to_practice")
+            ),
+            "{action}: {result}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn question_competing_reviews_commit_only_one_decision() {
     let _guard = LOCK.lock().await;
     let state = setup().await;
