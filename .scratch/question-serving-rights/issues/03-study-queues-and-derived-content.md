@@ -19,6 +19,8 @@ current learner-display grant becomes unavailable.
 - Cover active, revoked, expired, wrong-audience, seat-limited, and incomplete
   asset-scope grants with public-route regressions.
 - Verify no queue can create a new session from ineligible content.
+- Apply the same current display rule to competition question pools and
+  attempts, including persisted/idempotent responses.
 
 ## Learner-record behavior
 
@@ -28,8 +30,10 @@ current learner-display grant becomes unavailable.
 ## Delivery order
 
 1. QOTD selection, display, and answer eligibility: issue 05.
-2. Retest queues and marks.
-3. Notes, exports, review cards, insights, and other source-derived content.
+2. Retest queues, marks, source-linked notes, and review cards: issue 06.
+3. Competition pools and attempts: issue 07.
+4. Verify question-linked insights remain content-free while retaining
+   aggregate learner outcomes; complete any remaining study-path audit.
 
 ## Spec
 

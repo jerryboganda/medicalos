@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH eligible AS (\n               SELECT qv.id\n               FROM question_versions qv\n               JOIN curriculum_nodes chapter ON chapter.id = qv.chapter_id\n               WHERE chapter.exam_id = $1\n                 AND chapter.kind = 'chapter'\n                 AND qv.status = 'published'\n                 AND NOT EXISTS (\n                     SELECT 1 FROM reserved_questions rq\n                     WHERE rq.question_version_id = qv.id)\n                 AND question_display_rights_active(\n                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                 )\n               ORDER BY qv.id\n           ), picked AS (\n               SELECT id FROM eligible\n               ORDER BY id\n               OFFSET (\n                   SELECT CASE WHEN COUNT(*) = 0 THEN 0\n                               ELSE ABS(hashtext($1::text || CURRENT_DATE::text)::bigint) % COUNT(*)\n                          END\n                   FROM eligible\n               )\n               LIMIT 1\n           )\n           INSERT INTO qotd_daily_questions (exam_id, day, question_version_id)\n           SELECT $1, CURRENT_DATE, id FROM picked\n           ON CONFLICT (exam_id, day) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5784c983e1951ad5c0ccbdbe0db6d3727c2f20f47131b3a4d239e3365de3b041"
+}
