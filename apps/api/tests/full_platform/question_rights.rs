@@ -2608,13 +2608,7 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         None,
     )
     .await;
-    let question_id = create_question(
-        &app,
-        &author,
-        chapter_id,
-        Some("PACK-RIGHTS-LIVE"),
-    )
-    .await;
+    let question_id = create_question(&app, &author, chapter_id, Some("PACK-RIGHTS-LIVE")).await;
     approve_question(&app, &author, &reviewer, question_id).await;
     publish_result(&app, &reviewer, question_id).await;
     sqlx::query("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
@@ -2729,7 +2723,11 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         request("GET", &manifest_url, Some(&learner), None),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "revoked pack manifest: {revoked_manifest}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoked pack manifest: {revoked_manifest}"
+    );
     assert!(!revoked_manifest["items"]
         .as_array()
         .unwrap()
@@ -2746,7 +2744,11 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "revoked pack download: {denied}");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked pack download: {denied}"
+    );
     assert_eq!(denied["error"]["code"], "rights_unavailable");
     let (status, pregen) = call(
         app.clone(),
@@ -2758,7 +2760,11 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "revoked tutoring generation: {pregen}");
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked tutoring generation: {pregen}"
+    );
     assert_eq!(pregen["error"]["code"], "rights_unavailable");
     for content in [
         "Synthetic rights fixture vignette.",
@@ -2793,13 +2799,7 @@ async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_chan
         None,
     )
     .await;
-    let question_id = create_question(
-        &app,
-        &author,
-        chapter_id,
-        Some("INSIGHTS-RIGHTS-LIVE"),
-    )
-    .await;
+    let question_id = create_question(&app, &author, chapter_id, Some("INSIGHTS-RIGHTS-LIVE")).await;
     approve_question(&app, &author, &reviewer, question_id).await;
     publish_result(&app, &reviewer, question_id).await;
 
@@ -2811,7 +2811,7 @@ async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_chan
                 "/v1/practice/sessions",
                 Some(&learner),
                 Some(serde_json::json!({
-                    "preset": "practice",
+                    "preset": "tutor",
                     "chapter_id": chapter_id,
                     "question_count": 1
                 })),
@@ -2831,7 +2831,10 @@ async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_chan
         )
         .await;
         assert_eq!(status, StatusCode::OK, "practice detail: {detail}");
-        assert_eq!(detail["items"][0]["question_version_id"], question_id.to_string());
+        assert_eq!(
+            detail["items"][0]["question_version_id"],
+            question_id.to_string()
+        );
         let (status, answer) = call(
             app.clone(),
             request(
@@ -2907,7 +2910,10 @@ async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_chan
             .flat_map(|system| system["chapters"].as_array().unwrap())
             .find(|item| item["chapter_id"] == chapter_id.to_string())
             .expect("chapter mastery aggregate remains visible");
-        assert_eq!(chapter["chapter_name"], format!("Rights delivery fixture {chapter_id}"));
+        assert_eq!(
+            chapter["chapter_name"],
+            format!("Rights delivery fixture {chapter_id}")
+        );
 
         let trend = responses[2]["chapters"]
             .as_array()
@@ -3539,9 +3545,18 @@ async fn duel_acceptance_requires_a_full_current_pool_and_commits_once() {
     .fetch_one(&state.pool)
     .await
     .expect("count duel items after failed write");
-    assert_eq!(persisted_sessions, 1, "failed acceptance left partial sessions");
-    assert_eq!(persisted_duel_sessions, 1, "failed acceptance left a second link");
-    assert_eq!(persisted_items, 0, "failed acceptance left partial question items");
+    assert_eq!(
+        persisted_sessions, 1,
+        "failed acceptance left partial sessions"
+    );
+    assert_eq!(
+        persisted_duel_sessions, 1,
+        "failed acceptance left a second link"
+    );
+    assert_eq!(
+        persisted_items, 0,
+        "failed acceptance left partial question items"
+    );
     sqlx::query("DELETE FROM duel_sessions WHERE duel_id = $1 AND user_id = $2")
         .bind(duel_id)
         .bind(opponent_id)
@@ -3601,7 +3616,10 @@ async fn duel_acceptance_requires_a_full_current_pool_and_commits_once() {
             .fetch_one(&state.pool)
             .await
             .expect("count accepted duel sessions");
-    assert_eq!(session_count, 2, "acceptance must create exactly two sessions");
+    assert_eq!(
+        session_count, 2,
+        "acceptance must create exactly two sessions"
+    );
     let item_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM session_items item
          JOIN duel_sessions duel_session ON duel_session.session_id = item.session_id
@@ -3611,7 +3629,10 @@ async fn duel_acceptance_requires_a_full_current_pool_and_commits_once() {
     .fetch_one(&state.pool)
     .await
     .expect("count accepted duel questions");
-    assert_eq!(item_count, 6, "each duel session must contain all three questions");
+    assert_eq!(
+        item_count, 6,
+        "each duel session must contain all three questions"
+    );
 }
 
 #[tokio::test]

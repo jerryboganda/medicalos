@@ -1222,20 +1222,10 @@ pub async fn accept_duel(
     }
     // Select both full, currently displayable pools while holding the duel row
     // lock so a concurrent acceptance cannot create a second pair of sessions.
-    let challenger_qs = pick_duel_questions(
-        &mut tx,
-        duel.id,
-        duel.chapter_id,
-        duel.question_count,
-    )
-    .await?;
-    let opponent_qs = pick_duel_questions(
-        &mut tx,
-        duel.id,
-        duel.chapter_id,
-        duel.question_count,
-    )
-    .await?;
+    let challenger_qs =
+        pick_duel_questions(&mut tx, duel.id, duel.chapter_id, duel.question_count).await?;
+    let opponent_qs =
+        pick_duel_questions(&mut tx, duel.id, duel.chapter_id, duel.question_count).await?;
     if challenger_qs.len() != duel.question_count as usize
         || opponent_qs.len() != duel.question_count as usize
     {
