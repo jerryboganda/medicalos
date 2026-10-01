@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 // Visual evidence for design review (design.md; compute policy: screenshots
 // are produced in CI, never locally). Captures the key screens at a desktop
@@ -26,6 +27,7 @@ test('app gallery', async ({ page }) => {
 	const body = JSON.stringify({ email, password: 'correct horse battery' });
 	expect((await fetch(`${API}/v1/auth/register`, { method: 'POST', headers, body })).ok).toBeTruthy();
 	const { token } = await (await fetch(`${API}/v1/auth/login`, { method: 'POST', headers, body })).json();
+	const deviceKey = await registerE2EDevice(API, token);
 	const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 	const today = await (await fetch(`${API}/v1/me/today`, { headers: auth })).json();
 	const session = await (
@@ -42,7 +44,7 @@ test('app gallery', async ({ page }) => {
 		await shoot(page, `app-${vp.name}-login`);
 	}
 
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	for (const theme of ['dark', 'light']) {
 		if (theme === 'light') {
 			await page.addInitScript(() => localStorage.setItem('mlos_theme', 'light'));

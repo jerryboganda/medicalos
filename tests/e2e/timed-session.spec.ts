@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 // EX-08 in the browser: the timer derives from the server-issued deadline
 // (server_now skew correction), and the session auto-submits at zero.
@@ -43,7 +44,8 @@ async function registerLearner(prefix: string) {
 	});
 	expect(login.ok).toBeTruthy();
 	const { token } = await login.json();
-	return token as string;
+	const deviceKey = await registerE2EDevice(API, token as string);
+	return { token: token as string, deviceKey };
 }
 
 async function startPolicyMockSession(
@@ -94,7 +96,7 @@ test('timed session shows the server countdown and auto-submits', async ({
 	page
 }) => {
 	// Arrange the account and the short timed session through the API.
-	const token = await registerLearner('e2e-timed');
+	const { token, deviceKey } = await registerLearner('e2e-timed');
 	const authHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
 	const todayRes = await fetch(`${API}/v1/me/today`, { headers: authHeaders });
@@ -115,10 +117,7 @@ test('timed session shows the server countdown and auto-submits', async ({
 	const { session_id: sessionId } = await sessionRes.json();
 
 	// Act through the real UI, authenticated via the same token.
-	await page.addInitScript(
-		(t) => localStorage.setItem('mlos_token', t),
-		token
-	);
+	await installE2EBrowserSession(page, token, deviceKey);
 	await page.goto(`/session/${sessionId}`);
 
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
@@ -209,9 +208,9 @@ test('mock warning is server-enforced and integrity listeners stop after leaving
 	page
 }) => {
 	test.setTimeout(45_000);
-	const token = await registerLearner('e2e-integrity-warn');
+	const { token, deviceKey } = await registerLearner('e2e-integrity-warn');
 	const { sessionId, authHeaders } = await startPolicyMockSession(token, 'warn');
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	await page.goto(`/session/${sessionId}`);
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 
@@ -276,9 +275,9 @@ test('mock auto-submit worker returns its real persisted receipt to the session'
 	page
 }) => {
 	test.setTimeout(60_000);
-	const token = await registerLearner('e2e-integrity-auto');
+	const { token, deviceKey } = await registerLearner('e2e-integrity-auto');
 	const { sessionId, authHeaders } = await startPolicyMockSession(token, 'auto_submit');
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	await page.goto(`/session/${sessionId}`);
 	await expect(page.getByText(/Question 1 of/)).toBeVisible();
 

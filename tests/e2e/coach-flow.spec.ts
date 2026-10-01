@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
@@ -24,6 +25,7 @@ test('coach answers from reviewed material and enforces the allowance', async ({
 		body: JSON.stringify({ email, password: 'correct horse battery' })
 	});
 	const { token } = await login.json();
+	const deviceKey = await registerE2EDevice(API, token);
 	const authHeaders = {
 		authorization: `Bearer ${token}`,
 		'content-type': 'application/json'
@@ -47,7 +49,7 @@ test('coach answers from reviewed material and enforces the allowance', async ({
 		})
 	});
 
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	await page.goto('/coach');
 
 	await expect(page.getByTestId('coach-q')).toBeVisible();

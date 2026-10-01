@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 const API = 'http://127.0.0.1:8080';
 
@@ -12,7 +13,8 @@ async function signIn(page: Page): Promise<string> {
 	const body = JSON.stringify({ email, password: 'correct horse battery' });
 	expect((await fetch(`${API}/v1/auth/register`, { method: 'POST', headers, body })).ok).toBeTruthy();
 	const { token } = await (await fetch(`${API}/v1/auth/login`, { method: 'POST', headers, body })).json();
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	const deviceKey = await registerE2EDevice(API, token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	return token;
 }
 

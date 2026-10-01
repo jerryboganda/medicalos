@@ -1,4 +1,5 @@
 import { mockDeviceRegistration } from './mock-device-registration';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 import { expect, test } from '@playwright/test';
 
@@ -349,6 +350,7 @@ test('editor maps an image case to a pinned concept version the learner can see'
 	});
 	expect(login.ok).toBeTruthy();
 	const { token } = await login.json();
+	const deviceKey = await registerE2EDevice(api, token);
 	const authHeaders = {
 		authorization: `Bearer ${token}`,
 		'content-type': 'application/json',
@@ -393,13 +395,8 @@ test('editor maps an image case to a pinned concept version the learner can see'
 	expect(imageResponse.ok).toBeTruthy();
 	const { case_id: caseId } = await imageResponse.json();
 
-	await page.addInitScript(
-		(values) => {
-			localStorage.setItem('mlos_token', values.token);
-			localStorage.setItem('mlos_admin', values.admin);
-		},
-		{ token, admin }
-	);
+	await installE2EBrowserSession(page, token, deviceKey);
+	await page.addInitScript((adminToken) => localStorage.setItem('mlos_admin', adminToken), admin);
 	await page.goto('/admin/image-annotations');
 	await expect(page.getByTestId('image-concept-mapping')).toBeVisible();
 	await page.getByLabel('Image case').selectOption(caseId);
