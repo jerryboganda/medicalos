@@ -43,8 +43,8 @@ restored.
   omit the queue item and preserve its saved schedule.
 - Omit an ineligible marked question from the marks response while retaining
   its database row.
-- Omit a source-linked note and its backlink title from note-list and
-  concept-note responses while the source is ineligible. Exports omit the
+- Omit a source-linked note and its backlink title from note-list,
+  concept-note responses while the source is ineligible. Note and account exports omit the
   entire ineligible linked note. Unlinked notes continue to work normally.
 - Omit a source-linked review card from the review queue and deck export while
   its question is ineligible. Cards without question provenance are unaffected.

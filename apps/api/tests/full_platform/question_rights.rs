@@ -2278,6 +2278,7 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
             format!("{prefix}/notes"),
             format!("{prefix}/concepts/negative-feedback/notes"),
             format!("{prefix}/notes/export"),
+            format("{prefix}/me/export"),
             format!("{prefix}/reviews/queue"),
             format!("{prefix}/me/decks/export"),
         ]
@@ -2318,6 +2319,12 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
                         item["body"] == "SOURCE-LINKED-PRIVATE-BODY"
                     }),
                     "active linked note missing from export at {path}: {response}"
+                ),
+                "/v1/me/export" | "/api/v1/me/export" => assert!(
+                    response["notes"].as_array().unwrap().iter().any(|item| {
+                        item["body"] == "SOURCE-LINKED-PRIVATE-BODY"
+                    }),
+                    "active linked note missing from account export at {path}: {response}"
                 ),
                 "/v1/reviews/queue" | "/api/v1/reviews/queue" => {
                     assert!(response.to_string().contains("SOURCE-LINKED-CARD-FRONT"),
@@ -2408,6 +2415,17 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
                 paths[4]
             );
 
+            let account_export = get_json(&app, &learner, &paths[7]).await;
+            assert!(
+                !account_export.to_string().contains("SOURCE-LINKED-PRIVATE"),
+                "{state_name} leaked account export at {}: {account_export}",
+                paths[7]
+            );
+            assert!(
+                account_export.to_string().contains("UNLINKED-PRIVATE-BODY"),
+                "unlinked note missing from account export at {}: {account_export}",
+                paths[7]
+            );
             let queue = get_json(&app, &learner, &paths[5]).await;
             assert!(
                 !queue.to_string().contains("SOURCE-LINKED-CARD"),
@@ -2489,6 +2507,12 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
                 }),
                 "restored mark missing at {}: {marks}",
                 paths[1]
+            );
+            let account_export = get_json(&app, &learner, &paths[7]).await;
+            assert!(
+                account_export.to_string().contains("SOURCE-LINKED-PRIVATE-BODY"),
+                "restored linked note missing from account export at {}: {account_export}",
+                paths[7]
             );
             let queue = get_json(&app, &learner, &paths[5]).await;
             assert!(
