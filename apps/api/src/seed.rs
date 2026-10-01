@@ -126,7 +126,11 @@ async fn ensure_synthetic_question_rights(pool: &PgPool) -> ApiResult<()> {
     .bind(Uuid::new_v4())
     .bind(RIGHTS_REF)
     .bind("Medical OS fictional seed content")
-    .bind(serde_json::json!(["display", "derivatives", "distribution"]))
+    .bind(serde_json::json!([
+        "display",
+        "derivatives",
+        "distribution"
+    ]))
     .bind("Synthetic local/test fixtures only; not a third-party license grant.")
     .bind(asset_refs)
     .bind(serde_json::json!(["learners"]))

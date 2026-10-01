@@ -147,12 +147,17 @@ async fn create_rights_chapter(pool: &sqlx::PgPool, exam_id: Uuid) -> Uuid {
     chapter_id
 }
 
-async fn export_qti(app: &Router, token: &str, exam_id: Uuid) -> (StatusCode, String) {
+async fn export_qti_at(
+    app: &Router,
+    token: &str,
+    exam_id: Uuid,
+    prefix: &str,
+) -> (StatusCode, String) {
     call_text(
         app.clone(),
         admin_req(
             "GET",
-            &format!("/api/v1/admin/qti/packages/{exam_id}"),
+            &format!("{prefix}/admin/qti/packages/{exam_id}"),
             Some(token),
             None,
         ),
@@ -160,11 +165,25 @@ async fn export_qti(app: &Router, token: &str, exam_id: Uuid) -> (StatusCode, St
     .await
 }
 
-async fn assert_qti_denied(app: &Router, token: &str, exam_id: Uuid, reason: &str) {
-    let (status, body) = export_qti(app, token, exam_id).await;
+async fn export_qti(app: &Router, token: &str, exam_id: Uuid) -> (StatusCode, String) {
+    export_qti_at(app, token, exam_id, "/api/v1").await
+}
+
+async fn assert_qti_denied_at(
+    app: &Router,
+    token: &str,
+    exam_id: Uuid,
+    prefix: &str,
+    reason: &str,
+) {
+    let (status, body) = export_qti_at(app, token, exam_id, prefix).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{reason}: {body}");
     let body: Value = serde_json::from_str(&body).expect("QTI denial is JSON");
     assert_eq!(body["error"]["code"], "rights_unavailable", "{reason}");
+}
+
+async fn assert_qti_denied(app: &Router, token: &str, exam_id: Uuid, reason: &str) {
+    assert_qti_denied_at(app, token, exam_id, "/api/v1", reason).await;
 }
 
 #[tokio::test]
@@ -1636,6 +1655,14 @@ async fn qti_export_requires_current_distribution_rights_for_every_question() {
         "display permission cannot export an answer key",
     )
     .await;
+    assert_qti_denied_at(
+        &app,
+        &reviewer,
+        ids.exam_id,
+        "/v1",
+        "v1 alias display permission cannot export an answer key",
+    )
+    .await;
 
     sqlx::query("UPDATE content_rights SET permitted_uses = $2 WHERE id = $1")
         .bind(rights_id)
@@ -1655,6 +1682,14 @@ async fn qti_export_requires_current_distribution_rights_for_every_question() {
     );
     assert!(package.contains(&version_id.to_string()), "{package}");
     assert!(package.contains("<correctResponse>"), "{package}");
+    let (alias_status, alias_package) = export_qti_at(&app, &reviewer, ids.exam_id, "/v1").await;
+    assert_eq!(
+        alias_status,
+        StatusCode::OK,
+        "active distribution grant through v1 alias: {alias_package}"
+    );
+    assert!(alias_package.contains(&version_id.to_string()), "{alias_package}");
+    assert!(alias_package.contains("<correctResponse>"), "{alias_package}");
 
     sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
         .bind(rights_id)
