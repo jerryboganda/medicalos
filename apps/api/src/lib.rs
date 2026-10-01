@@ -5,6 +5,7 @@ pub mod agent;
 pub mod auth;
 pub mod authz;
 pub mod error;
+pub mod question_rights;
 pub mod routes;
 pub mod schema;
 pub mod seed;

@@ -337,7 +337,8 @@ pub async fn coach_turn(
 
     // Idempotent replay.
     let replay = sqlx::query!(
-        r#"SELECT answer, adapter, model, grounded_on, created_at FROM coach_turns
+        r#"SELECT question_version_id AS "question_version_id?",
+                  answer, adapter, model, grounded_on, created_at FROM coach_turns
            WHERE user_id = $1 AND idempotency_key = $2"#,
         user.user_id,
         req.idempotency_key
@@ -345,6 +346,15 @@ pub async fn coach_turn(
     .fetch_optional(&state.pool)
     .await?;
     if let Some(t) = replay {
+        // A stored/idempotent response is still content; check the question
+        // that actually produced it before returning the prior Coach turn.
+        let version_id = t.question_version_id.ok_or_else(|| {
+            ApiError::forbidden(
+                "rights_unavailable",
+                "the stored Coach turn has no displayable question context",
+            )
+        })?;
+        crate::question_rights::ensure_question_displayable(&state.pool, version_id).await?;
         return Ok(Json(CoachTurnResponse {
             already_recorded: true,
             answer: t.answer,
@@ -363,6 +373,7 @@ pub async fn coach_turn(
             "Ask about a specific question: this Coach answers only from reviewed material attached to it.",
         ));
     };
+    crate::question_rights::ensure_question_displayable(&state.pool, vid).await?;
 
     // The learner must have answered this question themselves — keys for
     // unanswered questions are unreleased (§11.3), and their attempt is the
@@ -456,6 +467,7 @@ pub async fn history(
             "pass ?question_version_id=",
         ));
     };
+    crate::question_rights::ensure_question_displayable(&state.pool, vid).await?;
     let rows = sqlx::query!(
         r#"SELECT prompt_type, message, answer, adapter, created_at FROM coach_turns
            WHERE user_id = $1 AND question_version_id = $2
@@ -490,6 +502,9 @@ pub async fn answerable_questions(
            JOIN question_versions qv ON qv.id = a.question_version_id
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE a.user_id = $1 AND a.correct IS NOT NULL
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
            ORDER BY c.name, qv.id"#,
         user.user_id
     )

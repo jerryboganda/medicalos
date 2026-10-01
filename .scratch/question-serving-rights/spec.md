@@ -10,11 +10,12 @@ Publication-time validation is not a permanent display entitlement.
 ## Shared display rule
 
 A question is currently displayable only when its `rights_ref` resolves to a
-rights record that is active today, permits `display`, permits `learners` (or
-has no audience restriction), has no unsupported seat limit, and covers the
-question's source, source references, and media references. Missing or
-malformed provenance fails closed. The same database predicate must be used by
-student-facing question paths so expiry and revocation have one definition.
+rights record that is active today, permits `display`, permits the `learners`
+or `all` audience (or has no audience restriction), has no unsupported seat
+limit, and covers the question's source, source references, and media
+references. Missing or malformed provenance fails closed. The same database
+predicate must be used by student-facing question paths so expiry and
+revocation have one definition.
 
 This display rule is separate from external confirmation that a license is
 authentic. Production content still requires documented, reviewed grants and

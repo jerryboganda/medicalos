@@ -81,6 +81,27 @@ async fn create_rights(
     body["rights_id"].as_str().unwrap().parse().unwrap()
 }
 
+async fn display_rights_active(
+    pool: &sqlx::PgPool,
+    rights_ref: Option<&str>,
+    source_refs: &[&str],
+    media_refs: &[&str],
+) -> bool {
+    let source_refs: Vec<String> = source_refs
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    let media_refs: Vec<String> = media_refs.iter().map(|value| (*value).to_owned()).collect();
+    sqlx::query_scalar::<_, bool>("SELECT question_display_rights_active($1, $2, $3, $4)")
+        .bind(rights_ref)
+        .bind(SOURCE_REF)
+        .bind(source_refs)
+        .bind(media_refs)
+        .fetch_one(pool)
+        .await
+        .expect("display-rights predicate")
+}
+
 async fn approve_question(app: &Router, author: &str, reviewer: &str, version_id: Uuid) {
     for (token, action) in [(author, "submit"), (reviewer, "approve")] {
         let (status, body) = workflow(app.clone(), token, action, [version_id]).await;
@@ -541,7 +562,7 @@ async fn question_publication_requires_recorded_independent_review() {
 }
 
 #[tokio::test]
-async fn learner_routes_stop_serving_question_content_after_rights_are_revoked() {
+async fn learner_routes_stop_serving_question_content_after_rights_revoke_or_expire() {
     let _guard = LOCK.lock().await;
     let state = setup().await;
     let app = router(state.clone());
@@ -587,6 +608,23 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
     let result = publish_result(&app, &reviewer, version_id).await;
     assert_eq!(result["status"], "published", "{result}");
 
+    let expiring_ref = "QUESTION-RIGHTS-RUNTIME-EXPIRY";
+    let expiring_rights_id = create_rights(
+        &app,
+        &author,
+        expiring_ref,
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let expiring_version_id = create_question(&app, &author, chapter_id, Some(expiring_ref)).await;
+    approve_question(&app, &author, &reviewer, expiring_version_id).await;
+    let expiring_result = publish_result(&app, &reviewer, expiring_version_id).await;
+    assert_eq!(expiring_result["status"], "published", "{expiring_result}");
+
     let (status, session) = call(
         app.clone(),
         request(
@@ -594,17 +632,23 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
             "/v1/practice/sessions",
             Some(&learner),
             Some(serde_json::json!({
-                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 2
             })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "active-rights session: {session}");
     let session_id = session["session_id"].as_str().expect("session id");
-    assert_eq!(
-        session["items"][0]["question_version_id"],
-        serde_json::json!(version_id)
-    );
+    let items = session["items"].as_array().expect("session items");
+    assert_eq!(items.len(), 2, "{session}");
+    let item_index = items
+        .iter()
+        .position(|item| item["question_version_id"] == serde_json::json!(version_id))
+        .expect("revocable question item");
+    let expiring_item_index = items
+        .iter()
+        .position(|item| item["question_version_id"] == serde_json::json!(expiring_version_id))
+        .expect("expiring question item");
 
     let answer_key = "rights-revocation-answer-replay";
     let (status, answer) = call(
@@ -614,7 +658,7 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
             &format!("/v1/practice/sessions/{session_id}/answers"),
             Some(&learner),
             Some(serde_json::json!({
-                "item_index": 0,
+                "item_index": item_index,
                 "chosen_index": 1,
                 "idempotency_key": answer_key
             })),
@@ -648,6 +692,11 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "revoke rights: {revoked}");
+    sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
+        .bind(expiring_rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("expire second grant");
 
     let (status, detail) = call(
         app.clone(),
@@ -676,7 +725,7 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
             &format!("/v1/practice/sessions/{session_id}/answers"),
             Some(&learner),
             Some(serde_json::json!({
-                "item_index": 0,
+                "item_index": item_index,
                 "chosen_index": 1,
                 "idempotency_key": answer_key
             })),
@@ -690,11 +739,39 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
     );
     assert_eq!(replay["error"]["code"], "rights_unavailable", "{replay}");
 
+    let (status, sync) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/sync/events",
+            Some(&learner),
+            Some(serde_json::json!({
+                "events": [{
+                    "event_id": "revoked-question-answer-sync",
+                    "kind": "answer",
+                    "payload": {
+                        "session_id": session_id,
+                        "item_index": item_index,
+                        "chosen_index": 1,
+                        "idempotency_key": answer_key
+                    }
+                }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "offline sync batch: {sync}");
+    assert_eq!(
+        sync["results"][0]["status"], "rejected",
+        "revoked offline answer replay: {sync}"
+    );
+    assert_eq!(sync["results"][0]["code"], "rights_unavailable", "{sync}");
+
     let (status, hint) = call(
         app.clone(),
         request(
             "GET",
-            &format!("/v1/practice/sessions/{session_id}/items/0/hint"),
+            &format!("/v1/practice/sessions/{session_id}/items/{expiring_item_index}/hint"),
             Some(&learner),
             None,
         ),
@@ -748,7 +825,7 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
             "/v1/practice/sessions",
             Some(&learner),
             Some(serde_json::json!({
-                "preset": "tutor", "chapter_id": chapter_id, "question_count": 1
+                "preset": "tutor", "chapter_id": chapter_id, "question_count": 2
             })),
         ),
     )
@@ -775,7 +852,7 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
         StatusCode::OK,
         "aggregate submission survives revoke: {submitted}"
     );
-    assert_eq!(submitted["total"], 1, "{submitted}");
+    assert_eq!(submitted["total"], 2, "{submitted}");
     assert!(!submitted
         .to_string()
         .contains("Synthetic rights fixture vignette"));
@@ -804,6 +881,120 @@ async fn learner_routes_stop_serving_question_content_after_rights_are_revoked()
             "{action}: {result}"
         );
     }
+}
+
+#[tokio::test]
+async fn question_display_rights_fail_closed_for_expiry_scope_and_seat_limits() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    seed::seed(&state.pool).await.expect("seed");
+    let admin = register_and_login(app.clone()).await;
+
+    let full_sources = [SOURCE_REF, SOURCE_REFS[1]];
+    let full_media = [MEDIA_REFS[0]];
+    let active_ref = "DISPLAY-RIGHTS-ACTIVE";
+    create_rights(
+        &app,
+        &admin,
+        active_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &[],
+        None,
+        None,
+    )
+    .await;
+    assert!(display_rights_active(&state.pool, Some(active_ref), &full_sources, &full_media).await);
+
+    let expired_ref = "DISPLAY-RIGHTS-EXPIRED";
+    create_rights(
+        &app,
+        &admin,
+        expired_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        Some("2020-01-01"),
+        None,
+    )
+    .await;
+    assert!(
+        !display_rights_active(&state.pool, Some(expired_ref), &full_sources, &full_media).await
+    );
+
+    let audience_ref = "DISPLAY-RIGHTS-AUDIENCE";
+    create_rights(
+        &app,
+        &admin,
+        audience_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["instructors"],
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        !display_rights_active(&state.pool, Some(audience_ref), &full_sources, &full_media).await
+    );
+
+    let seat_ref = "DISPLAY-RIGHTS-SEATS";
+    create_rights(
+        &app,
+        &admin,
+        seat_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        Some(50),
+    )
+    .await;
+    assert!(!display_rights_active(&state.pool, Some(seat_ref), &full_sources, &full_media).await);
+
+    let wrong_use_ref = "DISPLAY-RIGHTS-WRONG-USE";
+    create_rights(
+        &app,
+        &admin,
+        wrong_use_ref,
+        &["derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        !display_rights_active(&state.pool, Some(wrong_use_ref), &full_sources, &full_media).await
+    );
+
+    let missing_media_ref = "DISPLAY-RIGHTS-MISSING-MEDIA";
+    create_rights(
+        &app,
+        &admin,
+        missing_media_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        !display_rights_active(
+            &state.pool,
+            Some(missing_media_ref),
+            &full_sources,
+            &full_media
+        )
+        .await
+    );
+
+    assert!(!display_rights_active(&state.pool, None, &full_sources, &full_media).await);
+    assert!(
+        !display_rights_active(&state.pool, Some(active_ref), &[SOURCE_REF], &full_media).await
+    );
 }
 
 #[tokio::test]

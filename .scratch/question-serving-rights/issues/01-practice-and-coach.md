@@ -15,6 +15,8 @@ session/Coach response was previously created.
 - Session detail, hints, answer feedback, answer idempotency replay, Coach
   turns, Coach history, and Coach idempotency replay refuse unavailable
   question content with a stable `rights_unavailable` error.
+- Offline answer synchronization uses the same check and cannot replay
+  feedback for a question whose grant is no longer active.
 - Rights checks happen before returning stored/idempotent responses.
 - A rights-denied response contains no question text, options, hint, answer,
   rationale, key-learning point, or Coach answer.
