@@ -2588,6 +2588,350 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
 }
 
 #[tokio::test]
+async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_id = create_rights(
+        &app,
+        &author,
+        "PACK-RIGHTS-LIVE",
+        &["display", "derivatives", "offline"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let question_id = create_question(
+        &app,
+        &author,
+        chapter_id,
+        Some("PACK-RIGHTS-LIVE"),
+    )
+    .await;
+    approve_question(&app, &author, &reviewer, question_id).await;
+    publish_result(&app, &reviewer, question_id).await;
+    sqlx::query("UPDATE users SET tier = 'paid' WHERE tier = 'free'")
+        .execute(&state.pool)
+        .await
+        .expect("enable paid pack fixture");
+
+    let device_id = "rights-device";
+    let (status, lease) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/packs/lease",
+            Some(&learner),
+            Some(serde_json::json!({
+                "exam_id": ids.exam_id,
+                "device_id": device_id,
+                "chapters": [chapter_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create pack lease: {lease}");
+
+    let (status, session) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/practice/sessions",
+            Some(&learner),
+            Some(serde_json::json!({
+                "preset": "tutor",
+                "chapter_id": chapter_id,
+                "question_count": 1
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "tutor session: {session}");
+    let session_id = session["session_id"].as_str().unwrap();
+    let (status, answer) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{session_id}/answers"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "item_index": 0,
+                "chosen_index": 0,
+                "idempotency_key": "rights-pack-tutor-answer"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "tutor answer: {answer}");
+    assert_eq!(answer["tutoring_cards"].as_array().unwrap().len(), 5);
+
+    let manifest_url = format!(
+        "/v2/packs/{}/manifest?chapters={}&device_id={device_id}",
+        ids.exam_id, chapter_id
+    );
+    let (status, manifest) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active pack manifest: {manifest}");
+    assert!(manifest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["question_version_id"] == question_id.to_string()));
+
+    let resource_request = serde_json::json!({
+        "device_id": device_id,
+        "chapters": [chapter_id],
+        "question_version_ids": [question_id]
+    });
+    let (status, resources) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&learner),
+            Some(resource_request.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active resources: {resources}");
+    assert_eq!(
+        resources["resources"][0]["tutoring_cards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Synthetic pack fixture revocation"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke pack grant: {revoked}");
+
+    let (status, revoked_manifest) = call(
+        app.clone(),
+        request("GET", &manifest_url, Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoked pack manifest: {revoked_manifest}");
+    assert!(!revoked_manifest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["question_version_id"] == question_id.to_string()));
+
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&learner),
+            Some(resource_request),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "revoked pack download: {denied}");
+    assert_eq!(denied["error"]["code"], "rights_unavailable");
+    let (status, pregen) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/questions/versions/{question_id}/pregen-tutoring"),
+            Some(&author),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "revoked tutoring generation: {pregen}");
+    assert_eq!(pregen["error"]["code"], "rights_unavailable");
+    for content in [
+        "Synthetic rights fixture vignette.",
+        "Synthetic first rationale.",
+        "Synthetic rights fixtures stay within scope.",
+    ] {
+        assert!(
+            !denied.to_string().contains(content),
+            "revoked question content leaked in pack response: {denied}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_change() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_id = create_rights(
+        &app,
+        &author,
+        "INSIGHTS-RIGHTS-LIVE",
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let question_id = create_question(
+        &app,
+        &author,
+        chapter_id,
+        Some("INSIGHTS-RIGHTS-LIVE"),
+    )
+    .await;
+    approve_question(&app, &author, &reviewer, question_id).await;
+    publish_result(&app, &reviewer, question_id).await;
+
+    for attempt in 0..2 {
+        let (status, session) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/practice/sessions",
+                Some(&learner),
+                Some(serde_json::json!({
+                    "preset": "practice",
+                    "chapter_id": chapter_id,
+                    "question_count": 1
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "practice session: {session}");
+        let session_id = session["session_id"].as_str().unwrap();
+        let (status, detail) = call(
+            app.clone(),
+            request(
+                "GET",
+                &format!("/v1/practice/sessions/{session_id}"),
+                Some(&learner),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "practice detail: {detail}");
+        assert_eq!(detail["items"][0]["question_version_id"], question_id.to_string());
+        let (status, answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/practice/sessions/{session_id}/answers"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "item_index": 0,
+                    "chosen_index": 1,
+                    "idempotency_key": format!("rights-insight-{attempt}")
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "record wrong answer: {answer}");
+        assert_eq!(answer["correct"], false);
+    }
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Synthetic insights fixture revocation"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke insights grant: {revoked}");
+
+    for prefix in ["/v1", "/api/v1"] {
+        let paths = [
+            format!("{prefix}/me/mistake-hypotheses"),
+            format!("{prefix}/me/heatmap"),
+            format!("{prefix}/me/trends?days=30&chapter_id={chapter_id}"),
+        ];
+        let mut responses = Vec::new();
+        for path in paths {
+            let (status, response) =
+                call(app.clone(), request("GET", &path, Some(&learner), None)).await;
+            assert_eq!(status, StatusCode::OK, "GET {path}: {response}");
+            let serialized = response.to_string();
+            assert!(
+                !serialized.contains(&question_id.to_string()),
+                "question identifier leaked at {path}: {response}"
+            );
+            for content in [
+                "Synthetic rights fixture vignette.",
+                "Which synthetic answer applies?",
+                "Synthetic first rationale.",
+                "Synthetic rights fixtures stay within scope.",
+            ] {
+                assert!(
+                    !serialized.contains(content),
+                    "question content leaked at {path}: {response}"
+                );
+            }
+            responses.push(response);
+        }
+
+        let hypothesis = responses[0]["hypotheses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["chapter_id"] == chapter_id.to_string())
+            .expect("aggregate repeated-miss hypothesis remains visible");
+        assert_eq!(hypothesis["misses"], 2);
+
+        let chapter = responses[1]["systems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|system| system["chapters"].as_array().unwrap())
+            .find(|item| item["chapter_id"] == chapter_id.to_string())
+            .expect("chapter mastery aggregate remains visible");
+        assert_eq!(chapter["chapter_name"], format!("Rights delivery fixture {chapter_id}"));
+
+        let trend = responses[2]["chapters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["chapter_id"] == chapter_id.to_string())
+            .expect("chapter accuracy trend remains visible");
+        let buckets = trend["buckets"].as_array().unwrap();
+        assert_eq!(
+            buckets
+                .iter()
+                .map(|bucket| bucket["answered"].as_i64().unwrap())
+                .sum::<i64>(),
+            2,
+            "the revoked question's real attempts remain in aggregate evidence"
+        );
+        assert!(
+            buckets.iter().all(|bucket| bucket["accuracy"] == 0),
+            "both retained attempts were wrong: {trend}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_replay() {
     let _guard = LOCK.lock().await;
     let state = setup().await;
