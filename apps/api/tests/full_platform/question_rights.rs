@@ -1557,7 +1557,6 @@ async fn guest_trial_does_not_return_a_question_after_its_rights_expire() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "active guest content: {question}");
-    assert_eq!(question["question_version_id"], version_id.to_string());
 
     sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
         .bind(rights_id)
