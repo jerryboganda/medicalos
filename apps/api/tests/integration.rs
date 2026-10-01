@@ -12755,11 +12755,12 @@ async fn qotd_is_shared_and_stable_per_exam() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, source_refs, media_refs, rights_ref
            )
            SELECT $1, $2, version + 1, 'published', $3, difficulty,
                   vignette || ' (new daily pool item)', lead_in, options,
-                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref,
+                  source_refs, media_refs, rights_ref
            FROM question_versions WHERE id = $4"#,
     )
     .bind(added_question_version)
@@ -12921,11 +12922,12 @@ async fn qotd_is_shared_and_stable_per_exam() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, source_refs, media_refs, rights_ref
            )
            SELECT $1, $2, 1, 'published', $3, difficulty,
                   'Question from the second exam', lead_in, options,
-                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref,
+                  source_refs, media_refs, rights_ref
            FROM question_versions WHERE id = $4"#,
     )
     .bind(second_question_version)

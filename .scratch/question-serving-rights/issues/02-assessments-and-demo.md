@@ -1,6 +1,6 @@
 # Enforce current display rights in assessments and demo delivery
 
-Status: ready-for-agent
+Status: complete (push CI run 36856293152 on c9d6a3a; PR #32 checks passed)
 
 ## Outcome
 
@@ -33,3 +33,5 @@ content unless the current grant covers the applicable use.
 See `../spec.md`.
 
 ## Comments
+
+- 2026-10-01 — Implemented and accepted on exact source commit `c9d6a3a` in [GitHub Actions run 36856293152](https://github.com/jerryboganda/medicalos/actions/runs/36856293152). Rust, offline SQLx compile, client, E2E, site, and Zitadel jobs passed; the PR reported 12 passing checks. Assessment, mock, guest, and both QTI API aliases are covered, with QTI requiring active distribution rights for every published question. The fixture now aligns the reused question's source reference with the scoped grant. License authenticity and consuming-LMS certification remain outside this code acceptance.

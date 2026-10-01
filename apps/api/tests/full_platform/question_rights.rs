@@ -1771,3 +1771,319 @@ async fn qti_export_requires_current_distribution_rights_for_every_question() {
     );
     assert_qti_denied(&app, &reviewer, ids.exam_id, "revoked distribution grant").await;
 }
+
+#[tokio::test]
+async fn qotd_routes_withhold_ineligible_content_and_keep_the_daily_pick_stable() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+
+    let (status, settings) = call(
+        app.clone(),
+        request(
+            "PUT",
+            "/v1/me/engagement/settings",
+            Some(&learner),
+            Some(serde_json::json!({"qotd_exam_id": ids.exam_id})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "QOTD settings: {settings}");
+
+    let qotd_routes = ["/v1/qotd", "/v1/me/qotd", "/api/v1/qotd", "/api/v1/me/qotd"];
+    let mut selected_id = None;
+    for route in qotd_routes {
+        let (status, qotd) = call(app.clone(), request("GET", route, Some(&learner), None)).await;
+        assert_eq!(status, StatusCode::OK, "active QOTD {route}: {qotd}");
+        assert_eq!(qotd["available"], true, "active QOTD {route}: {qotd}");
+        let id = qotd["question_version_id"]
+            .as_str()
+            .expect("active QOTD version")
+            .to_owned();
+        assert!(qotd["vignette"].is_string(), "active QOTD {route}: {qotd}");
+        assert!(qotd["options"].is_array(), "active QOTD {route}: {qotd}");
+        if let Some(expected) = &selected_id {
+            assert_eq!(&id, expected, "shared QOTD at {route}");
+        } else {
+            selected_id = Some(id);
+        }
+    }
+    let selected_id: Uuid = selected_id
+        .as_deref()
+        .expect("daily QOTD")
+        .parse()
+        .expect("QOTD UUID");
+    let rights_ref: String =
+        sqlx::query_scalar("SELECT rights_ref FROM question_versions WHERE id = $1")
+            .bind(selected_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("selected question rights ref");
+    let rights_id: Uuid = sqlx::query_scalar("SELECT id FROM content_rights WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .fetch_one(&state.pool)
+        .await
+        .expect("selected question rights grant");
+    let baseline_assets: Value =
+        sqlx::query_scalar("SELECT asset_refs FROM content_rights WHERE id = $1")
+            .bind(rights_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("synthetic grant assets");
+
+    for (state_name, mutation) in [
+        (
+            "expired",
+            "UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1",
+        ),
+        (
+            "wrong audience",
+            "UPDATE content_rights SET audiences = '[\"instructors\"]'::jsonb WHERE id = $1",
+        ),
+        (
+            "unsupported seat limit",
+            "UPDATE content_rights SET seat_limit = 25 WHERE id = $1",
+        ),
+        (
+            "incomplete asset scope",
+            "UPDATE content_rights SET asset_refs = '[]'::jsonb WHERE id = $1",
+        ),
+    ] {
+        sqlx::query(mutation)
+            .bind(rights_id)
+            .execute(&state.pool)
+            .await
+            .unwrap_or_else(|error| panic!("set {state_name} QOTD grant: {error}"));
+
+        for route in qotd_routes {
+            let (status, qotd) =
+                call(app.clone(), request("GET", route, Some(&learner), None)).await;
+            assert_eq!(status, StatusCode::OK, "{state_name} at {route}: {qotd}");
+            assert_eq!(qotd["available"], false, "{state_name} at {route}: {qotd}");
+            assert_eq!(qotd["answered"], false, "{state_name} at {route}: {qotd}");
+            for field in ["question_version_id", "vignette", "options"] {
+                assert!(
+                    qotd.get(field).is_none(),
+                    "{state_name} leaked {field}: {qotd}"
+                );
+            }
+        }
+        for route in ["/v1/me/engagement", "/api/v1/me/engagement"] {
+            let (status, engagement) =
+                call(app.clone(), request("GET", route, Some(&learner), None)).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "{state_name} at {route}: {engagement}"
+            );
+            let qotd = &engagement["qotd"];
+            assert_eq!(qotd["available"], false, "{state_name} at {route}: {qotd}");
+            for field in ["question_version_id", "vignette", "options"] {
+                assert!(
+                    qotd.get(field).is_none(),
+                    "{state_name} leaked {field}: {qotd}"
+                );
+            }
+        }
+
+        let (status, stale_answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/me/qotd/answers",
+                Some(&learner),
+                Some(serde_json::json!({
+                    "question_version_id": selected_id,
+                    "chosen_index": 0
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{state_name}: {stale_answer}"
+        );
+        assert_eq!(
+            stale_answer["error"]["code"], "qotd_unavailable",
+            "{state_name}"
+        );
+        let answer_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM qotd_answers WHERE question_version_id = $1 AND day = CURRENT_DATE",
+        )
+        .bind(selected_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("count answers after stale submission");
+        assert_eq!(answer_count, 0, "{state_name} stale answer was persisted");
+
+        sqlx::query(
+            "UPDATE content_rights
+             SET revoked_at = NULL, valid_from = DATE '2020-01-01', valid_to = NULL,
+                 audiences = '[\"learners\"]'::jsonb, seat_limit = NULL, asset_refs = $2
+             WHERE id = $1",
+        )
+        .bind(rights_id)
+        .bind(&baseline_assets)
+        .execute(&state.pool)
+        .await
+        .unwrap_or_else(|error| panic!("restore QOTD rights after {state_name}: {error}"));
+        let (status, restored) = call(
+            app.clone(),
+            request("GET", "/v1/qotd", Some(&learner), None),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "restore after {state_name}: {restored}"
+        );
+        assert_eq!(
+            restored["available"], true,
+            "restore after {state_name}: {restored}"
+        );
+        assert_eq!(restored["question_version_id"], selected_id.to_string());
+    }
+
+    // With no persisted daily pick, an ineligible pool must not create one.
+    sqlx::query("UPDATE content_rights SET asset_refs = '[]'::jsonb WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("remove QOTD source scope");
+    sqlx::query("DELETE FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE")
+        .bind(ids.exam_id)
+        .execute(&state.pool)
+        .await
+        .expect("clear daily QOTD pick");
+    let (status, unavailable) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "ineligible pool: {unavailable}");
+    assert_eq!(
+        unavailable["available"], false,
+        "ineligible pool: {unavailable}"
+    );
+    assert!(unavailable.get("question_version_id").is_none());
+    let daily_pick_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM qotd_daily_questions WHERE exam_id = $1 AND day = CURRENT_DATE",
+    )
+    .bind(ids.exam_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("daily pick count");
+    assert_eq!(
+        daily_pick_count, 0,
+        "ineligible question was persisted as QOTD"
+    );
+}
+
+#[tokio::test]
+async fn qotd_revocation_preserves_answer_evidence_without_question_content() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let first_learner = register_and_login(app.clone()).await;
+    let second_learner = register_and_login(app.clone()).await;
+
+    for learner in [&first_learner, &second_learner] {
+        let (status, settings) = call(
+            app.clone(),
+            request(
+                "PUT",
+                "/v1/me/engagement/settings",
+                Some(learner),
+                Some(serde_json::json!({"qotd_exam_id": ids.exam_id})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "QOTD settings: {settings}");
+    }
+
+    let (status, first_pick) = call(
+        app.clone(),
+        request("GET", "/v1/qotd", Some(&first_learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "first QOTD: {first_pick}");
+    assert_eq!(first_pick["available"], true, "first QOTD: {first_pick}");
+    let question_id = first_pick["question_version_id"].clone();
+    let (status, second_pick) = call(
+        app.clone(),
+        request("GET", "/api/v1/me/qotd", Some(&second_learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "second QOTD: {second_pick}");
+    assert_eq!(second_pick["question_version_id"], question_id);
+
+    for (learner, chosen_index) in [(&first_learner, 0), (&second_learner, 1)] {
+        let (status, answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/me/qotd/answers",
+                Some(learner),
+                Some(serde_json::json!({
+                    "question_version_id": question_id,
+                    "chosen_index": chosen_index
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "QOTD answer: {answer}");
+    }
+
+    let rights_ref: String =
+        sqlx::query_scalar("SELECT rights_ref FROM question_versions WHERE id = $1")
+            .bind(question_id.as_str().unwrap().parse::<Uuid>().unwrap())
+            .fetch_one(&state.pool)
+            .await
+            .expect("selected question rights ref");
+    sqlx::query("UPDATE content_rights SET revoked_at = now() WHERE ref_code = $1")
+        .bind(rights_ref)
+        .execute(&state.pool)
+        .await
+        .expect("revoke QOTD display grant");
+
+    for (learner, route) in [
+        (&first_learner, "/v1/me/qotd"),
+        (&second_learner, "/api/v1/me/engagement"),
+    ] {
+        let (status, response) =
+            call(app.clone(), request("GET", route, Some(learner), None)).await;
+        assert_eq!(status, StatusCode::OK, "answered QOTD {route}: {response}");
+        let qotd = if route.ends_with("engagement") {
+            &response["qotd"]
+        } else {
+            &response
+        };
+        assert_eq!(qotd["answered"], true, "answered QOTD {route}: {qotd}");
+        assert_eq!(qotd["available"], false, "answered QOTD {route}: {qotd}");
+        assert_eq!(qotd["community_total"], 2, "answered QOTD {route}: {qotd}");
+        assert_eq!(
+            qotd["community_split"].as_array().unwrap().len(),
+            2,
+            "{qotd}"
+        );
+        for field in ["question_version_id", "vignette", "options"] {
+            assert!(
+                qotd.get(field).is_none(),
+                "revoked answer leaked {field}: {qotd}"
+            );
+        }
+    }
+
+    let stored_answers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM qotd_answers WHERE question_version_id = $1 AND day = CURRENT_DATE",
+    )
+    .bind(question_id.as_str().unwrap().parse::<Uuid>().unwrap())
+    .fetch_one(&state.pool)
+    .await
+    .expect("stored QOTD answer evidence");
+    assert_eq!(stored_answers, 2, "rights changes retain answer evidence");
+}
