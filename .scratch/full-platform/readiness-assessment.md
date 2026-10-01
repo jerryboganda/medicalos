@@ -16,9 +16,12 @@ The exact 400ed80 commit passed all five GitHub Actions jobs: API tests against
 Postgres, client/site builds, identity-provider provisioning and browser tests.
 It includes session/device revocation, LTI configuration ownership, guarded
 JWKS transport, accurate Coach engine labels and mobile keyboard navigation.
-Readiness and verified backup/restore changes passed on e70ba45. Later content
-publication, browser device registration and Account controls need the newer
-exact-source run. See ci-evidence.md for successful and unsuccessful runs.
+Readiness and verified backup/restore changes passed on e70ba45. Candidate
+527f06f passed all 148 API integration tests, migrations, backup/restore,
+client/site builds and identity provisioning. Account checks and its four
+theme/size gallery images passed and were inspected. Two OIDC fixture errors
+and a retry-passing session-cleanup check prevented complete browser acceptance.
+Their repairs still need exact-source CI. See ci-evidence.md for all runs.
 
 Recovery testing uses a disposable CI database and synthetic data. Software
 tests do not establish lawful content, clinical correctness, vendor contracts,
@@ -49,6 +52,11 @@ The browser now registers before study requests, but the generic server
 authentication extractor still accepts an unbound bearer. Global registration
 and device-cap enforcement for direct API clients remains code work; the
 browser recovery test is not proof of that server-wide boundary.
+
+The session-policy setter also updates its user outside session retirement's
+transaction. Its failure regression and the read/control UI contract are added;
+the atomic repair is pending its confirmed red result. privacy-data-map.md
+lists the export categories requiring implementation and ownership checks.
 
 Question publication checks the grant at publication time. Revoking a grant
 currently changes the rights record only; existing practice and Coach serving
