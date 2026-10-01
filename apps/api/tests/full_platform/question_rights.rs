@@ -2087,3 +2087,417 @@ async fn qotd_revocation_preserves_answer_evidence_without_question_content() {
     .expect("stored QOTD answer evidence");
     assert_eq!(stored_answers, 2, "rights changes retain answer evidence");
 }
+
+
+#[tokio::test]
+async fn learner_records_withhold_source_linked_content_when_question_rights_change() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let learner = register_and_login(app.clone()).await;
+    let question_id = ids.question_versions[0];
+
+    async fn get_json(app: &Router, token: &str, path: &str) -> Value {
+        let (status, body) = call(app.clone(), request("GET", path, Some(token), None)).await;
+        assert_eq!(status, StatusCode::OK, "GET {path}: {body}");
+        body
+    }
+
+    let (rights_ref, baseline_assets): (String, Value) = sqlx::query_as(
+        "SELECT qv.rights_ref, cr.asset_refs
+         FROM question_versions qv
+         JOIN content_rights cr ON cr.ref_code = qv.rights_ref
+         WHERE qv.id = $1",
+    )
+    .bind(question_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("seeded question rights");
+    let rights_id: Uuid = sqlx::query_scalar("SELECT id FROM content_rights WHERE ref_code = $1")
+        .bind(&rights_ref)
+        .fetch_one(&state.pool)
+        .await
+        .expect("rights grant id");
+    let eligible: bool = sqlx::query_scalar(
+        "SELECT question_display_rights_active(
+            (SELECT rights_ref FROM question_versions WHERE id = $1),
+            (SELECT source_ref FROM question_versions WHERE id = $1),
+            (SELECT source_refs FROM question_versions WHERE id = $1),
+            (SELECT media_refs FROM question_versions WHERE id = $1)
+        )",
+    )
+    .bind(question_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("current question display rights");
+    assert!(eligible, "seeded question must begin displayable");
+
+    let (status, linked) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&learner),
+            Some(serde_json::json!({
+                "title": "SOURCE-LINKED-PRIVATE-TITLE",
+                "body": "SOURCE-LINKED-PRIVATE-BODY",
+                "source_question_version_id": question_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "linked note: {linked}");
+    let linked_note_id: Uuid = linked["note_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, unrelated) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes",
+            Some(&learner),
+            Some(serde_json::json!({
+                "title": "UNLINKED-PRIVATE-TITLE",
+                "body": "UNLINKED-PRIVATE-BODY"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "unlinked note: {unrelated}");
+    let unrelated_note_id: Uuid = unrelated["note_id"].as_str().unwrap().parse().unwrap();
+    let learner_id: Uuid = sqlx::query_scalar("SELECT user_id FROM notes WHERE id = $1")
+        .bind(linked_note_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("learner note owner");
+
+    for note_id in [linked_note_id, unrelated_note_id] {
+        let (status, tagged) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/notes/{note_id}/concepts"),
+                Some(&learner),
+                Some(serde_json::json!({"concept": "negative-feedback"})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "tag note concept: {tagged}");
+    }
+    let (status, linked_backlink) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/notes/link",
+            Some(&learner),
+            Some(serde_json::json!({
+                "from_note_id": unrelated_note_id,
+                "to_note_id": linked_note_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "link learner notes: {linked_backlink}");
+
+    let (status, mark) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/questions/{question_id}/mark"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "mark question: {mark}");
+
+    sqlx::query(
+        "INSERT INTO retest_cards (user_id, question_version_id, passes, due)
+         VALUES ($1, $2, 1, now() - INTERVAL '1 minute')",
+    )
+    .bind(learner_id)
+    .bind(question_id)
+    .execute(&state.pool)
+    .await
+    .expect("saved due retest");
+
+    let (status, deck) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/decks",
+            Some(&learner),
+            Some(serde_json::json!({"name": "Rights fixture deck"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create deck: {deck}");
+    let deck_id: Uuid = deck["deck_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, linked_card) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "SOURCE-LINKED-CARD-FRONT",
+                "back": "SOURCE-LINKED-CARD-BACK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create linked card: {linked_card}");
+    let linked_card_id: Uuid = linked_card["card_id"].as_str().unwrap().parse().unwrap();
+    let (status, unrelated_card) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/decks/{deck_id}/cards"),
+            Some(&learner),
+            Some(serde_json::json!({
+                "front": "UNLINKED-CARD-FRONT",
+                "back": "UNLINKED-CARD-BACK"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create unrelated card: {unrelated_card}");
+    let unrelated_card_id: Uuid = unrelated_card["card_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE cards SET source_question_version_id = $2 WHERE id = $1")
+        .bind(linked_card_id)
+        .bind(question_id)
+        .execute(&state.pool)
+        .await
+        .expect("record linked card provenance");
+
+    let prefix_paths = |prefix: &str| {
+        [
+            format!("{prefix}/me/retests"),
+            format!("{prefix}/me/marks"),
+            format!("{prefix}/notes"),
+            format!("{prefix}/concepts/negative-feedback/notes"),
+            format!("{prefix}/notes/export"),
+            format!("{prefix}/reviews/queue"),
+            format!("{prefix}/me/decks/export"),
+        ]
+    };
+    for prefix in ["/v1", "/api/v1"] {
+        for path in prefix_paths(prefix) {
+            let response = get_json(&app, &learner, &path).await;
+            match path.as_str() {
+                "/v1/me/retests" | "/api/v1/me/retests" => assert!(
+                    response["retests"].as_array().unwrap().iter().any(|item| {
+                        item["card_version_id"] == question_id.to_string()
+                            && item["question_version_id"] == question_id.to_string()
+                    }),
+                    "active retest missing at {path}: {response}"
+                ),
+                "/v1/me/marks" | "/api/v1/me/marks" => assert!(
+                    response["marks"].as_array().unwrap().iter().any(|item| {
+                        item["question_version_id"] == question_id.to_string()
+                    }),
+                    "active mark missing at {path}: {response}"
+                ),
+                "/v1/notes" | "/api/v1/notes" => assert!(
+                    response["notes"].as_array().unwrap().iter().any(|item| {
+                        item["note_id"] == linked_note_id.to_string()
+                            && item["body"] == "SOURCE-LINKED-PRIVATE-BODY"
+                    }),
+                    "active linked note missing at {path}: {response}"
+                ),
+                "/v1/concepts/negative-feedback/notes"
+                | "/api/v1/concepts/negative-feedback/notes" => assert!(
+                    response["notes"].as_array().unwrap().iter().any(|item| {
+                        item["note_id"] == linked_note_id.to_string()
+                    }),
+                    "active concept note missing at {path}: {response}"
+                ),
+                "/v1/notes/export" | "/api/v1/notes/export" => assert!(
+                    response["notes"].as_array().unwrap().iter().any(|item| {
+                        item["body"] == "SOURCE-LINKED-PRIVATE-BODY"
+                    }),
+                    "active linked note missing from export at {path}: {response}"
+                ),
+                "/v1/reviews/queue" | "/api/v1/reviews/queue" => {
+                    assert!(response.to_string().contains("SOURCE-LINKED-CARD-FRONT"),
+                        "active linked card missing at {path}: {response}");
+                }
+                "/v1/me/decks/export" | "/api/v1/me/decks/export" => {
+                    assert!(response.to_string().contains("SOURCE-LINKED-CARD-FRONT"),
+                        "active linked card missing from export at {path}: {response}");
+                }
+                _ => unreachable!("covered learner route"),
+            }
+        }
+    }
+
+    for (state_name, mutation) in [
+        ("revoked", "UPDATE content_rights SET revoked_at = now() WHERE id = $1"),
+        ("expired", "UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1"),
+        ("wrong audience", "UPDATE content_rights SET audiences = '[\"instructors\"]'::jsonb WHERE id = $1"),
+        ("unsupported seat limit", "UPDATE content_rights SET seat_limit = 25 WHERE id = $1"),
+        ("incomplete asset scope", "UPDATE content_rights SET asset_refs = '[]'::jsonb WHERE id = $1"),
+    ] {
+        sqlx::query(mutation)
+            .bind(rights_id)
+            .execute(&state.pool)
+            .await
+            .unwrap_or_else(|error| panic!("set {state_name} rights: {error}"));
+
+        for prefix in ["/v1", "/api/v1"] {
+            let paths = prefix_paths(prefix);
+            let retests = get_json(&app, &learner, &paths[0]).await;
+            assert!(
+                !retests["retests"].as_array().unwrap().iter().any(|item| {
+                    item["card_version_id"] == question_id.to_string()
+                }),
+                "{state_name} leaked retest at {}: {retests}",
+                paths[0]
+            );
+
+            let marks = get_json(&app, &learner, &paths[1]).await;
+            assert!(
+                !marks["marks"].as_array().unwrap().iter().any(|item| {
+                    item["question_version_id"] == question_id.to_string()
+                }),
+                "{state_name} leaked mark at {}: {marks}",
+                paths[1]
+            );
+
+            let notes = get_json(&app, &learner, &paths[2]).await;
+            let linked_listed = notes["notes"].as_array().unwrap().iter().any(|item| {
+                item["note_id"] == linked_note_id.to_string()
+                    || item["title"] == "SOURCE-LINKED-PRIVATE-TITLE"
+                    || item["body"] == "SOURCE-LINKED-PRIVATE-BODY"
+            });
+            assert!(!linked_listed, "{state_name} leaked linked note at {}: {notes}", paths[2]);
+            let unrelated = notes["notes"].as_array().unwrap().iter()
+                .find(|item| item["note_id"] == unrelated_note_id.to_string())
+                .expect("unlinked note stays visible");
+            assert_eq!(unrelated["body"], "UNLINKED-PRIVATE-BODY");
+            assert!(
+                !unrelated["backlinks"].to_string().contains("SOURCE-LINKED-PRIVATE-TITLE"),
+                "{state_name} leaked hidden backlink at {}: {notes}",
+                paths[2]
+            );
+
+            let concept_notes = get_json(&app, &learner, &paths[3]).await;
+            assert!(
+                !concept_notes["notes"].as_array().unwrap().iter().any(|item| {
+                    item["note_id"] == linked_note_id.to_string()
+                }),
+                "{state_name} leaked concept note at {}: {concept_notes}",
+                paths[3]
+            );
+            assert!(
+                concept_notes.to_string().contains("UNLINKED-PRIVATE-BODY"),
+                "unlinked concept note missing at {}: {concept_notes}",
+                paths[3]
+            );
+
+            let note_export = get_json(&app, &learner, &paths[4]).await;
+            assert!(
+                !note_export.to_string().contains("SOURCE-LINKED-PRIVATE"),
+                "{state_name} leaked note export at {}: {note_export}",
+                paths[4]
+            );
+            assert!(
+                note_export.to_string().contains("UNLINKED-PRIVATE-BODY"),
+                "unlinked note missing from export at {}: {note_export}",
+                paths[4]
+            );
+
+            let queue = get_json(&app, &learner, &paths[5]).await;
+            assert!(
+                !queue.to_string().contains("SOURCE-LINKED-CARD"),
+                "{state_name} leaked review card at {}: {queue}",
+                paths[5]
+            );
+            assert!(
+                queue.to_string().contains("UNLINKED-CARD-FRONT"),
+                "unlinked card missing at {}: {queue}",
+                paths[5]
+            );
+
+            let deck_export = get_json(&app, &learner, &paths[6]).await;
+            assert!(
+                !deck_export.to_string().contains("SOURCE-LINKED-CARD"),
+                "{state_name} leaked exported card at {}: {deck_export}",
+                paths[6]
+            );
+            assert!(
+                deck_export.to_string().contains("UNLINKED-CARD-FRONT"),
+                "unlinked card missing from export at {}: {deck_export}",
+                paths[6]
+            );
+
+            let retained: (i64, i64, i64, i64, i64) = sqlx::query_as(
+                "SELECT
+                    (SELECT COUNT(*) FROM question_marks WHERE user_id = $1 AND question_version_id = $2),
+                    (SELECT COUNT(*) FROM notes WHERE id = $3 AND user_id = $1),
+                    (SELECT COUNT(*) FROM retest_cards WHERE user_id = $1 AND question_version_id = $2),
+                    (SELECT COUNT(*) FROM cards WHERE id = $4 AND user_id = $1
+                        AND source_question_version_id = $2),
+                    (SELECT COUNT(*) FROM cards WHERE id = $5 AND user_id = $1)",
+            )
+            .bind(learner_id)
+            .bind(question_id)
+            .bind(linked_note_id)
+            .bind(linked_card_id)
+            .bind(unrelated_card_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("learner records remain stored");
+            assert_eq!(retained, (1, 1, 1, 1, 1), "{state_name} mutated stored learner records");
+        }
+
+        sqlx::query(
+            "UPDATE content_rights
+             SET revoked_at = NULL, valid_from = DATE '2020-01-01', valid_to = NULL,
+                 audiences = '[\"learners\"]'::jsonb, seat_limit = NULL, asset_refs = $2
+             WHERE id = $1",
+        )
+        .bind(rights_id)
+        .bind(&baseline_assets)
+        .execute(&state.pool)
+        .await
+        .unwrap_or_else(|error| panic!("restore rights after {state_name}: {error}"));
+
+        for prefix in ["/v1", "/api/v1"] {
+            let paths = prefix_paths(prefix);
+            let notes = get_json(&app, &learner, &paths[2]).await;
+            assert!(
+                notes["notes"].as_array().unwrap().iter().any(|item| {
+                    item["note_id"] == linked_note_id.to_string()
+                }),
+                "restored linked note missing at {}: {notes}",
+                paths[2]
+            );
+            let retests = get_json(&app, &learner, &paths[0]).await;
+            assert!(
+                retests["retests"].as_array().unwrap().iter().any(|item| {
+                    item["card_version_id"] == question_id.to_string()
+                }),
+                "restored retest missing at {}: {retests}",
+                paths[0]
+            );
+            let marks = get_json(&app, &learner, &paths[1]).await;
+            assert!(
+                marks["marks"].as_array().unwrap().iter().any(|item| {
+                    item["question_version_id"] == question_id.to_string()
+                }),
+                "restored mark missing at {}: {marks}",
+                paths[1]
+            );
+            let queue = get_json(&app, &learner, &paths[5]).await;
+            assert!(
+                queue.to_string().contains("SOURCE-LINKED-CARD-FRONT"),
+                "restored linked card missing at {}: {queue}",
+                paths[5]
+            );
+        }
+    }
+
+    let _ = unrelated_card_id;
+}
