@@ -2613,27 +2613,89 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
     for _ in 0..3 {
         let question_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
         approve_question(&app, &author, &reviewer, question_id).await;
-        assert_eq!(publish_result(&app, &reviewer, question_id).await["status"], "published");
+        assert_eq!(
+            publish_result(&app, &reviewer, question_id).await["status"],
+            "published"
+        );
         question_ids.push(question_id);
     }
 
     let now = chrono::Utc::now();
     let starts_at = (now - chrono::Duration::minutes(1)).to_rfc3339();
     let ends_at = (now + chrono::Duration::hours(2)).to_rfc3339();
-    let (status, competition) = call(
-        app.clone(),
+    let create_competition = |title: &str| {
         admin_req(
             "POST",
             "/v1/competitions",
             Some(&author),
             Some(serde_json::json!({
-                "title": "Rights-aware competition fixture",
+                "title": title,
                 "exam_id": ids.exam_id,
-                "question_ids": question_ids,
+                "question_ids": &question_ids,
                 "starts_at": starts_at,
                 "ends_at": ends_at
             })),
+        )
+    };
+    for (state_name, mutation) in [
+        (
+            "revoked",
+            "UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1",
         ),
+        (
+            "expired",
+            "UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1",
+        ),
+        (
+            "wrong audience",
+            "UPDATE content_rights SET audiences = '[\"instructors\"]'::jsonb WHERE id = $1",
+        ),
+        (
+            "seat limit",
+            "UPDATE content_rights SET seat_limit = 25 WHERE id = $1",
+        ),
+        (
+            "incomplete scope",
+            "UPDATE content_rights SET asset_refs = '[]'::jsonb WHERE id = $1",
+        ),
+    ] {
+        sqlx::query(mutation)
+            .bind(rights_id)
+            .execute(&state.pool)
+            .await
+            .unwrap_or_else(|error| panic!("set {state_name} competition grant: {error}"));
+        let (status, denied) = call(
+            app.clone(),
+            create_competition(&format!("Ineligible {state_name}")),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{state_name} competition questions: {denied}"
+        );
+        assert_eq!(
+            denied["error"]["code"], "invalid_competition_questions",
+            "{state_name}: {denied}"
+        );
+        sqlx::query(
+            "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
+                 valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
+                 seat_limit = NULL, asset_refs = $2 WHERE id = $1",
+        )
+        .bind(rights_id)
+        .bind(serde_json::json!([
+            SOURCE_REF,
+            SOURCE_REFS[1],
+            MEDIA_REFS[0]
+        ]))
+        .execute(&state.pool)
+        .await
+        .unwrap_or_else(|error| panic!("restore competition rights after {state_name}: {error}"));
+    }
+    let (status, competition) = call(
+        app.clone(),
+        create_competition("Rights-aware competition fixture"),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "create competition: {competition}");
@@ -2693,94 +2755,147 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
         .parse::<Uuid>()
         .unwrap();
 
-    sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
+    for (state_name, mutation) in [
+        (
+            "revoked",
+            "UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1",
+        ),
+        (
+            "expired",
+            "UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1",
+        ),
+        (
+            "wrong audience",
+            "UPDATE content_rights SET audiences = '[\"instructors\"]'::jsonb WHERE id = $1",
+        ),
+        (
+            "seat limit",
+            "UPDATE content_rights SET seat_limit = 25 WHERE id = $1",
+        ),
+        (
+            "incomplete scope",
+            "UPDATE content_rights SET asset_refs = '[]'::jsonb WHERE id = $1",
+        ),
+    ] {
+        sqlx::query(mutation)
+            .bind(rights_id)
+            .execute(&state.pool)
+            .await
+            .unwrap_or_else(|error| panic!("set {state_name} competition grant: {error}"));
+
+        let (replay_status, replay) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry/answer"),
+                Some(&learner),
+                Some(answer_body.clone()),
+            ),
+        )
+        .await;
+        assert_eq!(
+            replay_status,
+            StatusCode::CONFLICT,
+            "{state_name} idempotent replay: {replay}"
+        );
+        assert_eq!(
+            replay["error"]["code"], "question_unavailable",
+            "{state_name}: {replay}"
+        );
+        assert!(
+            replay.get("question").is_none()
+                && !replay
+                    .to_string()
+                    .contains("Synthetic rights fixture vignette"),
+            "{state_name} stale replay leaked question content: {replay}"
+        );
+
+        let (resume_status, resume) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry"),
+                Some(&learner),
+                Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            resume_status,
+            StatusCode::CONFLICT,
+            "{state_name} stale resume: {resume}"
+        );
+        assert_eq!(
+            resume["error"]["code"], "question_unavailable",
+            "{state_name}: {resume}"
+        );
+
+        let (answer_status, stale_answer) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry/answer"),
+                Some(&learner),
+                Some(serde_json::json!({
+                    "question_version_id": next_question_id,
+                    "chosen_index": 0,
+                    "idempotency_key": Uuid::new_v4()
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            answer_status,
+            StatusCode::CONFLICT,
+            "{state_name} stale answer: {stale_answer}"
+        );
+        assert_eq!(
+            stale_answer["error"]["code"], "question_unavailable",
+            "{state_name}: {stale_answer}"
+        );
+        let saved_answers: Value = sqlx::query_scalar(
+            "SELECT answers FROM competition_attempts WHERE competition_id = $1",
+        )
+        .bind(competition_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("persisted competition answer");
+        assert_eq!(
+            saved_answers.as_array().unwrap().len(),
+            1,
+            "{state_name} stale answer mutated attempt"
+        );
+
+        sqlx::query(
+            "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
+                 valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
+                 seat_limit = NULL, asset_refs = $2 WHERE id = $1",
+        )
         .bind(rights_id)
+        .bind(serde_json::json!([
+            SOURCE_REF,
+            SOURCE_REFS[1],
+            MEDIA_REFS[0]
+        ]))
         .execute(&state.pool)
         .await
-        .expect("revoke competition question rights");
-
-    let (replay_status, replay) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{competition_id}/entry/answer"),
-            Some(&learner),
-            Some(answer_body),
-        ),
-    )
-    .await;
-    assert_eq!(
-        replay_status,
-        StatusCode::CONFLICT,
-        "stale idempotent replay: {replay}"
-    );
-    assert_eq!(replay["error"]["code"], "question_unavailable", "{replay}");
-    assert!(replay.get("question").is_none(), "stale replay leaked question: {replay}");
-    assert!(
-        !replay.to_string().contains("Synthetic rights fixture vignette"),
-        "stale replay leaked vignette: {replay}"
-    );
-
-    let (resume_status, resume) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{competition_id}/entry"),
-            Some(&learner),
-            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
-        ),
-    )
-    .await;
-    assert_eq!(resume_status, StatusCode::CONFLICT, "stale resume: {resume}");
-    assert_eq!(resume["error"]["code"], "question_unavailable", "{resume}");
-
-    let (answer_status, stale_answer) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{competition_id}/entry/answer"),
-            Some(&learner),
-            Some(serde_json::json!({
-                "question_version_id": next_question_id,
-                "chosen_index": 0,
-                "idempotency_key": Uuid::new_v4()
-            })),
-        ),
-    )
-    .await;
-    assert_eq!(answer_status, StatusCode::CONFLICT, "stale answer: {stale_answer}");
-    assert_eq!(stale_answer["error"]["code"], "question_unavailable", "{stale_answer}");
-    let saved_answers: Value = sqlx::query_scalar(
-        "SELECT answers FROM competition_attempts WHERE competition_id = $1",
-    )
-    .bind(competition_id)
-    .fetch_one(&state.pool)
-    .await
-    .expect("persisted competition answer");
-    assert_eq!(saved_answers.as_array().unwrap().len(), 1, "stale answer mutated attempt");
-
-    sqlx::query(
-        "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
-             valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
-             seat_limit = NULL, asset_refs = $2 WHERE id = $1",
-    )
-    .bind(rights_id)
-    .bind(serde_json::json!([SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]]))
-    .execute(&state.pool)
-    .await
-    .expect("restore competition display rights");
-    let (resume_status, resumed) = call(
-        app.clone(),
-        request(
-            "POST",
-            &format!("/v1/competitions/{competition_id}/entry"),
-            Some(&learner),
-            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
-        ),
-    )
-    .await;
-    assert_eq!(resume_status, StatusCode::OK, "restored resume: {resumed}");
-    assert_eq!(resumed["question"], cached_question, "restored question changed");
+        .unwrap_or_else(|error| panic!("restore competition rights after {state_name}: {error}"));
+        let (resume_status, resumed) = call(
+            app.clone(),
+            request(
+                "POST",
+                &format!("/v1/competitions/{competition_id}/entry"),
+                Some(&learner),
+                Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+            ),
+        )
+        .await;
+        assert_eq!(resume_status, StatusCode::OK, "restored resume: {resumed}");
+        assert_eq!(
+            resumed["question"], cached_question,
+            "restored question changed after {state_name}"
+        );
+    }
 
     let mut step = resumed;
     for _ in 0..3 {
@@ -2826,12 +2941,20 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "preserved leaderboard: {leaderboard}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "preserved leaderboard: {leaderboard}"
+    );
     assert!(
-        leaderboard["entries"].as_array().unwrap().iter().any(|entry| {
-            entry["handle"] == "rights-competition-learner"
-                && entry["score"].as_f64().is_some()
-        }),
+        leaderboard["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["handle"] == "rights-competition-learner"
+                    && entry["score"].as_f64().is_some()
+            }),
         "submitted score was lost: {leaderboard}"
     );
     for content_field in ["question_version_id", "vignette", "lead_in"] {
@@ -2841,4 +2964,119 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
             "leaderboard includes question content field {content_field}: {leaderboard}"
         );
     }
+}
+
+#[tokio::test]
+async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_ref = "COMPETITION-RECURRING-RIGHTS";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let mut question_ids = Vec::new();
+    for _ in 0..3 {
+        let question_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+        approve_question(&app, &author, &reviewer, question_id).await;
+        assert_eq!(
+            publish_result(&app, &reviewer, question_id).await["status"],
+            "published"
+        );
+        question_ids.push(question_id);
+    }
+
+    let starts_at = (chrono::Utc::now() + chrono::Duration::minutes(1));
+    let ends_at = starts_at + chrono::Duration::hours(4);
+    let (status, competition) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/competitions",
+            Some(&author),
+            Some(serde_json::json!({
+                "title": "Recurring rights fixture",
+                "exam_id": ids.exam_id,
+                "question_ids": question_ids,
+                "starts_at": starts_at.to_rfc3339(),
+                "ends_at": ends_at.to_rfc3339(),
+                "cadence": "weekly",
+                "question_count": 3
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create recurring event: {competition}");
+    let series_id = competition["series_id"].as_str().unwrap().to_owned();
+
+    sqlx::query("UPDATE content_rights SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("revoke recurring pool rights");
+    let (status, before_restore) = call(
+        app.clone(),
+        request("GET", "/v1/competitions", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "list ineligible recurrence: {before_restore}");
+    let occurrence_count = before_restore["competitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["series_id"] == series_id)
+        .count();
+    assert_eq!(
+        occurrence_count, 1,
+        "ineligible recurring questions produced events: {before_restore}"
+    );
+
+    sqlx::query(
+        "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
+             valid_to = NULL, audiences = '[\"learners\"]'::jsonb,
+             seat_limit = NULL, asset_refs = $2 WHERE id = $1",
+    )
+    .bind(rights_id)
+    .bind(serde_json::json!([
+        SOURCE_REF,
+        SOURCE_REFS[1],
+        MEDIA_REFS[0]
+    ]))
+    .execute(&state.pool)
+    .await
+    .expect("restore recurring pool rights");
+    sqlx::query("UPDATE competition_series SET next_start_at = now() WHERE id = $1")
+        .bind(series_id.parse::<Uuid>().unwrap())
+        .execute(&state.pool)
+        .await
+        .expect("make next occurrence due in fixture");
+    let (status, after_restore) = call(
+        app,
+        request("GET", "/v1/competitions", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "restored recurring pool: {after_restore}");
+    let restored_occurrence_count = after_restore["competitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["series_id"] == series_id)
+        .count();
+    assert!(
+        restored_occurrence_count > occurrence_count,
+        "eligible recurring pool did not resume: {after_restore}"
+    );
 }
