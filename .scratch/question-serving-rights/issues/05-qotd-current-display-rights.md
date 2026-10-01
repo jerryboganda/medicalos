@@ -1,6 +1,6 @@
 # Enforce current display eligibility for the question of the day
 
-Status: in-progress
+Status: complete (full exact-source CI run 36878420626 on 86723609f363f7844b35d25171170e38a5db9c3d passed)
 
 ## Problem Statement
 
@@ -47,4 +47,4 @@ The current daily question is a shared exam/day record; rights changes affect wh
 
 ## Comments
 
-- 2026-10-01 — Public-route regression coverage is being added for both API aliases, engagement status, rights-state changes, stale answers, stable picks, and preserved answered aggregates. Exact-source GitHub Actions acceptance is pending.
+- 2026-10-01 — Public-route regressions for both API aliases, engagement status, rights-state changes, stale answers, stable picks, and preserved answered aggregates passed. Full exact-source GitHub Actions run 36878420626 on 86723609f363f7844b35d25171170e38a5db9c3d passed Rust, offline-cache, client, site, browser E2E, and Zitadel checks.

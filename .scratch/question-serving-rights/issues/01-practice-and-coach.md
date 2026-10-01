@@ -1,6 +1,6 @@
 # Enforce current display rights in practice and Coach
 
-Status: ready-for-agent
+Status: complete (full exact-source CI run 36878420626 on 86723609f363f7844b35d25171170e38a5db9c3d passed)
 
 ## Outcome
 
@@ -33,3 +33,4 @@ session/Coach response was previously created.
 See `../spec.md`.
 
 ## Comments
+- 2026-10-01 — Public-route rights regressions for pools, sessions, answer replay, sync, Coach, and preserved aggregate results passed in the full exact-source GitHub Actions run above.

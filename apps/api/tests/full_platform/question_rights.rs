@@ -3024,6 +3024,253 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
 }
 
 #[tokio::test]
+async fn duel_acceptance_requires_a_full_current_pool_and_commits_once() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let (opponent_id, opponent) = register(app.clone(), "rights-duel-opponent".into()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+
+    let mut rights_ids = Vec::new();
+    for index in 0..3 {
+        let rights_ref = format!("COMP-DUEL-RIGHTS-{index}");
+        rights_ids.push(
+            create_rights(
+                &app,
+                &author,
+                &rights_ref,
+                &["display"],
+                &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+                &["learners"],
+                None,
+                None,
+            )
+            .await,
+        );
+        let question_id =
+            create_question(&app, &author, chapter_id, Some(rights_ref.as_str())).await;
+        approve_question(&app, &author, &reviewer, question_id).await;
+        assert_eq!(
+            publish_result(&app, &reviewer, question_id).await["status"],
+            "published"
+        );
+    }
+
+    for (token, handle) in [
+        (&author, "rights-duel-author"),
+        (&opponent, "rights-duel-opponent"),
+    ] {
+        let (status, profile) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/community/profile",
+                Some(token),
+                Some(serde_json::json!({ "handle": handle })),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "community profile: {profile}");
+    }
+    let (status, duel) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/community/duels",
+            Some(&author),
+            Some(serde_json::json!({
+                "opponent": opponent_id,
+                "exam_id": ids.exam_id,
+                "chapter_id": chapter_id,
+                "question_count": 3
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create rights-aware duel: {duel}");
+    let duel_id: Uuid = duel["duel_id"].as_str().unwrap().parse().unwrap();
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{}/revoke", rights_ids[0]),
+            Some(&author),
+            Some(serde_json::json!({ "reason": "Synthetic duel fixture grant ended" })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke duel grant: {revoked}");
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/duels/{duel_id}/accept"),
+            Some(&opponent),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "partial rights-eligible duel must not start: {denied}"
+    );
+    assert_eq!(denied["error"]["code"], "empty_pool", "{denied}");
+    let session_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM practice_sessions WHERE preset = 'duel'")
+            .fetch_one(&state.pool)
+            .await
+            .expect("count sessions after denied duel");
+    assert_eq!(session_count, 0, "denied duel created partial sessions");
+    let duel_status: String = sqlx::query_scalar("SELECT status FROM duels WHERE id = $1")
+        .bind(duel_id)
+        .fetch_one(&state.pool)
+        .await
+        .expect("pending duel state");
+    assert_eq!(duel_status, "pending");
+
+    sqlx::query("UPDATE content_rights SET revoked_at = NULL WHERE id = $1")
+        .bind(rights_ids[0])
+        .execute(&state.pool)
+        .await
+        .expect("restore duel fixture grant");
+
+    let placeholder_session_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO practice_sessions (id, user_id, preset, chapter_id)
+         VALUES ($1, $2, 'duel', $3)",
+    )
+    .bind(placeholder_session_id)
+    .bind(opponent_id)
+    .bind(chapter_id)
+    .execute(&state.pool)
+    .await
+    .expect("create duplicate duel-session fixture");
+    sqlx::query(
+        "INSERT INTO duel_sessions (duel_id, user_id, session_id)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(duel_id)
+    .bind(opponent_id)
+    .bind(placeholder_session_id)
+    .execute(&state.pool)
+    .await
+    .expect("reserve opponent duel slot");
+    let (status, failed_accept) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/community/duels/{duel_id}/accept"),
+            Some(&opponent),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "duplicate duel slot should reject the whole acceptance: {failed_accept}"
+    );
+    let persisted_sessions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM practice_sessions WHERE preset = 'duel'")
+            .fetch_one(&state.pool)
+            .await
+            .expect("count sessions after failed duel write");
+    let persisted_duel_sessions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM duel_sessions WHERE duel_id = $1")
+            .bind(duel_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("count duel session links after failed write");
+    let persisted_items: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_items item
+         JOIN duel_sessions duel_session ON duel_session.session_id = item.session_id
+         WHERE duel_session.duel_id = $1",
+    )
+    .bind(duel_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count duel items after failed write");
+    assert_eq!(persisted_sessions, 1, "failed acceptance left partial sessions");
+    assert_eq!(persisted_duel_sessions, 1, "failed acceptance left a second link");
+    assert_eq!(persisted_items, 0, "failed acceptance left partial question items");
+    sqlx::query("DELETE FROM duel_sessions WHERE duel_id = $1 AND user_id = $2")
+        .bind(duel_id)
+        .bind(opponent_id)
+        .execute(&state.pool)
+        .await
+        .expect("remove duplicate duel-session fixture");
+    sqlx::query("DELETE FROM practice_sessions WHERE id = $1")
+        .bind(placeholder_session_id)
+        .execute(&state.pool)
+        .await
+        .expect("remove duplicate practice-session fixture");
+
+    let mut hold_duel = state.pool.begin().await.expect("begin duel lock fixture");
+    sqlx::query("SELECT id FROM duels WHERE id = $1 FOR UPDATE")
+        .bind(duel_id)
+        .fetch_one(&mut *hold_duel)
+        .await
+        .expect("lock pending duel");
+    let first_app = app.clone();
+    let first_token = opponent.clone();
+    let first_path = format!("/v1/community/duels/{duel_id}/accept");
+    let first = tokio::spawn(async move {
+        call(
+            first_app,
+            request("POST", &first_path, Some(&first_token), None),
+        )
+        .await
+    });
+    let second_app = app.clone();
+    let second_token = opponent.clone();
+    let second_path = format!("/v1/community/duels/{duel_id}/accept");
+    let second = tokio::spawn(async move {
+        call(
+            second_app,
+            request("POST", &second_path, Some(&second_token), None),
+        )
+        .await
+    });
+    wait_for_blocked_statements(&state.pool, "FROM duels", 2).await;
+    hold_duel.commit().await.expect("release duel lock fixture");
+
+    let (first_status, first_body) = first.await.expect("first accept task");
+    let (second_status, second_body) = second.await.expect("second accept task");
+    assert!(
+        (first_status == StatusCode::OK && second_status == StatusCode::CONFLICT)
+            || (second_status == StatusCode::OK && first_status == StatusCode::CONFLICT),
+        "exactly one concurrent acceptance must win: {first_status} {first_body}; {second_status} {second_body}"
+    );
+    let accepted = if first_status == StatusCode::OK {
+        first_body
+    } else {
+        second_body
+    };
+    assert_eq!(accepted["question_count"], 3, "{accepted}");
+    let session_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM practice_sessions WHERE preset = 'duel'")
+            .fetch_one(&state.pool)
+            .await
+            .expect("count accepted duel sessions");
+    assert_eq!(session_count, 2, "acceptance must create exactly two sessions");
+    let item_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM session_items item
+         JOIN duel_sessions duel_session ON duel_session.session_id = item.session_id
+         WHERE duel_session.duel_id = $1",
+    )
+    .bind(duel_id)
+    .fetch_one(&state.pool)
+    .await
+    .expect("count accepted duel questions");
+    assert_eq!(item_count, 6, "each duel session must contain all three questions");
+}
+
+#[tokio::test]
 async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
     let _guard = LOCK.lock().await;
     let state = setup().await;

@@ -1,6 +1,6 @@
 # Enforce current display rights in study queues and derived content
 
-Status: in-progress (QOTD rights first; retests, marks, notes, cards, and insights remain open)
+Status: in-progress (QOTD, Issue 06 learner records, and Issue 07 competition attempts passed exact-source CI; Issue 08 community duels and the insights audit remain)
 
 ## Outcome
 

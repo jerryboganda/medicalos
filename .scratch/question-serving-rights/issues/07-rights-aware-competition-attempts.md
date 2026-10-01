@@ -1,15 +1,16 @@
 # Recheck question display rights throughout competition attempts
 
-Status: in-progress
+Status: complete (full exact-source PR run 36908529573 on b6c464adcc90f29f06bd4f03a76b43bde7d458b9 passed)
 
-Progress: CI run 36896072254 passed format, migrations, Clippy, dependency
-advisories, site, and Zitadel checks. Its critical integration suite ran 33
-tests successfully and confirmed that replaying a cached question after rights
-revocation still returned HTTP 200 (expected 409). The source now rechecks
-rights during attempt creation, question presentation, answer submission, and
-cached-question replay; a regression also asserts that a denied first start
-persists no attempt. The corrected recurring fixture passed. Current source is
-awaiting exact-SHA CI validation.
+Progress: The current source rechecks rights during competition creation,
+recurring-pool selection, first attempt creation, question presentation,
+answer submission, and cached-question replay. Regression coverage confirms
+stale questions return a content-free conflict, denied starts persist no
+attempt, recurring events wait for an eligible pool, and submitted scores stay
+available without question content. Full exact-source PR workflow 36908529573
+passed on b6c464adcc90f29f06bd4f03a76b43bde7d458b9, including Rust tests,
+client/site, offline, browser E2E, Zitadel, backup/restore, SQLx, and Wasm
+checks.
 
 ## Problem Statement
 
