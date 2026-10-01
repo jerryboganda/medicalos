@@ -2738,13 +2738,12 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
         "do not start from revoked competition questions: {denied_start}"
     );
     assert_eq!(denied_start["error"]["code"], "question_unavailable");
-    let attempt_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM competition_attempts WHERE competition_id = $1",
-    )
-    .bind(competition_id)
-    .fetch_one(&state.pool)
-    .await
-    .expect("count attempts after denied start");
+    let attempt_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM competition_attempts WHERE competition_id = $1")
+            .bind(competition_id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("count attempts after denied start");
     assert_eq!(attempt_count, 0, "denied start persisted an attempt");
     sqlx::query(
         "UPDATE content_rights SET revoked_at = NULL, valid_from = DATE '2020-01-01',
