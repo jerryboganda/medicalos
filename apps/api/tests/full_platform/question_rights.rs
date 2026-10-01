@@ -2799,7 +2799,8 @@ async fn question_linked_insights_keep_only_aggregate_evidence_after_rights_chan
         None,
     )
     .await;
-    let question_id = create_question(&app, &author, chapter_id, Some("INSIGHTS-RIGHTS-LIVE")).await;
+    let question_id =
+        create_question(&app, &author, chapter_id, Some("INSIGHTS-RIGHTS-LIVE")).await;
     approve_question(&app, &author, &reviewer, question_id).await;
     publish_result(&app, &reviewer, question_id).await;
 
