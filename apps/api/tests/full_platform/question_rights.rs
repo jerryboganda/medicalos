@@ -2278,9 +2278,9 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
             format!("{prefix}/notes"),
             format!("{prefix}/concepts/negative-feedback/notes"),
             format!("{prefix}/notes/export"),
-            format("{prefix}/me/export"),
             format!("{prefix}/reviews/queue"),
             format!("{prefix}/me/decks/export"),
+            format!("{prefix}/me/export"),
         ]
     };
     for prefix in ["/v1", "/api/v1"] {
