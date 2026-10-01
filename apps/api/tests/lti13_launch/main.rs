@@ -494,6 +494,11 @@ async fn lti13_login_launch_deeplink_round_trip() {
         launched["message_type"], "LtiDeepLinkingRequest",
         "{launched}"
     );
+    let deep_link_token = launched["token"]
+        .as_str()
+        .expect("deep-link session token")
+        .to_owned();
+    bind_device(&app, &deep_link_token, "lti-test-device").await;
 
     let (status, response) = call(
         app.clone(),
@@ -501,7 +506,10 @@ async fn lti13_login_launch_deeplink_round_trip() {
             .method("POST")
             .uri("/v1/lti/deep-links")
             .header(header::CONTENT_TYPE, "application/json")
-            .header(header::AUTHORIZATION, format!("Bearer {}", launched["token"].as_str().unwrap()))
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {deep_link_token}"),
+            )
             .body(Body::from(
                 json!({"items": [{"title": "Cardiology drill", "url": "https://medicalos.example/session?exam=1"}]})
                     .to_string(),
