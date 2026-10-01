@@ -2076,7 +2076,7 @@ pub struct ContentRightsReq {
     pub ref_code: String,
     pub licensor: String,
     pub territory: Option<String>,
-    /// Content use flags, including private_import and document_extraction.
+    /// Content use flags, including distribution, private_import and document_extraction.
     pub permitted_uses: Vec<String>,
     #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub valid_from: chrono::NaiveDate,
@@ -2159,6 +2159,7 @@ pub async fn create_content_rights(
         "embeddings",
         "ai",
         "derivatives",
+        "distribution",
         "translation",
         "private_import",
         "document_extraction",
@@ -2171,7 +2172,7 @@ pub async fn create_content_rights(
     {
         return Err(ApiError::unprocessable(
             "invalid_permitted_uses",
-            "permitted uses must draw from display, search, offline, embeddings, ai, derivatives, translation, private_import, document_extraction",
+            "permitted uses must draw from display, search, offline, embeddings, ai, derivatives, distribution, translation, private_import, document_extraction",
         ));
     }
     let mut uses = std::collections::HashSet::new();

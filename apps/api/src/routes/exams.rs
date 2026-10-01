@@ -259,7 +259,10 @@ pub async fn start_assessment_session(
     .await?
     .ok_or_else(|| ApiError::not_found("assessment_form_not_found"))?;
     let items = sqlx::query!(
-        r#"SELECT rq.question_version_id
+        r#"SELECT rq.question_version_id,
+                  COALESCE(question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ), false) AS "rights_active!"
            FROM reserved_questions rq
            JOIN question_versions qv ON qv.id = rq.question_version_id
            WHERE rq.form_id = $1 AND qv.status = 'published'
@@ -273,6 +276,9 @@ pub async fn start_assessment_session(
             "form_empty",
             "this assessment form has no published reserved questions",
         ));
+    }
+    if items.iter().any(|item| !item.rights_active) {
+        return Err(crate::question_rights::unavailable_error());
     }
     let sid = Uuid::new_v4();
     sqlx::query!(
@@ -431,7 +437,10 @@ pub async fn qti_export(
     let provided = headers.get("x-admin-token").and_then(|v| v.to_str().ok());
     state.require_permission(&user, provided, Permission::ExamConfigure)?;
     let rows = sqlx::query!(
-        r#"SELECT qv.id, qv.lead_in, qv.options, qv.correct_index
+        r#"SELECT qv.id, qv.lead_in, qv.options, qv.correct_index,
+                  bool_and(question_rights_active(
+                      'distribution', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  )) OVER () AS "all_distribution_rights_active!"
            FROM question_versions qv
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE c.exam_id = $1 AND qv.status = 'published'
@@ -440,6 +449,9 @@ pub async fn qti_export(
     )
     .fetch_all(&state.pool)
     .await?;
+    if rows.iter().any(|row| !row.all_distribution_rights_active) {
+        return Err(crate::question_rights::unavailable_error());
+    }
     let esc = |t: &str| {
         t.replace('&', "&amp;")
             .replace('<', "&lt;")

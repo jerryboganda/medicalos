@@ -5,7 +5,7 @@ use uuid::Uuid;
 pub fn unavailable_error() -> ApiError {
     ApiError::forbidden(
         "rights_unavailable",
-        "the question's current display rights are unavailable",
+        "the question's current rights do not permit this use",
     )
 }
 

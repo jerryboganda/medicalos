@@ -119,12 +119,14 @@ async fn ensure_synthetic_question_rights(pool: &PgPool) -> ApiResult<()> {
              (id, ref_code, licensor, territory, permitted_uses, valid_from,
               notes, asset_refs, audiences)
          VALUES ($1, $2, $3, 'worldwide', $4, DATE '2020-01-01', $5, $6, $7)
-         ON CONFLICT (ref_code) DO NOTHING",
+         ON CONFLICT (ref_code) DO UPDATE
+         SET permitted_uses = EXCLUDED.permitted_uses
+         WHERE content_rights.notes = EXCLUDED.notes",
     )
     .bind(Uuid::new_v4())
     .bind(RIGHTS_REF)
     .bind("Medical OS fictional seed content")
-    .bind(serde_json::json!(["display", "derivatives"]))
+    .bind(serde_json::json!(["display", "derivatives", "distribution"]))
     .bind("Synthetic local/test fixtures only; not a third-party license grant.")
     .bind(asset_refs)
     .bind(serde_json::json!(["learners"]))

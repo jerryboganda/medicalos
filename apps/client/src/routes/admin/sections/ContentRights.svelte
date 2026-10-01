@@ -42,6 +42,7 @@
 		{ value: 'ai', label: 'AI use' },
 		{ value: 'derivatives', label: 'Derivatives' },
 		{ value: 'translation', label: 'Translation' },
+		{ value: 'distribution', label: 'QTI package distribution, including answer keys' },
 		{ value: 'private_import', label: 'Private learner imports' },
 		{ value: 'document_extraction', label: 'Document extraction' }
 	];

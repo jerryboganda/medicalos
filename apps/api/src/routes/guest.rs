@@ -83,6 +83,9 @@ pub async fn next_question(
     let q = sqlx::query!(
         r#"SELECT id, vignette, lead_in, options FROM question_versions
            WHERE status = 'published'
+             AND question_display_rights_active(
+                 rights_ref, source_ref, source_refs, media_refs
+             )
            ORDER BY random() LIMIT 1"#,
     )
     .fetch_optional(&state.pool)
