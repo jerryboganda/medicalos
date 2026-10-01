@@ -149,6 +149,14 @@ async fn session_policy_failure_preserves_policy_and_existing_access() {
     let email = create_password_account(&app).await;
     let first = login_token(&app, &email).await;
     let second = login_token(&app, &email).await;
+    for token in [&first, &second] {
+        let (status, device) = register_device(&app, token, "session-policy-device").await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "bind session for access check: {device}"
+        );
+    }
     let first_hash = api::auth::sha256_hex(&first);
     sqlx::query(&format!(
         "ALTER TABLE auth_sessions ADD CONSTRAINT reject_fixture_session_retirement
@@ -174,6 +182,8 @@ async fn session_policy_failure_preserves_policy_and_existing_access() {
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{result}");
     // A fresh login must not retire either prior session after a failed enable.
     let fresh = login_token(&app, &email).await;
+    let (status, device) = register_device(&app, &fresh, "session-policy-device").await;
+    assert_eq!(status, StatusCode::OK, "bind fresh session: {device}");
     for token in [&first, &second, &fresh] {
         let (status, body) = call(
             app.clone(),
@@ -468,6 +478,8 @@ async fn coach_reports_the_extractive_adapter_even_when_an_openai_key_is_configu
     let ids = seed::seed(&state.pool).await.expect("seed");
     let email = create_password_account(&app).await;
     let token = login_token(&app, &email).await;
+    let (status, device) = register_device(&app, &token, "coach-test-device").await;
+    assert_eq!(status, StatusCode::OK, "register coach device: {device}");
 
     let (status, session) = call(
         app.clone(),

@@ -7,7 +7,7 @@ use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::{hash_password, AuthSession, AuthUser};
+use crate::auth::{hash_password, AccountRecoveryUser, AuthSession, AuthUser};
 use crate::error::{ApiError, ApiResult};
 use crate::routes::admin::{admin_headers, audit};
 use crate::state::AppState;
@@ -20,7 +20,7 @@ pub struct DeviceReq {
 
 pub async fn register_device(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
     Extension(session): Extension<AuthSession>,
     Json(req): Json<DeviceReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
@@ -163,7 +163,7 @@ pub async fn register_device(
 
 pub async fn list_devices(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let rows = sqlx::query!(
         r#"SELECT id, device_key, label, created_at, last_seen_at, revoked_at
@@ -192,7 +192,7 @@ pub async fn list_devices(
 
 pub async fn revoke_device(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
     Path(device_id): Path<Uuid>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut tx = state.pool.begin().await?;
@@ -227,7 +227,7 @@ pub async fn revoke_device(
 
 pub async fn delete_account(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut tx = state.pool.begin().await?;
     sqlx::query_scalar!(
@@ -268,7 +268,7 @@ pub struct SessionPolicyReq {
 
 pub async fn get_session_policy(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let single_active_session = sqlx::query_scalar!(
         r#"SELECT single_active_session AS "single_active_session!"
@@ -286,7 +286,7 @@ pub async fn get_session_policy(
 /// When on, the next login retires every prior session for this account.
 pub async fn set_session_policy(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
     Json(req): Json<SessionPolicyReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let mut tx = state.pool.begin().await?;

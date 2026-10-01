@@ -12,7 +12,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::AuthUser;
+use crate::auth::{AccountRecoveryUser, AuthUser};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use sha2::{Digest, Sha256};
@@ -240,7 +240,7 @@ pub struct PackLeaseRevokedResponse {
 
 pub async fn export_account(
     State(state): State<Arc<AppState>>,
-    user: AuthUser,
+    user: AccountRecoveryUser,
 ) -> ApiResult<Json<serde_json::Value>> {
     let profile = sqlx::query!(
         "SELECT email, created_at, tier FROM users WHERE id = $1",

@@ -219,6 +219,12 @@ async fn register_and_login(app: Router) -> String {
 }
 
 async fn register_and_login_with_email(app: Router, email: String) -> String {
+    let token = register_and_login_unbound_with_email(app.clone(), email).await;
+    bind_test_device(&app, &token, "integration-test-device").await;
+    token
+}
+
+async fn register_and_login_unbound_with_email(app: Router, email: String) -> String {
     let (_, v) = call(
         app.clone(),
         request(
@@ -244,6 +250,20 @@ async fn register_and_login_with_email(app: Router, email: String) -> String {
     v["token"].as_str().expect("token").to_string()
 }
 
+async fn bind_test_device(app: &Router, token: &str, device_key: &str) {
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/devices",
+            Some(token),
+            Some(serde_json::json!({"device_key": device_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "register test device: {body}");
+}
+
 async fn register(app: Router, prefix: String) -> (Uuid, String) {
     let email = format!("{prefix}-{}@example.test", Uuid::new_v4());
     let (status, registered) = call(
@@ -259,7 +279,7 @@ async fn register(app: Router, prefix: String) -> (Uuid, String) {
     assert_eq!(status, StatusCode::OK, "register: {registered}");
     let user_id: Uuid = registered["user_id"].as_str().unwrap().parse().unwrap();
     let (status, login) = call(
-        app,
+        app.clone(),
         request(
             "POST",
             "/v1/auth/login",
@@ -269,7 +289,9 @@ async fn register(app: Router, prefix: String) -> (Uuid, String) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "login: {login}");
-    (user_id, login["token"].as_str().unwrap().to_string())
+    let token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &token, "integration-test-device").await;
+    (user_id, token)
 }
 
 async fn pack_resources(
@@ -10747,7 +10769,7 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
     let email = format!("completion-kernel-{}@example.test", Uuid::new_v4());
-    let token = register_and_login_with_email(app.clone(), email.clone()).await;
+    let token = register_and_login_unbound_with_email(app.clone(), email.clone()).await;
 
     let (status, device) = call(
         app.clone(),
@@ -10811,6 +10833,8 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{devices}");
     assert!(devices["devices"][0]["revoked_at"].is_string(), "{devices}");
+
+    bind_test_device(&app, &token, "ci-browser").await;
 
     // EX-06: learner accommodations are stored per key and overwrite on update.
     let (status, acc) = call(
@@ -11257,6 +11281,12 @@ async fn institution_program_curriculum_and_coverage_are_tenant_scoped() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{logged_in}");
+        bind_test_device(
+            &app,
+            logged_in["token"].as_str().expect("learner bearer"),
+            "program-coverage-device",
+        )
+        .await;
         if index == 0 {
             first_learner_token = logged_in["token"].as_str().unwrap().to_owned();
         }
@@ -13450,6 +13480,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let member_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &member_token, "analytics-member-device").await;
 
     let (status, cohort) = call(
         app.clone(),
@@ -19611,6 +19642,7 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let third_token = third_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &third_token, "first-device").await;
     let (status, _) = call(
         app.clone(),
         request("GET", "/v1/me/today", Some(&second_token), None),
@@ -20177,6 +20209,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     let password_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &password_token, "oidc-password-device").await;
 
     let (_, institution) = call(
         app.clone(),
@@ -20224,6 +20257,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     let password_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &password_token, "oidc-password-device").await;
 
     let config_uri = format!("/v1/admin/institutions/{institution_id}/sso/oidc");
     let (status, denied) = call(
@@ -20377,6 +20411,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     assert_eq!(status, StatusCode::OK, "{session}");
     assert_json_keys(&session, &["token"]);
     let sso_token = session["token"].as_str().unwrap();
+    bind_test_device(&app, sso_token, "oidc-sso-device").await;
 
     let (status, _) = call(
         app.clone(),
@@ -20807,6 +20842,7 @@ async fn off02_concurrent_session_submit_returns_one_persisted_receipt() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let learner = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &learner, "zitadel-flow-learner-device").await;
 
     let (status, created) = call(
         app.clone(),
@@ -24315,9 +24351,11 @@ async fn role_session_with(
     assert_eq!(status, StatusCode::OK, "{reg}");
     let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
     let roles: Vec<String> = roles.iter().map(|r| r.to_string()).collect();
-    api::auth::issue_session_with(&state.pool, user_id, &roles, mfa)
+    let token = api::auth::issue_session_with(&state.pool, user_id, &roles, mfa)
         .await
-        .expect("role session")
+        .expect("role session");
+    bind_test_device(app, &token, "role-session-device").await;
+    token
 }
 
 /// Plan auth-zitadel phase 1: the API is Zitadel's OIDC client. A sign-in
@@ -24408,7 +24446,9 @@ async fn platform_sign_in_maps_zitadel_roles_and_mfa_onto_the_session() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{session}");
-        Ok(session["token"].as_str().unwrap().to_owned())
+        let token = session["token"].as_str().unwrap().to_owned();
+        bind_test_device(app, &token, "zitadel-test-device").await;
+        Ok(token)
     }
 
     let (_, options) = call(
@@ -24602,6 +24642,7 @@ async fn admin_reset_password_revokes_sessions_and_reauths() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let victim = login["token"].as_str().unwrap().to_owned();
+    bind_test_device(&app, &victim, "password-reset-victim-device").await;
 
     // Plain sessions cannot reset passwords.
     let (status, body) = call(

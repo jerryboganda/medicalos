@@ -128,6 +128,20 @@ async fn register(app: &Router, email: &str) -> (StatusCode, Value, String) {
     .await;
     assert_eq!(login_status, StatusCode::OK, "{login}");
     let token = login["token"].as_str().unwrap_or_default().to_owned();
+    let (device_status, device) = call(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/v1/me/devices")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::from(
+                json!({"device_key": "lti-test-device"}).to_string(),
+            ))
+            .expect("register test device"),
+    )
+    .await;
+    assert_eq!(device_status, StatusCode::OK, "{device}");
     (status, body, token)
 }
 
