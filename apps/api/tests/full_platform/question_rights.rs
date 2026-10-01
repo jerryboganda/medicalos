@@ -124,6 +124,49 @@ async fn publish_result(app: &Router, reviewer: &str, version_id: Uuid) -> Value
     body["results"][0].clone()
 }
 
+async fn create_rights_chapter(pool: &sqlx::PgPool, exam_id: Uuid) -> Uuid {
+    let parent_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'system' LIMIT 1",
+    )
+    .bind(exam_id)
+    .fetch_one(pool)
+    .await
+    .expect("fixture system");
+    let chapter_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO curriculum_nodes (id, exam_id, kind, name, parent_id, display_order)
+         VALUES ($1, $2, 'chapter', $3, $4, 99)",
+    )
+    .bind(chapter_id)
+    .bind(exam_id)
+    .bind(format!("Rights delivery fixture {chapter_id}"))
+    .bind(parent_id)
+    .execute(pool)
+    .await
+    .expect("isolated fixture chapter");
+    chapter_id
+}
+
+async fn export_qti(app: &Router, token: &str, exam_id: Uuid) -> (StatusCode, String) {
+    call_text(
+        app.clone(),
+        admin_req(
+            "GET",
+            &format!("/api/v1/admin/qti/packages/{exam_id}"),
+            Some(token),
+            None,
+        ),
+    )
+    .await
+}
+
+async fn assert_qti_denied(app: &Router, token: &str, exam_id: Uuid, reason: &str) {
+    let (status, body) = export_qti(app, token, exam_id).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{reason}: {body}");
+    let body: Value = serde_json::from_str(&body).expect("QTI denial is JSON");
+    assert_eq!(body["error"]["code"], "rights_unavailable", "{reason}");
+}
+
 #[tokio::test]
 async fn question_publication_denies_missing_revoked_expired_and_wrong_use_rights() {
     let _guard = LOCK.lock().await;
@@ -1171,4 +1214,520 @@ async fn question_publication_waits_for_concurrent_rights_revocation() {
         publish_body["results"][0]["error"]["code"], "rights_unavailable",
         "revocation committed before publication: {publish_body}"
     );
+}
+
+#[tokio::test]
+async fn assessment_launch_rechecks_reserved_question_display_rights() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+
+    let rights_ref = "ASSESSMENT-RIGHTS-REVOKE";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let version_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+    approve_question(&app, &author, &reviewer, version_id).await;
+    assert_eq!(
+        publish_result(&app, &reviewer, version_id).await["status"],
+        "published"
+    );
+
+    let (status, spec) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exams/{}/specs", ids.exam_id),
+            Some(&author),
+            Some(serde_json::json!({
+                "effective_from": chrono::Utc::now().date_naive().to_string(),
+                "config": {
+                    "blocks": 2,
+                    "block_seconds": 3600,
+                    "break_seconds": 600,
+                    "grace_seconds": 30
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create exam spec: {spec}");
+    let spec_id = spec["spec_id"].as_str().expect("spec id");
+    let (status, form) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            &format!("/v1/admin/exam-specs/{spec_id}/forms"),
+            Some(&author),
+            Some(serde_json::json!({
+                "name": "Rights runtime form",
+                "assessment_family": "pilot",
+                "blueprint": {"chapters": []},
+                "reserved": true,
+                "ai_allowed": false,
+                "question_ids": [version_id]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create reserved form: {form}");
+    let form_id = form["form_id"].as_str().expect("form id");
+
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/assessments/{form_id}/sessions"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "active assessment launch: {started}"
+    );
+    let session_id = started["session_id"].as_str().expect("session id");
+    let (status, detail) = call(
+        app.clone(),
+        request(
+            "GET",
+            &format!("/v1/practice/sessions/{session_id}"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active assessment detail: {detail}");
+    assert_eq!(
+        detail["items"][0]["question_version_id"],
+        version_id.to_string()
+    );
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Assessment fixture license ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoke assessment rights: {revoked}"
+    );
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/api/v1/assessments/{form_id}/sessions"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked assessment launch: {denied}"
+    );
+    assert_eq!(denied["error"]["code"], "rights_unavailable", "{denied}");
+}
+
+#[tokio::test]
+async fn mock_pool_excludes_revoked_expired_and_out_of_scope_questions() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let learner = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_refs = [
+        "MOCK-RIGHTS-REVOKE",
+        "MOCK-RIGHTS-EXPIRED",
+        "MOCK-RIGHTS-AUDIENCE",
+        "MOCK-RIGHTS-SEATS",
+        "MOCK-RIGHTS-MEDIA-SCOPE",
+        "MOCK-RIGHTS-SOURCE-SCOPE",
+    ];
+    let mut rights_ids = Vec::with_capacity(rights_refs.len());
+    for rights_ref in rights_refs {
+        let rights_id = create_rights(
+            &app,
+            &author,
+            rights_ref,
+            &["display", "derivatives"],
+            &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+            &["learners"],
+            None,
+            None,
+        )
+        .await;
+        let version_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+        approve_question(&app, &author, &reviewer, version_id).await;
+        assert_eq!(
+            publish_result(&app, &reviewer, version_id).await["status"],
+            "published"
+        );
+        rights_ids.push(rights_id);
+    }
+
+    let (status, mock) = call(
+        app.clone(),
+        admin_req(
+            "POST",
+            "/v1/mocks",
+            Some(&author),
+            Some(serde_json::json!({
+                "title": "Rights runtime mock",
+                "exam_id": ids.exam_id,
+                "mock_type": "mini",
+                "blueprint": [{"chapter_id": chapter_id, "count": rights_refs.len()}],
+                "pass_mark_percent": 50,
+                "attempts_allowed": 2
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create mock: {mock}");
+    let mock_id = mock["mock_id"].as_str().expect("mock id");
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/api/v1/mocks/{mock_id}/start"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active mock start: {started}");
+    assert_eq!(started["question_count"], rights_refs.len());
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{}/revoke", rights_ids[0]),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Mock fixture license ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "revoke mock rights: {revoked}");
+    sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
+        .bind(rights_ids[1])
+        .execute(&state.pool)
+        .await
+        .expect("expire mock grant");
+    sqlx::query("UPDATE content_rights SET audiences = $2 WHERE id = $1")
+        .bind(rights_ids[2])
+        .bind(serde_json::json!(["instructors"]))
+        .execute(&state.pool)
+        .await
+        .expect("restrict mock audience");
+    sqlx::query("UPDATE content_rights SET seat_limit = 25 WHERE id = $1")
+        .bind(rights_ids[3])
+        .execute(&state.pool)
+        .await
+        .expect("seat-limit mock grant");
+    sqlx::query("UPDATE content_rights SET asset_refs = $2 WHERE id = $1")
+        .bind(rights_ids[4])
+        .bind(serde_json::json!([SOURCE_REF, SOURCE_REFS[1]]))
+        .execute(&state.pool)
+        .await
+        .expect("remove mock media scope");
+    sqlx::query("UPDATE content_rights SET asset_refs = $2 WHERE id = $1")
+        .bind(rights_ids[5])
+        .bind(serde_json::json!([SOURCE_REF, MEDIA_REFS[0]]))
+        .execute(&state.pool)
+        .await
+        .expect("remove mock source scope");
+
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/mocks/{mock_id}/start"),
+            Some(&learner),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "ineligible mock pool: {denied}"
+    );
+    assert_eq!(
+        denied["error"]["code"], "insufficient_questions",
+        "{denied}"
+    );
+}
+
+#[tokio::test]
+async fn guest_trial_does_not_return_a_question_after_its_rights_expire() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let synthetic_rights_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM content_rights WHERE ref_code = 'MEDICALOS-SYNTHETIC-SEED'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("synthetic seed grant");
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{synthetic_rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "Isolate guest rights fixture"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoke synthetic fixture grant: {revoked}"
+    );
+
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_ref = "GUEST-RIGHTS-EXPIRY";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let version_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+    approve_question(&app, &author, &reviewer, version_id).await;
+    assert_eq!(
+        publish_result(&app, &reviewer, version_id).await["status"],
+        "published"
+    );
+
+    let guest_key = format!("guest-rights-{}", Uuid::new_v4());
+    let (status, started) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/guest/trial/start",
+            None,
+            Some(serde_json::json!({"guest_key": guest_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "guest trial start: {started}");
+    let (status, question) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/guest/trial/next-question",
+            None,
+            Some(serde_json::json!({"guest_key": guest_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "active guest content: {question}");
+    assert_eq!(question["question_version_id"], version_id.to_string());
+
+    sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("expire guest grant");
+    let (status, denied) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/guest/trial/next-question",
+            None,
+            Some(serde_json::json!({"guest_key": guest_key})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "expired guest pool: {denied}"
+    );
+    assert_eq!(denied["error"]["code"], "empty_pool", "{denied}");
+}
+
+#[tokio::test]
+async fn content_rights_accept_explicit_distribution_use() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let author = register_and_login(app.clone()).await;
+
+    create_rights(
+        &app,
+        &author,
+        "QTI-DISTRIBUTION-API",
+        &["display", "distribution"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn qti_export_requires_current_distribution_rights_for_every_question() {
+    let _guard = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let ids = seed::seed(&state.pool).await.expect("seed");
+    let author = register_and_login(app.clone()).await;
+    let reviewer = register_and_login(app.clone()).await;
+    let chapter_id = create_rights_chapter(&state.pool, ids.exam_id).await;
+    let rights_ref = "QTI-DISTRIBUTION-RIGHTS";
+    let rights_id = create_rights(
+        &app,
+        &author,
+        rights_ref,
+        &["display", "derivatives"],
+        &[SOURCE_REF, SOURCE_REFS[1], MEDIA_REFS[0]],
+        &["learners"],
+        None,
+        None,
+    )
+    .await;
+    let version_id = create_question(&app, &author, chapter_id, Some(rights_ref)).await;
+    approve_question(&app, &author, &reviewer, version_id).await;
+    assert_eq!(
+        publish_result(&app, &reviewer, version_id).await["status"],
+        "published"
+    );
+
+    assert_qti_denied(
+        &app,
+        &reviewer,
+        ids.exam_id,
+        "display permission cannot export an answer key",
+    )
+    .await;
+
+    sqlx::query("UPDATE content_rights SET permitted_uses = $2 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!([
+            "display",
+            "derivatives",
+            "distribution"
+        ]))
+        .execute(&state.pool)
+        .await
+        .expect("grant explicit distribution use");
+    let (status, package) = export_qti(&app, &reviewer, ids.exam_id).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "active distribution grant: {package}"
+    );
+    assert!(package.contains(&version_id.to_string()), "{package}");
+    assert!(package.contains("<correctResponse>"), "{package}");
+
+    sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
+        .bind(rights_id)
+        .execute(&state.pool)
+        .await
+        .expect("expire distribution grant");
+    assert_qti_denied(&app, &reviewer, ids.exam_id, "expired distribution grant").await;
+
+    sqlx::query("UPDATE content_rights SET valid_to = NULL, audiences = $2 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!(["instructors"]))
+        .execute(&state.pool)
+        .await
+        .expect("restrict distribution audience");
+    assert_qti_denied(&app, &reviewer, ids.exam_id, "wrong distribution audience").await;
+
+    sqlx::query("UPDATE content_rights SET audiences = $2, seat_limit = 25 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!(["learners"]))
+        .execute(&state.pool)
+        .await
+        .expect("set unsupported distribution seat limit");
+    assert_qti_denied(
+        &app,
+        &reviewer,
+        ids.exam_id,
+        "seat-limited distribution grant",
+    )
+    .await;
+
+    sqlx::query("UPDATE content_rights SET seat_limit = NULL, asset_refs = $2 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!([SOURCE_REF, SOURCE_REFS[1]]))
+        .execute(&state.pool)
+        .await
+        .expect("remove distribution media scope");
+    assert_qti_denied(
+        &app,
+        &reviewer,
+        ids.exam_id,
+        "missing distribution media scope",
+    )
+    .await;
+
+    sqlx::query("UPDATE content_rights SET asset_refs = $2 WHERE id = $1")
+        .bind(rights_id)
+        .bind(serde_json::json!([SOURCE_REF, MEDIA_REFS[0]]))
+        .execute(&state.pool)
+        .await
+        .expect("remove distribution source scope");
+    assert_qti_denied(
+        &app,
+        &reviewer,
+        ids.exam_id,
+        "missing distribution source scope",
+    )
+    .await;
+
+    let (status, revoked) = call(
+        app.clone(),
+        admin_req(
+            "PATCH",
+            &format!("/v1/admin/content-rights/{rights_id}/revoke"),
+            Some(&author),
+            Some(serde_json::json!({"reason": "QTI fixture license ended"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoke distribution grant: {revoked}"
+    );
+    assert_qti_denied(&app, &reviewer, ids.exam_id, "revoked distribution grant").await;
 }
