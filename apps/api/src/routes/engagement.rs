@@ -1145,7 +1145,10 @@ pub async fn create_competition(
     let valid_question_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM question_versions qv
          JOIN curriculum_nodes node ON node.id = qv.chapter_id
-         WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'",
+         WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'
+           AND question_display_rights_active(
+               qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+           )",
     )
     .bind(&req.question_ids)
     .bind(req.exam_id)
@@ -1312,6 +1315,9 @@ async fn materialize_competition_series(state: &AppState) -> ApiResult<()> {
              FROM question_versions qv
              JOIN curriculum_nodes node ON node.id = qv.chapter_id
              WHERE qv.id = ANY($1) AND node.exam_id = $2 AND qv.status = 'published'
+               AND question_display_rights_active(
+                   qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+               )
              ORDER BY array_position($1::uuid[], qv.id)",
         )
         .bind(&question_pool)

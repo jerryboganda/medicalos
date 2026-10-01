@@ -2,9 +2,11 @@
 
 Status: in-progress
 
-Progress: Added the first public-route regression for answer replay, resume,
-stale-answer rejection, restored continuation, and content-free submitted
-scores. Awaiting the CI red run before implementing the guards.
+Progress: CI run 36893686564 confirmed that POST /v1/competitions accepts a
+revoked question set (HTTP 200; expected 422). Current display-rights checks
+now guard creation and recurring-pool selection. Public attempt, answer and
+replay regressions remain in progress; recurring coverage now makes the next
+occurrence due within its seven-day horizon.
 
 ## Problem Statement
 
