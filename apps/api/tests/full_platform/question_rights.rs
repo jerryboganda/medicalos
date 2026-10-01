@@ -2897,7 +2897,21 @@ async fn competition_attempts_recheck_rights_on_resume_answer_and_idempotent_rep
         );
     }
 
-    let mut step = resumed;
+    let (resume_status, mut step) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/competitions/{competition_id}/entry"),
+            Some(&learner),
+            Some(serde_json::json!({ "handle": "rights-competition-learner" })),
+        ),
+    )
+    .await;
+    assert_eq!(resume_status, StatusCode::OK, "restored resume: {step}");
+    assert_eq!(
+        step["question"], cached_question,
+        "restored question changed"
+    );
     for _ in 0..3 {
         if step["submitted"] == true {
             break;
@@ -2998,7 +3012,7 @@ async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
         question_ids.push(question_id);
     }
 
-    let starts_at = (chrono::Utc::now() + chrono::Duration::minutes(1));
+    let starts_at = chrono::Utc::now() + chrono::Duration::minutes(1);
     let ends_at = starts_at + chrono::Duration::hours(4);
     let (status, competition) = call(
         app.clone(),
