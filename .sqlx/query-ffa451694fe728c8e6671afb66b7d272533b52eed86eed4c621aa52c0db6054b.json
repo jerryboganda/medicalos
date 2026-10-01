@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, vignette, lead_in, difficulty, options\n                   FROM question_versions\n                   WHERE status = 'published' AND chapter_id = $1\n                     AND question_display_rights_active(\n                         rights_ref, source_ref, source_refs, media_refs\n                     )\n                   ORDER BY random() LIMIT 10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ffa451694fe728c8e6671afb66b7d272533b52eed86eed4c621aa52c0db6054b"
+}

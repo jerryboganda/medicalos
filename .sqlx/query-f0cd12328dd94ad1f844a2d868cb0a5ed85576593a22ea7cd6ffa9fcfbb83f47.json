@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT qv.id AS version_id, qv.vignette, c.name AS chapter_name\n           FROM attempts a\n           JOIN question_versions qv ON qv.id = a.question_version_id\n           JOIN curriculum_nodes c ON c.id = qv.chapter_id\n           WHERE a.user_id = $1 AND a.correct IS NOT NULL\n             AND question_display_rights_active(\n                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n             )\n           ORDER BY c.name, qv.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "chapter_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f0cd12328dd94ad1f844a2d868cb0a5ed85576593a22ea7cd6ffa9fcfbb83f47"
+}

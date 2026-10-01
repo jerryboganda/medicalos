@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT qv.id FROM question_versions qv\n                   WHERE qv.status = 'published'\n                     AND question_display_rights_active(\n                         qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                     )\n                     AND (qv.id IN (\n                       SELECT question_version_id FROM attempts\n                       WHERE session_id = $1 AND correct = FALSE\n                   )\n                   OR qv.id IN (\n                       SELECT si.question_version_id FROM session_items si\n                       WHERE si.session_id = $1 AND NOT EXISTS (\n                           SELECT 1 FROM attempts a\n                           WHERE a.session_id = si.session_id AND a.item_index = si.item_index\n                       )\n                   ))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ca875b05e4c2dca628fdd9fba409cfbed7f77388478b420ff8c93e92b07b1b16"
+}
