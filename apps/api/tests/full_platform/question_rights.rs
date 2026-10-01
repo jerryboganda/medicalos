@@ -1688,8 +1688,14 @@ async fn qti_export_requires_current_distribution_rights_for_every_question() {
         StatusCode::OK,
         "active distribution grant through v1 alias: {alias_package}"
     );
-    assert!(alias_package.contains(&version_id.to_string()), "{alias_package}");
-    assert!(alias_package.contains("<correctResponse>"), "{alias_package}");
+    assert!(
+        alias_package.contains(&version_id.to_string()),
+        "{alias_package}"
+    );
+    assert!(
+        alias_package.contains("<correctResponse>"),
+        "{alias_package}"
+    );
 
     sqlx::query("UPDATE content_rights SET valid_to = CURRENT_DATE - 1 WHERE id = $1")
         .bind(rights_id)
