@@ -13629,7 +13629,7 @@ async fn reserved_family_form_session_and_ai_gate() {
         app.clone(),
         &author,
         "RESERVED-FIXTURE",
-        &["display"],
+        &["display", "offline"],
         &["Fixture"],
         None,
     )
