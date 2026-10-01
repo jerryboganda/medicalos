@@ -3439,11 +3439,12 @@ async fn qb16_fixed_resolution_requires_and_links_a_published_correction() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, rights_ref, source_refs, media_refs
            )
            SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
                   vignette || ' (corrected)', lead_in, options, correct_index,
-                  key_learning_point, exam_tip, high_yield, source_ref
+                  key_learning_point, exam_tip, high_yield, source_ref,
+                  rights_ref, source_refs, media_refs
            FROM question_versions WHERE id = $2"#,
     )
     .bind(corrected_version_id)
@@ -6407,10 +6408,10 @@ async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts()
         r#"INSERT INTO question_versions
              (id, question_id, version, status, chapter_id, difficulty, vignette,
               lead_in, options, correct_index, key_learning_point, exam_tip,
-              high_yield, source_ref)
+              high_yield, source_ref, rights_ref, source_refs, media_refs)
            SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
                   vignette || ' reviewed', lead_in, options, $3, key_learning_point,
-                  exam_tip, high_yield, source_ref
+                  exam_tip, high_yield, source_ref, rights_ref, source_refs, media_refs
            FROM question_versions WHERE id = $2"#,
     )
     .bind(replacement_version_id)
@@ -23364,6 +23365,7 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     async fn insert_question(
         pool: &sqlx::PgPool,
         chapter_id: Uuid,
+        rights_ref: &str,
         vignette: &str,
         hint: Option<&str>,
     ) -> Uuid {
@@ -23378,10 +23380,10 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
             r#"INSERT INTO question_versions
                  (id, question_id, version, status, chapter_id, difficulty,
                   vignette, lead_in, options, correct_index, key_learning_point,
-                  source_ref, hint)
+                  source_ref, rights_ref, hint)
                VALUES ($1, $2, 1, 'published', $3, 'medium', $4,
                        'Which option is correct?', $5, 0, 'Synthetic key point',
-                       'Synthetic SR-08 fixture', $6)"#,
+                       'Synthetic SR-08 fixture', $6, $7)"#,
         )
         .bind(version_id)
         .bind(question_id)
@@ -23391,6 +23393,7 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
             { "text": "Correct", "rationale": "Correct fixture answer." },
             { "text": "Incorrect", "rationale": "Incorrect fixture answer." }
         ]))
+        .bind(rights_ref)
         .bind(hint)
         .execute(pool)
         .await
@@ -23447,16 +23450,44 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     .execute(&state.pool)
     .await
     .expect("prepare seeded questions");
+    let fixture_rights_ref = "SYNTHETIC-SR08-RETEST-FIXTURE";
+    sqlx::query(
+        "INSERT INTO content_rights
+             (id, ref_code, licensor, permitted_uses, valid_from, asset_refs, audiences)
+         VALUES ($1, $2, 'Synthetic SR-08 test fixture', $3, DATE '2020-01-01', $4, $5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture_rights_ref)
+    .bind(serde_json::json!(["display"]))
+    .bind(serde_json::json!(["Synthetic SR-08 fixture"]))
+    .bind(serde_json::json!(["learners"]))
+    .execute(&state.pool)
+    .await
+    .expect("create scoped rights for direct test questions");
     let q_hint = insert_question(
         &state.pool,
         ids.chapter1,
+        fixture_rights_ref,
         "Hint fixture",
         Some("A saved hint"),
     )
     .await;
-    let q_correct_sure = insert_question(&state.pool, ids.chapter1, "Correct fixture", None).await;
-    let q_unpublished =
-        insert_question(&state.pool, ids.chapter1, "Unpublished fixture", None).await;
+    let q_correct_sure = insert_question(
+        &state.pool,
+        ids.chapter1,
+        fixture_rights_ref,
+        "Correct fixture",
+        None,
+    )
+    .await;
+    let q_unpublished = insert_question(
+        &state.pool,
+        ids.chapter1,
+        fixture_rights_ref,
+        "Unpublished fixture",
+        None,
+    )
+    .await;
     let versions = [
         q_no_attempt,
         q_skip,
