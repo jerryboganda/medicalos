@@ -3012,7 +3012,7 @@ async fn recurring_competitions_do_not_materialize_ineligible_question_pools() {
         question_ids.push(question_id);
     }
 
-    let starts_at = chrono::Utc::now() + chrono::Duration::minutes(1);
+    let starts_at = chrono::Utc::now() - chrono::Duration::minutes(1);
     let ends_at = starts_at + chrono::Duration::hours(4);
     let (status, competition) = call(
         app.clone(),
