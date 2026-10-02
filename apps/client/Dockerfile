@@ -6,5 +6,5 @@ COPY build /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/conf.d/security-headers.conf
 COPY lti-embed-headers.conf /etc/nginx/conf.d/lti-embed-headers.conf
-RUN nginx -t
 EXPOSE 80
+CMD ["sh", "-c", "nginx -t && exec nginx -g 'daemon off;'"]
