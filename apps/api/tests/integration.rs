@@ -1277,7 +1277,11 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
 
     for (token, title, body) in [
         (&learner, "My export note", "learner-owned note"),
-        (&other_learner, "Other export note", "another learner's private note"),
+        (
+            &other_learner,
+            "Other export note",
+            "another learner's private note",
+        ),
     ] {
         let (status, note) = call(
             app.clone(),
@@ -1292,15 +1296,15 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
         assert_eq!(status, StatusCode::OK, "{note}");
     }
 
-    let (status, export) = call(
-        app,
-        request("GET", "/v1/me/export", Some(&learner), None),
-    )
-    .await;
+    let (status, export) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
     assert_eq!(status, StatusCode::OK, "{export}");
     assert_eq!(export["archive"]["format"], "medical-os-account-export");
     assert_eq!(export["archive"]["version"], 1);
-    for category in ["profile_and_settings", "learning_evidence", "study_materials"] {
+    for category in [
+        "profile_and_settings",
+        "learning_evidence",
+        "study_materials",
+    ] {
         assert!(export["archive"]["included_categories"]
             .as_array()
             .unwrap()
@@ -1311,7 +1315,9 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["title"], "My export note");
     assert!(notes[0]["id"].as_str().is_some());
-    assert!(!export.to_string().contains("another learner's private note"));
+    assert!(!export
+        .to_string()
+        .contains("another learner's private note"));
     for forbidden in ["password_hash", "token_hash", "device_key", "pack_key"] {
         assert!(!export.to_string().contains(forbidden));
     }
