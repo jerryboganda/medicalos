@@ -1,6 +1,6 @@
 # Browser handoff and deep-link picker
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Outcome
 
@@ -18,3 +18,4 @@ Complete the owner-approved LTI browser handoff and published-article deep-link 
 ## Comments
 
 - Owner approval recorded in `.scratch/owner-inputs-requested.md` on 2026-09-30: LTI launch handoff and deep-link picker UI, design-system only.
+- Implemented and CI accepted on 2026-10-02: [run 37038719199](https://github.com/jerryboganda/medicalos/actions/runs/37038719199), source commit `8f586d1`. Rust, client image/header policy, site, Zitadel, and all 77 Playwright tests passed. INST-06 remains in-progress for real-campus launch and 1EdTech certification; no deployment acceptance is claimed.

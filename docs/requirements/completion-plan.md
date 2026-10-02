@@ -1,5 +1,11 @@
 # Medical OS — Completion Plan
 
+Current audit: [verification report, 2026-10-02](verification-report-2026-10-02.md)
+supersedes the completion counts and engineering backlog in this historical
+snapshot. LTI browser handoff/picker implementation passed full CI in run
+37038719199; real-campus certification remains external. No deployment was
+performed in that slice.
+
 Snapshot date: **2026-09-27** · Scope: the 152-ID requirement ledger in
 [`traceability.md`](traceability.md) (source: `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` §29).
 This document is the working roadmap for the remaining 25%: what is open, in what

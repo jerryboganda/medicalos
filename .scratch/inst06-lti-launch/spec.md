@@ -1,11 +1,11 @@
 # INST-06 — LTI 1.3 launch and browser handoff
 
-Status: in-progress (tool-side API shipped; browser implementation complete; full CI acceptance pending)
+Status: implementation complete; CI accepted in run 37038719199; real-campus launch and certification remain external
 Requirement IDs: INST-06, INST-01 (institution membership), §18.1.
 
 ## Problem statement
 
-Medical OS can verify an LTI 1.3 launch and issue its normal application session, but the browser receives JSON. An LMS user cannot continue into the app, and instructors have no browser picker for returning Medical OS content to the LMS.
+Before this slice, Medical OS verified an LTI 1.3 launch and issued its normal application session, but the browser received JSON. LMS users lacked a browser continuation, and instructors lacked a content picker for returning Medical OS content to the LMS. The implementation below closes those browser gaps; real campus acceptance remains external.
 
 ## Solution
 
@@ -47,3 +47,5 @@ Complete the two owner-authorized surfaces using the existing design system: a b
 ## Further notes
 
 The current tool-side flow remains the source of truth for identity linking, nonce/state validation, session issuance, and the single-use deep-link return settings. The browser work must not weaken those checks.
+
+Acceptance evidence: [GitHub Actions run 37038719199](https://github.com/jerryboganda/medicalos/actions/runs/37038719199), source commit `8f586d1`: all five jobs passed, including 156 Rust workspace tests, the 364-test type-export run, 77 Playwright tests, and containerized LTI frame-policy checks. Browser LTI fixtures and the mocked-campus API test do not replace real-campus certification.
