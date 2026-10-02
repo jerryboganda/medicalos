@@ -119,7 +119,7 @@ mod tests {
             .collect::<Vec<_>>();
         files.sort_unstable();
 
-        let mut registered = MIGRATION_NAMES
+        let registered = MIGRATION_NAMES
             .iter()
             .map(|name| (*name).to_owned())
             .collect::<Vec<_>>();
