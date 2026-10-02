@@ -129,12 +129,15 @@ jobs:
             sleep 1
           done
           lti_headers=$(curl -sS -D - -o /dev/null http://127.0.0.1:8090/lti/handoff)
+          printf '%s\n' "$lti_headers"
           grep -iq '^Content-Security-Policy: frame-ancestors https:;' <<<"$lti_headers"
           ! grep -iq '^X-Frame-Options:' <<<"$lti_headers"
           api_headers=$(curl -sS -D - -o /dev/null -X POST http://127.0.0.1:8090/api/v1/lti/launch || true)
+          printf '%s\n' "$api_headers"
           grep -iq '^Content-Security-Policy: frame-ancestors https:;' <<<"$api_headers"
           ! grep -iq '^X-Frame-Options:' <<<"$api_headers"
           app_headers=$(curl -sS -D - -o /dev/null http://127.0.0.1:8090/today)
+          printf '%s\n' "$app_headers"
           grep -iq '^X-Frame-Options: DENY' <<<"$app_headers"
       - name: TRUST-01 audit
         run: node scripts/trust01-audit.mjs
