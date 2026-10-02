@@ -131,4 +131,9 @@ CI restore testing uses the disposable database and synthetic data only.
 ## Current rights and offline receipt regression
 
 - PR run 36921326889 at source `142f74c295336addf3f96e1ce6df804cb2423978` passed format, migration, Clippy, dependency, critical-regression, site and Zitadel checks. The Rust integration suite passed 164/165; `reserved_family_form_session_and_ai_gate` failed because its synthetic rights grant allowed display but omitted the newly enforced `offline` use while the test explicitly downloaded a pack. No browser job ran, so the signed-receipt regression remains unverified.
-- The fixture now explicitly grants `offline` for this pack scenario. This keeps the server's fail-closed rights rule and the separate reserved-assessment AI restriction intact. The next exact-source run must pass all API tests and reach the browser regression before the client verifier is accepted.
+- The fixture now explicitly grants `offline` for this pack scenario. This keeps the server's fail-closed rights rule and the separate reserved-assessment AI restriction intact. The retest passed the full Rust suite and reached the browser regression recorded below.
+
+## Signed offline-receipt regression
+
+- PR run 36923455791 at source `a9bcdecb938c6f0fe793dfcaa48ef12c051a0dd9` passed Rust, client, site and Zitadel. The offline compile failed because the committed SQLx cache lacked current query records. Its Rust artifact contains 438 query records; eight were absent locally, and each artifact record had an exact filename and SHA-256 match after syncing. Existing cache-only records were retained.
+- The browser run passed 83 tests and reproduced the invalid-receipt regression: a 64-byte zero signature was accepted, the UI reported success, and all 26 questions were saved. The regression requires signature verification to fail before batch persistence. The client now verifies the receipt's Ed25519 signature against the already-verified manifest key and rejects malformed signature encodings. Exact-source GitHub Actions is still required for both changes.

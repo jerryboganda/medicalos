@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.question_version_id, p.prompt_type, p.content, q.source_ref\n           FROM pregen_tutoring p\n           JOIN question_versions q ON q.id = p.question_version_id\n           WHERE p.question_version_id = ANY($1) AND q.status = 'published'\n             AND question_display_rights_active(\n                 q.rights_ref, q.source_ref, q.source_refs, q.media_refs\n             )\n             AND question_rights_active(\n                 'derivatives', q.rights_ref, q.source_ref, q.source_refs, q.media_refs\n             )\n             AND NOT EXISTS (\n                 SELECT 1 FROM reserved_questions rq\n                 JOIN assessment_forms f ON f.id = rq.form_id\n                 WHERE rq.question_version_id = q.id AND f.ai_allowed = FALSE\n             )\n           ORDER BY p.question_version_id, p.prompt_type",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "prompt_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "source_ref",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0a7feb508632eba07964124a0d1109e376b0de4b30804506ec3f41e5786da7f3"
+}

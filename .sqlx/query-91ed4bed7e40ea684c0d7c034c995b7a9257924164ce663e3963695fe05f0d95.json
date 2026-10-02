@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS \"checksum!\"\n               FROM question_versions\n               WHERE chapter_id = $1 AND status = 'published'\n                 AND question_display_rights_active(\n                     rights_ref, source_ref, source_refs, media_refs\n                 )\n                 AND question_rights_active(\n                     'offline', rights_ref, source_ref, source_refs, media_refs\n                 )\n               ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "checksum!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "91ed4bed7e40ea684c0d7c034c995b7a9257924164ce663e3963695fe05f0d95"
+}

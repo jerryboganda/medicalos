@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, vignette, lead_in, difficulty, options,\n                  correct_index, key_learning_point, exam_tip, source_ref\n           FROM question_versions\n           WHERE chapter_id = ANY($1) AND status = 'published'\n             AND question_display_rights_active(\n                 rights_ref, source_ref, source_refs, media_refs\n             )\n             AND question_rights_active(\n                 'offline', rights_ref, source_ref, source_refs, media_refs\n             )\n           ORDER BY chapter_id, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "exam_tip",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_ref",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "e6dfc01236a96e73bc294ff640a2395512b75a3780f5c532d705f6e37b276567"
+}

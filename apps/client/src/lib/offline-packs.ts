@@ -160,6 +160,30 @@ function manifestCanonical(manifest: PackManifest): string {
 	].join('\n');
 }
 
+async function verifyEd25519Signature(
+	publicKey: Uint8Array,
+	signature: Uint8Array,
+	message: string
+): Promise<boolean> {
+	try {
+		const key = await crypto.subtle.importKey(
+			'raw',
+			arrayBuffer(publicKey),
+			{ name: 'Ed25519' } as AlgorithmIdentifier,
+			false,
+			['verify']
+		);
+		return await crypto.subtle.verify(
+			{ name: 'Ed25519' } as AlgorithmIdentifier,
+			key,
+			arrayBuffer(signature),
+			arrayBuffer(new TextEncoder().encode(message))
+		);
+	} catch {
+		throw new Error('This browser cannot verify Ed25519 offline pack signatures. Update the browser and try again.');
+	}
+}
+
 async function verifyManifest(manifest: PackManifest, expectedExam?: string, expectedDevice?: string) {
 	if (
 		manifest.manifest_version !== 4 ||
@@ -187,25 +211,45 @@ async function verifyManifest(manifest: PackManifest, expectedExam?: string, exp
 	}
 	const keyId = bytesHex(await crypto.subtle.digest('SHA-256', arrayBuffer(publicKey))).slice(0, 16);
 	if (keyId !== manifest.key_id) throw new Error('The pack signing key ID does not match.');
-	try {
-		const key = await crypto.subtle.importKey(
-			'raw',
-			arrayBuffer(publicKey),
-			{ name: 'Ed25519' } as AlgorithmIdentifier,
-			false,
-			['verify']
-		);
-		const valid = await crypto.subtle.verify(
-			{ name: 'Ed25519' } as AlgorithmIdentifier,
-			key,
-			arrayBuffer(signature),
-			arrayBuffer(new TextEncoder().encode(manifestCanonical(manifest)))
-		);
-		if (!valid) throw new Error('The pack manifest signature is invalid.');
-	} catch (error) {
-		if (error instanceof Error && error.message.includes('signature')) throw error;
-		throw new Error('This browser cannot verify Ed25519 offline pack signatures. Update the browser and try again.');
+	if (!(await verifyEd25519Signature(publicKey, signature, manifestCanonical(manifest)))) {
+		throw new Error('The pack manifest signature is invalid.');
 	}
+}
+
+async function verifyDownloadReceipt(
+	receipt: PackDownloadReceipt | undefined,
+	manifest: PackManifest,
+	examId: string,
+	deviceId: string,
+	checksums: string[]
+) {
+	if (
+		!receipt ||
+		receipt.device_id !== deviceId ||
+		receipt.exam_id !== examId ||
+		!Array.isArray(receipt.checksums) ||
+		JSON.stringify(receipt.checksums) !== JSON.stringify(checksums)
+	) {
+		throw new Error('The signed download receipt did not cover this verified batch. Resume to retry it.');
+	}
+	if (
+		typeof receipt.signature !== 'string' ||
+		!/^[0-9a-f]{128}$/i.test(receipt.signature)
+	) {
+		throw new Error('The signed download receipt signature has an invalid format. Resume to retry it.');
+	}
+	const payload = {
+		checksums: receipt.checksums,
+		device_id: receipt.device_id,
+		exam_id: receipt.exam_id,
+		issued_at: receipt.issued_at
+	};
+	const valid = await verifyEd25519Signature(
+		hexBytes(manifest.verification_key),
+		hexBytes(receipt.signature),
+		canonicalValue(payload)
+	);
+	if (!valid) throw new Error('The signed download receipt signature is invalid. Resume to retry it.');
 }
 
 async function resourceChecksum(resource: PackQuestionResource): Promise<string> {
@@ -458,18 +502,9 @@ export async function downloadPack(
 			batchResources.push(resource);
 		}
 		if (found.size !== batch.length) throw new Error('The server returned an unexpected pack batch. Resume to retry it.');
-		// OFF-01: the receipt must cover exactly the checksums this device just
-		// verified, or the batch is not attributable to a rights-checked delivery.
 		const receipt = response.receipt;
 		const batchChecksums = batchResources.map((resource) => resource.checksum);
-		if (
-			!receipt ||
-			receipt.device_id !== id ||
-			receipt.exam_id !== examId ||
-			JSON.stringify(receipt.checksums) !== JSON.stringify(batchChecksums)
-		) {
-			throw new Error('The signed download receipt did not cover this verified batch. Resume to retry it.');
-		}
+		await verifyDownloadReceipt(receipt, manifest, examId, id, batchChecksums);
 		pack.receipts = [...(pack.receipts ?? []), receipt].slice(-50);
 		await assertStorageCapacity(batchResources);
 		const encryptedBatch: EncryptedResource[] = [];
