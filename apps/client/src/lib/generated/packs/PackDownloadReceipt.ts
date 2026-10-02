@@ -8,4 +8,4 @@ export type PackDownloadReceipt = { device_id: string, exam_id: string,
 /**
  * RFC3339 — this exact string is part of the signed payload.
  */
-issued_at: string, checksums: Array<string>, signature: string, };
+issued_at: string, checksums: Array<string>, request_nonce: string, signature: string, };

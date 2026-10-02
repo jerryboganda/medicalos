@@ -7736,10 +7736,12 @@ async fn pregen_tutoring_generated_and_cached() {
         .collect();
     assert_eq!(receipt_checksums, resource_checksums);
     let issued_at = receipt["issued_at"].as_str().unwrap().to_owned();
+    let request_nonce = receipt["request_nonce"].as_str().unwrap().to_owned();
     let message = api::routes::packs::pack_download_receipt_message(
         "device-a",
         ids.exam_id,
         &issued_at,
+        &request_nonce,
         &receipt_checksums,
     );
     let key_bytes: [u8; 32] = hex_bytes(before_tutor_answer["verification_key"].as_str().unwrap())
@@ -7757,6 +7759,15 @@ async fn pregen_tutoring_generated_and_cached() {
             .is_ok(),
         "receipt signature must verify against the manifest key"
     );
+    let (recorded_nonce, recorded_issued_at): (String, String) = sqlx::query_as(
+        "SELECT request_nonce, issued_at FROM pack_download_receipts WHERE signature = $1",
+    )
+    .bind(receipt["signature"].as_str().unwrap())
+    .fetch_one(&state.pool)
+    .await
+    .expect("complete signed receipt payload is retained for audit");
+    assert_eq!(recorded_nonce, request_nonce);
+    assert_eq!(recorded_issued_at, issued_at);
     let receipt_rows: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM pack_download_receipts WHERE device_id = 'device-a'",
     )
@@ -7764,6 +7775,27 @@ async fn pregen_tutoring_generated_and_cached() {
     .await
     .expect("receipt rows");
     assert!(receipt_rows >= 1, "receipts are recorded server-side");
+
+    let (invalid_nonce_status, invalid_nonce) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({
+                "device_id": "device-a",
+                "chapters": [ids.chapter3],
+                "question_version_ids": [manifest_question_ids[0]],
+                "request_nonce": "not-a-valid-challenge"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        invalid_nonce_status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "malformed request nonce: {invalid_nonce}"
+    );
 
     // A tutor answer receives its cards with the immediate feedback; the
     // session detail also restores them after a reload.

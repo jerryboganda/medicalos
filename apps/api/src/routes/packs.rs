@@ -93,6 +93,8 @@ pub struct PackResourcesReq {
     pub device_id: String,
     pub chapters: Vec<Uuid>,
     pub question_version_ids: Vec<Uuid>,
+    /// Fresh 32-byte client challenge encoded as 64 hexadecimal characters.
+    pub request_nonce: String,
 }
 
 #[derive(Serialize)]
@@ -128,6 +130,8 @@ pub struct PackDownloadReceipt {
     /// RFC3339 — this exact string is part of the signed payload.
     pub issued_at: String,
     pub checksums: Vec<String>,
+    /// Echoes the fresh client challenge covered by the server signature.
+    pub request_nonce: String,
     pub signature: String,
 }
 
@@ -138,6 +142,7 @@ pub fn pack_download_receipt_message(
     device_id: &str,
     exam_id: Uuid,
     issued_at: &str,
+    request_nonce: &str,
     checksums: &[String],
 ) -> String {
     let payload = json!({
@@ -145,6 +150,7 @@ pub fn pack_download_receipt_message(
         "device_id": device_id,
         "exam_id": exam_id,
         "issued_at": issued_at,
+        "request_nonce": request_nonce,
     });
     let mut canonical = String::new();
     canonical_value(&payload, &mut canonical);
@@ -797,6 +803,17 @@ pub async fn pack_resources(
     Json(req): Json<PackResourcesReq>,
 ) -> ApiResult<Json<PackResourcesResponse>> {
     validate_device_id(&req.device_id)?;
+    if req.request_nonce.len() != 64
+        || !req
+            .request_nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_pack_request_nonce",
+            "request_nonce must contain 32 bytes encoded as 64 hexadecimal characters",
+        ));
+    }
     if req.chapters.is_empty() || req.chapters.len() > 50 {
         return Err(ApiError::unprocessable(
             "invalid_chapters",
@@ -929,15 +946,21 @@ pub async fn pack_resources(
     let checksums: Vec<String> = resources.iter().map(|r| r.checksum.clone()).collect();
     let issued_at = chrono::Utc::now();
     let issued_at_rfc3339 = issued_at.to_rfc3339();
-    let message =
-        pack_download_receipt_message(&req.device_id, exam_id, &issued_at_rfc3339, &checksums);
+    let message = pack_download_receipt_message(
+        &req.device_id,
+        exam_id,
+        &issued_at_rfc3339,
+        &req.request_nonce,
+        &checksums,
+    );
     let signature = hex(&ed25519_signing_key(&state)?
         .sign(message.as_bytes())
         .to_bytes());
     sqlx::query(
         "INSERT INTO pack_download_receipts
-           (id, user_id, exam_id, device_id, checksums, signature, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+           (id, user_id, exam_id, device_id, checksums, signature, created_at,
+            request_nonce, issued_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(Uuid::new_v4())
     .bind(user.user_id)
@@ -946,6 +969,8 @@ pub async fn pack_resources(
     .bind(json!(checksums))
     .bind(&signature)
     .bind(issued_at)
+    .bind(&req.request_nonce)
+    .bind(&issued_at_rfc3339)
     .execute(&state.pool)
     .await?;
     let receipt = PackDownloadReceipt {
@@ -953,6 +978,7 @@ pub async fn pack_resources(
         exam_id,
         issued_at: issued_at_rfc3339,
         checksums,
+        request_nonce: req.request_nonce,
         signature,
     };
     Ok(Json(PackResourcesResponse { resources, receipt }))

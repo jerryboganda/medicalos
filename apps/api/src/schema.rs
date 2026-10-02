@@ -83,6 +83,7 @@ migrations!(
     "0064_retest_receipts",
     "0065_question_display_rights",
     "0066_question_distribution_rights",
+    "0067_pack_receipt_challenge",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {

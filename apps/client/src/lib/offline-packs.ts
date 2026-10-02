@@ -1,4 +1,9 @@
-import { Api, type PackManifest, type PackQuestionResource } from '$lib/api';
+import {
+	Api,
+	type PackManifest,
+	type PackQuestionResource,
+	type PackResourcesResponse
+} from '$lib/api';
 import { browserDeviceId as deviceId } from './device-identity';
 
 export { deviceId };
@@ -22,15 +27,7 @@ interface PackRecord {
 	downloaded_count: number;
 	byte_count: number;
 	saved_at: string;
-	receipts?: PackDownloadReceipt[];
-}
-
-interface PackDownloadReceipt {
-	device_id: string;
-	exam_id: string;
-	issued_at: string;
-	checksums: string[];
-	signature: string;
+	receipts?: PackResourcesResponse['receipt'][];
 }
 
 interface EncryptedResource {
@@ -217,20 +214,22 @@ async function verifyManifest(manifest: PackManifest, expectedExam?: string, exp
 }
 
 async function verifyDownloadReceipt(
-	receipt: PackDownloadReceipt | undefined,
+	receipt: PackResourcesResponse['receipt'] | undefined,
 	manifest: PackManifest,
 	examId: string,
 	deviceId: string,
-	checksums: string[]
+	checksums: string[],
+	requestNonce: string
 ) {
 	if (
 		!receipt ||
 		receipt.device_id !== deviceId ||
 		receipt.exam_id !== examId ||
+		receipt.request_nonce !== requestNonce ||
 		!Array.isArray(receipt.checksums) ||
 		JSON.stringify(receipt.checksums) !== JSON.stringify(checksums)
 	) {
-		throw new Error('The signed download receipt did not cover this verified batch. Resume to retry it.');
+		throw new Error('The signed download receipt did not match this request challenge and verified batch. Resume to retry it.');
 	}
 	if (
 		typeof receipt.signature !== 'string' ||
@@ -242,7 +241,8 @@ async function verifyDownloadReceipt(
 		checksums: receipt.checksums,
 		device_id: receipt.device_id,
 		exam_id: receipt.exam_id,
-		issued_at: receipt.issued_at
+		issued_at: receipt.issued_at,
+		request_nonce: receipt.request_nonce
 	};
 	const valid = await verifyEd25519Signature(
 		hexBytes(manifest.verification_key),
@@ -481,10 +481,12 @@ export async function downloadPack(
 	onProgress({ done: complete.size, total: manifest.items.length });
 	for (let offset = 0; offset < missing.length; offset += RESOURCE_BATCH_SIZE) {
 		const batch = missing.slice(offset, offset + RESOURCE_BATCH_SIZE);
+		const requestNonce = bytesHex(arrayBuffer(crypto.getRandomValues(new Uint8Array(32))));
 		const response = await Api.packResources(examId, {
 			device_id: id,
 			chapters,
-			question_version_ids: batch.map((item) => item.question_version_id)
+			question_version_ids: batch.map((item) => item.question_version_id),
+			request_nonce: requestNonce
 		});
 		if (response.resources.length !== batch.length) throw new Error('The server returned an incomplete pack batch. Resume to retry it.');
 		const expected = new Map(batch.map((item) => [item.question_version_id, item.checksum]));
@@ -504,7 +506,7 @@ export async function downloadPack(
 		if (found.size !== batch.length) throw new Error('The server returned an unexpected pack batch. Resume to retry it.');
 		const receipt = response.receipt;
 		const batchChecksums = batchResources.map((resource) => resource.checksum);
-		await verifyDownloadReceipt(receipt, manifest, examId, id, batchChecksums);
+		await verifyDownloadReceipt(receipt, manifest, examId, id, batchChecksums, requestNonce);
 		pack.receipts = [...(pack.receipts ?? []), receipt].slice(-50);
 		await assertStorageCapacity(batchResources);
 		const encryptedBatch: EncryptedResource[] = [];
