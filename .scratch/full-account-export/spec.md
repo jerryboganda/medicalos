@@ -16,13 +16,13 @@ The existing Account download remains the student-facing entry point and keeps i
 2. As a student, I want the archive to list what it includes and excludes so that I can understand its coverage before relying on it.
 3. As a student, I want my profile, account preferences, accommodations, notification settings, and engagement settings so that I can retain the personal settings I entered.
 4. As a student, I want my practice sessions, session items, attempts, mock attempts, concept evidence, marks, reports, re-test cards, and re-test history so that I can retain my learning record.
-5. As a student, I want my own decks, cards, reviews, notes, links, and collections so that I can move my study materials.
+5. As a student, I want my own decks, rights-eligible cards and reviews, notes, note concepts, links, and collections so that I can move my study materials.
 6. As a student, I want my goals, protected commitments, plans, tasks, revisions, and intervention outcomes so that I can preserve my planning history.
 7. As a student, I want my Coach history and learner memory so that I can retain information I supplied and the assistance I received.
 8. As a student, I want my notifications, QOTD answers, daily engagement, XP, and achievements so that I can keep my engagement history.
 9. As a student, I want my article-read and source-change assignment metadata, plus private-import metadata, so that I can retain my library activity without receiving content I do not own.
-10. As a student, I want my simulation runs, team participation, appeals, feedback, portfolio, CE activities, and exam outcomes so that I can retain my professional learning evidence.
-11. As a student, I want my own community, duel, competition, and league contributions so that I can retain my participation without receiving other learners' private data.
+10. As a student, I want my simulation runs, team membership, my own handovers, invitation and acknowledgement metadata, appeals, feedback, portfolio, CE activities, and exam outcomes so that I can retain my professional learning evidence without copying peer-authored text.
+11. As a student, I want my own community, duel, challenge, competition, and league contributions so that I can retain my participation without receiving other learners' private data or shared invite tokens.
 12. As a student, I want safe device, identity-link, entitlement, referral, institutional-membership, and offline-download metadata so that I can understand the account links and access records associated with me.
 13. As a student, I want a failed or oversized export to report a clear failure rather than produce a truncated file that appears complete.
 14. As a student with a large account, I want an asynchronous export with an explicit ready, failed, or expired state so that the download does not depend on one long browser request.
@@ -38,6 +38,7 @@ The existing Account download remains the student-facing entry point and keeps i
 - Use direct `user_id` ownership where available. For indirect records, require an explicit learner membership or contribution. Never export a whole institution, cohort, group, duel, competition, or shared conversation to one member.
 - Export safe metadata for identity, devices, leases, receipts, private imports, and licensed material. Exclude credential material, one-use or shared tokens, signatures usable as proof, protected source text/media, and other people's private content.
 - Preserve the existing rights checks for question-linked learner text until the rights contract explicitly permits an export; include the exclusion in the archive metadata.
+- Apply the same live question-rights check to source-linked flashcards and their review history. Preserve only the authenticated learner's role/outcome for shared challenges, and only that learner's authored handovers; omit peer text and bearer invitation tokens.
 - Bound synchronous resource use and fail the whole request explicitly if the limit is exceeded. Asynchronous delivery requires a durable, private artifact-storage and expiry path; do not store unencrypted archives in an improvised location.
 - Preserve the Account page's existing type, spacing, card, button, responsive, and state patterns. Change only the copy/state contract needed to describe the versioned archive accurately.
 

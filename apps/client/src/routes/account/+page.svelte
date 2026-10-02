@@ -16,6 +16,7 @@
 	};
 
 	type AccountExport = Record<string, unknown> & {
+		archive: Record<string, unknown>;
 		account: Record<string, unknown>;
 		attempts: unknown[];
 		notes: unknown[];
@@ -65,6 +66,16 @@
 	function isAccountExport(value: unknown): value is AccountExport {
 		return (
 			isRecord(value) &&
+			isRecord(value.archive) &&
+			value.archive.format === 'medical-os-account-export' &&
+			value.archive.version === 1 &&
+			value.archive.maximum_inline_bytes === 8_388_608 &&
+			Array.isArray(value.archive.included_categories) &&
+			Array.isArray(value.archive.excluded_categories) &&
+			value.archive.included_categories.every((category) => typeof category === 'string') &&
+			value.archive.excluded_categories.every(
+				(category) => isRecord(category) && typeof category.id === 'string' && typeof category.reason === 'string'
+			) &&
 			isRecord(value.account) &&
 			Array.isArray(value.attempts) &&
 			Array.isArray(value.notes) &&
@@ -264,7 +275,7 @@
 			link.click();
 			link.remove();
 			window.setTimeout(() => URL.revokeObjectURL(url), 0);
-			exportNotice = 'Account export downloaded. This export is partial.';
+			exportNotice = 'Account archive v1 downloaded.';
 		} catch (error) {
 			if (!auth.token) {
 				endLocalSession('Signed out', 'Your sign-in has ended. Sign in again to manage this account.');
@@ -333,7 +344,7 @@
 <!-- Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 -->
 <header class="account-header">
 	<h1>Account</h1>
-	<p class="muted">Manage registered devices, download your supported data export, or disable account access.</p>
+	<p class="muted">Manage registered devices, download your account archive, or disable account access.</p>
 </header>
 
 {#if signedOutHeading}
@@ -430,8 +441,8 @@
 	<section class="card" aria-labelledby="export-heading">
 		<h2 id="export-heading">Export account data</h2>
 		<p class="muted">
-			The current JSON export includes account details, attempts, notes, reviews, and portfolio entries.
-			This is a partial export; some account data is not included.
+			Version 1 includes your account and study settings, learning evidence, notes and cards, plans, Coach and engagement history, library and private-import metadata, class memberships and assignments, professional learning, and your own community and offline records.
+			It excludes passwords, sign-in secrets, protected course content, private-import files, shared transcripts, moderation notes, and other learners’ private data. Exports above 8 MB or 50,000 records fail without creating a partial archive; secure large exports are not available yet.
 		</p>
 		{#if exportError}<p class="danger-text" role="alert">{exportError}</p>{/if}
 		{#if exportNotice}<p class="feedback" role="status">{exportNotice}</p>{/if}

@@ -2342,14 +2342,24 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
                         .any(|item| { item["body"] == "SOURCE-LINKED-PRIVATE-BODY" }),
                     "active linked note missing from export at {path}: {response}"
                 ),
-                "/v1/me/export" | "/api/v1/me/export" => assert!(
-                    response["notes"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|item| { item["body"] == "SOURCE-LINKED-PRIVATE-BODY" }),
-                    "active linked note missing from account export at {path}: {response}"
-                ),
+                "/v1/me/export" | "/api/v1/me/export" => {
+                    assert!(
+                        response["notes"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|item| { item["body"] == "SOURCE-LINKED-PRIVATE-BODY" }),
+                        "active linked note missing from account export at {path}: {response}"
+                    );
+                    assert!(
+                        response["cards"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|item| { item["front"] == "SOURCE-LINKED-CARD-FRONT" }),
+                        "active linked card missing from account export at {path}: {response}"
+                    );
+                }
                 "/v1/reviews/queue" | "/api/v1/reviews/queue" => {
                     assert!(
                         response.to_string().contains("SOURCE-LINKED-CARD-FRONT"),
@@ -2477,6 +2487,11 @@ async fn learner_records_withhold_source_linked_content_when_question_rights_cha
             assert!(
                 !account_export.to_string().contains("SOURCE-LINKED-PRIVATE"),
                 "{state_name} leaked account export at {}: {account_export}",
+                paths[7]
+            );
+            assert!(
+                !account_export.to_string().contains("SOURCE-LINKED-CARD"),
+                "{state_name} leaked rights-inactive flashcard at {}: {account_export}",
                 paths[7]
             );
             assert!(

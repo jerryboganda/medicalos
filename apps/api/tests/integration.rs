@@ -1271,10 +1271,38 @@ fn canonical_test_value(value: &Value) -> String {
 async fn account_export_is_versioned_and_contains_only_the_requesting_learners_records() {
     let _g = LOCK.lock().await;
     let state = setup().await;
-    let app = router(state);
+    let app = router(state.clone());
     let learner = register_and_login(app.clone()).await;
     let other_learner = register_and_login(app.clone()).await;
 
+    let learner_institution = Uuid::new_v4();
+    let other_institution = Uuid::new_v4();
+    for (institution_id, name, token) in [
+        (learner_institution, "Learner institution", &learner),
+        (other_institution, "Other institution", &other_learner),
+    ] {
+        sqlx::query("INSERT INTO institutions (id, name) VALUES ($1, $2)")
+            .bind(institution_id)
+            .bind(name)
+            .execute(&state.pool)
+            .await
+            .expect("institution fixture");
+        let (status, me) = call(
+            app.clone(),
+            request("GET", "/v1/me", Some(token.as_str()), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{me}");
+        let user_id: Uuid = me["user_id"].as_str().unwrap().parse().unwrap();
+        sqlx::query("INSERT INTO institution_members (institution_id, user_id, role) VALUES ($1, $2, 'learner')")
+            .bind(institution_id)
+            .bind(user_id)
+            .execute(&state.pool)
+            .await
+            .expect("membership fixture");
+    }
+
+    let mut learner_note_id = None;
     for (token, title, body) in [
         (&learner, "My export note", "learner-owned note"),
         (
@@ -1294,16 +1322,38 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{note}");
+        if title == "My export note" {
+            learner_note_id = note["note_id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok());
+        }
     }
+    let learner_note_id = learner_note_id.expect("created note id");
+    sqlx::query("INSERT INTO note_concepts (note_id, concept) VALUES ($1, 'learner-owned-concept')")
+        .bind(learner_note_id)
+        .execute(&state.pool)
+        .await
+        .expect("note concept fixture");
 
     let (status, export) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
     assert_eq!(status, StatusCode::OK, "{export}");
     assert_eq!(export["archive"]["format"], "medical-os-account-export");
     assert_eq!(export["archive"]["version"], 1);
+    assert_eq!(export["archive"]["maximum_inline_bytes"], 8_388_608);
+    assert_eq!(export["account"]["max_devices"], 5);
     for category in [
         "profile_and_settings",
         "learning_evidence",
         "study_materials",
+        "planning",
+        "coach_and_memory",
+        "notifications_and_engagement",
+        "library_activity_and_import_metadata",
+        "professional_learning",
+        "community_and_competition",
+        "institution_memberships",
+        "identity_and_device_metadata",
+        "entitlements_and_offline_metadata",
     ] {
         assert!(export["archive"]["included_categories"]
             .as_array()
@@ -1311,10 +1361,33 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
             .iter()
             .any(|item| item.as_str() == Some(category)));
     }
+    for category in [
+        "credentials_and_sessions",
+        "protected_learning_content",
+        "private_document_content",
+        "other_learners_private_records",
+        "rights_inactive_question_linked_text",
+        "provider_and_signed_proof_material",
+        "shared_simulation_transcripts",
+        "operator_only_records",
+    ] {
+        assert!(export["archive"]["excluded_categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == category));
+    }
     let notes = export["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["title"], "My export note");
-    assert!(notes[0]["id"].as_str().is_some());
+    assert_eq!(notes[0]["id"], learner_note_id.to_string());
+    assert_eq!(export["note_concepts"][0]["note_id"], learner_note_id.to_string());
+    assert_eq!(export["note_concepts"][0]["concept"], "learner-owned-concept");
+    let memberships = export["institution_memberships"].as_array().unwrap();
+    assert_eq!(memberships.len(), 1);
+    assert_eq!(memberships[0]["institution_id"], learner_institution.to_string());
+    assert_eq!(memberships[0]["institution_name"], "Learner institution");
+    assert!(!export.to_string().contains(&other_institution.to_string()));
     assert!(!export
         .to_string()
         .contains("another learner's private note"));
@@ -1322,6 +1395,42 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
         assert!(!export.to_string().contains(forbidden));
     }
     assert!(!export.to_string().contains("integration-test-device"));
+}
+
+#[tokio::test]
+async fn oversized_account_export_fails_without_returning_a_partial_archive() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+    let (status, me) = call(
+        app.clone(),
+        request("GET", "/v1/me", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let user_id: Uuid = me["user_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO notes (id, user_id, title, body) VALUES ($1, $2, 'large test note', repeat('x', 9 * 1024 * 1024))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("large note fixture");
+
+    let (status, response) = call(
+        app,
+        request("GET", "/v1/me/export", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{response}");
+    assert_eq!(response["error"]["code"], "account_export_too_large");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("No partial archive was created"));
+    assert!(response.get("archive").is_none());
 }
 
 #[tokio::test]

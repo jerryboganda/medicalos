@@ -632,7 +632,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/concepts/{concept}/notes",
             get(routes::retest::notes_by_concept),
         )
-        .route("/v1/me/export", get(routes::packs::export_account))
+        .route("/v1/me/export", get(routes::accounts::export_account))
         .route(
             "/v1/packs/{exam_id}/manifest",
             get(routes::packs::legacy_pack_manifest),
@@ -1341,7 +1341,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/concepts/{concept}/notes",
             get(routes::retest::notes_by_concept),
         )
-        .route("/api/v1/me/export", get(routes::packs::export_account))
+        .route("/api/v1/me/export", get(routes::accounts::export_account))
         .route(
             "/api/v1/packs/{exam_id}/manifest",
             get(routes::packs::legacy_pack_manifest),

@@ -19,6 +19,7 @@ type SetupOptions = {
 	failFirstSessionPolicy?: boolean;
 	deviceRegistrationExhausted?: boolean;
 	singleActiveSession?: boolean;
+	exportTooLarge?: boolean;
 };
 
 const token = 'synthetic-account-token';
@@ -45,10 +46,30 @@ const devicesFixture: DeviceFixture[] = [
 ];
 
 const exportFixture = {
+	archive: {
+		format: 'medical-os-account-export',
+		version: 1,
+		maximum_inline_bytes: 8_388_608,
+		included_categories: [
+			'profile_and_settings',
+			'learning_evidence',
+			'study_materials',
+			'planning',
+			'coach_and_memory',
+			'notifications_and_engagement',
+			'library_activity_and_import_metadata',
+			'professional_learning',
+			'community_and_competition',
+			'institution_memberships',
+			'identity_and_device_metadata',
+			'entitlements_and_offline_metadata'
+		],
+		excluded_categories: [{ id: 'credentials_and_sessions', reason: 'Secrets are excluded.' }]
+	},
 	exported_at: '2026-10-01T08:30:00.000Z',
 	account: { email: 'learner@example.test', tier: 'free', created_at: '2026-09-01T08:00:00.000Z' },
-	attempts: [{ question_version_id: 'question-1', chosen_index: 1, correct: true }],
-	notes: [{ title: 'Study note', body: 'Fixture note' }],
+	attempts: [{ id: 'attempt-1', session_id: 'session-1', question_version_id: 'question-1', chosen_index: 1, correct: true }],
+	notes: [{ id: 'note-1', title: 'Study note', body: 'Fixture note' }],
 	card_reviews: [{ card_id: 'card-1', rating: 4 }],
 	portfolio: [{ kind: 'achievement', title: 'Fixture item' }]
 };
@@ -144,6 +165,13 @@ async function setupAccount(page: Page, options: SetupOptions = {}) {
 		}
 
 		if (url.pathname === '/v1/me/export' && request.method() === 'GET') {
+			if (options.exportTooLarge) {
+				await route.fulfill({
+					status: 413,
+					json: { error: { code: 'account_export_too_large', message: 'This account is too large for a direct export. No partial archive was created.' } }
+				});
+				return;
+			}
 			await route.fulfill({ status: 200, json: exportFixture });
 			return;
 		}
@@ -263,9 +291,14 @@ test('learner reviews devices, revokes another device, and signs out by revoking
 test('learner downloads a versioned account archive as JSON', async ({ page }) => {
 	await setupAccount(page);
 	await page.goto('/account');
-	await expect(page.getByText(/partial export/i)).toBeVisible();
-	await expect(page.getByText(/some account data is not included/i)).toBeVisible();
-	await expect(page.getByText(/account.*attempts.*notes.*reviews.*portfolio/i)).toBeVisible();
+	await expect(page.getByText(/version 1 includes your account and study settings/i)).toBeVisible();
+	await expect(page.getByText(/passwords.*protected course content.*other learners/i)).toBeVisible();
+	await expect(page.getByText(/above 8 MB or 50,000 records fail without creating a partial archive/i)).toBeVisible();
+	for (const width of [320, 375, 414, 768]) {
+		await page.setViewportSize({ width, height: 900 });
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	}
+	await page.setViewportSize({ width: 1280, height: 900 });
 
 	const [download] = await Promise.all([
 		page.waitForEvent('download'),
@@ -273,7 +306,11 @@ test('learner downloads a versioned account archive as JSON', async ({ page }) =
 	]);
 	expect(download.suggestedFilename()).toMatch(/^medical-os-account-export-\d{4}-\d{2}-\d{2}\.json$/);
 	const contents = JSON.parse(await readFile(await download.path(), 'utf8'));
-	expect(contents.archive).toMatchObject({ format: 'medical-os-account-export', version: 1 });
+	expect(contents.archive).toMatchObject({
+		format: 'medical-os-account-export',
+		version: 1,
+		maximum_inline_bytes: 8_388_608
+	});
 	expect(contents.archive.included_categories).toContain('learning_evidence');
 	expect(contents).toMatchObject({
 		account: { email: 'learner@example.test' },
@@ -282,7 +319,17 @@ test('learner downloads a versioned account archive as JSON', async ({ page }) =
 		card_reviews: [{ card_id: 'card-1' }],
 		portfolio: [{ title: 'Fixture item' }]
 	});
-	await expect(page.getByRole('status')).toContainText('export downloaded');
+	await expect(page.getByRole('status')).toContainText('archive v1 downloaded');
+});
+
+test('oversized account export explains that no partial archive was created', async ({ page }) => {
+	await setupAccount(page, { exportTooLarge: true });
+	await page.goto('/account');
+	const downloads: string[] = [];
+	page.on('download', (download) => downloads.push(download.suggestedFilename()));
+	await page.getByRole('button', { name: 'Download account export' }).click();
+	await expect(page.getByRole('alert')).toContainText('No partial archive was created.');
+	expect(downloads).toHaveLength(0);
 });
 
 test('account deletion is reversible until confirmed and clears local authentication', async ({ page }) => {

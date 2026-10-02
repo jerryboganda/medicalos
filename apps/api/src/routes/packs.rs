@@ -1,7 +1,5 @@
-//! TRUST-02/OFF-01: full account export (GDPR-style) and signed pack
-//! manifests. Export covers every table that stores this learner's content
-//! or evidence. Legacy manifests use HMAC; lease-bound browser packs use
-//! publicly verifiable Ed25519 signatures (§22).
+//! OFF-01: signed pack manifests. Legacy manifests use HMAC; lease-bound
+//! browser packs use publicly verifiable Ed25519 signatures (§22).
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -12,7 +10,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::{AccountRecoveryUser, AuthUser};
+use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use sha2::{Digest, Sha256};
@@ -242,81 +240,6 @@ pub struct PackLeaseListResponse {
 )]
 pub struct PackLeaseRevokedResponse {
     pub revoked: bool,
-}
-
-pub async fn export_account(
-    State(state): State<Arc<AppState>>,
-    user: AccountRecoveryUser,
-) -> ApiResult<Json<serde_json::Value>> {
-    let profile = sqlx::query!(
-        "SELECT email, created_at, tier FROM users WHERE id = $1",
-        user.user_id
-    )
-    .fetch_one(&state.pool)
-    .await?;
-    let attempts = sqlx::query!(
-        r#"SELECT question_version_id, chosen_index, correct, confidence, assisted, created_at
-           FROM attempts WHERE user_id = $1 ORDER BY created_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let notes = sqlx::query!(
-        r#"SELECT n.title, n.body, n.created_at FROM notes n
-           WHERE n.user_id = $1
-             AND (n.source_question_version_id IS NULL OR EXISTS (
-                 SELECT 1 FROM question_versions qv
-                 WHERE qv.id = n.source_question_version_id
-                   AND qv.status = 'published'
-                   AND question_display_rights_active(
-                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
-                   )
-             ))
-           ORDER BY n.created_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let reviews = sqlx::query!(
-        r#"SELECT card_id, rating, reviewed_at FROM review_events
-           WHERE user_id = $1 ORDER BY reviewed_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let portfolio = sqlx::query!(
-        r#"SELECT kind, title, detail, occurred_on FROM portfolio_entries
-           WHERE user_id = $1 ORDER BY created_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    Ok(Json(json!({
-        "exported_at": chrono::Utc::now(),
-        "account": {
-            "email": profile.email,
-            "tier": profile.tier,
-            "created_at": profile.created_at,
-        },
-        "attempts": attempts.into_iter().map(|r| json!({
-            "question_version_id": r.question_version_id,
-            "chosen_index": r.chosen_index,
-            "correct": r.correct,
-            "confidence": r.confidence,
-            "assisted": r.assisted,
-            "created_at": r.created_at,
-        })).collect::<Vec<_>>(),
-        "notes": notes.into_iter().map(|r| json!({
-            "title": r.title, "body": r.body, "created_at": r.created_at,
-        })).collect::<Vec<_>>(),
-        "card_reviews": reviews.into_iter().map(|r| json!({
-            "card_id": r.card_id, "rating": r.rating, "reviewed_at": r.reviewed_at,
-        })).collect::<Vec<_>>(),
-        "portfolio": portfolio.into_iter().map(|r| json!({
-            "kind": r.kind, "title": r.title, "detail": r.detail,
-            "occurred_on": r.occurred_on,
-        })).collect::<Vec<_>>(),
-    })))
 }
 
 // ---- OFF-01: signed pack manifests -------------------------------------------

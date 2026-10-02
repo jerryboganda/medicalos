@@ -1,6 +1,6 @@
 # TRUST-02 — Versioned learner-owned data archive
 
-Status: ready-for-agent
+Status: in-progress
 Type: task
 
 ## Problem
@@ -12,7 +12,7 @@ Type: task
 - The response identifies its archive format and version and explicitly enumerates included and excluded categories.
 - The archive includes the safe learner-owned account, learning, study-material, planning, Coach, engagement, library-activity, professional-evidence, community/competition, identity/device, entitlement, and offline metadata recorded in `.scratch/full-platform/privacy-data-map.md`.
 - Rows are scoped by direct ownership or a verified learner membership/contribution. A second learner and a different institution cannot retrieve another learner's private rows.
-- Rows carry stable IDs, relevant timestamps, provenance/version, and disposition where those concepts apply.
+- Rows carry stable IDs, relevant timestamps, provenance/version, and disposition where those concepts apply; rights-inactive source-linked flashcards and their reviews are withheld alongside notes, Coach/report text, and appeals.
 - One read-only repeatable-read snapshot is used for all categories.
 - Password/session/device/pack/provider secrets, one-use/shared tokens, signed proof material, protected course/question content, binary imports, and other learners' private text are excluded.
 - Rights-inactive question-linked learner text follows the existing rights contract and is reported honestly as excluded.
