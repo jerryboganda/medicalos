@@ -588,6 +588,21 @@ export type { AnswerableQuestionsResponse } from './generated/coach/AnswerableQu
 
 export type SubmitReceipt = Omit<SubmitResult, 'expected_score' | 'time'> &
 	Partial<Pick<SubmitResult, 'expected_score' | 'time'>>;
+
+export type LtiResourceLink = {
+	type: 'ltiResourceLink';
+	title: string;
+	url: string;
+	custom: Record<string, string>;
+};
+
+export type LtiDeepLinkResponse = {
+	post_url: string;
+	jwt: string;
+	platform_issuer: string;
+	deployed_at: string;
+};
+
 const BASE: string =
 	// `||`, not `??`: an empty VITE_API_BASE must not drop the /api prefix.
 	import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? '/api' : '');
@@ -1012,6 +1027,16 @@ export const Api = {
 	reviewQueue: () =>
 		call<ReviewQueueResponse>('GET', '/v1/reviews/queue'),
 	listExams: () => call<ExamRegistryResponse>('GET', '/v1/exams'),
+	ltiLaunchUrl: (appOrigin: string) => {
+		const ltiApiBase = import.meta.env.PROD ? '/api' : BASE;
+		const url = new URL(`${ltiApiBase.replace(/\/$/, '')}/v1/lti/launch`, appOrigin);
+		if (url.origin !== appOrigin) {
+			throw new Error('LTI launch requires the Medical OS app and API to share an origin.');
+		}
+		return url.href;
+	},
+	createLtiDeepLinkResponse: (items: LtiResourceLink[]) =>
+		call<LtiDeepLinkResponse>('POST', '/v1/lti/deep-links', { items }),
 	listMocks: () => call<MockListResponse>('GET', '/v1/mocks'),
 	createMock: (body: CreateMockRequest) =>
 		call<CreateMockResponse>('POST', '/v1/mocks', body),

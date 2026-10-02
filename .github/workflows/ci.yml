@@ -118,6 +118,24 @@ jobs:
         run: npm install
       - name: Build client
         run: npm run build -w @medical-os/client
+      - name: Validate web image and LTI frame policy
+        run: |
+          docker build -f apps/client/Dockerfile -t medicalos-web:ci apps/client
+          docker run -d --name medicalos-web-ci --add-host medicalos-api:127.0.0.1 -p 127.0.0.1:8090:80 medicalos-web:ci
+          trap 'docker rm -f medicalos-web-ci >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8090/lti/handoff >/dev/null && break
+            [ "$i" -lt 20 ] || { docker logs medicalos-web-ci; exit 1; }
+            sleep 1
+          done
+          lti_headers=$(curl -sS -D - -o /dev/null http://127.0.0.1:8090/lti/handoff)
+          grep -iq '^Content-Security-Policy: frame-ancestors https:;' <<<"$lti_headers"
+          ! grep -iq '^X-Frame-Options:' <<<"$lti_headers"
+          api_headers=$(curl -sS -D - -o /dev/null -X POST http://127.0.0.1:8090/api/v1/lti/launch || true)
+          grep -iq '^Content-Security-Policy: frame-ancestors https:;' <<<"$api_headers"
+          ! grep -iq '^X-Frame-Options:' <<<"$api_headers"
+          app_headers=$(curl -sS -D - -o /dev/null http://127.0.0.1:8090/today)
+          grep -iq '^X-Frame-Options: DENY' <<<"$app_headers"
       - name: TRUST-01 audit
         run: node scripts/trust01-audit.mjs
 
