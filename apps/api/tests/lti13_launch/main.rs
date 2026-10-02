@@ -388,7 +388,11 @@ async fn lti13_login_launch_deeplink_round_trip() {
         ),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::SEE_OTHER, "browser login redirects");
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "browser login redirects"
+    );
     let location = response
         .headers()
         .get(header::LOCATION)
@@ -404,10 +408,7 @@ async fn lti13_login_launch_deeplink_round_trip() {
     );
     let mut browser_request = form_request(
         "/v1/lti/launch",
-        &[
-            ("id_token", &browser_id_token),
-            ("state", &browser_state),
-        ],
+        &[("id_token", &browser_id_token), ("state", &browser_state)],
     );
     browser_request
         .headers_mut()
@@ -418,7 +419,10 @@ async fn lti13_login_launch_deeplink_round_trip() {
         browser_response.headers()[header::CONTENT_TYPE],
         "text/html; charset=utf-8"
     );
-    assert_eq!(browser_response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(
+        browser_response.headers()[header::CACHE_CONTROL],
+        "no-store"
+    );
     assert!(browser_response.headers()[header::CONTENT_SECURITY_POLICY]
         .to_str()
         .expect("CSP header")

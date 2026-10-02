@@ -719,7 +719,9 @@ mod browser_handoff_tests {
 
     #[test]
     fn negotiates_html_only_for_an_html_navigation() {
-        assert!(accepts_html(Some("text/html,application/xhtml+xml,*/*;q=0.8")));
+        assert!(accepts_html(Some(
+            "text/html,application/xhtml+xml,*/*;q=0.8"
+        )));
         assert!(!accepts_html(Some("application/json, text/html;q=0.2")));
         assert!(!accepts_html(Some("text/html;q=invalid")));
         assert!(!accepts_html(Some("text/html;q=0.2,*/*;q=0.8")));
