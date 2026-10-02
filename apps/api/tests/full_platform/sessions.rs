@@ -358,7 +358,8 @@ async fn device_revocation_retires_every_bound_bearer_and_blocks_pack_opens() {
             Some(serde_json::json!({
                 "device_id": "session-device-a",
                 "chapters": [ids.chapter3],
-                "question_version_ids": []
+                "question_version_ids": [],
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )

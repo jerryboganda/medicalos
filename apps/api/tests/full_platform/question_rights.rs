@@ -2710,7 +2710,8 @@ async fn pack_resource_download_rechecks_rights_after_a_tutoring_answer() {
     let resource_request = serde_json::json!({
         "device_id": device_id,
         "chapters": [chapter_id],
-        "question_version_ids": [question_id]
+        "question_version_ids": [question_id],
+        "request_nonce": "cd".repeat(32)
     });
     let (status, resources) = call(
         app.clone(),

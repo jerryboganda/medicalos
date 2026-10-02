@@ -36,10 +36,10 @@ function canonicalValue(value: unknown): string {
   throw new Error('Unexpected offline resource field.');
 }
 
-function receiptFor(ids: string[]) {
+function receiptFor(ids: string[], request_nonce: string) {
   const issued_at = new Date().toISOString();
   const checksums = ids.map((id) => resource(id, questionIds.indexOf(id)).checksum);
-  const payload = { checksums, device_id: deviceId, exam_id: examId, issued_at };
+  const payload = { checksums, device_id: deviceId, exam_id: examId, issued_at, request_nonce };
   return {
     ...payload,
     signature: sign(null, Buffer.from(canonicalValue(payload)), signing.privateKey).toString('hex')
@@ -101,6 +101,9 @@ function signedManifest() {
 test('offline packs verify, resume, enforce lease expiry, reopen offline, and remove revoked content', async ({ page }) => {
   const manifest = signedManifest();
   const resourceRequests: string[][] = [];
+  const requestNonces: string[] = [];
+  let firstBatchResponse: Record<string, unknown> | undefined;
+  let replayCachedBatchOnce = false;
   let sessionRequest: { preset: string; chapter_ids: string[]; source: string; question_count: number } | null = null;
   let failSecondBatchOnce = true;
   let leaseRevoked = false;
@@ -176,9 +179,13 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', async (route) => {
-    const ids = (route.request().postDataJSON() as { question_version_ids: string[] })
-      .question_version_ids;
+    const body = route.request().postDataJSON() as {
+      question_version_ids: string[];
+      request_nonce: string;
+    };
+    const ids = body.question_version_ids;
     resourceRequests.push(ids);
+    requestNonces.push(body.request_nonce);
     if (resourceRequests.length === 2 && failSecondBatchOnce) {
       failSecondBatchOnce = false;
       await route.fulfill({
@@ -188,10 +195,24 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
       });
       return;
     }
+    if (replayCachedBatchOnce && ids.length === 25 && firstBatchResponse) {
+      replayCachedBatchOnce = false;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(firstBatchResponse)
+      });
+      return;
+    }
+    const response = {
+      resources: ids.map((id) => resource(id, questionIds.indexOf(id))),
+      receipt: receiptFor(ids, body.request_nonce)
+    };
+    if (ids.length === 25 && !firstBatchResponse) firstBatchResponse = response;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))), receipt: receiptFor(ids) })
+      body: JSON.stringify(response)
     });
   });
 
@@ -209,6 +230,9 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
   await expect(page.getByTestId('pack-ready')).toBeVisible();
   expect(resourceRequests.map((batch) => batch.length)).toEqual([25, 1, 1]);
   expect(resourceRequests[2]).toEqual([questionIds[25]]);
+  expect(requestNonces).toHaveLength(3);
+  expect(requestNonces.every((nonce) => /^[0-9a-f]{64}$/.test(nonce))).toBe(true);
+  expect(new Set(requestNonces).size).toBe(requestNonces.length);
 
   const openPageErrors: string[] = [];
   page.on('pageerror', (cause) => openPageErrors.push(cause.message));
@@ -296,6 +320,12 @@ test('offline packs verify, resume, enforce lease expiry, reopen offline, and re
   await page.getByTestId('pack-remove').click();
   await expect(page.getByTestId('pack-empty')).toBeVisible();
 
+  replayCachedBatchOnce = true;
+  await page.getByTestId('pack-download').click();
+  await expect(page.getByTestId('pack-error')).toContainText('request challenge');
+  await expect(page.getByTestId('pack-ready')).toHaveCount(0);
+  await expect(page.getByTestId('pack-partial')).toContainText('0 of 26 questions');
+
   await page.getByTestId('pack-download').click();
   await expect(page.getByTestId('pack-ready')).toBeVisible();
   leaseRevoked = true;
@@ -354,12 +384,18 @@ test('browser quota exhaustion keeps the pack incomplete and reports the limit',
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', (route) => {
-    const ids = (route.request().postDataJSON() as { question_version_ids: string[] })
-      .question_version_ids;
+    const body = route.request().postDataJSON() as {
+      question_version_ids: string[];
+      request_nonce: string;
+    };
+    const ids = body.question_version_ids;
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ resources: ids.map((id) => resource(id, questionIds.indexOf(id))), receipt: receiptFor(ids) })
+      body: JSON.stringify({
+        resources: ids.map((id) => resource(id, questionIds.indexOf(id))),
+        receipt: receiptFor(ids, body.request_nonce)
+      })
     });
   });
   await page.goto('/offline');
@@ -420,9 +456,12 @@ test('download rejects an invalid signed receipt before saving its batch', async
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) })
   );
   await page.route('**/v2/packs/*/resources', async (route) => {
-    const ids = (route.request().postDataJSON() as { question_version_ids: string[] })
-      .question_version_ids;
-    const receipt = receiptFor(ids);
+    const body = route.request().postDataJSON() as {
+      question_version_ids: string[];
+      request_nonce: string;
+    };
+    const ids = body.question_version_ids;
+    const receipt = receiptFor(ids, body.request_nonce);
     receipt.signature = '00'.repeat(64);
     resourceRequests += 1;
     await route.fulfill({

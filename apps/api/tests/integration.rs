@@ -311,7 +311,8 @@ async fn pack_resources(
             Some(serde_json::json!({
                 "device_id": device_id,
                 "chapters": chapters,
-                "question_version_ids": question_version_ids
+                "question_version_ids": question_version_ids,
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1138,7 +1139,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "export-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": [version_id]
+                "question_version_ids": [version_id],
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1175,7 +1177,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "other-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": [version_id]
+                "question_version_ids": [version_id],
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1192,7 +1195,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "export-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": too_many_ids
+                "question_version_ids": too_many_ids,
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -7717,6 +7721,7 @@ async fn pregen_tutoring_generated_and_cached() {
     let receipt = &before_answer_resources["receipt"];
     assert_eq!(receipt["device_id"], "device-a");
     assert_eq!(receipt["exam_id"], ids.exam_id.to_string());
+    assert_eq!(receipt["request_nonce"], "ab".repeat(32));
     let receipt_checksums: Vec<String> = receipt["checksums"]
         .as_array()
         .unwrap()
