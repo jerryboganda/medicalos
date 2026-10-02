@@ -1329,11 +1329,13 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
         }
     }
     let learner_note_id = learner_note_id.expect("created note id");
-    sqlx::query("INSERT INTO note_concepts (note_id, concept) VALUES ($1, 'learner-owned-concept')")
-        .bind(learner_note_id)
-        .execute(&state.pool)
-        .await
-        .expect("note concept fixture");
+    sqlx::query(
+        "INSERT INTO note_concepts (note_id, concept) VALUES ($1, 'learner-owned-concept')",
+    )
+    .bind(learner_note_id)
+    .execute(&state.pool)
+    .await
+    .expect("note concept fixture");
 
     let (status, export) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
     assert_eq!(status, StatusCode::OK, "{export}");
@@ -1381,11 +1383,20 @@ async fn account_export_is_versioned_and_contains_only_the_requesting_learners_r
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0]["title"], "My export note");
     assert_eq!(notes[0]["id"], learner_note_id.to_string());
-    assert_eq!(export["note_concepts"][0]["note_id"], learner_note_id.to_string());
-    assert_eq!(export["note_concepts"][0]["concept"], "learner-owned-concept");
+    assert_eq!(
+        export["note_concepts"][0]["note_id"],
+        learner_note_id.to_string()
+    );
+    assert_eq!(
+        export["note_concepts"][0]["concept"],
+        "learner-owned-concept"
+    );
     let memberships = export["institution_memberships"].as_array().unwrap();
     assert_eq!(memberships.len(), 1);
-    assert_eq!(memberships[0]["institution_id"], learner_institution.to_string());
+    assert_eq!(
+        memberships[0]["institution_id"],
+        learner_institution.to_string()
+    );
     assert_eq!(memberships[0]["institution_name"], "Learner institution");
     assert!(!export.to_string().contains(&other_institution.to_string()));
     assert!(!export
@@ -1403,11 +1414,7 @@ async fn oversized_account_export_fails_without_returning_a_partial_archive() {
     let state = setup().await;
     let app = router(state.clone());
     let learner = register_and_login(app.clone()).await;
-    let (status, me) = call(
-        app.clone(),
-        request("GET", "/v1/me", Some(&learner), None),
-    )
-    .await;
+    let (status, me) = call(app.clone(), request("GET", "/v1/me", Some(&learner), None)).await;
     assert_eq!(status, StatusCode::OK, "{me}");
     let user_id: Uuid = me["user_id"].as_str().unwrap().parse().unwrap();
     sqlx::query(
@@ -1419,11 +1426,7 @@ async fn oversized_account_export_fails_without_returning_a_partial_archive() {
     .await
     .expect("large note fixture");
 
-    let (status, response) = call(
-        app,
-        request("GET", "/v1/me/export", Some(&learner), None),
-    )
-    .await;
+    let (status, response) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{response}");
     assert_eq!(response["error"]["code"], "account_export_too_large");
     assert!(response["error"]["message"]

@@ -698,7 +698,9 @@ pub async fn export_account(
         return Err(ApiError {
             status: StatusCode::PAYLOAD_TOO_LARGE,
             code: "account_export_too_large",
-            message: "This account is too large for a direct export. No partial archive was created.".into(),
+            message:
+                "This account is too large for a direct export. No partial archive was created."
+                    .into(),
             details: None,
         });
     }
@@ -713,7 +715,9 @@ pub async fn export_account(
         return Err(ApiError {
             status: StatusCode::PAYLOAD_TOO_LARGE,
             code: "account_export_too_large",
-            message: "This account is too large for a direct export. No partial archive was created.".into(),
+            message:
+                "This account is too large for a direct export. No partial archive was created."
+                    .into(),
             details: None,
         });
     }
