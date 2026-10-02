@@ -397,7 +397,7 @@ const ACCOUNT_EXPORT_SIZE_SQL: &str = r#"
 SELECT COUNT(*)::BIGINT, COALESCE(SUM(row_bytes), 0)::BIGINT
 FROM (
     SELECT octet_length(to_jsonb(ROW(u.id, u.email, u.tier, u.idp_subject,
-      u.single_active_session, u.max_devices, u.created_at))::text)::BIGINT
+      u.single_active_session, u.max_devices, u.created_at))::text)::BIGINT AS row_bytes
       FROM users u WHERE u.id = $1 AND u.deleted_at IS NULL
     UNION ALL
     SELECT octet_length(to_jsonb(r)::text)::BIGINT AS row_bytes FROM (
