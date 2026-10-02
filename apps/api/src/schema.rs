@@ -81,6 +81,8 @@ migrations!(
     "0062_login_throttling",
     "0063_lti13_launch",
     "0064_retest_receipts",
+    "0065_question_display_rights",
+    "0066_question_distribution_rights",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -121,7 +123,6 @@ mod tests {
             .iter()
             .map(|name| (*name).to_owned())
             .collect::<Vec<_>>();
-        registered.sort_unstable();
 
         assert_eq!(registered, files, "runtime migration registry is stale");
     }
