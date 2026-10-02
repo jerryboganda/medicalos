@@ -744,7 +744,8 @@ mod browser_handoff_tests {
         assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
         let policy = response.headers()[CONTENT_SECURITY_POLICY]
             .to_str()
-            .expect("CSP header is text");
+            .expect("CSP header is text")
+            .to_owned();
         let body = http_body_util::BodyExt::collect(response.into_body())
             .await
             .expect("handoff body is readable")
