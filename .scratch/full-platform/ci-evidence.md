@@ -137,3 +137,9 @@ CI restore testing uses the disposable database and synthetic data only.
 
 - PR run 36923455791 at source `a9bcdecb938c6f0fe793dfcaa48ef12c051a0dd9` passed Rust, client, site and Zitadel. The offline compile failed because the committed SQLx cache lacked current query records. Its Rust artifact contains 438 query records; eight were absent locally, and each artifact record had an exact filename and SHA-256 match after syncing. Existing cache-only records were retained.
 - The browser run passed 83 tests and reproduced the invalid-receipt regression: a 64-byte zero signature was accepted, the UI reported success, and all 26 questions were saved. The regression requires signature verification to fail before batch persistence. The client now verifies the receipt's Ed25519 signature against the already-verified manifest key and rejects malformed signature encodings. Exact-source GitHub Actions is still required for both changes.
+
+## Request-bound offline receipt challenge accepted
+
+- Exact-source run [36990426238](https://github.com/jerryboganda/medicalos/actions/runs/36990426238) passed all six jobs at `7dfd41e25df75485e37bab5affad69603b966b4a`: Rust, client, site, Zitadel, offline compile, and browser E2E.
+- The accepted source creates a fresh 256-bit challenge per resource batch, validates and echoes it in the signed server receipt, and rejects malformed or replayed receipts before persisting the batch. Migration `0067_pack_receipt_challenge` stores the challenge and issued-at value; runtime registration and generated TypeScript declarations match the checked-in contract.
+- This closes the stale-response/replay defect only. The offline-access window still lacks a trusted client expiry policy and owner acceptance, so OFF-01 and the offline-rights issue remain open.

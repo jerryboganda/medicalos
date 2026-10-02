@@ -999,6 +999,8 @@ async fn account_export_and_signed_pack_manifest() {
     assert_eq!(status, StatusCode::OK, "{export}");
     assert!(export["account"]["email"].is_string());
     assert_eq!(export["attempts"].as_array().unwrap().len(), 1);
+    assert!(export["attempts"][0]["id"].as_str().is_some());
+    assert!(export["attempts"][0]["session_id"].as_str().is_some());
     assert!(export["notes"].is_array());
     assert!(export["card_reviews"].is_array());
     assert!(export["portfolio"].is_array());
@@ -1263,6 +1265,57 @@ fn canonical_test_value(value: &Value) -> String {
             )
         }
     }
+}
+
+#[tokio::test]
+async fn account_export_is_versioned_and_contains_only_the_requesting_learners_records() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state);
+    let learner = register_and_login(app.clone()).await;
+    let other_learner = register_and_login(app.clone()).await;
+
+    for (token, title, body) in [
+        (&learner, "My export note", "learner-owned note"),
+        (&other_learner, "Other export note", "another learner's private note"),
+    ] {
+        let (status, note) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/notes",
+                Some(token.as_str()),
+                Some(serde_json::json!({"title": title, "body": body})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{note}");
+    }
+
+    let (status, export) = call(
+        app,
+        request("GET", "/v1/me/export", Some(&learner), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(export["archive"]["format"], "medical-os-account-export");
+    assert_eq!(export["archive"]["version"], 1);
+    for category in ["profile_and_settings", "learning_evidence", "study_materials"] {
+        assert!(export["archive"]["included_categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str() == Some(category)));
+    }
+    let notes = export["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["title"], "My export note");
+    assert!(notes[0]["id"].as_str().is_some());
+    assert!(!export.to_string().contains("another learner's private note"));
+    for forbidden in ["password_hash", "token_hash", "device_key", "pack_key"] {
+        assert!(!export.to_string().contains(forbidden));
+    }
+    assert!(!export.to_string().contains("integration-test-device"));
 }
 
 #[tokio::test]

@@ -260,7 +260,7 @@ test('learner reviews devices, revokes another device, and signs out by revoking
 	});
 });
 
-test('learner downloads the supported partial account export as JSON', async ({ page }) => {
+test('learner downloads a versioned account archive as JSON', async ({ page }) => {
 	await setupAccount(page);
 	await page.goto('/account');
 	await expect(page.getByText(/partial export/i)).toBeVisible();
@@ -273,6 +273,8 @@ test('learner downloads the supported partial account export as JSON', async ({ 
 	]);
 	expect(download.suggestedFilename()).toMatch(/^medical-os-account-export-\d{4}-\d{2}-\d{2}\.json$/);
 	const contents = JSON.parse(await readFile(await download.path(), 'utf8'));
+	expect(contents.archive).toMatchObject({ format: 'medical-os-account-export', version: 1 });
+	expect(contents.archive.included_categories).toContain('learning_evidence');
 	expect(contents).toMatchObject({
 		account: { email: 'learner@example.test' },
 		attempts: [{ question_version_id: 'question-1' }],

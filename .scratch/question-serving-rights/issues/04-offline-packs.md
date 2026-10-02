@@ -27,3 +27,8 @@ policy.
 See `../spec.md`.
 
 ## Comments
+
+- Exact-source Actions run [36990426238](https://github.com/jerryboganda/medicalos/actions/runs/36990426238) passed all six jobs on `7dfd41e25df75485e37bab5affad69603b966b4a`. Resource-batch receipts now bind a fresh request challenge into the server signature, and the browser rejects stale/replayed challenges before saving content.
+- The trusted offline expiry/revocation window and owner-approved policy are still unresolved; this issue remains open.
+
+## Comments
