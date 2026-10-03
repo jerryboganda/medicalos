@@ -203,8 +203,8 @@ test('picker can return an empty selection to close the LMS flow', async ({ page
 	});
 	await page.goto('/lti/deep-links');
 	await page.getByRole('button', { name: 'Return to LMS without adding content' }).click();
-	expect(submittedItems).toEqual([]);
 	await expect(page.getByText('LMS closed without adding a link')).toBeVisible();
+	expect(submittedItems).toEqual([]);
 	expect(returnedJwt).toBe('signed-empty-response');
 });
 
