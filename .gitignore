@@ -28,6 +28,9 @@ tests/e2e/screenshots/
 playwright-report/
 .scratch/full-platform/artifacts/
 _ci*.log
+# AX evidence: trimmed excerpts are tracked under .scratch/*/evidence/;
+# only full raw log dumps stay local.
+*.raw.log
 .freebuff/
 
 # Local staging backups (infra/local, docs/deployment/orca-desktop.md)

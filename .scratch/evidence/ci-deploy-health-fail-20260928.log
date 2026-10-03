@@ -1,0 +1,245 @@
+deploy-vps	Deploy to production VPS	﻿2026-09-28T04:42:24.9880795Z ##[group]Run appleboy/ssh-action@v1
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9882026Z with:
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9882975Z   host: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9883742Z   username: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9888859Z   key: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9889689Z   envs: OIDC_CREDENTIAL_KEY,PACK_SIGNING_KEY
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9919256Z   script: set -euo pipefail
+deploy-vps	Deploy to production VPS	SHA='0ea38b478e45c1b663321f2dbf1869621527c063'
+deploy-vps	Deploy to production VPS	export VPS_DATABASE_URL_AS_ARG='***'
+deploy-vps	Deploy to production VPS	DATABASE_URL="$VPS_DATABASE_URL_AS_ARG"
+deploy-vps	Deploy to production VPS	REGISTRY='ghcr.io/jerryboganda'
+deploy-vps	Deploy to production VPS	PUBLIC_API_BASE_URL='https://medicalos.polytronx.com/api'
+deploy-vps	Deploy to production VPS	PUBLIC_APP_URL='https://medicalos.polytronx.com'
+deploy-vps	Deploy to production VPS	if [ "${#PACK_SIGNING_KEY}" -lt 32 ] || [ -z "${PACK_SIGNING_KEY//[[:space:]]/}" ]; then
+deploy-vps	Deploy to production VPS	  echo "VPS_PACK_SIGNING_KEY must contain at least 32 non-whitespace bytes" >&2
+deploy-vps	Deploy to production VPS	  exit 1
+deploy-vps	Deploy to production VPS	fi
+deploy-vps	Deploy to production VPS	API_IMAGE="$REGISTRY/medicalos-api:$SHA"
+deploy-vps	Deploy to production VPS	WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
+deploy-vps	Deploy to production VPS	echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
+deploy-vps	Deploy to production VPS	# Fresh GHCR login per deploy: the package may be private or the
+deploy-vps	Deploy to production VPS	# VPS's stored credential stale — the job token is valid now.
+deploy-vps	Deploy to production VPS	echo '***' | docker login ghcr.io -u 'jerryboganda' --password-stdin
+deploy-vps	Deploy to production VPS	docker pull "$API_IMAGE"
+deploy-vps	Deploy to production VPS	docker pull "$WEB_IMAGE"
+deploy-vps	Deploy to production VPS	echo "[medicalos] pulled:"
+deploy-vps	Deploy to production VPS	docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+deploy-vps	Deploy to production VPS	  | grep -E "medicalos-(api|web):$SHA" || {
+deploy-vps	Deploy to production VPS	  echo "pulled images do not include SHA $SHA" >&2
+deploy-vps	Deploy to production VPS	  exit 1
+deploy-vps	Deploy to production VPS	}
+deploy-vps	Deploy to production VPS	echo "[medicalos] recreating medicalos-api (image: $API_IMAGE)"
+deploy-vps	Deploy to production VPS	docker rm -f medicalos-api 2>/dev/null || true
+deploy-vps	Deploy to production VPS	docker run -d --name medicalos-api --restart unless-stopped \
+deploy-vps	Deploy to production VPS	  --cpus "1.0" --memory "1g" \
+deploy-vps	Deploy to production VPS	  --network platform \
+deploy-vps	Deploy to production VPS	  -e DATABASE_URL="$DATABASE_URL" \
+deploy-vps	Deploy to production VPS	  -e PUBLIC_API_BASE_URL="$PUBLIC_API_BASE_URL" \
+deploy-vps	Deploy to production VPS	  -e PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+deploy-vps	Deploy to production VPS	  -e OIDC_CREDENTIAL_KEY="${OIDC_CREDENTIAL_KEY:-}" \
+deploy-vps	Deploy to production VPS	  -e PACK_SIGNING_KEY="$PACK_SIGNING_KEY" \
+deploy-vps	Deploy to production VPS	  -e MIN_TIME_LIMIT_SECONDS=30 \
+deploy-vps	Deploy to production VPS	  -e FREE_DAILY_QUESTIONS=10 \
+deploy-vps	Deploy to production VPS	  "$API_IMAGE"
+deploy-vps	Deploy to production VPS	echo "[medicalos] api container: $(docker inspect medicalos-api --format '{{.Config.Image}}')"
+deploy-vps	Deploy to production VPS	echo "[medicalos] recreating medicalos-web (image: $WEB_IMAGE)"
+deploy-vps	Deploy to production VPS	docker rm -f medicalos-web 2>/dev/null || true
+deploy-vps	Deploy to production VPS	docker run -d --name medicalos-web --restart unless-stopped \
+deploy-vps	Deploy to production VPS	  --cpus "0.5" --memory "256m" \
+deploy-vps	Deploy to production VPS	  --network platform \
+deploy-vps	Deploy to production VPS	  "$WEB_IMAGE"
+deploy-vps	Deploy to production VPS	docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
+deploy-vps	Deploy to production VPS	echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
+deploy-vps	Deploy to production VPS	echo "[medicalos] health-check (API + web through the container network)"
+deploy-vps	Deploy to production VPS	for i in $(seq 1 30); do
+deploy-vps	Deploy to production VPS	  if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
+deploy-vps	Deploy to production VPS	    && docker run --rm --network platform curlimages/curl:8.5.0 -sf "http://medicalos-web/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
+deploy-vps	Deploy to production VPS	    echo "[medicalos] api + web healthy"
+deploy-vps	Deploy to production VPS	    break
+deploy-vps	Deploy to production VPS	  fi
+deploy-vps	Deploy to production VPS	  [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
+deploy-vps	Deploy to production VPS	  sleep 2
+deploy-vps	Deploy to production VPS	done
+deploy-vps	Deploy to production VPS	echo "[medicalos] live on medicalos.polytronx.com @ $SHA"
+deploy-vps	Deploy to production VPS	
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9942201Z   port: 22
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9942971Z   protocol: tcp
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9943797Z   timeout: 30s
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9944580Z   command_timeout: 10m
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9945397Z   proxy_port: 22
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9946189Z   proxy_protocol: tcp
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9947016Z   proxy_timeout: 30s
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9947846Z   curl_insecure: false
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9948707Z   capture_stdout: false
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9949554Z env:
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9950304Z   REGISTRY: ghcr.io/jerryboganda
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9951259Z   DOMAIN: medicalos.polytronx.com
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9952376Z   OIDC_CREDENTIAL_KEY: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9953678Z   PACK_SIGNING_KEY: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:24.9954504Z ##[endgroup]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0005907Z ##[start-action display=Set GitHub Path;id=__appleboy_ssh-action.__run]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0055406Z ##[group]Run echo "$GITHUB_ACTION_PATH" >> $GITHUB_PATH
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0056683Z ^[[36;1mecho "$GITHUB_ACTION_PATH" >> $GITHUB_PATH^[[0m
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0257645Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0258822Z env:
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0259814Z   REGISTRY: ghcr.io/jerryboganda
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0260755Z   DOMAIN: medicalos.polytronx.com
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0261671Z   OIDC_CREDENTIAL_KEY: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0263194Z   PACK_SIGNING_KEY: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0264423Z   GITHUB_ACTION_PATH: /home/runner/work/_actions/appleboy/ssh-action/v1
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0265635Z ##[endgroup]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0422239Z ##[end-action id=__appleboy_ssh-action.__run;outcome=success;conclusion=success;duration_ms=41]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0435736Z ##[start-action display=Run entrypoint.sh;id=__appleboy_ssh-action.entrypoint]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0471204Z ##[group]Run entrypoint.sh
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0472317Z ^[[36;1mentrypoint.sh^[[0m
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0527941Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0529075Z env:
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0529835Z   REGISTRY: ghcr.io/jerryboganda
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0530792Z   DOMAIN: medicalos.polytronx.com
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0531728Z   OIDC_CREDENTIAL_KEY: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0533277Z   PACK_SIGNING_KEY: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0534398Z   GITHUB_ACTION_PATH: /home/runner/work/_actions/appleboy/ssh-action/v1
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0535671Z   INPUT_HOST: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0536457Z   INPUT_PORT: 22
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0537260Z   INPUT_PROTOCOL: tcp
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0538099Z   INPUT_USERNAME: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0538923Z   INPUT_PASSWORD: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0539714Z   INPUT_PASSPHRASE: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0544764Z   INPUT_KEY: ***
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0545556Z   INPUT_KEY_PATH: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0546358Z   INPUT_FINGERPRINT: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0547176Z   INPUT_PROXY_HOST: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0547978Z   INPUT_PROXY_PORT: 22
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0548828Z   INPUT_PROXY_USERNAME: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0549687Z   INPUT_PROXY_PASSWORD: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0550577Z   INPUT_PROXY_PASSPHRASE: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0551434Z   INPUT_PROXY_KEY: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0552399Z   INPUT_PROXY_KEY_PATH: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0553269Z   INPUT_PROXY_FINGERPRINT: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0554166Z   INPUT_TIMEOUT: 30s
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0554993Z   INPUT_PROXY_TIMEOUT: 30s
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0555864Z   INPUT_COMMAND_TIMEOUT: 10m
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0584718Z   INPUT_SCRIPT: set -euo pipefail
+deploy-vps	Deploy to production VPS	SHA='0ea38b478e45c1b663321f2dbf1869621527c063'
+deploy-vps	Deploy to production VPS	export VPS_DATABASE_URL_AS_ARG='***'
+deploy-vps	Deploy to production VPS	DATABASE_URL="$VPS_DATABASE_URL_AS_ARG"
+deploy-vps	Deploy to production VPS	REGISTRY='ghcr.io/jerryboganda'
+deploy-vps	Deploy to production VPS	PUBLIC_API_BASE_URL='https://medicalos.polytronx.com/api'
+deploy-vps	Deploy to production VPS	PUBLIC_APP_URL='https://medicalos.polytronx.com'
+deploy-vps	Deploy to production VPS	if [ "${#PACK_SIGNING_KEY}" -lt 32 ] || [ -z "${PACK_SIGNING_KEY//[[:space:]]/}" ]; then
+deploy-vps	Deploy to production VPS	  echo "VPS_PACK_SIGNING_KEY must contain at least 32 non-whitespace bytes" >&2
+deploy-vps	Deploy to production VPS	  exit 1
+deploy-vps	Deploy to production VPS	fi
+deploy-vps	Deploy to production VPS	API_IMAGE="$REGISTRY/medicalos-api:$SHA"
+deploy-vps	Deploy to production VPS	WEB_IMAGE="$REGISTRY/medicalos-web:$SHA"
+deploy-vps	Deploy to production VPS	echo "[medicalos] pulling $API_IMAGE $WEB_IMAGE"
+deploy-vps	Deploy to production VPS	# Fresh GHCR login per deploy: the package may be private or the
+deploy-vps	Deploy to production VPS	# VPS's stored credential stale — the job token is valid now.
+deploy-vps	Deploy to production VPS	echo '***' | docker login ghcr.io -u 'jerryboganda' --password-stdin
+deploy-vps	Deploy to production VPS	docker pull "$API_IMAGE"
+deploy-vps	Deploy to production VPS	docker pull "$WEB_IMAGE"
+deploy-vps	Deploy to production VPS	echo "[medicalos] pulled:"
+deploy-vps	Deploy to production VPS	docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+deploy-vps	Deploy to production VPS	  | grep -E "medicalos-(api|web):$SHA" || {
+deploy-vps	Deploy to production VPS	  echo "pulled images do not include SHA $SHA" >&2
+deploy-vps	Deploy to production VPS	  exit 1
+deploy-vps	Deploy to production VPS	}
+deploy-vps	Deploy to production VPS	echo "[medicalos] recreating medicalos-api (image: $API_IMAGE)"
+deploy-vps	Deploy to production VPS	docker rm -f medicalos-api 2>/dev/null || true
+deploy-vps	Deploy to production VPS	docker run -d --name medicalos-api --restart unless-stopped \
+deploy-vps	Deploy to production VPS	  --cpus "1.0" --memory "1g" \
+deploy-vps	Deploy to production VPS	  --network platform \
+deploy-vps	Deploy to production VPS	  -e DATABASE_URL="$DATABASE_URL" \
+deploy-vps	Deploy to production VPS	  -e PUBLIC_API_BASE_URL="$PUBLIC_API_BASE_URL" \
+deploy-vps	Deploy to production VPS	  -e PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+deploy-vps	Deploy to production VPS	  -e OIDC_CREDENTIAL_KEY="${OIDC_CREDENTIAL_KEY:-}" \
+deploy-vps	Deploy to production VPS	  -e PACK_SIGNING_KEY="$PACK_SIGNING_KEY" \
+deploy-vps	Deploy to production VPS	  -e MIN_TIME_LIMIT_SECONDS=30 \
+deploy-vps	Deploy to production VPS	  -e FREE_DAILY_QUESTIONS=10 \
+deploy-vps	Deploy to production VPS	  "$API_IMAGE"
+deploy-vps	Deploy to production VPS	echo "[medicalos] api container: $(docker inspect medicalos-api --format '{{.Config.Image}}')"
+deploy-vps	Deploy to production VPS	echo "[medicalos] recreating medicalos-web (image: $WEB_IMAGE)"
+deploy-vps	Deploy to production VPS	docker rm -f medicalos-web 2>/dev/null || true
+deploy-vps	Deploy to production VPS	docker run -d --name medicalos-web --restart unless-stopped \
+deploy-vps	Deploy to production VPS	  --cpus "0.5" --memory "256m" \
+deploy-vps	Deploy to production VPS	  --network platform \
+deploy-vps	Deploy to production VPS	  "$WEB_IMAGE"
+deploy-vps	Deploy to production VPS	docker network connect nginx-proxy-manager_default medicalos-web 2>/dev/null || true
+deploy-vps	Deploy to production VPS	echo "[medicalos] web container: $(docker inspect medicalos-web --format '{{.Config.Image}}')"
+deploy-vps	Deploy to production VPS	echo "[medicalos] health-check (API + web through the container network)"
+deploy-vps	Deploy to production VPS	for i in $(seq 1 30); do
+deploy-vps	Deploy to production VPS	  if docker run --rm --network platform curlimages/curl:8.5.0 -sf http://medicalos-api:8080/healthz 2>/dev/null | grep -q ok \
+deploy-vps	Deploy to production VPS	    && docker run --rm --network platform curlimages/curl:8.5.0 -sf "http://medicalos-web/" 2>/dev/null | grep -q 'data-sveltekit-preload-data'; then
+deploy-vps	Deploy to production VPS	    echo "[medicalos] api + web healthy"
+deploy-vps	Deploy to production VPS	    break
+deploy-vps	Deploy to production VPS	  fi
+deploy-vps	Deploy to production VPS	  [ "$i" -eq 30 ] && { echo "stack never became healthy" >&2; exit 1; }
+deploy-vps	Deploy to production VPS	  sleep 2
+deploy-vps	Deploy to production VPS	done
+deploy-vps	Deploy to production VPS	echo "[medicalos] live on medicalos.polytronx.com @ $SHA"
+deploy-vps	Deploy to production VPS	
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0608040Z   INPUT_SCRIPT_FILE: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0608998Z   INPUT_ENVS: OIDC_CREDENTIAL_KEY,PACK_SIGNING_KEY
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0610054Z   INPUT_ENVS_FORMAT: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0610847Z   INPUT_DEBUG: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0611624Z   INPUT_ALL_ENVS: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0612578Z   INPUT_REQUEST_PTY: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0613414Z   INPUT_USE_INSECURE_CIPHER: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0614295Z   INPUT_CIPHER: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0615118Z   INPUT_PROXY_USE_INSECURE_CIPHER: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0616060Z   INPUT_PROXY_CIPHER: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0616876Z   INPUT_SYNC: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0617668Z   INPUT_CAPTURE_STDOUT: false
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0618582Z   INPUT_CURL_INSECURE: false
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0619457Z   DRONE_SSH_VERSION: 
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0620252Z ##[endgroup]
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.0832983Z Downloading drone-ssh-1.8.2-linux-amd64 from https://github.com/appleboy/drone-ssh/releases/download/v1.8.2
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.1665276Z ======= CLI Version Information =======
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.1680704Z Drone SSH version 1.8.2
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:25.1683782Z =======================================
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:26.3251328Z [medicalos] pulling ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063 ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:26.7520790Z WARNING! Your credentials are stored unencrypted in '/***/.docker/config.json'.
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:26.7523672Z Configure a credential helper to remove this warning. See
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:26.7524264Z https://docs.docker.com/go/credential-store/
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:26.7524659Z Login Succeeded
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:27.5796599Z 0ea38b478e45c1b663321f2dbf1869621527c063: Pulling from jerryboganda/medicalos-api
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:28.2716157Z 2c606bdf3064: Pulling fs layer
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:28.2717365Z be0884998499: Pulling fs layer
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:28.3160789Z 44136fa355b3: Already exists
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:28.6185149Z 2487bf0b05cf: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:29.0294148Z 2c606bdf3064: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:29.3292184Z be0884998499: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:30.2515896Z be0884998499: Pull complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:30.8260887Z 2c606bdf3064: Pull complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:30.8350737Z Digest: sha256:5b542354bbc651b0b7c5d0cd084a2c7170f5ea729c140b0d1da67213afe9e58b
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:30.8351664Z Status: Downloaded newer image for ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:30.8399181Z ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:31.8059418Z 0ea38b478e45c1b663321f2dbf1869621527c063: Pulling from jerryboganda/medicalos-web
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:32.6176152Z 44136fa355b3: Already exists
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:32.7052726Z 6824b69b44c3: Pulling fs layer
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:32.7053258Z 056c12c927d1: Pulling fs layer
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:32.8915202Z 82c45175e779: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:32.9915877Z 6824b69b44c3: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.0978177Z 056c12c927d1: Download complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2052666Z 6824b69b44c3: Pull complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2135713Z 056c12c927d1: Pull complete
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2201908Z Digest: sha256:40f5c8dec3e90818d6d19ab874ffe6876232b872c100b0cbe7e1ee0e85c1c725
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2203216Z Status: Downloaded newer image for ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2257670Z ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:33.2296729Z [medicalos] pulled:
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:35.3183995Z ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063 5b542354bbc6
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:35.3184594Z ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063 40f5c8dec3e9
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:35.3211449Z [medicalos] recreating medicalos-api (image: ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063)
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:35.8765914Z medicalos-api
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:36.0363089Z 88fd140c199d9d0374f2cdcefdfb1ed3e24d66ab1d3f237bf8a225008d07b281
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:36.5056978Z [medicalos] api container: ghcr.io/jerryboganda/medicalos-api:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:36.5057706Z [medicalos] recreating medicalos-web (image: ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063)
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:37.2967079Z medicalos-web
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:38.1589318Z 4c309c2f16ab31345bbd041f1bf752ed366b6f5669aac3fcde7d607067a7ac43
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:38.9406373Z [medicalos] web container: ghcr.io/jerryboganda/medicalos-web:0ea38b478e45c1b663321f2dbf1869621527c063
+deploy-vps	Deploy to production VPS	2026-09-28T04:42:38.9406966Z [medicalos] health-check (API + web through the container network)
+deploy-vps	Deploy to production VPS	2026-09-28T04:44:15.1315061Z stack never became healthy
+deploy-vps	Deploy to production VPS	2026-09-28T04:44:15.1327475Z 2026/09/28 04:44:15 Process exited with status 1
+deploy-vps	Deploy to production VPS	2026-09-28T04:44:15.1342669Z ##[error]Process completed with exit code 1.
+deploy-vps	Deploy to production VPS	2026-09-28T04:44:15.1352058Z ##[end-action id=__appleboy_ssh-action.entrypoint;outcome=failure;conclusion=failure;duration_ms=110091]

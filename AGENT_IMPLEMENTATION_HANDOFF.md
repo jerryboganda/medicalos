@@ -6,7 +6,8 @@
 
 1. `MEDICAL_LEARNING_OS_MASTER_PLAN_v2.md` — all requirements. If code contradicts the plan, the plan wins until an ADR says otherwise.
 2. `docs/requirements/traceability.md` — every ticket must cite ≥1 requirement ID from this ledger.
-3. `AGENTS.md` — skill-suite mandate + compute policy.
+3. `AGENTS.md` — skill-suite mandate + compute policy + AX protocol.
+4. The effort's `.scratch/<slug>/STATE.md` (AX protocol, `docs/agents/agent-experience.md`) — live task state; ground truth stays git + CI + the ledger.
 
 ## Stack (do not substitute without an ADR)
 
@@ -31,11 +32,11 @@ All builds, lints, tests, screenshots, analysis, and artifacts run in **GitHub A
 
 ## Workflow per slice (plan §31)
 
-requirement IDs → data contract → backend behavior → UI integration → permissions → failure states → tests → evidence → documentation. One complete vertical flow before proliferating modules. Skills per AGENTS.md: `to-spec` → `tdd` → `implement` → `code-review`; UI through hallmark; end every diff with `ponytail-review`; debugging starts with `diagnosing-bugs`.
+requirement IDs → data contract → backend behavior → UI integration → permissions → failure states → tests → evidence → STATE.md upkeep → documentation. One complete vertical flow before proliferating modules. Skills per AGENTS.md: `to-spec` → `tdd` → `implement` → `code-review`; UI through hallmark; end every diff with `ponytail-review`; debugging starts with `diagnosing-bugs`.
 
 ## Reporting honesty
 
-Completion reports state implemented / tested / partial / blocked / deliberately deferred. A mocked third-party integration is not a production integration. An attractive screen is not a working backend — verify through evidence, never inference.
+Completion reports state implemented / tested / partial / blocked / deliberately deferred. A mocked third-party integration is not a production integration. An attractive screen is not a working backend — verify through evidence, never inference. No verification gate is passed without raw output evidence (AX protocol: `docs/agents/agent-experience.md`).
 
 ## Current state
 

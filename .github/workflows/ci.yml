@@ -151,6 +151,8 @@ jobs:
           grep -iq '^X-Frame-Options: DENY' <<<"$app_headers"
       - name: TRUST-01 audit
         run: node scripts/trust01-audit.mjs
+      - name: AX audit (no fake evidence)
+        run: node scripts/ax-audit.mjs
 
   offline:
     # Release images expand SQLx queries without a database. Verify the committed

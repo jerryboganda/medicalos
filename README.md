@@ -32,7 +32,7 @@ packages/design-system   Locked design system (design.md): §7.1 tokens, compone
 docs/adr                 Architecture decision records (lazy)
 docs/requirements        Traceability ledger, coverage map, analytics taxonomy
 docs/deployment          Production runbooks (VPS, deploy workflow)
-.scratch/<feature-slug>  Per-phase specs + issue tracker (local markdown)
+.scratch/<feature-slug>  Per-phase specs, issue tracker, STATE.md, evidence (local markdown)
 .github/workflows        CI + deploy (§27.1 compute rule)
 tests/e2e                Playwright suites (client against the real API; site static)
 ```
@@ -42,7 +42,7 @@ tests/e2e                Playwright suites (client against the real API; site st
 1. **Compute:** all builds, lints, tests, and artifacts run in GitHub Actions — never on the production VPS or local machines (AGENTS.md, plan §27). No self-hosted runners on excluded machines.
 2. **Rust is the contract:** generated TypeScript/API clients are never hand-edited; business rules live in shared crates, never re-implemented in Svelte (§31.1).
 3. **No fake anything:** no placeholder analytics, dead buttons, fabricated metrics, or numerical readiness before Phase 7 validation (TRUST-01, decision 12).
-4. **Agent workflow:** every implementation task runs the project skill suites (AGENTS.md): ponytail, hallmark for UI, mattpocock `to-spec → tdd → implement → code-review`.
+4. **Agent workflow:** every implementation task runs the project skill suites (AGENTS.md): ponytail, hallmark for UI, mattpocock `to-spec → tdd → implement → code-review`; every effort maintains `.scratch/<slug>/STATE.md` with evidence-gated verification (AX protocol, `docs/agents/agent-experience.md`).
 5. **Production VPS serves the live app only** — deployment additionally requires the runtime approval (issue 10).
 
 ## Where things live
@@ -51,6 +51,7 @@ tests/e2e                Playwright suites (client against the real API; site st
 - Section → phase coverage: [`docs/requirements/coverage-map.md`](./docs/requirements/coverage-map.md)
 - Phase program: `.scratch/phase-0-decisions/` … `.scratch/phase-7-advanced/` (created per phase)
 - Issue tracker: local markdown under `.scratch/` — see [`docs/agents/issue-tracker.md`](./docs/agents/issue-tracker.md)
+- Agent Experience protocol (per-effort STATE.md, verification gates, multi-agent rules): [`docs/agents/agent-experience.md`](./docs/agents/agent-experience.md)
 - Handoff for implementation agents: [`AGENT_IMPLEMENTATION_HANDOFF.md`](./AGENT_IMPLEMENTATION_HANDOFF.md)
 - UI design system (read before any UI work): [`design.md`](./design.md). Code in [`packages/design-system/`](./packages/design-system/): `tokens.css`, `base.css`, `components.css`, `layout.css` and `motion.css`, loaded together through `index.css` by both apps.
 - Client shell and navigation:

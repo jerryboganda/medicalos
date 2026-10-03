@@ -6,6 +6,8 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The spec is `.scratch/<feature-slug>/spec.md`
+- The effort's live working state is `.scratch/<feature-slug>/STATE.md` (see `agent-experience.md`)
+- Raw verification evidence is saved under `.scratch/<feature-slug>/evidence/` as trimmed excerpts; effort-less CI logs go to `.scratch/evidence/` (full dumps use the git-ignored `*.raw.log`)
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
