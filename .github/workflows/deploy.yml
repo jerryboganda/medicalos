@@ -253,8 +253,8 @@ jobs:
           envs: OIDC_CREDENTIAL_KEY,PACK_SIGNING_KEY,ZITADEL_ISSUER,ZITADEL_CLIENT_ID,ZITADEL_CLIENT_SECRET,ZITADEL_PROJECT_ID,ZITADEL_IDP_GOOGLE,ZITADEL_IDP_APPLE,VPS_ZITADEL_DB_PASSWORD,VPS_ZITADEL_MASTERKEY,VPS_ZITADEL_ADMIN_PASSWORD,VPS_ZITADEL_EXTERNAL_URL
           # Inline the script (script_file + script_arguments silently sent
           # NOTHING in v1: the debug log showed empty CMD with success).
-          # The script content is identical to infra/vps/deploy.sh — keep
-          # both in sync; the file remains the VPS-side source of truth.
+          # SOURCE OF TRUTH: infra/vps/deploy.sh — after editing that file,
+          # copy its body here and keep both in sync.
           script: |
             set -euo pipefail
             SHA='${{ github.sha }}'

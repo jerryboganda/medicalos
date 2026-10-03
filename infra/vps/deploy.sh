@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# VPS deploy for medicalos.polytronx.com — runs ON the VPS via SSH from the
-# GitHub Actions `deploy-vps` job. Pulls GHCR images (never builds), recreates
-# the two containers on the shared networks, health-checks, reports versions.
+# VPS deploy for medicalos.polytronx.com.
+#
+# SOURCE OF TRUTH WARNING: the GitHub Actions `deploy-vps` job inlines an
+# identical copy of this script (appleboy/ssh-action v1 silently ignores
+# script_file, so the inline copy is what actually runs in production).
+# After editing THIS file, copy the body into the `script:` block of
+# .github/workflows/deploy.yml (deploy-vps job) and keep both in sync.
+# Verified by: deploy run 35429618143 (all 5 jobs green, 2026-09-19).
 #
 # Usage: deploy.sh <sha>   (VPS_DATABASE_URL_AS_ARG exported by CI; the
-# appleboy action passes `envs` through, DATABASE_URL is set from it below
+# action passes it through envs, DATABASE_URL is set from it below
 # so the secret never appears in the SSH command line.)
 set -euo pipefail
 
