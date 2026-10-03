@@ -3,7 +3,8 @@
 //! trusted in-process transport and plays the platform's browser: it follows the
 //! login-initiation redirect, mints the signed id_token the platform would
 //! form-post, and verifies the tool's deep-linking response against the
-//! tool's own JWKS endpoint. API-only — no client surfaces involved.
+//! tool's own JWKS endpoint. It also covers the launch route's browser HTML
+//! handoff; client surfaces are covered by Playwright.
 
 mod lti_test_keys;
 
@@ -113,6 +114,18 @@ async fn bind_device(app: &Router, token: &str, device_key: &str) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+fn query_param(location: &str, key: &str) -> String {
+    location
+        .split_once('?')
+        .and_then(|(_, query)| {
+            query.split('&').find_map(|pair| {
+                let (name, value) = pair.split_once('=')?;
+                (name == key).then(|| value.to_owned())
+            })
+        })
+        .unwrap_or_else(|| panic!("missing {key} in {location}"))
 }
 
 /// Registration answers with the account; the token comes from a login.
@@ -300,6 +313,11 @@ async fn lti13_login_launch_deeplink_round_trip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{platform}");
+    let platform_id: uuid::Uuid = platform["platform_id"]
+        .as_str()
+        .expect("registered platform id")
+        .parse()
+        .expect("platform id is a UUID");
 
     // Third-party initiated login: 303 to the platform's auth URL with the
     // LTI OIDC parameters; state and nonce come back out of the Location.
@@ -334,28 +352,8 @@ async fn lti13_login_launch_deeplink_round_trip() {
     ] {
         assert!(location.contains(expected), "{expected} in {location}");
     }
-    let query: Vec<(String, String)> = location
-        .split('?')
-        .nth(1)
-        .expect("query")
-        .split('&')
-        .map(|pair| {
-            let (k, v) = pair.split_once('=').expect("pair");
-            (k.to_owned(), v.to_owned())
-        })
-        .collect();
-    let state_value = query
-        .iter()
-        .find(|(k, _)| k == "state")
-        .expect("state")
-        .1
-        .clone();
-    let nonce = query
-        .iter()
-        .find(|(k, _)| k == "nonce")
-        .expect("nonce")
-        .1
-        .clone();
+    let state_value = query_param(&location, "state");
+    let nonce = query_param(&location, "nonce");
 
     // The launch refuses a forged state before anything else happens.
     let id_token = mint_id_token(&nonce, "learner@lms.test", "LtiResourceLinkRequest", None);
@@ -419,6 +417,63 @@ async fn lti13_login_launch_deeplink_round_trip() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "state replay refused");
 
+    // A browser form_post negotiates the same verified launch as an HTML
+    // handoff document, which stores the session in the framed app origin.
+    let response = call_raw(
+        app.clone(),
+        get_request(
+            "/v1/lti/login?iss=https%3A%2F%2Flms.campus.test&login_hint=lms-user-1\
+             &target_link_uri=http%3A%2F%2F127.0.0.1%3A5173%2Fsession&client_id=client-123",
+        ),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "browser login redirects"
+    );
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("browser login redirect");
+    let browser_state = query_param(location, "state");
+    let browser_nonce = query_param(location, "nonce");
+    let browser_id_token = mint_id_token(
+        &browser_nonce,
+        "learner@lms.test",
+        "LtiResourceLinkRequest",
+        None,
+    );
+    let mut browser_request = form_request(
+        "/v1/lti/launch",
+        &[("id_token", &browser_id_token), ("state", &browser_state)],
+    );
+    browser_request
+        .headers_mut()
+        .insert(header::ACCEPT, "text/html".parse().expect("accept header"));
+    let browser_response = call_raw(app.clone(), browser_request).await;
+    assert_eq!(browser_response.status(), StatusCode::OK);
+    assert_eq!(
+        browser_response.headers()[header::CONTENT_TYPE],
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        browser_response.headers()[header::CACHE_CONTROL],
+        "no-store"
+    );
+    assert!(browser_response.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .expect("CSP header")
+        .contains("frame-ancestors https:"));
+    let browser_html = axum::body::to_bytes(browser_response.into_body(), 1024 * 1024)
+        .await
+        .expect("browser handoff body");
+    let browser_html = String::from_utf8(browser_html.to_vec()).expect("handoff is UTF-8");
+    assert!(browser_html.contains("localStorage.setItem('mlos_token'"));
+    assert!(browser_html.contains("/lti/handoff"));
+    assert!(!browser_html.contains("/lti/handoff?token="));
+
     // Tool JWKS serves the key the platform will verify us by.
     let (status, jwks) = call(app.clone(), get_request("/v1/lti/jwks.json")).await;
     assert_eq!(status, StatusCode::OK, "{jwks}");
@@ -427,18 +482,6 @@ async fn lti13_login_launch_deeplink_round_trip() {
 
     // Deep linking: launch as the staff user (linked by verified email),
     // then sign a response over chosen content items.
-    let dl_nonce = "dl-nonce";
-    let _dl_token = mint_id_token(
-        dl_nonce,
-        "lms-staff@example.test",
-        "LtiDeepLinkingRequest",
-        Some(json!({
-            "deep_link_return_url": format!("{lms_base}/deep-link-return"),
-            "accept_types": ["ltiResourceLink"],
-            "accept_presentation_document_targets": ["iframe"],
-            "data": {"picker": "exams"}
-        })),
-    );
     // The staff launch needs its own login initiation (fresh state).
     let response = call_raw(
         app.clone(),
@@ -454,24 +497,9 @@ async fn lti13_login_launch_deeplink_round_trip() {
         .and_then(|value| value.to_str().ok())
         .expect("redirect location")
         .to_owned();
-    let query: Vec<(String, String)> = location
-        .split('?')
-        .nth(1)
-        .expect("query")
-        .split('&')
-        .map(|pair| {
-            let (k, v) = pair.split_once('=').expect("pair");
-            (k.to_owned(), v.to_owned())
-        })
-        .collect();
-    let staff_state = query
-        .iter()
-        .find(|(k, _)| k == "state")
-        .expect("state")
-        .1
-        .clone();
+    let staff_state = query_param(&location, "state");
     let dl_id_token = mint_id_token(
-        &query.iter().find(|(k, _)| k == "nonce").expect("nonce").1,
+        &query_param(&location, "nonce"),
         "lms-staff@example.test",
         "LtiDeepLinkingRequest",
         Some(json!({
@@ -480,7 +508,6 @@ async fn lti13_login_launch_deeplink_round_trip() {
             "data": {"picker": "exams"}
         })),
     );
-    let _ = dl_nonce;
     let (status, launched) = call(
         app.clone(),
         form_request(
@@ -560,4 +587,59 @@ async fn lti13_login_launch_deeplink_round_trip() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["type"], "ltiResourceLink");
     assert_eq!(items[0]["title"], "Cardiology drill");
+
+    // An instructor may cancel a deep-link picker. The tool still signs an
+    // empty content_items array and returns it to the server-saved LMS URL.
+    sqlx::query(
+        "INSERT INTO lti_deep_link_pends (user_id, platform_id, settings, expires_at)
+         VALUES ($1, $2, $3, now() + interval '5 minutes')
+         ON CONFLICT (user_id) DO UPDATE SET
+            platform_id = $2, settings = $3, expires_at = now() + interval '5 minutes'",
+    )
+    .bind(_staff_id)
+    .bind(platform_id)
+    .bind(json!({
+        "deep_link_return_url": format!("{lms_base}/deep-link-return"),
+        "accept_types": ["ltiResourceLink"],
+        "data": {"picker": "cancel"}
+    }))
+    .execute(&state.pool)
+    .await
+    .expect("park cancellation settings");
+    let (status, empty_response) = call(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/v1/lti/deep-links")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {staff_token}"))
+            .body(Body::from(json!({"items": []}).to_string()))
+            .expect("empty deep-link response"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_response}");
+    let expected_return_url = format!("{lms_base}/deep-link-return");
+    assert_eq!(
+        empty_response["post_url"].as_str(),
+        Some(expected_return_url.as_str())
+    );
+    let empty_claims = jsonwebtoken::decode::<Value>(
+        empty_response["jwt"].as_str().expect("empty response JWT"),
+        &key,
+        &validation,
+    )
+    .expect("verify signed cancellation response")
+    .claims;
+    assert_eq!(
+        empty_claims["https://purl.imsglobal.org/spec/lti/claim/message_type"],
+        "LtiDeepLinkingResponse"
+    );
+    assert_eq!(
+        empty_claims["https://purl.imsglobal.org/spec/lti/claim/content_items"],
+        json!([])
+    );
+    assert_eq!(
+        empty_claims["https://purl.imsglobal.org/spec/lti/claim/data"]["picker"],
+        "cancel"
+    );
 }

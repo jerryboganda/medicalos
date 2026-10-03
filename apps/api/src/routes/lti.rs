@@ -4,10 +4,12 @@
 //! auth endpoint, it form-posts the signed `id_token` back to `launch`, and
 //! we verify it against the platform's JWKS and issue the shared app
 //! session. Deep-linking responses the platform verifies against OUR JWKS
-//! are signed with `LTI_TOOL_PRIVATE_KEY`. No UI here — launches answer
-//! JSON; a browser handoff page is a UI-gated follow-up.
+//! are signed with `LTI_TOOL_PRIVATE_KEY`. Browser form posts receive a
+//! same-origin HTML session handoff; API callers continue to receive JSON.
 
 use axum::extract::{Path, Query, State};
+use axum::http::header::{self, HeaderValue};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Form, Json};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -151,8 +153,9 @@ pub struct LaunchParams {
 /// id_token against its JWKS, link the LMS identity once, issue a session.
 pub async fn launch(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Form(params): Form<LaunchParams>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Response> {
     let pem = tool_key(&state)?;
 
     // Single-use: delete-first makes replay impossible even under races.
@@ -248,7 +251,7 @@ pub async fn launch(
         .await?;
     }
 
-    Ok(Json(json!({
+    let response = json!({
         "token": token,
         "user_id": user_id,
         "message_type": message_type,
@@ -256,7 +259,16 @@ pub async fn launch(
         "resource_link": payload.get(lti_claim("resource_link").as_str()),
         "roles": payload.get(lti_claim("roles").as_str()),
         "deep_linking_settings": deep_link_settings,
-    })))
+    });
+    if accepts_html(
+        headers
+            .get(header::ACCEPT)
+            .and_then(|value| value.to_str().ok()),
+    ) {
+        handoff_response(&response)
+    } else {
+        Ok(Json(response).into_response())
+    }
 }
 
 /// Tool JWKS: the public half the platform uses to verify our deep-linking
@@ -296,12 +308,7 @@ pub async fn deep_links(
     Json(req): Json<DeepLinkReq>,
 ) -> ApiResult<Json<Value>> {
     let pem = tool_key(&state)?;
-    if req.items.is_empty() || req.items.len() > 50 {
-        return Err(ApiError::unprocessable(
-            "invalid_items",
-            "deep linking needs 1-50 content items",
-        ));
-    }
+    validate_deep_link_items(&req.items)?;
     let pend = sqlx::query!(
         "DELETE FROM lti_deep_link_pends WHERE user_id = $1 AND expires_at > now()
          RETURNING platform_id, settings",
@@ -764,6 +771,201 @@ fn form_encode(pairs: &[(&str, &str)]) -> String {
         .map(|(k, v)| format!("{}={}", percent_encode(k), percent_encode(v)))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+fn accepts_html(accept: Option<&str>) -> bool {
+    let mut html_quality = None;
+    let mut json_quality = None;
+    let mut application_quality = None;
+    let mut wildcard_quality = None;
+
+    for media_range in accept.unwrap_or_default().split(',') {
+        let mut parts = media_range.split(';');
+        let media_type = parts.next().unwrap_or_default().trim();
+        let quality = parts
+            .filter_map(|parameter| parameter.trim().split_once('='))
+            .find_map(|(name, value)| {
+                name.trim().eq_ignore_ascii_case("q").then(|| {
+                    value
+                        .trim()
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|quality| quality.is_finite() && (0.0..=1.0).contains(quality))
+                        .unwrap_or(0.0)
+                })
+            })
+            .unwrap_or(1.0);
+        if media_type.eq_ignore_ascii_case("text/html") {
+            html_quality = Some(quality);
+        } else if media_type.eq_ignore_ascii_case("application/json") {
+            json_quality = Some(quality);
+        } else if media_type.eq_ignore_ascii_case("application/*") {
+            application_quality = Some(quality);
+        } else if media_type == "*/*" {
+            wildcard_quality = Some(quality);
+        }
+    }
+
+    let Some(html_quality) = html_quality else {
+        return false;
+    };
+    let json_quality = json_quality
+        .or(application_quality)
+        .or(wildcard_quality)
+        .unwrap_or(0.0);
+    html_quality > 0.0 && html_quality >= json_quality
+}
+
+fn handoff_response(payload: &Value) -> ApiResult<Response> {
+    let token = payload
+        .get("token")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let message_type = payload
+        .get("message_type")
+        .and_then(Value::as_str)
+        .ok_or_else(ApiError::internal)?;
+    let next = if message_type == MESSAGE_DEEP_LINK {
+        "/lti/deep-links"
+    } else {
+        "/lti/handoff"
+    };
+    let context = json!({
+        "message_type": message_type,
+        "resource_link": payload.get("resource_link"),
+        "deep_linking_settings": payload.get("deep_linking_settings"),
+    });
+    let bootstrap = script_safe_json(&json!({
+        "token": token,
+        "context": context,
+        "next": next,
+    }))?;
+    let nonce = random_token();
+    let body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Opening Medical OS</title></head><body><p role=\"status\">Opening Medical OS…</p><script nonce=\"{nonce}\">const launch={bootstrap};try{{localStorage.setItem('mlos_token',launch.token);try{{sessionStorage.setItem('mlos_lti_launch',JSON.stringify(launch.context))}}catch{{}}window.location.replace(launch.next)}}catch{{document.body.textContent='Medical OS could not save this session in browser storage. Allow site storage, then launch again from your LMS.'}}</script></body></html>"
+    );
+    let policy = format!(
+        "default-src 'none'; script-src 'nonce-{nonce}'; style-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors https:"
+    );
+    let mut response = Response::new(axum::body::Body::from(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&policy).map_err(|_| ApiError::internal())?,
+    );
+    Ok(response)
+}
+
+fn script_safe_json(value: &Value) -> ApiResult<String> {
+    let encoded = serde_json::to_string(value).map_err(|_| ApiError::internal())?;
+    Ok(encoded
+        .replace('&', "\\u0026")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029"))
+}
+
+fn validate_deep_link_items(items: &[Value]) -> ApiResult<()> {
+    if items.len() > 50 {
+        return Err(ApiError::unprocessable(
+            "invalid_items",
+            "deep linking supports at most 50 content items",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod browser_handoff_tests {
+    use super::*;
+    use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE};
+
+    #[test]
+    fn negotiates_html_only_for_an_html_navigation() {
+        assert!(accepts_html(Some(
+            "text/html,application/xhtml+xml,*/*;q=0.8"
+        )));
+        assert!(!accepts_html(Some("application/json, text/html;q=0.2")));
+        assert!(!accepts_html(Some("text/html;q=invalid")));
+        assert!(!accepts_html(Some("text/html;q=0.2,*/*;q=0.8")));
+        assert!(!accepts_html(Some("application/json")));
+        assert!(!accepts_html(Some("text/html;q=0")));
+        assert!(!accepts_html(None));
+    }
+
+    #[tokio::test]
+    async fn handoff_document_keeps_token_out_of_navigation_and_escapes_claims() {
+        let payload = json!({
+            "token": "browser-session-secret",
+            "message_type": MESSAGE_RESOURCE_LINK,
+            "resource_link": { "title": "</script><img src=x onerror=alert(1)>" },
+            "deep_linking_settings": null
+        });
+        let response = handoff_response(&payload).expect("valid launch context builds a handoff");
+
+        assert_eq!(response.headers()[CONTENT_TYPE], "text/html; charset=utf-8");
+        assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+        let policy = response.headers()[CONTENT_SECURITY_POLICY]
+            .to_str()
+            .expect("CSP header is text")
+            .to_owned();
+        let body = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .expect("handoff body is readable")
+            .to_bytes();
+        let body = String::from_utf8(body.to_vec()).expect("handoff document is UTF-8");
+
+        assert!(body.contains("browser-session-secret"));
+        assert!(body.contains("localStorage.setItem"));
+        assert!(body.contains("location.replace"));
+        assert!(body.contains("/lti/handoff"));
+        assert!(!body.contains("/lti/handoff?token="));
+        assert!(!body.contains("</script><img"));
+        let nonce = body
+            .split("<script nonce=\"")
+            .nth(1)
+            .and_then(|part| part.split('\"').next())
+            .expect("script has a CSP nonce");
+        assert!(policy.contains(&format!("'nonce-{nonce}'")));
+        assert!(policy.contains("frame-ancestors https:"));
+    }
+
+    #[tokio::test]
+    async fn deep_link_launch_handoff_opens_picker_with_platform_settings() {
+        let response = handoff_response(&json!({
+            "token": "browser-session-secret",
+            "message_type": MESSAGE_DEEP_LINK,
+            "deep_linking_settings": {
+                "deep_link_return_url": "https://lms.example.test/return",
+                "accept_types": ["ltiResourceLink"],
+                "data": "opaque-platform-state"
+            }
+        }))
+        .expect("valid deep-link launch builds a handoff");
+        let body = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .expect("handoff body is readable")
+            .to_bytes();
+        let body = String::from_utf8(body.to_vec()).expect("handoff document is UTF-8");
+
+        assert!(body.contains("/lti/deep-links"));
+        assert!(body.contains("https://lms.example.test/return"));
+        assert!(body.contains("opaque-platform-state"));
+    }
+
+    #[test]
+    fn deep_link_response_allows_cancel_but_caps_content_items() {
+        assert!(validate_deep_link_items(&[]).is_ok());
+        assert!(validate_deep_link_items(&vec![json!({}); 50]).is_ok());
+        assert!(validate_deep_link_items(&vec![json!({}); 51]).is_err());
+    }
 }
 
 #[cfg(test)]
