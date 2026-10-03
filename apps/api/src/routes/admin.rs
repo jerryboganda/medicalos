@@ -591,11 +591,14 @@ async fn transition_version(
     vid: Uuid,
     note: Option<&str>,
 ) -> ApiResult<serde_json::Value> {
+    let mut tx = state.pool.begin().await?;
     let v = sqlx::query!(
-        r#"SELECT status AS "status!", created_by FROM question_versions WHERE id = $1"#,
+        r#"SELECT status AS "status!", created_by, reviewed_by, rights_ref, source_ref,
+                  source_refs, media_refs
+           FROM question_versions WHERE id = $1 FOR UPDATE"#,
         vid
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("question_not_found"))?;
     match action {
@@ -606,15 +609,15 @@ async fn transition_version(
                     "only drafts can be submitted for review",
                 ));
             }
+            question_author_id(v.created_by)?;
             sqlx::query!(
-                "UPDATE question_versions SET status = 'in_review', created_by = $2 WHERE id = $1",
-                vid,
-                actor
+                "UPDATE question_versions SET status = 'in_review' WHERE id = $1",
+                vid
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
             audit(
-                &state.pool,
+                &mut *tx,
                 actor,
                 "assessment_submitted",
                 "question_version",
@@ -622,6 +625,7 @@ async fn transition_version(
                 json!({}),
             )
             .await?;
+            tx.commit().await?;
             Ok(json!({ "version_id": vid, "status": "in_review" }))
         }
         "approve" | "reject" => {
@@ -631,7 +635,7 @@ async fn transition_version(
                     "only in-review versions can be approved or rejected",
                 ));
             }
-            if v.created_by == Some(actor) {
+            if question_author_id(v.created_by)? == actor {
                 return Err(ApiError::forbidden(
                     "separation_violation",
                     "the author of an item cannot be its approver (§19.3)",
@@ -651,7 +655,7 @@ async fn transition_version(
                 decision,
                 note
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
             if action == "approve" {
                 sqlx::query!(
@@ -659,18 +663,18 @@ async fn transition_version(
                     vid,
                     actor
                 )
-                .execute(&state.pool)
+                .execute(&mut *tx)
                 .await?;
             } else {
                 sqlx::query!(
-                    "UPDATE question_versions SET status = 'draft' WHERE id = $1",
+                    "UPDATE question_versions SET status = 'draft', reviewed_by = NULL WHERE id = $1",
                     vid
                 )
-                .execute(&state.pool)
+                .execute(&mut *tx)
                 .await?;
             }
             audit(
-                &state.pool,
+                &mut *tx,
                 actor,
                 if action == "approve" {
                     "assessment_approved"
@@ -682,22 +686,78 @@ async fn transition_version(
                 json!({ "decision": decision }),
             )
             .await?;
+            tx.commit().await?;
             Ok(json!({ "version_id": vid, "status": new_status }))
         }
         "publish" => {
-            if v.status != "approved" {
+            let version = v;
+            if version.status != "approved" {
                 return Err(ApiError::conflict(
                     "invalid_transition",
                     "only approved versions can be published",
                 ));
             }
-            if v.created_by == Some(actor) {
+            if question_author_id(version.created_by)? == actor {
                 return Err(ApiError::forbidden(
                     "separation_violation",
                     "the author of an item cannot publish it (§19.3)",
                 ));
             }
-            let mut tx = state.pool.begin().await?;
+            if version.reviewed_by.is_none() || version.reviewed_by == version.created_by {
+                return Err(ApiError::forbidden(
+                    "independent_review_required",
+                    "an independent clinical review is required to publish a question",
+                ));
+            }
+            let rights_ref = version
+                .rights_ref
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    ApiError::forbidden(
+                        "rights_ref_required",
+                        "a current content-rights record is required to publish a question",
+                    )
+                })?
+                .to_ascii_uppercase();
+            let rights = sqlx::query!(
+                r#"SELECT revoked_at, valid_from, valid_to, permitted_uses,
+                          asset_refs, audiences, seat_limit
+                   FROM content_rights WHERE ref_code = $1 FOR UPDATE"#,
+                rights_ref
+            )
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                ApiError::forbidden(
+                    "rights_unavailable",
+                    "rights_ref is missing, revoked, or outside its validity dates",
+                )
+            })?;
+            let today = sqlx::query_scalar!(r#"SELECT clock_timestamp()::date AS "today!""#)
+                .fetch_one(&mut *tx)
+                .await?;
+            if rights.revoked_at.is_some()
+                || rights.valid_from > today
+                || rights.valid_to.is_some_and(|valid_to| valid_to < today)
+            {
+                return Err(ApiError::forbidden(
+                    "rights_unavailable",
+                    "rights_ref is missing, revoked, or outside its validity dates",
+                ));
+            }
+            if let Some((code, message)) = question_publication_rights_issue(
+                &rights.permitted_uses,
+                &rights.asset_refs,
+                &rights.audiences,
+                rights.seat_limit,
+                &version.source_ref,
+                &version.source_refs,
+                &version.media_refs,
+            ) {
+                return Err(ApiError::forbidden(code, message));
+            }
             let updated = sqlx::query!(
                 "UPDATE question_versions SET status = 'published', published_by = $2 WHERE id = $1 AND status = 'approved'",
                 vid,
@@ -731,13 +791,28 @@ async fn transition_version(
     }
 }
 
+fn question_author_id(created_by: Option<Uuid>) -> ApiResult<Uuid> {
+    created_by.ok_or_else(|| {
+        ApiError::forbidden(
+            "author_provenance_required",
+            "the question author is unknown; workflow transitions fail closed",
+        )
+    })
+}
+
 pub async fn assessment_workflow(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     headers: axum::http::HeaderMap,
     Json(req): Json<AssessmentWorkflowReq>,
 ) -> ApiResult<Json<AssessmentWorkflowResponse>> {
-    state.require_permission(&user, admin_headers(&headers), Permission::ClinicalApprove)?;
+    let permission = match req.action.as_str() {
+        "submit" => Permission::ContentAuthor,
+        "approve" | "reject" => Permission::ClinicalApprove,
+        "publish" => Permission::ContentPublish,
+        _ => Permission::ClinicalApprove,
+    };
+    state.require_permission(&user, admin_headers(&headers), permission)?;
     if req.version_ids.is_empty() {
         return Err(ApiError::unprocessable(
             "invalid_request",
@@ -1336,24 +1411,19 @@ async fn validate_rows(
         .collect();
     let mut active_rights = HashMap::new();
     for rights_ref in rights_refs {
-        if let Some(rights) = sqlx::query(
-            "SELECT permitted_uses, asset_refs FROM content_rights
-             WHERE ref_code = $1 AND revoked_at IS NULL
-               AND valid_from <= CURRENT_DATE
-               AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
-             FOR SHARE",
+        if let Some(rights) = sqlx::query!(
+            r#"SELECT permitted_uses, asset_refs
+               FROM content_rights
+               WHERE ref_code = $1 AND revoked_at IS NULL
+                 AND valid_from <= CURRENT_DATE
+                 AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+               FOR SHARE"#,
+            rights_ref
         )
-        .bind(&rights_ref)
         .fetch_optional(&mut *conn)
         .await?
         {
-            active_rights.insert(
-                rights_ref,
-                (
-                    rights.try_get::<serde_json::Value, _>("permitted_uses")?,
-                    rights.try_get::<serde_json::Value, _>("asset_refs")?,
-                ),
-            );
+            active_rights.insert(rights_ref, (rights.permitted_uses, rights.asset_refs));
         }
     }
     for (i, row) in rows.iter().enumerate() {
@@ -1419,39 +1489,109 @@ async fn validate_rows(
             });
             continue;
         };
-        let grants_use = |required: &str| {
-            permitted_uses
-                .as_array()
-                .is_some_and(|uses| uses.iter().any(|use_| use_.as_str() == Some(required)))
-        };
-        if !grants_use("display") || !grants_use("derivatives") {
+        if let Some((code, message)) = question_import_rights_issue(
+            permitted_uses,
+            asset_refs,
+            &row.source_ref,
+            &row.source_refs,
+            &row.media_refs,
+        ) {
             issues.push(RowIssue {
                 row: row_number,
-                code: "rights_use_not_permitted",
-                message: "the rights record must permit both display and derivatives".into(),
-            });
-            continue;
-        }
-        let covers_asset = |required: &str| {
-            asset_refs.as_array().is_some_and(|assets| {
-                assets
-                    .iter()
-                    .any(|asset| asset.as_str() == Some(required.trim()))
-            })
-        };
-        let source_refs = std::iter::once(row.source_ref.as_str())
-            .chain(row.source_refs.iter().map(String::as_str));
-        if source_refs.into_iter().any(|asset| !covers_asset(asset))
-            || row.media_refs.iter().any(|asset| !covers_asset(asset))
-        {
-            issues.push(RowIssue {
-                row: row_number,
-                code: "rights_asset_scope_incomplete",
-                message: "the rights record must cover the question source and every source/media reference".into(),
+                code,
+                message: message.into(),
             });
         }
     }
     Ok(issues)
+}
+
+fn grants_question_use(permitted_uses: &serde_json::Value, required: &str) -> bool {
+    permitted_uses
+        .as_array()
+        .is_some_and(|uses| uses.iter().any(|use_| use_.as_str() == Some(required)))
+}
+
+fn question_asset_scope_issue(
+    asset_refs: &serde_json::Value,
+    source_ref: &str,
+    source_refs: &[String],
+    media_refs: &[String],
+) -> Option<(&'static str, &'static str)> {
+    let covers_asset = |required: &str| {
+        asset_refs.as_array().is_some_and(|assets| {
+            assets
+                .iter()
+                .any(|asset| asset.as_str() == Some(required.trim()))
+        })
+    };
+    if std::iter::once(source_ref)
+        .chain(source_refs.iter().map(String::as_str))
+        .chain(media_refs.iter().map(String::as_str))
+        .any(|asset| !covers_asset(asset))
+    {
+        return Some((
+            "rights_asset_scope_incomplete",
+            "the rights record must cover the question source and every source/media reference",
+        ));
+    }
+    None
+}
+
+fn question_import_rights_issue(
+    permitted_uses: &serde_json::Value,
+    asset_refs: &serde_json::Value,
+    source_ref: &str,
+    source_refs: &[String],
+    media_refs: &[String],
+) -> Option<(&'static str, &'static str)> {
+    if !grants_question_use(permitted_uses, "display")
+        || !grants_question_use(permitted_uses, "derivatives")
+    {
+        return Some((
+            "rights_use_not_permitted",
+            "the rights record must permit both display and derivatives",
+        ));
+    }
+    question_asset_scope_issue(asset_refs, source_ref, source_refs, media_refs)
+}
+
+fn question_publication_rights_issue(
+    permitted_uses: &serde_json::Value,
+    asset_refs: &serde_json::Value,
+    audiences: &serde_json::Value,
+    seat_limit: Option<i32>,
+    source_ref: &str,
+    source_refs: &[String],
+    media_refs: &[String],
+) -> Option<(&'static str, &'static str)> {
+    if !grants_question_use(permitted_uses, "display") {
+        return Some((
+            "rights_use_not_permitted",
+            "the rights record must permit display",
+        ));
+    }
+    if !audiences.as_array().is_some_and(|values| {
+        values.is_empty()
+            || values.iter().any(|audience| {
+                audience.as_str().is_some_and(|value| {
+                    value.trim().eq_ignore_ascii_case("learners")
+                        || value.trim().eq_ignore_ascii_case("all")
+                })
+            })
+    }) {
+        return Some((
+            "rights_audience_not_permitted",
+            "the rights record must permit display to learners",
+        ));
+    }
+    if seat_limit.is_some() {
+        return Some((
+            "rights_seat_limited",
+            "seat-limited rights cannot be used until seat allocation is supported",
+        ));
+    }
+    question_asset_scope_issue(asset_refs, source_ref, source_refs, media_refs)
 }
 
 async fn import_rows(
@@ -1936,7 +2076,7 @@ pub struct ContentRightsReq {
     pub ref_code: String,
     pub licensor: String,
     pub territory: Option<String>,
-    /// Content use flags, including private_import and document_extraction.
+    /// Content use flags, including distribution, private_import and document_extraction.
     pub permitted_uses: Vec<String>,
     #[cfg_attr(feature = "type-export", ts(type = "string"))]
     pub valid_from: chrono::NaiveDate,
@@ -2019,6 +2159,7 @@ pub async fn create_content_rights(
         "embeddings",
         "ai",
         "derivatives",
+        "distribution",
         "translation",
         "private_import",
         "document_extraction",
@@ -2031,7 +2172,7 @@ pub async fn create_content_rights(
     {
         return Err(ApiError::unprocessable(
             "invalid_permitted_uses",
-            "permitted uses must draw from display, search, offline, embeddings, ai, derivatives, translation, private_import, document_extraction",
+            "permitted uses must draw from display, search, offline, embeddings, ai, derivatives, distribution, translation, private_import, document_extraction",
         ));
     }
     let mut uses = std::collections::HashSet::new();
@@ -3295,6 +3436,12 @@ pub async fn run_recovery_drill(
                   correct_index, key_learning_point, exam_tip, source_ref
            FROM question_versions
            WHERE chapter_id = ANY($1) AND status = 'published'
+             AND question_display_rights_active(
+                 rights_ref, source_ref, source_refs, media_refs
+             )
+             AND question_rights_active(
+                 'offline', rights_ref, source_ref, source_refs, media_refs
+             )
            ORDER BY chapter_id, id"#,
         &chapter_ids
     )

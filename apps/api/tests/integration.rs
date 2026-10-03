@@ -21,6 +21,17 @@ use uuid::Uuid;
 
 use api::{router, schema, seed, state::AppState};
 
+#[path = "full_platform/lti.rs"]
+mod full_platform_lti;
+#[path = "full_platform/question_rights.rs"]
+mod full_platform_question_rights;
+#[path = "full_platform/readiness.rs"]
+mod full_platform_readiness;
+#[path = "full_platform/retests.rs"]
+mod full_platform_retests;
+#[path = "full_platform/sessions.rs"]
+mod full_platform_sessions;
+
 static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone)]
@@ -144,6 +155,7 @@ async fn setup_with(zitadel: Option<api::state::ZitadelConfig>) -> Arc<AppState>
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel,
         lti_tool_key: None,
+        lti_jwks_transport: Arc::new(api::routes::lti::GuardedHttpsJwksTransport),
     })
 }
 
@@ -203,6 +215,16 @@ fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) ->
 
 async fn register_and_login(app: Router) -> String {
     let email = format!("learner-{}@example.test", Uuid::new_v4());
+    register_and_login_with_email(app, email).await
+}
+
+async fn register_and_login_with_email(app: Router, email: String) -> String {
+    let token = register_and_login_unbound_with_email(app.clone(), email).await;
+    bind_test_device(&app, &token, "integration-test-device").await;
+    token
+}
+
+async fn register_and_login_unbound_with_email(app: Router, email: String) -> String {
     let (_, v) = call(
         app.clone(),
         request(
@@ -228,6 +250,20 @@ async fn register_and_login(app: Router) -> String {
     v["token"].as_str().expect("token").to_string()
 }
 
+async fn bind_test_device(app: &Router, token: &str, device_key: &str) {
+    let (status, body) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/me/devices",
+            Some(token),
+            Some(serde_json::json!({"device_key": device_key})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "register test device: {body}");
+}
+
 async fn register(app: Router, prefix: String) -> (Uuid, String) {
     let email = format!("{prefix}-{}@example.test", Uuid::new_v4());
     let (status, registered) = call(
@@ -243,7 +279,7 @@ async fn register(app: Router, prefix: String) -> (Uuid, String) {
     assert_eq!(status, StatusCode::OK, "register: {registered}");
     let user_id: Uuid = registered["user_id"].as_str().unwrap().parse().unwrap();
     let (status, login) = call(
-        app,
+        app.clone(),
         request(
             "POST",
             "/v1/auth/login",
@@ -253,7 +289,9 @@ async fn register(app: Router, prefix: String) -> (Uuid, String) {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "login: {login}");
-    (user_id, login["token"].as_str().unwrap().to_string())
+    let token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &token, "integration-test-device").await;
+    (user_id, token)
 }
 
 async fn pack_resources(
@@ -273,7 +311,8 @@ async fn pack_resources(
             Some(serde_json::json!({
                 "device_id": device_id,
                 "chapters": chapters,
-                "question_version_ids": question_version_ids
+                "question_version_ids": question_version_ids,
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -791,8 +830,10 @@ async fn retest_queue_and_note_collections_and_screening() {
             "POST",
             &format!("/v1/practice/sessions/{sid}/answers"),
             Some(&token),
-            Some(serde_json::json!({"item_index": 0, "chosen_index": 0,
-                                    "idempotency_key": "rt-key-1"})),
+            Some(
+                serde_json::json!({"item_index": 0, "chosen_index": 1, "confidence": "sure",
+                                    "idempotency_key": "rt-key-1"}),
+            ),
         ),
     )
     .await;
@@ -803,6 +844,18 @@ async fn retest_queue_and_note_collections_and_screening() {
         .parse()
         .unwrap();
 
+    let (status, submission) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v1/practice/sessions/{sid}/submit"),
+            Some(&token),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{submission}");
+
     // Wrong re-test: compresses to +1 day and resets passes.
     let (status, r1) = call(
         app.clone(),
@@ -811,7 +864,7 @@ async fn retest_queue_and_note_collections_and_screening() {
             "/v1/me/retests/result",
             Some(&token),
             Some(
-                serde_json::json!({"question_version_id": vid, "correct": false,
+                serde_json::json!({"question_version_id": vid, "session_id": sid, "item_index": 0,
                                     "idempotency_key": "rt-res-1"}),
             ),
         ),
@@ -820,6 +873,17 @@ async fn retest_queue_and_note_collections_and_screening() {
     assert_eq!(status, StatusCode::OK, "{r1}");
     assert_eq!(r1["passes"], 0);
 
+    let (correct_sid, correct_vid) = full_platform_retests::submitted_practice(
+        &app,
+        &token,
+        ids.chapter3,
+        Some(0),
+        "sure",
+        false,
+    )
+    .await;
+    assert_eq!(correct_vid, vid);
+
     let (status, r2) = call(
         app.clone(),
         request(
@@ -827,7 +891,7 @@ async fn retest_queue_and_note_collections_and_screening() {
             "/v1/me/retests/result",
             Some(&token),
             Some(
-                serde_json::json!({"question_version_id": vid, "correct": true,
+                serde_json::json!({"question_version_id": vid, "session_id": correct_sid, "item_index": 0,
                                     "idempotency_key": "rt-res-2"}),
             ),
         ),
@@ -935,6 +999,8 @@ async fn account_export_and_signed_pack_manifest() {
     assert_eq!(status, StatusCode::OK, "{export}");
     assert!(export["account"]["email"].is_string());
     assert_eq!(export["attempts"].as_array().unwrap().len(), 1);
+    assert!(export["attempts"][0]["id"].as_str().is_some());
+    assert!(export["attempts"][0]["session_id"].as_str().is_some());
     assert!(export["notes"].is_array());
     assert!(export["card_reviews"].is_array());
     assert!(export["portfolio"].is_array());
@@ -1075,7 +1141,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "export-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": [version_id]
+                "question_version_ids": [version_id],
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1112,7 +1179,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "other-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": [version_id]
+                "question_version_ids": [version_id],
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1129,7 +1197,8 @@ async fn account_export_and_signed_pack_manifest() {
             Some(serde_json::json!({
                 "device_id": "export-device",
                 "chapters": [ids.chapter3],
-                "question_version_ids": too_many_ids
+                "question_version_ids": too_many_ids,
+                "request_nonce": "ab".repeat(32)
             })),
         ),
     )
@@ -1196,6 +1265,175 @@ fn canonical_test_value(value: &Value) -> String {
             )
         }
     }
+}
+
+#[tokio::test]
+async fn account_export_is_versioned_and_contains_only_the_requesting_learners_records() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+    let other_learner = register_and_login(app.clone()).await;
+
+    let learner_institution = Uuid::new_v4();
+    let other_institution = Uuid::new_v4();
+    for (institution_id, name, token) in [
+        (learner_institution, "Learner institution", &learner),
+        (other_institution, "Other institution", &other_learner),
+    ] {
+        sqlx::query("INSERT INTO institutions (id, name) VALUES ($1, $2)")
+            .bind(institution_id)
+            .bind(name)
+            .execute(&state.pool)
+            .await
+            .expect("institution fixture");
+        let (status, me) = call(
+            app.clone(),
+            request("GET", "/v1/me", Some(token.as_str()), None),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{me}");
+        let user_id: Uuid = me["user_id"].as_str().unwrap().parse().unwrap();
+        sqlx::query("INSERT INTO institution_members (institution_id, user_id, role) VALUES ($1, $2, 'learner')")
+            .bind(institution_id)
+            .bind(user_id)
+            .execute(&state.pool)
+            .await
+            .expect("membership fixture");
+    }
+
+    let mut learner_note_id = None;
+    for (token, title, body) in [
+        (&learner, "My export note", "learner-owned note"),
+        (
+            &other_learner,
+            "Other export note",
+            "another learner's private note",
+        ),
+    ] {
+        let (status, note) = call(
+            app.clone(),
+            request(
+                "POST",
+                "/v1/notes",
+                Some(token.as_str()),
+                Some(serde_json::json!({"title": title, "body": body})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{note}");
+        if title == "My export note" {
+            learner_note_id = note["note_id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok());
+        }
+    }
+    let learner_note_id = learner_note_id.expect("created note id");
+    sqlx::query(
+        "INSERT INTO note_concepts (note_id, concept) VALUES ($1, 'learner-owned-concept')",
+    )
+    .bind(learner_note_id)
+    .execute(&state.pool)
+    .await
+    .expect("note concept fixture");
+
+    let (status, export) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(export["archive"]["format"], "medical-os-account-export");
+    assert_eq!(export["archive"]["version"], 1);
+    assert_eq!(export["archive"]["maximum_inline_bytes"], 8_388_608);
+    assert_eq!(export["account"]["max_devices"], 5);
+    for category in [
+        "profile_and_settings",
+        "learning_evidence",
+        "study_materials",
+        "planning",
+        "coach_and_memory",
+        "notifications_and_engagement",
+        "library_activity_and_import_metadata",
+        "professional_learning",
+        "community_and_competition",
+        "institution_memberships",
+        "identity_and_device_metadata",
+        "entitlements_and_offline_metadata",
+    ] {
+        assert!(export["archive"]["included_categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item.as_str() == Some(category)));
+    }
+    for category in [
+        "credentials_and_sessions",
+        "protected_learning_content",
+        "private_document_content",
+        "other_learners_private_records",
+        "rights_inactive_question_linked_text",
+        "provider_and_signed_proof_material",
+        "shared_simulation_transcripts",
+        "operator_only_records",
+    ] {
+        assert!(export["archive"]["excluded_categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == category));
+    }
+    let notes = export["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["title"], "My export note");
+    assert_eq!(notes[0]["id"], learner_note_id.to_string());
+    assert_eq!(
+        export["note_concepts"][0]["note_id"],
+        learner_note_id.to_string()
+    );
+    assert_eq!(
+        export["note_concepts"][0]["concept"],
+        "learner-owned-concept"
+    );
+    let memberships = export["institution_memberships"].as_array().unwrap();
+    assert_eq!(memberships.len(), 1);
+    assert_eq!(
+        memberships[0]["institution_id"],
+        learner_institution.to_string()
+    );
+    assert_eq!(memberships[0]["institution_name"], "Learner institution");
+    assert!(!export.to_string().contains(&other_institution.to_string()));
+    assert!(!export
+        .to_string()
+        .contains("another learner's private note"));
+    for forbidden in ["password_hash", "token_hash", "device_key", "pack_key"] {
+        assert!(!export.to_string().contains(forbidden));
+    }
+    assert!(!export.to_string().contains("integration-test-device"));
+}
+
+#[tokio::test]
+async fn oversized_account_export_fails_without_returning_a_partial_archive() {
+    let _g = LOCK.lock().await;
+    let state = setup().await;
+    let app = router(state.clone());
+    let learner = register_and_login(app.clone()).await;
+    let (status, me) = call(app.clone(), request("GET", "/v1/me", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let user_id: Uuid = me["user_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO notes (id, user_id, title, body) VALUES ($1, $2, 'large test note', repeat('x', 9 * 1024 * 1024))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .execute(&state.pool)
+    .await
+    .expect("large note fixture");
+
+    let (status, response) = call(app, request("GET", "/v1/me/export", Some(&learner), None)).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{response}");
+    assert_eq!(response["error"]["code"], "account_export_too_large");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("No partial archive was created"));
+    assert!(response.get("archive").is_none());
 }
 
 #[tokio::test]
@@ -3376,11 +3614,12 @@ async fn qb16_fixed_resolution_requires_and_links_a_published_correction() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, rights_ref, source_refs, media_refs
            )
            SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
                   vignette || ' (corrected)', lead_in, options, correct_index,
-                  key_learning_point, exam_tip, high_yield, source_ref
+                  key_learning_point, exam_tip, high_yield, source_ref,
+                  rights_ref, source_refs, media_refs
            FROM question_versions WHERE id = $2"#,
     )
     .bind(corrected_version_id)
@@ -5231,8 +5470,8 @@ async fn editorial_hierarchy_question_and_import_flow() {
     assert_eq!(status, StatusCode::OK, "{applied2}");
     let batch2: Uuid = applied2["batch_id"].as_str().unwrap().parse().unwrap();
 
-    // Imported items go through the same §19.3 gate before pool entry:
-    // a second admin submits the batch, the importer approves and publishes.
+    // Imported items keep their true author through the §19.3 gate:
+    // the importer submits and a different operator approves and publishes.
     let co_reviewer = register_and_login(app.clone()).await;
     let vids: Vec<Uuid> = applied2["created"]
         .as_array()
@@ -5245,7 +5484,7 @@ async fn editorial_hierarchy_question_and_import_flow() {
         admin_req(
             "POST",
             "/v1/admin/assessment-workflow",
-            Some(&co_reviewer),
+            Some(&token),
             Some(serde_json::json!({"action": "submit", "version_ids": vids})),
         ),
     )
@@ -5259,7 +5498,7 @@ async fn editorial_hierarchy_question_and_import_flow() {
             admin_req(
                 "POST",
                 "/v1/admin/assessment-workflow",
-                Some(&token),
+                Some(&co_reviewer),
                 Some(serde_json::json!({"action": action, "version_ids": vids})),
             ),
         )
@@ -5546,6 +5785,7 @@ async fn coach_daily_allowance_enforced() {
         public_app_url: "http://127.0.0.1:5173".into(),
         zitadel: None,
         lti_tool_key: None,
+        lti_jwks_transport: Arc::new(api::routes::lti::GuardedHttpsJwksTransport),
     });
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
@@ -6343,10 +6583,10 @@ async fn source_change_quarantines_impacts_and_recalculates_corrected_attempts()
         r#"INSERT INTO question_versions
              (id, question_id, version, status, chapter_id, difficulty, vignette,
               lead_in, options, correct_index, key_learning_point, exam_tip,
-              high_yield, source_ref)
+              high_yield, source_ref, rights_ref, source_refs, media_refs)
            SELECT $1, question_id, version + 1, 'published', chapter_id, difficulty,
                   vignette || ' reviewed', lead_in, options, $3, key_learning_point,
-                  exam_tip, high_yield, source_ref
+                  exam_tip, high_yield, source_ref, rights_ref, source_refs, media_refs
            FROM question_versions WHERE id = $2"#,
     )
     .bind(replacement_version_id)
@@ -7652,6 +7892,7 @@ async fn pregen_tutoring_generated_and_cached() {
     let receipt = &before_answer_resources["receipt"];
     assert_eq!(receipt["device_id"], "device-a");
     assert_eq!(receipt["exam_id"], ids.exam_id.to_string());
+    assert_eq!(receipt["request_nonce"], "ab".repeat(32));
     let receipt_checksums: Vec<String> = receipt["checksums"]
         .as_array()
         .unwrap()
@@ -7666,10 +7907,12 @@ async fn pregen_tutoring_generated_and_cached() {
         .collect();
     assert_eq!(receipt_checksums, resource_checksums);
     let issued_at = receipt["issued_at"].as_str().unwrap().to_owned();
+    let request_nonce = receipt["request_nonce"].as_str().unwrap().to_owned();
     let message = api::routes::packs::pack_download_receipt_message(
         "device-a",
         ids.exam_id,
         &issued_at,
+        &request_nonce,
         &receipt_checksums,
     );
     let key_bytes: [u8; 32] = hex_bytes(before_tutor_answer["verification_key"].as_str().unwrap())
@@ -7687,6 +7930,15 @@ async fn pregen_tutoring_generated_and_cached() {
             .is_ok(),
         "receipt signature must verify against the manifest key"
     );
+    let (recorded_nonce, recorded_issued_at): (String, String) = sqlx::query_as(
+        "SELECT request_nonce, issued_at FROM pack_download_receipts WHERE signature = $1",
+    )
+    .bind(receipt["signature"].as_str().unwrap())
+    .fetch_one(&state.pool)
+    .await
+    .expect("complete signed receipt payload is retained for audit");
+    assert_eq!(recorded_nonce, request_nonce);
+    assert_eq!(recorded_issued_at, issued_at);
     let receipt_rows: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM pack_download_receipts WHERE device_id = 'device-a'",
     )
@@ -7694,6 +7946,27 @@ async fn pregen_tutoring_generated_and_cached() {
     .await
     .expect("receipt rows");
     assert!(receipt_rows >= 1, "receipts are recorded server-side");
+
+    let (invalid_nonce_status, invalid_nonce) = call(
+        app.clone(),
+        request(
+            "POST",
+            &format!("/v2/packs/{}/resources", ids.exam_id),
+            Some(&token),
+            Some(serde_json::json!({
+                "device_id": "device-a",
+                "chapters": [ids.chapter3],
+                "question_version_ids": [manifest_question_ids[0]],
+                "request_nonce": "not-a-valid-challenge"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        invalid_nonce_status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "malformed request nonce: {invalid_nonce}"
+    );
 
     // A tutor answer receives its cards with the immediate feedback; the
     // session detail also restores them after a reload.
@@ -8255,6 +8528,17 @@ async fn settings_admin_gate_and_update() {
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
     let token = register_and_login(app.clone()).await;
+    // Create genuine submitted evidence before this test sets the free
+    // allowance to zero; the re-test interval must still use live settings.
+    let (retest_sid, retest_vid) = full_platform_retests::submitted_practice(
+        &app,
+        &token,
+        ids.chapter3,
+        Some(0),
+        "sure",
+        false,
+    )
+    .await;
 
     let (status, defaults) = call(
         app.clone(),
@@ -8387,8 +8671,9 @@ async fn settings_admin_gate_and_update() {
             "/v1/me/retests/result",
             Some(&token),
             Some(serde_json::json!({
-                "question_version_id": ids.question_versions[1],
-                "correct": true,
+                "question_version_id": retest_vid,
+                "session_id": retest_sid,
+                "item_index": 0,
                 "idempotency_key": "settings-retest-interval"
             })),
         ),
@@ -10692,7 +10977,8 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     let state = setup().await;
     let app = router(state.clone());
     let ids = seed::seed(&state.pool).await.expect("seed");
-    let token = register_and_login(app.clone()).await;
+    let email = format!("completion-kernel-{}@example.test", Uuid::new_v4());
+    let token = register_and_login_unbound_with_email(app.clone(), email.clone()).await;
 
     let (status, device) = call(
         app.clone(),
@@ -10729,6 +11015,26 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     assert_eq!(status, StatusCode::OK, "{rev}");
     assert_eq!(rev["revoked"], true);
 
+    let (status, _) = call(
+        app.clone(),
+        request("GET", "/v1/me/devices", Some(&token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "revoked bearer must fail");
+
+    let (status, login) = call(
+        app.clone(),
+        request(
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(serde_json::json!({"email": email, "password": "correct horse"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "fresh login: {login}");
+    let token = login["token"].as_str().expect("fresh bearer").to_string();
+
     let (status, devices) = call(
         app.clone(),
         request("GET", "/v1/me/devices", Some(&token), None),
@@ -10736,6 +11042,8 @@ async fn completion_kernel_account_exam_and_readiness_flow() {
     .await;
     assert_eq!(status, StatusCode::OK, "{devices}");
     assert!(devices["devices"][0]["revoked_at"].is_string(), "{devices}");
+
+    bind_test_device(&app, &token, "ci-browser").await;
 
     // EX-06: learner accommodations are stored per key and overwrite on update.
     let (status, acc) = call(
@@ -11182,6 +11490,12 @@ async fn institution_program_curriculum_and_coverage_are_tenant_scoped() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{logged_in}");
+        bind_test_device(
+            &app,
+            logged_in["token"].as_str().expect("learner bearer"),
+            "program-coverage-device",
+        )
+        .await;
         if index == 0 {
             first_learner_token = logged_in["token"].as_str().unwrap().to_owned();
         }
@@ -12649,11 +12963,12 @@ async fn qotd_is_shared_and_stable_per_exam() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, source_refs, media_refs, rights_ref
            )
            SELECT $1, $2, version + 1, 'published', $3, difficulty,
                   vignette || ' (new daily pool item)', lead_in, options,
-                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref,
+                  source_refs, media_refs, rights_ref
            FROM question_versions WHERE id = $4"#,
     )
     .bind(added_question_version)
@@ -12815,11 +13130,12 @@ async fn qotd_is_shared_and_stable_per_exam() {
         r#"INSERT INTO question_versions (
                id, question_id, version, status, chapter_id, difficulty,
                vignette, lead_in, options, correct_index, key_learning_point,
-               exam_tip, high_yield, source_ref
+               exam_tip, high_yield, source_ref, source_refs, media_refs, rights_ref
            )
            SELECT $1, $2, 1, 'published', $3, difficulty,
                   'Question from the second exam', lead_in, options,
-                  correct_index, key_learning_point, exam_tip, high_yield, source_ref
+                  correct_index, key_learning_point, exam_tip, high_yield, source_ref,
+                  source_refs, media_refs, rights_ref
            FROM question_versions WHERE id = $4"#,
     )
     .bind(second_question_version)
@@ -13070,6 +13386,15 @@ async fn assessment_author_reviewer_publisher_separation() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "SEPARATION-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     // A fresh chapter so pool visibility is provable without seed noise.
     let (status, node) = call(
@@ -13099,7 +13424,8 @@ async fn assessment_author_reviewer_publisher_separation() {
         ],
         "correct_index": 0,
         "key_learning_point": "Authors cannot approve their own items.",
-        "source_ref": "Fixture"
+        "source_ref": "Fixture",
+        "rights_ref": "SEPARATION-FIXTURE"
     });
     let (status, created) = call(
         app.clone(),
@@ -13154,7 +13480,8 @@ async fn assessment_author_reviewer_publisher_separation() {
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "approved", "{wf}");
 
-    // The reviewer may publish — only the author is barred.
+    // A different operator may publish through the fixture's break-glass
+    // token; role-specific publication refusal is covered separately.
     let (status, wf) = workflow(app.clone(), &reviewer, "publish", [vid]).await;
     assert_eq!(status, StatusCode::OK, "{wf}");
     assert_eq!(wf["results"][0]["status"], "published", "{wf}");
@@ -13364,6 +13691,7 @@ async fn institution_analytics_minimum_group_size_and_tenant_isolation() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let member_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &member_token, "analytics-member-device").await;
 
     let (status, cohort) = call(
         app.clone(),
@@ -13505,6 +13833,15 @@ async fn reserved_family_form_session_and_ai_gate() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "RESERVED-FIXTURE",
+        &["display", "offline"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     // Fresh chapter so pool visibility is provable without seed noise.
     let (status, node) = call(
@@ -13541,7 +13878,8 @@ async fn reserved_family_form_session_and_ai_gate() {
                 ],
                 "correct_index": 0,
                 "key_learning_point": "Reserved families stay behind their form.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "RESERVED-FIXTURE"
             })),
         ),
     )
@@ -13757,6 +14095,15 @@ async fn assisted_evidence_never_becomes_community_signal() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "ASSISTED-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
     let coached = register_and_login(app.clone()).await;
     let clean = register_and_login(app.clone()).await;
     let declared = register_and_login(app.clone()).await;
@@ -13794,7 +14141,8 @@ async fn assisted_evidence_never_becomes_community_signal() {
                 ],
                 "correct_index": 0,
                 "key_learning_point": "Assisted answers are not community evidence.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "ASSISTED-FIXTURE"
             })),
         ),
     )
@@ -13919,8 +14267,25 @@ async fn retest_serves_unattempted_family_variant() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "FAMILY-VARIANT-FIXTURE",
+        &["display"],
+        &["Fixture"],
+        None,
+    )
+    .await;
     let learner = register_and_login(app.clone()).await;
-    let original = ids.question_versions[0];
+    let (original_sid, original) = full_platform_retests::submitted_practice(
+        &app,
+        &learner,
+        ids.chapter3,
+        Some(1),
+        "sure",
+        false,
+    )
+    .await;
 
     // The learner failed the original: a re-test card exists (+1 day).
     let (status, res) = call(
@@ -13931,7 +14296,7 @@ async fn retest_serves_unattempted_family_variant() {
             Some(&learner),
             Some(serde_json::json!({
                 "question_version_id": format!("{original}"),
-                "correct": false, "idempotency_key": "variant-res-1"
+                "session_id": original_sid, "item_index": 0, "idempotency_key": "variant-res-1"
             })),
         ),
     )
@@ -13971,7 +14336,8 @@ async fn retest_serves_unattempted_family_variant() {
                 ],
                 "correct_index": 1,
                 "key_learning_point": "Variants probe the same concept differently.",
-                "source_ref": "Fixture"
+                "source_ref": "Fixture",
+                "rights_ref": "FAMILY-VARIANT-FIXTURE"
             })),
         ),
     )
@@ -14080,6 +14446,35 @@ async fn retest_serves_unattempted_family_variant() {
         serde_json::json!(format!("{original}")),
         "{queue}"
     );
+
+    // A real submitted sibling answer grades the original card.
+    let (status, variant_result) = call(
+        app,
+        request(
+            "POST",
+            "/v1/me/retests/result",
+            Some(&learner),
+            Some(serde_json::json!({
+                "question_version_id": original, "session_id": sid, "item_index": 0,
+                "idempotency_key": "variant-graded-receipt"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{variant_result}");
+    assert_eq!(
+        variant_result["card_version_id"],
+        serde_json::json!(original)
+    );
+    assert_eq!(
+        variant_result["question_version_id"],
+        serde_json::json!(variant)
+    );
+    // This sibling's key is B (the original's key is A), and its answer
+    // did not declare certainty. Grade the sibling's key, not the card's.
+    assert_eq!(variant_result["correct"], true, "{variant_result}");
+    assert_eq!(variant_result["rating"], "hard", "{variant_result}");
+    assert_eq!(variant_result["passes"], 0, "{variant_result}");
 }
 
 #[tokio::test]
@@ -19394,6 +19789,14 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let first_token = first_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &first_token, "first-device").await;
+    let (status, initial_policy) = call(
+        app.clone(),
+        request("GET", "/v1/me/session-policy", Some(&first_token), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "policy read: {initial_policy}");
+    assert_eq!(initial_policy["single_active_session"], false);
 
     // Turn the policy on with the FIRST token: it retires itself (by design,
     // the next login is the surviving one).
@@ -19427,6 +19830,18 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let second_token = second_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &second_token, "first-device").await;
+    let (status, enabled_policy) = call(
+        app.clone(),
+        request("GET", "/v1/me/session-policy", Some(&second_token), None),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "policy persists across sign-in: {enabled_policy}"
+    );
+    assert_eq!(enabled_policy["single_active_session"], true);
 
     // A fresh login retires the previous active session.
     let (_, third_login) = call(
@@ -19440,6 +19855,7 @@ async fn single_active_session_policy_and_device_limit() {
     )
     .await;
     let third_token = third_login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &third_token, "first-device").await;
     let (status, _) = call(
         app.clone(),
         request("GET", "/v1/me/today", Some(&second_token), None),
@@ -19688,6 +20104,15 @@ async fn variants_trends_drills_regression_and_qti() {
     let ids = seed::seed(&state.pool).await.expect("seed");
     let author = register_and_login(app.clone()).await;
     let reviewer = register_and_login(app.clone()).await;
+    create_question_import_rights(
+        app.clone(),
+        &author,
+        "VARIANT-SOURCE-RIGHTS",
+        &["display", "distribution"],
+        &["Fixture"],
+        None,
+    )
+    .await;
 
     let (status, denied_search) = call(
         app.clone(),
@@ -19699,9 +20124,10 @@ async fn variants_trends_drills_regression_and_qti() {
 
     // QB-02: author a second version on an existing family, through the gate.
     let original = ids.question_versions[0];
-    sqlx::query("UPDATE question_versions SET rights_ref = $2 WHERE id = $1")
+    sqlx::query("UPDATE question_versions SET rights_ref = $2, source_ref = $3 WHERE id = $1")
         .bind(original)
         .bind("VARIANT-SOURCE-RIGHTS")
+        .bind("Fixture")
         .execute(&state.pool)
         .await
         .expect("fixture rights provenance");
@@ -19997,6 +20423,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     let password_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &password_token, "oidc-password-device").await;
 
     let (_, institution) = call(
         app.clone(),
@@ -20044,6 +20471,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     )
     .await;
     let password_token = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &password_token, "oidc-password-device").await;
 
     let config_uri = format!("/v1/admin/institutions/{institution_id}/sso/oidc");
     let (status, denied) = call(
@@ -20197,6 +20625,7 @@ async fn institution_oidc_login_verifies_pkce_nonce_and_scoped_subject() {
     assert_eq!(status, StatusCode::OK, "{session}");
     assert_json_keys(&session, &["token"]);
     let sso_token = session["token"].as_str().unwrap();
+    bind_test_device(&app, sso_token, "oidc-sso-device").await;
 
     let (status, _) = call(
         app.clone(),
@@ -20627,6 +21056,7 @@ async fn off02_concurrent_session_submit_returns_one_persisted_receipt() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let learner = login["token"].as_str().unwrap().to_string();
+    bind_test_device(&app, &learner, "zitadel-flow-learner-device").await;
 
     let (status, created) = call(
         app.clone(),
@@ -23146,6 +23576,7 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     async fn insert_question(
         pool: &sqlx::PgPool,
         chapter_id: Uuid,
+        rights_ref: &str,
         vignette: &str,
         hint: Option<&str>,
     ) -> Uuid {
@@ -23160,10 +23591,10 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
             r#"INSERT INTO question_versions
                  (id, question_id, version, status, chapter_id, difficulty,
                   vignette, lead_in, options, correct_index, key_learning_point,
-                  source_ref, hint)
+                  source_ref, rights_ref, hint)
                VALUES ($1, $2, 1, 'published', $3, 'medium', $4,
                        'Which option is correct?', $5, 0, 'Synthetic key point',
-                       'Synthetic SR-08 fixture', $6)"#,
+                       'Synthetic SR-08 fixture', $6, $7)"#,
         )
         .bind(version_id)
         .bind(question_id)
@@ -23173,6 +23604,7 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
             { "text": "Correct", "rationale": "Correct fixture answer." },
             { "text": "Incorrect", "rationale": "Incorrect fixture answer." }
         ]))
+        .bind(rights_ref)
         .bind(hint)
         .execute(pool)
         .await
@@ -23229,16 +23661,44 @@ async fn retest_automatic_enrollment_on_practice_session_submission() {
     .execute(&state.pool)
     .await
     .expect("prepare seeded questions");
+    let fixture_rights_ref = "SYNTHETIC-SR08-RETEST-FIXTURE";
+    sqlx::query(
+        "INSERT INTO content_rights
+             (id, ref_code, licensor, permitted_uses, valid_from, asset_refs, audiences)
+         VALUES ($1, $2, 'Synthetic SR-08 test fixture', $3, DATE '2020-01-01', $4, $5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture_rights_ref)
+    .bind(serde_json::json!(["display"]))
+    .bind(serde_json::json!(["Synthetic SR-08 fixture"]))
+    .bind(serde_json::json!(["learners"]))
+    .execute(&state.pool)
+    .await
+    .expect("create scoped rights for direct test questions");
     let q_hint = insert_question(
         &state.pool,
         ids.chapter1,
+        fixture_rights_ref,
         "Hint fixture",
         Some("A saved hint"),
     )
     .await;
-    let q_correct_sure = insert_question(&state.pool, ids.chapter1, "Correct fixture", None).await;
-    let q_unpublished =
-        insert_question(&state.pool, ids.chapter1, "Unpublished fixture", None).await;
+    let q_correct_sure = insert_question(
+        &state.pool,
+        ids.chapter1,
+        fixture_rights_ref,
+        "Correct fixture",
+        None,
+    )
+    .await;
+    let q_unpublished = insert_question(
+        &state.pool,
+        ids.chapter1,
+        fixture_rights_ref,
+        "Unpublished fixture",
+        None,
+    )
+    .await;
     let versions = [
         q_no_attempt,
         q_skip,
@@ -24135,9 +24595,11 @@ async fn role_session_with(
     assert_eq!(status, StatusCode::OK, "{reg}");
     let user_id: Uuid = reg["user_id"].as_str().unwrap().parse().unwrap();
     let roles: Vec<String> = roles.iter().map(|r| r.to_string()).collect();
-    api::auth::issue_session_with(&state.pool, user_id, &roles, mfa)
+    let token = api::auth::issue_session_with(&state.pool, user_id, &roles, mfa)
         .await
-        .expect("role session")
+        .expect("role session");
+    bind_test_device(app, &token, "role-session-device").await;
+    token
 }
 
 /// Plan auth-zitadel phase 1: the API is Zitadel's OIDC client. A sign-in
@@ -24228,7 +24690,9 @@ async fn platform_sign_in_maps_zitadel_roles_and_mfa_onto_the_session() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{session}");
-        Ok(session["token"].as_str().unwrap().to_owned())
+        let token = session["token"].as_str().unwrap().to_owned();
+        bind_test_device(app, &token, "zitadel-test-device").await;
+        Ok(token)
     }
 
     let (_, options) = call(
@@ -24422,6 +24886,7 @@ async fn admin_reset_password_revokes_sessions_and_reauths() {
     .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let victim = login["token"].as_str().unwrap().to_owned();
+    bind_test_device(&app, &victim, "password-reset-victim-device").await;
 
     // Plain sessions cannot reset passwords.
     let (status, body) = call(
@@ -24597,6 +25062,19 @@ async fn qotd_reminder_honours_preferences_quiet_hours_and_dedupes() {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        // This fixture must be eligible at every UTC hour. The quiet-hours
+        // case below explicitly sets its own wrapping window afterwards.
+        let (status, preferences) = call(
+            app.clone(),
+            request(
+                "PATCH",
+                "/v1/me/notifications",
+                Some(token),
+                Some(serde_json::json!({"quiet_hours_start": 0, "quiet_hours_end": 0})),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{preferences}");
     }
 
     let token_a = register_and_login(app.clone()).await;

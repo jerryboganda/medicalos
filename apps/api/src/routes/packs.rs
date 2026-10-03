@@ -1,7 +1,5 @@
-//! TRUST-02/OFF-01: full account export (GDPR-style) and signed pack
-//! manifests. Export covers every table that stores this learner's content
-//! or evidence. Legacy manifests use HMAC; lease-bound browser packs use
-//! publicly verifiable Ed25519 signatures (§22).
+//! OFF-01: signed pack manifests. Legacy manifests use HMAC; lease-bound
+//! browser packs use publicly verifiable Ed25519 signatures (§22).
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -93,6 +91,8 @@ pub struct PackResourcesReq {
     pub device_id: String,
     pub chapters: Vec<Uuid>,
     pub question_version_ids: Vec<Uuid>,
+    /// Fresh 32-byte client challenge encoded as 64 hexadecimal characters.
+    pub request_nonce: String,
 }
 
 #[derive(Serialize)]
@@ -128,6 +128,8 @@ pub struct PackDownloadReceipt {
     /// RFC3339 — this exact string is part of the signed payload.
     pub issued_at: String,
     pub checksums: Vec<String>,
+    /// Echoes the fresh client challenge covered by the server signature.
+    pub request_nonce: String,
     pub signature: String,
 }
 
@@ -138,6 +140,7 @@ pub fn pack_download_receipt_message(
     device_id: &str,
     exam_id: Uuid,
     issued_at: &str,
+    request_nonce: &str,
     checksums: &[String],
 ) -> String {
     let payload = json!({
@@ -145,6 +148,7 @@ pub fn pack_download_receipt_message(
         "device_id": device_id,
         "exam_id": exam_id,
         "issued_at": issued_at,
+        "request_nonce": request_nonce,
     });
     let mut canonical = String::new();
     canonical_value(&payload, &mut canonical);
@@ -236,71 +240,6 @@ pub struct PackLeaseListResponse {
 )]
 pub struct PackLeaseRevokedResponse {
     pub revoked: bool,
-}
-
-pub async fn export_account(
-    State(state): State<Arc<AppState>>,
-    user: AuthUser,
-) -> ApiResult<Json<serde_json::Value>> {
-    let profile = sqlx::query!(
-        "SELECT email, created_at, tier FROM users WHERE id = $1",
-        user.user_id
-    )
-    .fetch_one(&state.pool)
-    .await?;
-    let attempts = sqlx::query!(
-        r#"SELECT question_version_id, chosen_index, correct, confidence, assisted, created_at
-           FROM attempts WHERE user_id = $1 ORDER BY created_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let notes = sqlx::query!(
-        "SELECT title, body, created_at FROM notes WHERE user_id = $1 ORDER BY created_at",
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let reviews = sqlx::query!(
-        r#"SELECT card_id, rating, reviewed_at FROM review_events
-           WHERE user_id = $1 ORDER BY reviewed_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    let portfolio = sqlx::query!(
-        r#"SELECT kind, title, detail, occurred_on FROM portfolio_entries
-           WHERE user_id = $1 ORDER BY created_at"#,
-        user.user_id
-    )
-    .fetch_all(&state.pool)
-    .await?;
-    Ok(Json(json!({
-        "exported_at": chrono::Utc::now(),
-        "account": {
-            "email": profile.email,
-            "tier": profile.tier,
-            "created_at": profile.created_at,
-        },
-        "attempts": attempts.into_iter().map(|r| json!({
-            "question_version_id": r.question_version_id,
-            "chosen_index": r.chosen_index,
-            "correct": r.correct,
-            "confidence": r.confidence,
-            "assisted": r.assisted,
-            "created_at": r.created_at,
-        })).collect::<Vec<_>>(),
-        "notes": notes.into_iter().map(|r| json!({
-            "title": r.title, "body": r.body, "created_at": r.created_at,
-        })).collect::<Vec<_>>(),
-        "card_reviews": reviews.into_iter().map(|r| json!({
-            "card_id": r.card_id, "rating": r.rating, "reviewed_at": r.reviewed_at,
-        })).collect::<Vec<_>>(),
-        "portfolio": portfolio.into_iter().map(|r| json!({
-            "kind": r.kind, "title": r.title, "detail": r.detail,
-            "occurred_on": r.occurred_on,
-        })).collect::<Vec<_>>(),
-    })))
 }
 
 // ---- OFF-01: signed pack manifests -------------------------------------------
@@ -435,6 +374,12 @@ pub async fn legacy_pack_manifest(
             r#"SELECT id, encode(sha256((vignette || lead_in)::bytea), 'hex') AS "checksum!"
                FROM question_versions
                WHERE chapter_id = $1 AND status = 'published'
+                 AND question_display_rights_active(
+                     rights_ref, source_ref, source_refs, media_refs
+                 )
+                 AND question_rights_active(
+                     'offline', rights_ref, source_ref, source_refs, media_refs
+                 )
                ORDER BY id"#,
             chapter_id
         )
@@ -572,6 +517,12 @@ pub(crate) async fn tutoring_cards_for_questions(
            FROM pregen_tutoring p
            JOIN question_versions q ON q.id = p.question_version_id
            WHERE p.question_version_id = ANY($1) AND q.status = 'published'
+             AND question_display_rights_active(
+                 q.rights_ref, q.source_ref, q.source_refs, q.media_refs
+             )
+             AND question_rights_active(
+                 'derivatives', q.rights_ref, q.source_ref, q.source_refs, q.media_refs
+             )
              AND NOT EXISTS (
                  SELECT 1 FROM reserved_questions rq
                  JOIN assessment_forms f ON f.id = rq.form_id
@@ -685,8 +636,14 @@ pub async fn pack_manifest(
     }
 
     let published_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)::bigint FROM question_versions
-         WHERE chapter_id = ANY($1) AND status = 'published'",
+        "SELECT COUNT(*)::bigint FROM question_versions qv
+         WHERE qv.chapter_id = ANY($1) AND qv.status = 'published'
+           AND question_display_rights_active(
+               qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+           )
+           AND question_rights_active(
+               'offline', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+           )",
     )
     .bind(&chapter_ids)
     .fetch_one(&state.pool)
@@ -705,6 +662,12 @@ pub async fn pack_manifest(
                   key_learning_point, exam_tip, source_ref
            FROM question_versions
            WHERE chapter_id = ANY($1) AND status = 'published'
+             AND question_display_rights_active(
+                 rights_ref, source_ref, source_refs, media_refs
+             )
+             AND question_rights_active(
+                 'offline', rights_ref, source_ref, source_refs, media_refs
+             )
            ORDER BY chapter_id, id"#,
         &chapter_ids
     )
@@ -763,6 +726,17 @@ pub async fn pack_resources(
     Json(req): Json<PackResourcesReq>,
 ) -> ApiResult<Json<PackResourcesResponse>> {
     validate_device_id(&req.device_id)?;
+    if req.request_nonce.len() != 64
+        || !req
+            .request_nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_pack_request_nonce",
+            "request_nonce must contain 32 bytes encoded as 64 hexadecimal characters",
+        ));
+    }
     if req.chapters.is_empty() || req.chapters.len() > 50 {
         return Err(ApiError::unprocessable(
             "invalid_chapters",
@@ -827,6 +801,12 @@ pub async fn pack_resources(
            JOIN curriculum_nodes c ON c.id = qv.chapter_id
            WHERE qv.id = ANY($1) AND qv.chapter_id = ANY($2)
              AND c.exam_id = $3 AND qv.status = 'published'
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
+             AND question_rights_active(
+                 'offline', qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
            ORDER BY qv.id"#,
         &req.question_version_ids,
         &req.chapters,
@@ -835,6 +815,31 @@ pub async fn pack_resources(
     .fetch_all(&state.pool)
     .await?;
     if rows.len() != req.question_version_ids.len() {
+        let rights_unavailable: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM question_versions qv
+                 JOIN curriculum_nodes c ON c.id = qv.chapter_id
+                 WHERE qv.id = ANY($1) AND qv.chapter_id = ANY($2)
+                   AND c.exam_id = $3 AND qv.status = 'published'
+                   AND (
+                       NOT question_display_rights_active(
+                           qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                       )
+                       OR NOT question_rights_active(
+                           'offline', qv.rights_ref, qv.source_ref,
+                           qv.source_refs, qv.media_refs
+                       )
+                   )
+             )",
+        )
+        .bind(&req.question_version_ids)
+        .bind(&req.chapters)
+        .bind(exam_id)
+        .fetch_one(&state.pool)
+        .await?;
+        if rights_unavailable {
+            return Err(crate::question_rights::unavailable_error());
+        }
         return Err(ApiError::unprocessable(
             "invalid_pack_resources",
             "every requested question must be published in the leased exam chapters",
@@ -864,15 +869,21 @@ pub async fn pack_resources(
     let checksums: Vec<String> = resources.iter().map(|r| r.checksum.clone()).collect();
     let issued_at = chrono::Utc::now();
     let issued_at_rfc3339 = issued_at.to_rfc3339();
-    let message =
-        pack_download_receipt_message(&req.device_id, exam_id, &issued_at_rfc3339, &checksums);
+    let message = pack_download_receipt_message(
+        &req.device_id,
+        exam_id,
+        &issued_at_rfc3339,
+        &req.request_nonce,
+        &checksums,
+    );
     let signature = hex(&ed25519_signing_key(&state)?
         .sign(message.as_bytes())
         .to_bytes());
     sqlx::query(
         "INSERT INTO pack_download_receipts
-           (id, user_id, exam_id, device_id, checksums, signature, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+           (id, user_id, exam_id, device_id, checksums, signature, created_at,
+            request_nonce, issued_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(Uuid::new_v4())
     .bind(user.user_id)
@@ -881,6 +892,8 @@ pub async fn pack_resources(
     .bind(json!(checksums))
     .bind(&signature)
     .bind(issued_at)
+    .bind(&req.request_nonce)
+    .bind(&issued_at_rfc3339)
     .execute(&state.pool)
     .await?;
     let receipt = PackDownloadReceipt {
@@ -888,6 +901,7 @@ pub async fn pack_resources(
         exam_id,
         issued_at: issued_at_rfc3339,
         checksums,
+        request_nonce: req.request_nonce,
         signature,
     };
     Ok(Json(PackResourcesResponse { resources, receipt }))

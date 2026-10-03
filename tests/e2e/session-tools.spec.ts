@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 const API = process.env.E2E_API_BASE ?? 'http://127.0.0.1:8080';
 
@@ -18,6 +19,7 @@ test('session tools autosave notes and marks and replay an offline answer', asyn
 		body: JSON.stringify({ email, password: 'correct horse battery' })
 	});
 	const { token } = await login.json();
+	const deviceKey = await registerE2EDevice(API, token);
 	const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 	const today = await fetch(`${API}/v1/me/today`, { headers: auth }).then((r) => r.json());
 	const sessionResponse = await fetch(`${API}/v1/practice/sessions`, {
@@ -33,7 +35,7 @@ test('session tools autosave notes and marks and replay an offline answer', asyn
 	const { session_id: sessionId } = await sessionResponse.json();
 
 	await page.setViewportSize({ width: 375, height: 812 });
-	await page.addInitScript((value) => localStorage.setItem('mlos_token', value), token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	await page.goto(`/session/${sessionId}`);
 	await expect(page.getByTestId('session-workspace')).toBeVisible();
 

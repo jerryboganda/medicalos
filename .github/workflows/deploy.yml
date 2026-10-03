@@ -1,7 +1,7 @@
-# Production deployment — medicalos.polytronx.com on the shared VPS.
-# Builds run entirely in GitHub Actions (AGENTS.md compute policy); the VPS
-# serves only the live app — it pulls the GHCR images, it never builds.
-# Sequence per owner mandate: repo PUBLIC during deploy+verify, then PRIVATE.
+# Exact-CI-gated images and release artifacts for the authorized Orca stack.
+# Builds run entirely in GitHub Actions (AGENTS.md compute policy).
+# Legacy remote jobs remain disabled unless the owner explicitly selects that
+# runtime through MEDICALOS_RUNTIME_TARGET; this task does not operate the VPS.
 
 name: deploy
 
@@ -15,6 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: write
   # OPS-03: keyless image signing — cosign signs with an OIDC-derived
@@ -30,7 +31,19 @@ env:
   DOMAIN: medicalos.polytronx.com
 
 jobs:
+  ci-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const requireSuccessfulCi = require('./scripts/release-ci-gate.cjs');
+            await requireSuccessfulCi({github, context, core});
+
   sqlx-cache:
+    needs: ci-gate
     # The committed .sqlx query cache goes stale as checked queries evolve;
     # SQLX_OFFLINE builds (docker image + release binary) fail on any query
     # missing from it. Regenerate from the live schema here so every offline
@@ -112,6 +125,7 @@ jobs:
             "${{ env.REGISTRY }}/medicalos-api@${{ steps.push.outputs.digest }}"
 
   web-image:
+    needs: ci-gate
     # Static client SPA + same-origin /api/ proxy → GHCR. The client is
     # baked with VITE_API_BASE=/api (same origin reaches the API container
     # through the /api/ prefix, so no CORS configuration is needed).
@@ -156,6 +170,7 @@ jobs:
             "${{ env.REGISTRY }}/medicalos-web@${{ steps.push.outputs.digest }}"
 
   site-image:
+    needs: ci-gate
     # Static Astro marketing site → GHCR (ADR 0002: prod origin is an open
     # owner decision; today's consumer is the local Orca staging stack).
     runs-on: ubuntu-latest
@@ -202,6 +217,9 @@ jobs:
           path: target/release/api
 
   deploy-vps:
+    # The authorized target is Orca; legacy remote operations need an
+    # explicit runtime selection outside this task.
+    if: vars.MEDICALOS_RUNTIME_TARGET == 'vps'
     # Ship to the shared VPS over SSH: pull GHCR images, recreate the two
     # containers, health-check. Lightweight by design (AGENTS.md compute
     # policy) — all compiling happened in the jobs above.

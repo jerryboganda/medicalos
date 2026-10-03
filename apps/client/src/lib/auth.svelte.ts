@@ -3,8 +3,12 @@ export const auth = $state({ token: '' });
 const KEY = 'mlos_token';
 
 export function loadAuth(): string {
-	if (!auth.token && typeof localStorage !== 'undefined') {
-		auth.token = localStorage.getItem(KEY) ?? '';
+	if (!auth.token) {
+		try {
+			auth.token = localStorage.getItem(KEY) ?? '';
+		} catch {
+			// Keep an in-memory bearer when browser storage is unavailable.
+		}
 	}
 	return auth.token;
 }

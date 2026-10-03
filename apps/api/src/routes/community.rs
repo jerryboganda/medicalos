@@ -1166,7 +1166,7 @@ pub async fn duel_by_token(
 }
 
 async fn pick_duel_questions(
-    state: &AppState,
+    connection: &mut sqlx::PgConnection,
     duel_id: Uuid,
     chapter_id: Option<Uuid>,
     count: i32,
@@ -1177,6 +1177,9 @@ async fn pick_duel_questions(
            WHERE qv.status = 'published'
              AND c.exam_id = (SELECT exam_id FROM duels WHERE id = $1)
              AND ($2::uuid IS NULL OR qv.chapter_id = $2)
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
              AND NOT EXISTS (SELECT 1 FROM question_reports r
                              WHERE r.question_version_id = qv.id AND r.status = 'quarantined')
              AND NOT EXISTS (SELECT 1 FROM reserved_questions rq
@@ -1186,7 +1189,7 @@ async fn pick_duel_questions(
         chapter_id,
         count as i64
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *connection)
     .await?;
     Ok(rows.into_iter().map(|r| r.id).collect())
 }
@@ -1196,12 +1199,13 @@ pub async fn accept_duel(
     user: AuthUser,
     Path(duel_id): Path<Uuid>,
 ) -> ApiResult<Json<AcceptDuelResponse>> {
+    let mut tx = state.pool.begin().await?;
     let duel = sqlx::query!(
         "SELECT id, challenger, opponent, status, chapter_id, question_count
-         FROM duels WHERE id = $1",
+         FROM duels WHERE id = $1 FOR UPDATE",
         duel_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("duel_not_found"))?;
     if duel.opponent != user.user_id {
@@ -1216,13 +1220,15 @@ pub async fn accept_duel(
             "this duel is no longer pending",
         ));
     }
-    // Same selection rules for both sides: random published, non-reserved,
-    // non-quarantined questions from the chapter (or exam-wide without one).
+    // Select both full, currently displayable pools while holding the duel row
+    // lock so a concurrent acceptance cannot create a second pair of sessions.
     let challenger_qs =
-        pick_duel_questions(&state, duel.id, duel.chapter_id, duel.question_count).await?;
+        pick_duel_questions(&mut tx, duel.id, duel.chapter_id, duel.question_count).await?;
     let opponent_qs =
-        pick_duel_questions(&state, duel.id, duel.chapter_id, duel.question_count).await?;
-    if challenger_qs.is_empty() || opponent_qs.is_empty() {
+        pick_duel_questions(&mut tx, duel.id, duel.chapter_id, duel.question_count).await?;
+    if challenger_qs.len() != duel.question_count as usize
+        || opponent_qs.len() != duel.question_count as usize
+    {
         return Err(ApiError::unprocessable(
             "empty_pool",
             "no questions available for this duel",
@@ -1241,7 +1247,7 @@ pub async fn accept_duel(
             uid,
             duel.chapter_id
         )
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
         for (i, vid) in qs.iter().enumerate() {
             let idx = i as i16;
@@ -1253,7 +1259,7 @@ pub async fn accept_duel(
                 idx,
                 vid
             )
-            .execute(&state.pool)
+            .execute(&mut *tx)
             .await?;
         }
         sqlx::query!(
@@ -1262,12 +1268,13 @@ pub async fn accept_duel(
             uid,
             sid
         )
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
     }
     sqlx::query!("UPDATE duels SET status = 'active' WHERE id = $1", duel.id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(AcceptDuelResponse {
         accepted: true,
         your_session_id: opponent_session,

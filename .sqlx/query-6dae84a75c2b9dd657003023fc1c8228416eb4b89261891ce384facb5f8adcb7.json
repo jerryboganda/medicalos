@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.question_version_id, a.chosen_index, a.confidence,\n                  (a.assisted OR si.hint_used) AS \"assisted!\", qv.correct_index\n           FROM attempts a\n           JOIN session_items si ON si.session_id = a.session_id AND si.item_index = a.item_index\n           JOIN question_versions qv ON qv.id = a.question_version_id\n           JOIN questions q ON q.id = qv.question_id\n           JOIN question_versions card ON card.id = $3\n           JOIN questions cq ON cq.id = card.question_id\n           WHERE a.user_id = $1 AND a.session_id = $2 AND a.item_index = $4\n             AND qv.status = 'published' AND card.status = 'published'\n             AND (qv.id = card.id OR (q.family_id IS NOT NULL AND q.family_id = cq.family_id))\n           FOR SHARE OF a",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 3,
+        "name": "confidence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "assisted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "correct_index",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "6dae84a75c2b9dd657003023fc1c8228416eb4b89261891ce384facb5f8adcb7"
+}

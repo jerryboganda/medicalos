@@ -5,6 +5,7 @@ pub mod agent;
 pub mod auth;
 pub mod authz;
 pub mod error;
+pub mod question_rights;
 pub mod routes;
 pub mod schema;
 pub mod seed;
@@ -19,9 +20,11 @@ use tower_http::cors::CorsLayer;
 pub fn router(state: Arc<state::AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readiness))
         // Same-origin production prefix: nginx serves the API under /api/
         // (medicalos.polytronx.com/api/* -> medicalos-api:8080/*).
         .route("/api/healthz", get(health_json))
+        .route("/api/readyz", get(readiness))
         .route("/api/version.json", get(version))
         .route("/v1/auth/register", post(routes::auth::register))
         .route("/v1/auth/login", post(routes::auth::login))
@@ -250,7 +253,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/v1/me/review-debt", get(routes::review::review_debt))
         .route(
             "/v1/me/session-policy",
-            axum::routing::patch(routes::accounts::set_session_policy),
+            get(routes::accounts::get_session_policy).patch(routes::accounts::set_session_policy),
         )
         .route(
             "/v1/admin/articles/{article_id}/media",
@@ -629,7 +632,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/v1/concepts/{concept}/notes",
             get(routes::retest::notes_by_concept),
         )
-        .route("/v1/me/export", get(routes::packs::export_account))
+        .route("/v1/me/export", get(routes::accounts::export_account))
         .route(
             "/v1/packs/{exam_id}/manifest",
             get(routes::packs::legacy_pack_manifest),
@@ -957,7 +960,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
         .route("/api/v1/me/review-debt", get(routes::review::review_debt))
         .route(
             "/api/v1/me/session-policy",
-            axum::routing::patch(routes::accounts::set_session_policy),
+            get(routes::accounts::get_session_policy).patch(routes::accounts::set_session_policy),
         )
         .route(
             "/api/v1/admin/articles/{article_id}/media",
@@ -1338,7 +1341,7 @@ pub fn router(state: Arc<state::AppState>) -> Router {
             "/api/v1/concepts/{concept}/notes",
             get(routes::retest::notes_by_concept),
         )
-        .route("/api/v1/me/export", get(routes::packs::export_account))
+        .route("/api/v1/me/export", get(routes::accounts::export_account))
         .route(
             "/api/v1/packs/{exam_id}/manifest",
             get(routes::packs::legacy_pack_manifest),
@@ -1448,6 +1451,30 @@ async fn healthz() -> &'static str {
 async fn health_json() -> axum::Json<serde_json::Value> {
     // JSON twin for the plain-text healthz (lets the deploy probe parse it).
     axum::Json(serde_json::json!({"status": "ok"}))
+}
+
+async fn readiness(
+    axum::extract::State(state): axum::extract::State<Arc<state::AppState>>,
+) -> (axum::http::StatusCode, axum::Json<serde_json::Value>) {
+    let available = matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            sqlx::query_scalar!("SELECT 1").fetch_one(&state.pool),
+        )
+        .await,
+        Ok(Ok(_))
+    );
+    if available {
+        (
+            axum::http::StatusCode::OK,
+            axum::Json(serde_json::json!({"status": "ok"})),
+        )
+    } else {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"status": "unavailable"})),
+        )
+    }
 }
 
 async fn version() -> axum::Json<serde_json::Value> {

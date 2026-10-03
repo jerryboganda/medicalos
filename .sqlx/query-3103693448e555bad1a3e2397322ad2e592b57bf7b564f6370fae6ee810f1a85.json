@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT device_id, created_at FROM auth_sessions\n         WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()\n           AND revoked_at IS NULL FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "3103693448e555bad1a3e2397322ad2e592b57bf7b564f6370fae6ee810f1a85"
+}

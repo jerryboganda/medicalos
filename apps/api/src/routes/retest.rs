@@ -155,6 +155,14 @@ pub async fn notes_by_concept(
         r#"SELECT n.id, n.title, n.body FROM notes n
            JOIN note_concepts nc ON nc.note_id = n.id
            WHERE n.user_id = $1 AND nc.concept = $2
+             AND (n.source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = n.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
            ORDER BY n.updated_at DESC"#,
         user.user_id,
         concept.to_lowercase()
@@ -173,17 +181,31 @@ pub async fn notes_by_concept(
 #[derive(Deserialize)]
 pub struct RetestResultReq {
     pub question_version_id: Uuid,
-    pub correct: bool,
+    pub session_id: Option<Uuid>,
+    pub item_index: Option<i16>,
     pub idempotency_key: String,
 }
 
-/// Record a re-test outcome: wrong compresses the next interval, correct
-/// extends it deterministically. Idempotent by key.
+/// Grade a submitted practice answer on the server. One attempt supplies
+/// one durable receipt; the receipt and scheduler update commit together.
 pub async fn retest_result(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(req): Json<RetestResultReq>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let (Some(session_id), Some(item_index)) = (req.session_id, req.item_index) else {
+        return Err(ApiError::unprocessable(
+            "retest_evidence_required",
+            "identify a submitted practice session and item",
+        ));
+    };
+    let key = req.idempotency_key.trim();
+    if key.is_empty() || key.len() > 200 || item_index < 0 {
+        return Err(ApiError::unprocessable(
+            "invalid_retest_request",
+            "use a nonnegative item index and an idempotency key of 1-200 characters",
+        ));
+    }
     let raw_intervals = crate::routes::settings::current_i64_list(
         &state.pool,
         "retest_intervals_days",
@@ -191,67 +213,184 @@ pub async fn retest_result(
     )
     .await?;
     let intervals = crate::routes::settings::effective_retest_intervals(raw_intervals);
-    let replay = sqlx::query!(
-        "SELECT id FROM retest_history
-         WHERE user_id = $1 AND idempotency_key = $2",
-        user.user_id,
-        req.idempotency_key
+    let mut tx = state.pool.begin().await?;
+    // Same session-then-user order as practice submission. The user lock
+    // serializes different evidence/keys without blocking FK key-share reads.
+    let session = sqlx::query!(
+        "SELECT status, preset, submitted_at FROM practice_sessions
+         WHERE id = $1 AND user_id = $2 FOR NO KEY UPDATE",
+        session_id,
+        user.user_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("retest_evidence_not_found"))?;
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE",
+        user.user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    let submitted_at = session
+        .submitted_at
+        .filter(|_| session.status == "submitted");
+    let Some(submitted_at) = submitted_at else {
+        return Err(ApiError::conflict(
+            "retest_session_not_submitted",
+            "submit the practice session before recording a re-test",
+        ));
+    };
+    if !matches!(session.preset.as_str(), "tutor" | "timed" | "revision") {
+        return Err(ApiError::unprocessable(
+            "invalid_retest_session",
+            "re-test evidence must come from practice, not an examination",
+        ));
+    }
+    let replay = sqlx::query!(
+        r#"SELECT rh.question_version_id, rh.result_payload,
+                  a.session_id AS "session_id?", a.item_index AS "item_index?"
+           FROM retest_history rh LEFT JOIN attempts a ON a.id = rh.attempt_id
+           WHERE rh.user_id = $1 AND rh.idempotency_key = $2
+           ORDER BY rh.created_at DESC LIMIT 1"#,
+        user.user_id,
+        key
+    )
+    .fetch_optional(&mut *tx)
     .await?;
-    if replay.is_some() {
-        return Ok(Json(json!({ "already_recorded": true })));
+    if let Some(replay) = replay {
+        if replay.question_version_id != req.question_version_id
+            || replay.session_id != Some(session_id)
+            || replay.item_index != Some(item_index)
+        {
+            return Err(ApiError::conflict(
+                "retest_key_conflict",
+                "this key already identifies different or legacy evidence",
+            ));
+        }
+        let mut result = replay.result_payload.ok_or_else(ApiError::internal)?;
+        result["already_recorded"] = json!(true);
+        tx.commit().await?;
+        return Ok(Json(result));
     }
 
-    let now = Utc::now();
+    let attempt = sqlx::query!(
+        r#"SELECT a.id, a.question_version_id, a.chosen_index, a.confidence,
+                  (a.assisted OR si.hint_used) AS "assisted!", qv.correct_index
+           FROM attempts a
+           JOIN session_items si ON si.session_id = a.session_id AND si.item_index = a.item_index
+           JOIN question_versions qv ON qv.id = a.question_version_id
+           JOIN questions q ON q.id = qv.question_id
+           JOIN question_versions card ON card.id = $3
+           JOIN questions cq ON cq.id = card.question_id
+           WHERE a.user_id = $1 AND a.session_id = $2 AND a.item_index = $4
+             AND qv.status = 'published' AND card.status = 'published'
+             AND (qv.id = card.id OR (q.family_id IS NOT NULL AND q.family_id = cq.family_id))
+           FOR SHARE OF a"#,
+        user.user_id,
+        session_id,
+        req.question_version_id,
+        item_index
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("retest_evidence_not_found"))?;
+    let used = sqlx::query_scalar!(
+        r#"SELECT EXISTS(SELECT 1 FROM retest_history WHERE attempt_id = $1) AS "used!""#,
+        attempt.id
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if used {
+        return Err(ApiError::conflict(
+            "retest_attempt_used",
+            "this answer already supplied a re-test receipt",
+        ));
+    }
     let existing = sqlx::query!(
-        "SELECT passes FROM retest_cards
-         WHERE user_id = $1 AND question_version_id = $2",
+        "SELECT passes, updated_at, enrolled_session_id FROM retest_cards
+         WHERE user_id = $1 AND question_version_id = $2 FOR UPDATE",
         user.user_id,
         req.question_version_id
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *tx)
     .await?;
-    let passes_before = existing.map(|r| r.passes).unwrap_or(0);
-    let (passes, due_days) = if req.correct {
-        let p = (passes_before + 1).min(intervals.len() as i32);
+    if existing.as_ref().is_some_and(|card| {
+        card.updated_at > submitted_at && card.enrolled_session_id != Some(session_id)
+    }) {
+        return Err(ApiError::conflict(
+            "retest_evidence_obsolete",
+            "submit fresh evidence after the current re-test card update",
+        ));
+    }
+    let correct = attempt.chosen_index == Some(attempt.correct_index);
+    let rating = if correct && !attempt.assisted {
+        if attempt.confidence.as_deref() == Some("sure") {
+            "good"
+        } else {
+            "hard"
+        }
+    } else {
+        "again"
+    };
+    // Legacy client-reported passes do not seed a trusted receipt chain.
+    let passes_before = existing
+        .filter(|r| r.enrolled_session_id.is_some())
+        .map(|r| r.passes.max(0))
+        .unwrap_or(0);
+    let (passes, due_days) = if rating == "good" {
+        let p = passes_before.saturating_add(1).min(intervals.len() as i32);
         (p, intervals[(p - 1) as usize])
+    } else if rating == "hard" {
+        (passes_before, 1)
     } else {
         (0, 1)
     };
+    let now = sqlx::query_scalar!(r#"SELECT clock_timestamp() AS "now!""#)
+        .fetch_one(&mut *tx)
+        .await?;
     let due = now + chrono::Duration::days(due_days);
+    let result = json!({
+        "already_recorded": false,
+        "card_version_id": req.question_version_id,
+        "question_version_id": attempt.question_version_id,
+        "correct": correct,
+        "rating": rating,
+        "passes": passes,
+        "due": due,
+    });
 
     sqlx::query!(
-        "INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
-         VALUES ($1, $2, $3, $4, $5)
+        "INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at, enrolled_session_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (user_id, question_version_id) DO UPDATE SET
-           passes = $3, due = $4, updated_at = $5",
+           passes = $3, due = $4, updated_at = $5,
+           enrolled_session_id = COALESCE(retest_cards.enrolled_session_id, EXCLUDED.enrolled_session_id)",
         user.user_id,
         req.question_version_id,
         passes,
         due,
-        now
+        now,
+        session_id
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
 
     sqlx::query!(
-        "INSERT INTO retest_history (id, user_id, question_version_id, correct, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO retest_history (id, user_id, question_version_id, correct, idempotency_key, attempt_id, result_payload)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
         Uuid::new_v4(),
         user.user_id,
         req.question_version_id,
-        req.correct,
-        req.idempotency_key
+        correct,
+        key,
+        attempt.id,
+        result
     )
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await?;
-
-    Ok(Json(json!({
-        "already_recorded": false,
-        "passes": passes,
-        "due": due,
-    })))
+    tx.commit().await?;
+    Ok(Json(result))
 }
 
 /// Due re-tests for the learner: question payload + pass count. §13: prefer
@@ -263,7 +402,10 @@ pub async fn due_retests(
 ) -> ApiResult<Json<serde_json::Value>> {
     let now = Utc::now();
     let rows = sqlx::query!(
-        r#"SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due
+        r#"SELECT qv.id AS question_version_id, qv.vignette, rc.passes, rc.due,
+                  question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ) AS "rights_active!"
            FROM retest_cards rc
            JOIN question_versions qv ON qv.id = rc.question_version_id
            WHERE rc.user_id = $1 AND rc.due <= $2 AND qv.status = 'published'
@@ -286,6 +428,9 @@ pub async fn due_retests(
                        JOIN question_versions qv2 ON qv2.question_id = q2.id
                        WHERE qv2.id = $1)
                  AND qv.id <> $1 AND qv.status = 'published'
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                 )
                  AND NOT EXISTS (
                      SELECT 1 FROM attempts a
                      WHERE a.question_version_id = qv.id AND a.user_id = $2)
@@ -301,7 +446,8 @@ pub async fn due_retests(
         .await?;
         let (served_id, served_vignette, swapped) = match &variant {
             Some(v) => (v.id, v.vignette.clone(), true),
-            None => (r.question_version_id, r.vignette.clone(), false),
+            None if r.rights_active => (r.question_version_id, r.vignette.clone(), false),
+            None => continue,
         };
         items.push(json!({
             "question_version_id": served_id,

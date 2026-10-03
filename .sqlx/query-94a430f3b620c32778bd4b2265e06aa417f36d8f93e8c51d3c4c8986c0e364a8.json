@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE auth_sessions SET device_id = $1\n             WHERE token_hash = $2 AND user_id = $3 AND device_id IS NULL\n               AND expires_at > now() AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94a430f3b620c32778bd4b2265e06aa417f36d8f93e8c51d3c4c8986c0e364a8"
+}

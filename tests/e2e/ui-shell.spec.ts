@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installE2EBrowserSession, registerE2EDevice } from './device-binding';
 
 const API = 'http://127.0.0.1:8080';
 
@@ -12,7 +13,8 @@ async function signIn(page: Page): Promise<string> {
 	const body = JSON.stringify({ email, password: 'correct horse battery' });
 	expect((await fetch(`${API}/v1/auth/register`, { method: 'POST', headers, body })).ok).toBeTruthy();
 	const { token } = await (await fetch(`${API}/v1/auth/login`, { method: 'POST', headers, body })).json();
-	await page.addInitScript((t) => localStorage.setItem('mlos_token', t), token);
+	const deviceKey = await registerE2EDevice(API, token);
+	await installE2EBrowserSession(page, token, deviceKey);
 	return token;
 }
 
@@ -77,6 +79,8 @@ test('mobile tab bar and the Menu sheet', async ({ page }) => {
 	await sheet.getByTestId('nav-notes').click();
 	await expect(page).toHaveURL(/\/notes$/);
 	await expect(sheet).toBeHidden();
+	await expect(page.locator('#main')).toHaveJSProperty('inert', false);
+	await expect(page.locator('nav[aria-label="Quick navigation"]')).toHaveJSProperty('inert', false);
 
 	for (const width of [320, 375, 414, 768]) {
 		await page.setViewportSize({ width, height: 812 });
@@ -86,6 +90,67 @@ test('mobile tab bar and the Menu sheet', async ({ page }) => {
 			`shell overflows at ${width}px`
 		).toBe(true);
 	}
+});
+
+test('mobile menu manages focus, inertness, and desktop resize', async ({ page }) => {
+	await signIn(page);
+	await page.setViewportSize({ width: 375, height: 812 });
+	await page.goto('/today');
+
+	const toggle = page.getByRole('button', { name: 'Menu' });
+	const menu = page.getByRole('navigation', { name: 'Main navigation' });
+	const closeToggle = page.getByRole('button', { name: 'Close menu' });
+	const main = page.locator('#main');
+	const tabs = page.locator('nav[aria-label="Quick navigation"]');
+	const brand = page.locator('.brand');
+	const skipLink = page.locator('.skip-link');
+	const firstItem = menu.locator('a').first();
+	const lastItem = menu.locator('a, button').last();
+
+	await toggle.focus();
+	await page.keyboard.press('Enter');
+	await expect(menu).toBeVisible();
+	await expect(closeToggle).toHaveAttribute('aria-expanded', 'true');
+	await expect(firstItem).toBeFocused();
+	await expect(main).toHaveJSProperty('inert', true);
+	await expect(tabs).toHaveJSProperty('inert', true);
+	await expect(page.getByTestId('quick-jump')).toHaveJSProperty('inert', true);
+	await expect(brand).toHaveJSProperty('inert', true);
+	await expect(skipLink).toHaveJSProperty('inert', true);
+
+	// The close toggle and sheet items form one keyboard focus cycle.
+	await page.keyboard.press('Shift+Tab');
+	await expect(closeToggle).toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await expect(lastItem).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(closeToggle).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(firstItem).toBeFocused();
+
+	await page.keyboard.press('Escape');
+	await expect(menu).toBeHidden();
+	await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+	await expect(toggle).toBeFocused();
+	await expect(main).toHaveJSProperty('inert', false);
+	await expect(tabs).toHaveJSProperty('inert', false);
+	await expect(page.getByTestId('quick-jump')).toHaveJSProperty('inert', false);
+	await expect(brand).toHaveJSProperty('inert', false);
+	await expect(skipLink).toHaveJSProperty('inert', false);
+
+	// Crossing the desktop breakpoint closes the mobile state and keeps focus
+	// on a visible navigation item if the disappearing toggle held focus.
+	await toggle.click();
+	await expect(firstItem).toBeFocused();
+	await closeToggle.focus();
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await expect(menu).toBeVisible();
+	await expect(page.getByTestId('nav-today')).toBeFocused();
+	await expect(main).toHaveJSProperty('inert', false);
+	await expect(tabs).toHaveJSProperty('inert', false);
+	await lastItem.focus();
+	await page.keyboard.press('Tab');
+	await expect(menu.locator(':focus')).toHaveCount(0);
 });
 
 test('the light reading theme persists across reloads', async ({ page }) => {

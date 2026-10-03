@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-examiner-token']);
+});
 
 test('examiner records criterion scores against observed transcript events', async ({ page }) => {
 	const runId = '11111111-1111-4111-8111-111111111111';

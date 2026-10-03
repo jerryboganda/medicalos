@@ -333,26 +333,8 @@ pub async fn next_action(
                      SELECT 1 FROM reserved_questions rq
                      WHERE rq.question_version_id = qv.id
                  )
-                 AND EXISTS (
-                     SELECT 1 FROM content_rights rights
-                     WHERE rights.ref_code = UPPER(BTRIM(qv.rights_ref))
-                       AND rights.revoked_at IS NULL
-                       AND rights.valid_from <= CURRENT_DATE
-                       AND (rights.valid_to IS NULL OR rights.valid_to >= CURRENT_DATE)
-                       AND rights.permitted_uses @> '["display"]'::jsonb
-                       AND (rights.audiences = '[]'::jsonb OR EXISTS (
-                           SELECT 1
-                           FROM jsonb_array_elements_text(rights.audiences) AS audiences(audience)
-                           WHERE LOWER(BTRIM(audiences.audience)) IN ('learners', 'all')
-                       ))
-                       -- No seat-allocation ledger exists, so capped grants fail closed.
-                       AND rights.seat_limit IS NULL
-                       AND rights.asset_refs @> jsonb_build_array(qv.source_ref)
-                       AND NOT EXISTS (
-                           SELECT 1
-                           FROM unnest(qv.source_refs || qv.media_refs) AS refs(asset_ref)
-                           WHERE NOT (rights.asset_refs @> jsonb_build_array(refs.asset_ref))
-                       )
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
                  )
            )
            SELECT t.id, t.task_key, t.kind, t.title, t.chapter_id, t.source_session_id,

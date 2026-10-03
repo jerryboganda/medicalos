@@ -38,6 +38,10 @@ _Avoid_: Tag, when referring to a canonical knowledge identity.
 
 **Content-rights record**: An operator-maintained statement of a content source's permitted uses, territory, validity window, and revocation state. It records supplied licensing terms; it does not prove that a contract or ownership claim is authentic.
 
+**Current display eligibility**: Whether a question version may be shown to a learner at the time of a request, based on its current display permission, audience, validity, seat allocation, and complete source/media scope. Publication approval does not establish lasting eligibility.
+
+**Question-linked learner record**: A learner-owned note, mark, or answer associated with an exact question version. Its stored state and ownership are distinct from whether the linked question content is currently eligible for display.
+
 **Private import**: A document owned by one learner account and readable only while its linked content-rights record permits private import and display. It is not a shared library resource and may not contain patient-identifiable information.
 
 ## Clinical simulation

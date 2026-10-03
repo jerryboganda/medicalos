@@ -17,9 +17,11 @@ check() { # label url pattern
 }
 
 check "api  /healthz (direct)"        "$API/healthz" '^ok'
+check "api  /readyz (database)"      "$API/readyz" '"status":"ok"'
 check "web  app shell"                "$WEB/" 'data-sveltekit-preload-data'
 check "web  /api/version.json static" "$WEB/api/version.json" '"sha"'
 check "web  /api/healthz via proxy"   "$WEB/api/healthz" 'ok'
+check "web  /api/readyz via proxy"    "$WEB/api/readyz" '"status":"ok"'
 
 echo
 echo "deployed build: $(curl -sf "$WEB/api/version.json" || echo '(version.json unreachable)')"

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rh.question_version_id, rh.result_payload,\n                  a.session_id AS \"session_id?\", a.item_index AS \"item_index?\"\n           FROM retest_history rh LEFT JOIN attempts a ON a.id = rh.attempt_id\n           WHERE rh.user_id = $1 AND rh.idempotency_key = $2\n           ORDER BY rh.created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "result_payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "item_index?",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d65d867ed6a5d10ba6ec34c06f94cdcd9a10d2715c070eaf1b07a64f40a65ccb"
+}

@@ -1,0 +1,44 @@
+# Enforce current display rights in study queues and derived content
+
+Status: in-progress (QOTD, Issue 06 learner records, and Issue 07 competition attempts passed exact-source CI; Issue 08 community duels and the insights audit remain)
+
+## Outcome
+
+Recommendations, review queues, saved question-linked resources, and derived
+learning material do not continue to display a question's content after its
+current learner-display grant becomes unavailable.
+
+## Acceptance criteria
+
+- Inventory daily plans, QOTD, engagement, retests, marks, notes, insights,
+  tutoring cards, and other learner-facing question-linked paths.
+- Reuse the shared current display-rights predicate for question discovery and
+  any response that returns licensed question text or a derivative of it.
+- Define and test how saved learner notes/cards behave after revocation while
+  preserving non-content learning evidence and account isolation.
+- Cover active, revoked, expired, wrong-audience, seat-limited, and incomplete
+  asset-scope grants with public-route regressions.
+- Verify no queue can create a new session from ineligible content.
+- Apply the same current display rule to competition question pools and
+  attempts, including persisted/idempotent responses.
+
+## Learner-record behavior
+
+- Re-evaluate current display eligibility at every read, answer, and session-creation boundary that can return question text or derived question content.
+- When source rights are unavailable, omit the linked question payload and source-derived material from learner-facing responses and exports. Retain the underlying notes, marks, attempts, schedules, and outcomes without rewriting or deleting them; keep account ownership and non-content learning evidence intact. Eligible content may reappear if the grant becomes active again.
+
+## Delivery order
+
+1. QOTD selection, display, and answer eligibility: issue 05.
+2. Retest queues, marks, source-linked notes, and review cards: issue 06.
+3. Competition pools and attempts: issue 07.
+4. Verify question-linked insights remain content-free while retaining
+   aggregate learner outcomes; complete any remaining study-path audit.
+
+## Spec
+
+See `../spec.md`.
+
+## Comments
+
+- 2026-10-01 — Split QOTD into the focused public-route spec in issue 05. This parent remains open until every acceptance area above is verified.

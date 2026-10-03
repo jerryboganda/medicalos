@@ -428,8 +428,8 @@ pub async fn create_session(
     .await?;
     // COM-01: the free-tier daily allowance is an entitlement check (§26.1) —
     // upgrade prompts may originate only from here, never from the Coach.
-    // # ponytail: revision sessions are exempt (they re-practice already-
-    // served items); resource-specific rights still depend on billing links.
+    // # ponytail: revisions skip the daily attempt allowance because they
+    // revisit served questions; re-check if paid tiers meter revision use.
     if req.preset.as_str() != "revision" {
         let tier = sqlx::query_scalar!("SELECT tier FROM users WHERE id = $1", user.user_id)
             .fetch_one(&state.pool)
@@ -593,6 +593,9 @@ pub async fn create_session(
                 r#"SELECT id, vignette, lead_in, difficulty, options
                    FROM question_versions qv
                    WHERE status = 'published' AND chapter_id = ANY($1)
+                     AND question_display_rights_active(
+                         qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                     )
                      AND NOT EXISTS (
                          SELECT 1 FROM question_reports r
                          WHERE r.question_version_id = qv.id
@@ -728,6 +731,9 @@ pub async fn create_session(
                     r#"SELECT id, vignette, lead_in, difficulty, options
                        FROM question_versions qv
                        WHERE status = 'published' AND chapter_id = $1
+                         AND question_display_rights_active(
+                             qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                         )
                          AND NOT EXISTS (
                              SELECT 1 FROM question_reports r
                              WHERE r.question_version_id = qv.id
@@ -817,7 +823,11 @@ pub async fn create_session(
                 r#"SELECT id, vignette, lead_in, difficulty, options FROM (
                        SELECT DISTINCT qv.id, qv.vignette, qv.lead_in, qv.difficulty, qv.options
                        FROM question_versions qv
-                       WHERE qv.status = 'published' AND (qv.id IN (
+                       WHERE qv.status = 'published'
+                         AND question_display_rights_active(
+                             qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                         )
+                         AND (qv.id IN (
                            SELECT question_version_id FROM attempts
                            WHERE session_id = $1
                              AND (correct = FALSE OR chosen_index IS NULL)
@@ -914,6 +924,13 @@ pub async fn get_session(
     let items = sqlx::query!(
         r#"SELECT si.item_index, qv.id AS question_version_id, qv.status AS question_status,
                   qv.vignette, qv.lead_in, qv.difficulty,
+                  question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ) AS "rights_active!",
+                  source_corrected.id IS NULL OR question_display_rights_active(
+                      source_corrected.rights_ref, source_corrected.source_ref,
+                      source_corrected.source_refs, source_corrected.media_refs
+                  ) AS "corrected_rights_active!",
                   COALESCE(source_corrected.options, qv.options) AS options,
                   COALESCE(source_corrected.correct_index, qv.correct_index) AS correct_index,
                   COALESCE(source_corrected.key_learning_point, qv.key_learning_point) AS key_learning_point,
@@ -992,6 +1009,13 @@ pub async fn get_session(
     )
     .fetch_all(&state.pool)
     .await?;
+
+    if items
+        .iter()
+        .any(|item| !item.rights_active || !item.corrected_rights_active)
+    {
+        return Err(crate::question_rights::unavailable_error());
+    }
 
     let mut out = Vec::with_capacity(items.len());
     for it in items {
@@ -1164,14 +1188,23 @@ pub async fn hint(
         ));
     }
     let item = sqlx::query!(
-        "SELECT question_version_id FROM session_items
-         WHERE session_id = $1 AND item_index = $2 FOR UPDATE",
+        r#"SELECT si.question_version_id,
+                  question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ) AS "rights_active!"
+           FROM session_items si
+           JOIN question_versions qv ON qv.id = si.question_version_id
+           WHERE si.session_id = $1 AND si.item_index = $2
+           FOR UPDATE OF si"#,
         sid,
         item_index
     )
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| ApiError::not_found("unknown_item"))?;
+    if !item.rights_active {
+        return Err(crate::question_rights::unavailable_error());
+    }
     let answered = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM attempts WHERE session_id = $1 AND item_index = $2)",
     )
@@ -1414,7 +1447,10 @@ pub async fn apply_answer(
 
     let item = sqlx::query!(
         r#"SELECT qv.id, qv.status AS question_status, qv.correct_index, qv.options, qv.key_learning_point,
-                  qv.exam_tip, si.hint_used
+                  qv.exam_tip, si.hint_used,
+                  question_display_rights_active(
+                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                  ) AS "rights_active!"
            FROM session_items si JOIN question_versions qv ON qv.id = si.question_version_id
            WHERE si.session_id = $1 AND si.item_index = $2"#,
         sid,
@@ -1423,6 +1459,9 @@ pub async fn apply_answer(
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("unknown_item"))?;
+    if !item.rights_active {
+        return Err(crate::question_rights::unavailable_error());
+    }
 
     let already = sqlx::query!(
         r#"SELECT a.id, a.chosen_index, qv.correct_index
@@ -1801,19 +1840,23 @@ async fn enroll_missed_questions_in_retest_queue(
     let due = now + chrono::Duration::days(first_interval_days);
 
     sqlx::query(
-        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at)
+        r#"INSERT INTO retest_cards (user_id, question_version_id, passes, due, updated_at, enrolled_session_id)
            SELECT DISTINCT
                $2 AS user_id,
                qv.id AS question_version_id,
                0 AS passes,
                $3 AS due,
-               $4 AS updated_at
+               $4 AS updated_at,
+               $1 AS enrolled_session_id
            FROM session_items si
            JOIN question_versions qv ON qv.id = si.question_version_id
            LEFT JOIN attempts a
              ON a.session_id = si.session_id AND a.item_index = si.item_index
            WHERE si.session_id = $1
              AND qv.status = 'published'
+             AND question_display_rights_active(
+                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+             )
              AND (
                  a.id IS NULL
                  OR a.chosen_index IS NULL
@@ -1825,7 +1868,8 @@ async fn enroll_missed_questions_in_retest_queue(
            ON CONFLICT (user_id, question_version_id) DO UPDATE SET
                passes = 0,
                due = EXCLUDED.due,
-               updated_at = EXCLUDED.updated_at"#,
+               updated_at = EXCLUDED.updated_at,
+               enrolled_session_id = EXCLUDED.enrolled_session_id"#,
     )
     .bind(sid)
     .bind(user_id)
@@ -2246,8 +2290,14 @@ pub async fn submit(
     // lazily if the job has not landed yet).
     if initial.preset == "tutor" {
         let versions: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT question_version_id FROM session_items
-              WHERE session_id = $1 ORDER BY item_index LIMIT 20",
+            "SELECT si.question_version_id
+             FROM session_items si
+             JOIN question_versions qv ON qv.id = si.question_version_id
+             WHERE si.session_id = $1
+               AND question_display_rights_active(
+                   qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+               )
+             ORDER BY si.item_index LIMIT 20",
         )
         .bind(sid)
         .fetch_all(&state.pool)
@@ -2293,6 +2343,7 @@ async fn response_for_question(
     key_learning_point: String,
     exam_tip: Option<String>,
 ) -> ApiResult<Json<AnswerResponse>> {
+    crate::question_rights::ensure_question_displayable(&state.pool, question_version_id).await?;
     let mut effective_question_version_id = question_version_id;
     let mut effective_question_status = question_status.to_owned();
     let mut effective_correct_index = correct_index;
@@ -2329,6 +2380,7 @@ async fn response_for_question(
             .fetch_optional(&state.pool)
             .await?
         {
+            crate::question_rights::ensure_question_displayable(&state.pool, version_id).await?;
             effective_question_version_id = version_id;
             effective_question_status = status;
             effective_correct_index = corrected_index;

@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-learner-token']);
+});
 
 test('learner follows an authored station and explores a read-only alternate timeline', async ({ page }) => {
 	const runId = '22222222-2222-4222-8222-222222222222';

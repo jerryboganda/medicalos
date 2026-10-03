@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT n.id, n.title, n.body FROM notes n\n           JOIN note_concepts nc ON nc.note_id = n.id\n           WHERE n.user_id = $1 AND nc.concept = $2\n             AND (n.source_question_version_id IS NULL OR EXISTS (\n                 SELECT 1 FROM question_versions qv\n                 WHERE qv.id = n.source_question_version_id\n                   AND qv.status = 'published'\n                   AND question_display_rights_active(\n                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                   )\n             ))\n           ORDER BY n.updated_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c0885d22e1eaee5c14247848eae3f800bceb6c4529dc3608ece58811c02710dd"
+}

@@ -1,0 +1,210 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT si.item_index, qv.id AS question_version_id, qv.status AS question_status,\n                  qv.vignette, qv.lead_in, qv.difficulty,\n                  question_display_rights_active(\n                      qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                  ) AS \"rights_active!\",\n                  source_corrected.id IS NULL OR question_display_rights_active(\n                      source_corrected.rights_ref, source_corrected.source_ref,\n                      source_corrected.source_refs, source_corrected.media_refs\n                  ) AS \"corrected_rights_active!\",\n                  COALESCE(source_corrected.options, qv.options) AS options,\n                  COALESCE(source_corrected.correct_index, qv.correct_index) AS correct_index,\n                  COALESCE(source_corrected.key_learning_point, qv.key_learning_point) AS key_learning_point,\n                  (qv.hint IS NOT NULL AND btrim(qv.hint) <> '') AS \"hint_available!\",\n                  si.hint_used,\n                  COALESCE(source_corrected.exam_tip, qv.exam_tip) AS \"exam_tip?\",\n                  a.id AS \"attempt_id?\", a.chosen_index, a.correct,\n                  EXISTS (\n                      SELECT 1 FROM question_reports r\n                      WHERE r.question_version_id = qv.id\n                        AND r.status IN ('open', 'quarantined')\n                  ) AS \"flagged!\",\n                  EXISTS (\n                      SELECT 1 FROM question_reports r\n                      WHERE r.question_version_id = qv.id\n                        AND r.status = 'quarantined'\n                  ) AS \"quarantined!\",\n                  ($3 = 'submitted' AND EXISTS (\n                      SELECT 1 FROM question_reports r\n                      WHERE r.question_version_id = qv.id\n                        AND r.status = 'resolved_fixed'\n                  )) OR latest_correction.corrected_version_id IS NOT NULL AS \"corrected!\",\n                  EXISTS (\n                      SELECT 1 FROM question_reports r\n                      WHERE r.corrected_version_id = qv.id\n                        AND r.status = 'resolved_fixed'\n                  ) AS \"current_corrected!\",\n                  (SELECT r.correction_note FROM question_reports r\n                   WHERE r.corrected_version_id = qv.id AND r.status = 'resolved_fixed'\n                   ORDER BY r.resolved_at DESC LIMIT 1) AS \"correction_note?\",\n                  EXISTS (\n                      SELECT 1 FROM question_reports r\n                      WHERE r.question_version_id = qv.id\n                        AND r.status = 'resolved_rejected'\n                  ) AS \"reviewed_rejected!\",\n                  latest_correction.corrected_version_id AS \"corrected_version_id?\",\n                  own_report.status AS \"my_report_status?\",\n                  own_report.resolution_note AS \"my_resolution_note?\",\n                  own_report.correction_note AS \"my_correction_note?\",\n                  own_report.resolved_at AS \"my_report_resolved_at?\",\n                  own_report.corrected_version_id AS \"my_corrected_version_id?\",\n                  (SELECT corrected.version FROM question_versions corrected\n                   WHERE corrected.id = own_report.corrected_version_id)\n                      AS \"my_corrected_version_number?\",\n                  own_report.created_at AS \"my_report_created_at?\",\n                  own_report.acknowledged_at AS \"my_acknowledged_at?\"\n           FROM session_items si\n           JOIN question_versions qv ON qv.id = si.question_version_id\n           LEFT JOIN LATERAL (\n               SELECT correction.corrected_version_id\n               FROM (\n                   SELECT t.corrected_question_version_id AS corrected_version_id,\n                          t.resolved_at, t.id\n                   FROM source_change_tasks t\n                   WHERE t.question_version_id = qv.id\n                     AND t.status = 'resolved' AND t.resolution = 'corrected'\n                   UNION ALL\n                   SELECT r.corrected_version_id, r.resolved_at, r.id\n                   FROM question_reports r\n                   WHERE r.question_version_id = qv.id\n                     AND r.status = 'resolved_fixed' AND r.corrected_version_id IS NOT NULL\n               ) correction\n               ORDER BY correction.resolved_at DESC NULLS LAST, correction.id DESC LIMIT 1\n           ) latest_correction ON $3 = 'submitted'\n           LEFT JOIN question_versions source_corrected\n             ON source_corrected.id = latest_correction.corrected_version_id\n           LEFT JOIN attempts a\n             ON a.session_id = si.session_id AND a.item_index = si.item_index\n           LEFT JOIN question_reports own_report\n             ON own_report.question_version_id = qv.id AND own_report.reporter_id = $2\n           WHERE si.session_id = $1\n           ORDER BY si.item_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 1,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "question_status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "rights_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "corrected_rights_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "options",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "correct_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 10,
+        "name": "key_learning_point",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "hint_available!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "hint_used",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "exam_tip?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "attempt_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
+        "name": "chosen_index",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 16,
+        "name": "correct",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "flagged!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "quarantined!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 19,
+        "name": "corrected!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 20,
+        "name": "current_corrected!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 21,
+        "name": "correction_note?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "reviewed_rejected!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "corrected_version_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 24,
+        "name": "my_report_status?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 25,
+        "name": "my_resolution_note?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 26,
+        "name": "my_correction_note?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "my_report_resolved_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 28,
+        "name": "my_corrected_version_id?",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 29,
+        "name": "my_corrected_version_number?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 30,
+        "name": "my_report_created_at?",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 31,
+        "name": "my_acknowledged_at?",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      null,
+      false,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "522de81f1f68f8b55a2afad8db17b6b4e22472457dcda4aab85628e40b7bb61a"
+}

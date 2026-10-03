@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qm.question_version_id, qv.lead_in, qm.created_at\n           FROM question_marks qm\n           JOIN question_versions qv ON qv.id = qm.question_version_id\n           WHERE qm.user_id = $1\n             AND qv.status = 'published'\n             AND question_display_rights_active(\n                 qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n             )\n           ORDER BY qm.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5cae9624d3a554d42b3dddf95077f3f5098c7650d3143aa0484054af19ff7889"
+}

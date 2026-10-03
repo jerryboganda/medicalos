@@ -51,6 +51,9 @@ pub async fn session_action(
                 r#"SELECT id, vignette, lead_in, difficulty, options
                    FROM question_versions
                    WHERE status = 'published' AND chapter_id = $1
+                     AND question_display_rights_active(
+                         rights_ref, source_ref, source_refs, media_refs
+                     )
                    ORDER BY random() LIMIT 10"#,
                 chapter
             )
@@ -94,7 +97,11 @@ pub async fn session_action(
             let src = sid;
             let pool_qs = sqlx::query!(
                 r#"SELECT DISTINCT qv.id FROM question_versions qv
-                   WHERE qv.status = 'published' AND (qv.id IN (
+                   WHERE qv.status = 'published'
+                     AND question_display_rights_active(
+                         qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                     )
+                     AND (qv.id IN (
                        SELECT question_version_id FROM attempts
                        WHERE session_id = $1 AND correct = FALSE
                    )

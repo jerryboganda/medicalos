@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-user-token']);
+});
 
 // QB-08 in the browser: the learner reports a problem on an answered item
 // through the real UI, and the thanks state renders (the report persists

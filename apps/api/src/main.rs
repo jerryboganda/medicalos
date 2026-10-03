@@ -89,6 +89,7 @@ async fn main() {
             .unwrap_or_else(|_| "http://127.0.0.1:5173".into()),
         zitadel: zitadel_from_env(),
         lti_tool_key: env_opt("LTI_TOOL_PRIVATE_KEY"),
+        lti_jwks_transport: std::sync::Arc::new(api::routes::lti::GuardedHttpsJwksTransport),
     });
     api::routes::integrity::spawn_auto_submit_worker(state.clone());
     api::routes::jobs::spawn_jobs_worker(state.clone());

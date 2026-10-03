@@ -1,10 +1,15 @@
 # Owner inputs and remaining external gates — 2026-09-30 (supersedes the 2026-09-25 sheet)
 
-The engineering-ready, code-addressable tail is empty: every open ledger ID
-is gated on one of the decisions below or an external party. Each decision
-lists its option set, the safe default already shipped, and exactly what
-answering it unlocks. Answer in one pass (a letter per row is enough); each
-answer converts directly into a scoped slice.
+The code-addressable engineering tail is **not empty**. The 2026-09-30 audit
+identified LTI ownership/JWKS defects, device-session revocation gaps, rights
+publication gaps, incomplete account-data controls, readiness/recovery gaps,
+and missing real-student acceptance. Full-platform development was authorized
+on 2026-10-01, with the existing design system strictly preserved.
+
+The complete 152-ID execution inventory is in
+`.scratch/full-platform/requirements.md`; its spec and CI evidence remain
+separate from external acceptance. The decisions below still unlock genuinely
+external work and do not imply that implementation is already complete.
 
 ## Decision sheet
 
@@ -21,10 +26,16 @@ answer converts directly into a scoped slice.
 | 9 | Reference test devices | Device list + budget | UX-03 / TRUST-06 blocked | Device-budget + accessibility matrix execution (UX-03, TRUST-06) |
 | 10 | Site deployment origin | Subdomain on the existing VPS (recommended) / separate host | Site built + CI-gated, unserved | Serve `apps/site` at the chosen origin (GROW-02 tail) |
 | 11 | SIM-03 voice model | Model-provider decision | Text-mode OSCE shipped; voice adapters owner-gated | Voice adapters for scenario runs (SIM-03 tail) |
-| 12 | Tauri shells + app IDs | Shell work authorization, app identifiers, deep-link domains | ARCH-03 not started; UX-01/EX-08 native tails, ENG-01/ENG-03 remote push, PROT-01/02 native controls deferred behind it | The native workstream (ARCH-03, UX-01, EX-08, ENG-01/03 push, CORE-08 push tokens, PROT-01/02 native, OPS-03 installer signing) |
-| 13 | **UI authorization for new surfaces** — **ANSWERED 2026-09-30: lifted for the LTI launch handoff page + deep-linking content picker** (design-system only) | Lift for scoped surfaces / keep frozen | Launches answered JSON; server/API complete | The two authorized browser surfaces — build next (hallmark + design-system only) |
+| 12 | Native app identifiers, deep-link domains and distribution access | App identifiers, approved CI-built device-testing route and signing identities | Full native development is authorized; identifiers, device acceptance and signing remain unverified | The complete native workstream (ARCH-03, UX-01, EX-08, ENG-01/03 push, CORE-08 push tokens, PROT-01/02 native, OPS-03 installer signing) |
+| 13 | **Existing UI/UX contract** — LTI surfaces authorized 2026-09-30; full platform development authorized 2026-10-01 | The owner explicitly requires strict adherence to the current project patterns | Full platform design/development is authorized using design.md and existing components; no redesign or theme deviation | Missing account, onboarding, LTI handoff and content-selection surfaces implemented within the locked system |
 | 14 | COM-04 business model | Per §32 / §26.1 | Blocked by owner decision | Tier/monetization definition feeding COM-02/03 detail |
 | 15 | Learner token transport (owner review) | httpOnly-cookie migration (touches every client request path + CSRF) / keep localStorage | localStorage, documented in the readiness assessment | The httpOnly-cookie migration as a scoped, owner-approved slice |
+| 16 | First supported exam and approved content | Official exam/blueprint, lawful source material and reviewer capacity | Synthetic fixture coverage only; no real reviewed pack acceptance claimed | First fully reviewed student pathway and clinical acceptance |
+| 17 | Operating entity, privacy/retention rules and support contacts | Approved entity/contact, retention/deletion policy, target ages and markets | Legal pages remain draft; soft deletion is not described as complete erasure | Truthful final notices and tested account-data lifecycle |
+| 18 | Retest SLA definition | Product meaning and timing of the SLA, distinct from scheduling intervals | SR-08 SLA acceptance remains open | Server-authoritative timers, reminders and measurable SLA checks |
+| 19 | Calendar provider and consent scopes | Provider access with independently consented read/write scopes | PLAN-05 remains pending; no fabricated connection | Real calendar connection, revoke and failure/retry acceptance |
+| 20 | Ingestion services and lawful source access | Approved malware/OCR/parser/license-verification services | LIB-06/07 engineering and real-service acceptance remain open | Safe document processing and evaluated completeness |
+| 21 | Supported tutoring languages and evaluation sets | Initial languages, qualified language reviewers and reviewed evaluation data | AI-15 remains pending; no unevaluated language quality claims | Multilingual implementation and real quality acceptance |
 
 ## Non-decision gates (external parties, not answerable by the owner alone)
 

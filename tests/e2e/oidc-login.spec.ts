@@ -1,4 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { mockDeviceRegistration } from './mock-device-registration';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-session-token', 'e2e-user-token']);
+});
 
 test('institution OIDC sign-in completes the browser handoff and stays usable on mobile', async ({
 	page

@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status AS \"status!\", created_by, reviewed_by, rights_ref, source_ref,\n                  source_refs, media_refs\n           FROM question_versions WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "reviewed_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rights_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_refs",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "media_refs",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "eb0c375bbd50c314871ef9f7829c48f3ee6aab5a5150d13f6902693970d1e36d"
+}

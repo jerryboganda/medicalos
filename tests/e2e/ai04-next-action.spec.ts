@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-user-token']);
+});
 
 test('Today requests a time-bounded next action and explains when nothing fits', async ({ page }) => {
 	const taskId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

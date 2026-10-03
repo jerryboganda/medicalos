@@ -87,6 +87,67 @@ async fn insert_question(pool: &PgPool, q: &NewQuestion) -> Result<Uuid, ApiErro
     Ok(vid)
 }
 
+async fn ensure_synthetic_question_rights(pool: &PgPool) -> ApiResult<()> {
+    const SOURCE_REF: &str = "Synthetic CI fixture - fictional content, not medical material";
+    const RIGHTS_REF: &str = "MEDICALOS-SYNTHETIC-SEED";
+
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM question_versions WHERE source_ref = $1)")
+            .bind(SOURCE_REF)
+            .fetch_one(pool)
+            .await?;
+    if !exists {
+        return Ok(());
+    }
+
+    let asset_refs: serde_json::Value = sqlx::query_scalar(
+        "SELECT COALESCE(
+             jsonb_agg(DISTINCT to_jsonb(BTRIM(asset_ref.value))),
+             '[]'::jsonb
+         )
+         FROM question_versions qv
+         CROSS JOIN LATERAL unnest(
+             ARRAY[qv.source_ref] || qv.source_refs || qv.media_refs
+         ) AS asset_ref(value)
+         WHERE qv.source_ref = $1 AND BTRIM(asset_ref.value) <> ''",
+    )
+    .bind(SOURCE_REF)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO content_rights
+             (id, ref_code, licensor, territory, permitted_uses, valid_from,
+              notes, asset_refs, audiences)
+         VALUES ($1, $2, $3, 'worldwide', $4, DATE '2020-01-01', $5, $6, $7)
+         ON CONFLICT (ref_code) DO UPDATE
+         SET permitted_uses = EXCLUDED.permitted_uses
+         WHERE content_rights.notes = EXCLUDED.notes",
+    )
+    .bind(Uuid::new_v4())
+    .bind(RIGHTS_REF)
+    .bind("Medical OS fictional seed content")
+    .bind(serde_json::json!([
+        "display",
+        "derivatives",
+        "offline",
+        "distribution"
+    ]))
+    .bind("Synthetic local/test fixtures only; not a third-party license grant.")
+    .bind(asset_refs)
+    .bind(serde_json::json!(["learners"]))
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE question_versions SET rights_ref = $1
+         WHERE source_ref = $2 AND rights_ref IS NULL",
+    )
+    .bind(RIGHTS_REF)
+    .bind(SOURCE_REF)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
     // Idempotency: `api --seed` may be re-run against an already-seeded
     // database (local exploration), and re-inserting would violate
@@ -98,6 +159,7 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
             .fetch_optional(pool)
             .await?;
     if let Some(exam_id) = exam_id {
+        ensure_synthetic_question_rights(pool).await?;
         let nil = Uuid::nil();
         let chapters: Vec<Uuid> = sqlx::query_scalar(
             "SELECT id FROM curriculum_nodes WHERE exam_id = $1 AND kind = 'chapter'
@@ -367,6 +429,7 @@ pub async fn seed(pool: &PgPool) -> ApiResult<SeedIds> {
         false,
     );
     let v5 = insert_question(pool, &q5).await?;
+    ensure_synthetic_question_rights(pool).await?;
 
     // EX-07 fixture: deterministic frozen form (both chapter-1 questions;
     // answering A on both yields exactly 1 correct = 50% = pass at mark 50).

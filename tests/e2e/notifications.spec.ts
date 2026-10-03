@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-user-token']);
+});
 
 test('notification preferences persist source correction updates', async ({ page }) => {
 	let contentUpdates = false;

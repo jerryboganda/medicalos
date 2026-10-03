@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, preset, submitted_at FROM practice_sessions\n         WHERE id = $1 AND user_id = $2 FOR NO KEY UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "preset",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "submitted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ce23fd559642775790f9cdf5a43043a3b26b3f3c35e565dba8d53b7a2df64a6a"
+}

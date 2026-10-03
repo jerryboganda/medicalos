@@ -1,4 +1,5 @@
 import { auth, clearToken } from './auth.svelte';
+import { browserDeviceId } from './device-identity';
 import type { LoginRequest } from './generated/auth/LoginRequest';
 import type { LoginResponse } from './generated/auth/LoginResponse';
 import type { RegisterRequest } from './generated/auth/RegisterRequest';
@@ -592,6 +593,12 @@ const BASE: string =
 	// `||`, not `??`: an empty VITE_API_BASE must not drop the /api prefix.
 	import.meta.env.VITE_API_BASE || (import.meta.env.PROD ? '/api' : '');
 
+let registeredToken = '';
+let registeredDeviceKey = '';
+let registration:
+	| { token: string; deviceKey: string; promise: Promise<void> }
+	| undefined;
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -614,18 +621,19 @@ export function adminToken(): string {
 	}
 }
 
-async function call<T>(
+async function request<T>(
 	method: string,
 	path: string,
 	body?: unknown,
-	contentType = 'application/json'
+	contentType = 'application/json',
+	bearer = auth.token
 ): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
 		method,
 		headers: {
 			'content-type': contentType,
 			'x-admin-token': adminToken(),
-			...(auth.token ? { authorization: `Bearer ${auth.token}` } : {})
+			...(bearer ? { authorization: `Bearer ${bearer}` } : {})
 		},
 		body:
 			body === undefined
@@ -635,7 +643,7 @@ async function call<T>(
 					: (body as BodyInit)
 	});
 	if (!res.ok) {
-		if (res.status === 401) {
+		if (res.status === 401 && (!bearer || auth.token === bearer)) {
 			clearToken();
 		}
 		let code = 'error';
@@ -650,6 +658,65 @@ async function call<T>(
 		throw new ApiError(res.status, code, message);
 	}
 	return (await res.json()) as T;
+}
+
+async function registerBrowserDevice(token: string): Promise<void> {
+	const deviceKey = browserDeviceId();
+	if (registeredToken === token && registeredDeviceKey === deviceKey) return;
+	if (registration?.token === token && registration.deviceKey === deviceKey) {
+		return registration.promise;
+	}
+
+	const pending = {
+		token,
+		deviceKey,
+		promise: request<unknown>(
+			'POST',
+			'/v1/me/devices',
+			{ device_key: deviceKey, label: 'Browser' },
+			'application/json',
+			token
+		).then(() => undefined)
+	};
+	registration = pending;
+	try {
+		await pending.promise;
+		registeredToken = token;
+		registeredDeviceKey = deviceKey;
+	} finally {
+		if (registration === pending) registration = undefined;
+	}
+}
+
+async function call<T>(
+	method: string,
+	path: string,
+	body?: unknown,
+	contentType = 'application/json'
+): Promise<T> {
+	const token = auth.token;
+	const publicAuthRoute =
+		path.startsWith('/v1/auth/') || /\/sso\/oidc\/start(?:\?|$)/.test(path);
+	if (token && !publicAuthRoute) {
+		try {
+			await registerBrowserDevice(token);
+		} catch (error) {
+			// A newly signed-in browser at the device limit must still be able
+			// to retire a device or close/export its account. Study requests
+			// remain blocked until registration succeeds.
+			const accountControl =
+				(method === 'GET' && (path === '/v1/me/devices' || path === '/v1/me/export' || path === '/v1/me/session-policy')) ||
+				(method === 'PATCH' && path === '/v1/me/session-policy') ||
+				(method === 'DELETE' && (path === '/v1/me/account' || /^\/v1\/me\/devices\/[^/]+$/.test(path)));
+			if (!(accountControl && error instanceof ApiError && error.status === 403 && error.code === 'devices_exhausted')) {
+				throw error;
+			}
+		}
+		if (auth.token !== token) {
+			throw new ApiError(409, 'session_changed', 'Your sign-in changed. Retry the request.');
+		}
+	}
+	return request<T>(method, path, body, contentType, token);
 }
 
 export const Api = {
@@ -683,6 +750,16 @@ export const Api = {
 		call<StartInstitutionSsoResponse>('GET', `/v1/auth/start${idp ? `?idp=${idp}` : ''}`),
 	/** Who am I, which platform/institution permissions do I hold. */
 	me: () => call<MeView>('GET', '/v1/me'),
+	listDevices: () => call<unknown>('GET', '/v1/me/devices'),
+	sessionPolicy: () => call<unknown>('GET', '/v1/me/session-policy'),
+	setSessionPolicy: (singleActiveSession: boolean) =>
+		call<unknown>('PATCH', '/v1/me/session-policy', {
+			single_active_session: singleActiveSession
+		}),
+	revokeDevice: (deviceId: string) =>
+		call<unknown>('DELETE', `/v1/me/devices/${encodeURIComponent(deviceId)}`),
+	exportAccount: () => call<unknown>('GET', '/v1/me/export'),
+	deleteAccount: () => call<unknown>('DELETE', '/v1/me/account'),
 	startInstitutionSso: (institutionId: string) =>
 		call<StartInstitutionSsoResponse>(
 			'GET',

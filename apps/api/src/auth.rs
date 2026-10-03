@@ -9,6 +9,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
+use std::ops::Deref;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -109,6 +110,11 @@ pub fn sha256_hex(input: &str) -> String {
     out.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+#[derive(Clone)]
+pub struct AuthSession {
+    pub token_hash: String,
+}
+
 pub struct AuthUser {
     pub user_id: Uuid,
     /// Zitadel platform roles snapshotted at sign-in (empty for password
@@ -116,6 +122,17 @@ pub struct AuthUser {
     pub roles: Vec<String>,
     /// The sign-in used a second factor.
     pub mfa: bool,
+}
+
+/// An authenticated but not-yet-registered session for account recovery only.
+pub struct AccountRecoveryUser(AuthUser);
+
+impl Deref for AccountRecoveryUser {
+    type Target = AuthUser;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl AuthUser {
@@ -129,29 +146,60 @@ impl AuthUser {
     }
 }
 
+async fn authenticated_user(
+    parts: &mut Parts,
+    state: &Arc<AppState>,
+    allow_unbound: bool,
+) -> ApiResult<AuthUser> {
+    let raw = parts
+        .headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(ApiError::unauthorized)?;
+    let token_hash = sha256_hex(raw);
+    let row = sqlx::query!(
+        r#"SELECT s.user_id, s.roles, s.mfa, s.device_id,
+                  EXISTS (
+                      SELECT 1 FROM user_devices d
+                      WHERE d.user_id = s.user_id
+                        AND d.device_key = s.device_id
+                        AND d.revoked_at IS NULL
+                  ) AS "device_registered!"
+           FROM auth_sessions s
+           WHERE s.token_hash = $1 AND s.expires_at > now() AND s.revoked_at IS NULL"#,
+        &token_hash
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(ApiError::unauthorized)?;
+    if row.device_id.is_none() {
+        if !allow_unbound {
+            return Err(ApiError::unauthorized());
+        }
+    } else if !row.device_registered {
+        return Err(ApiError::unauthorized());
+    }
+    parts.extensions.insert(AuthSession { token_hash });
+    Ok(AuthUser {
+        user_id: row.user_id,
+        roles: row.roles,
+        mfa: row.mfa,
+    })
+}
+
 impl FromRequestParts<Arc<AppState>> for AuthUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> ApiResult<Self> {
-        let raw = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .ok_or_else(ApiError::unauthorized)?;
-        let token_hash = sha256_hex(raw);
-        let row = sqlx::query(
-            "SELECT user_id, roles, mfa FROM auth_sessions
-             WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL",
-        )
-        .bind(token_hash)
-        .fetch_optional(&state.pool)
-        .await?
-        .ok_or_else(ApiError::unauthorized)?;
-        Ok(AuthUser {
-            user_id: row.try_get("user_id")?,
-            roles: row.try_get("roles")?,
-            mfa: row.try_get("mfa")?,
-        })
+        authenticated_user(parts, state, false).await
+    }
+}
+
+impl FromRequestParts<Arc<AppState>> for AccountRecoveryUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> ApiResult<Self> {
+        authenticated_user(parts, state, true).await.map(Self)
     }
 }

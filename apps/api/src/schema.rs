@@ -11,6 +11,8 @@ macro_rules! migrations {
         pub const UP_SQLS: &[&str] = &[$(include_str!(concat!("../migrations/", $name, ".up.sql"))),*];
         /// Same files; apply_down iterates this in REVERSE.
         pub const DOWN_SQLS: &[&str] = &[$(include_str!(concat!("../migrations/", $name, ".down.sql"))),*];
+        /// Names let tests verify the runtime registry covers every migration file.
+        pub const MIGRATION_NAMES: &[&str] = &[$($name),*];
     };
 }
 
@@ -78,6 +80,10 @@ migrations!(
     "0061_zitadel_identity",
     "0062_login_throttling",
     "0063_lti13_launch",
+    "0064_retest_receipts",
+    "0065_question_display_rights",
+    "0066_question_distribution_rights",
+    "0067_pack_receipt_challenge",
 );
 
 pub async fn apply_up(pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -92,4 +98,33 @@ pub async fn apply_down(pool: &PgPool) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(sql).execute(pool).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MIGRATION_NAMES;
+
+    #[test]
+    fn registered_migrations_match_up_files() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut files = std::fs::read_dir(directory)
+            .expect("read migrations directory")
+            .map(|entry| {
+                entry
+                    .expect("read migration entry")
+                    .file_name()
+                    .into_string()
+                    .expect("migration filename is UTF-8")
+            })
+            .filter_map(|name| name.strip_suffix(".up.sql").map(str::to_owned))
+            .collect::<Vec<_>>();
+        files.sort_unstable();
+
+        let registered = MIGRATION_NAMES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(registered, files, "runtime migration registry is stale");
+    }
 }

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT qv.id, qv.vignette\n               FROM question_versions qv\n               JOIN questions q ON q.id = qv.question_id\n               WHERE q.family_id = (\n                       SELECT q2.family_id FROM questions q2\n                       JOIN question_versions qv2 ON qv2.question_id = q2.id\n                       WHERE qv2.id = $1)\n                 AND qv.id <> $1 AND qv.status = 'published'\n                 AND question_display_rights_active(\n                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                 )\n                 AND NOT EXISTS (\n                     SELECT 1 FROM attempts a\n                     WHERE a.question_version_id = qv.id AND a.user_id = $2)\n                 AND NOT EXISTS (\n                     SELECT 1 FROM reserved_questions rq\n                     WHERE rq.question_version_id = qv.id)\n               ORDER BY qv.version\n               LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0e553b8b0a051b2fde97aa75beb4ba9bdcc781b6c54102e65cb189e1f696addc"
+}

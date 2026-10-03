@@ -40,7 +40,7 @@ services:
       MIN_TIME_LIMIT_SECONDS: "30"
       FREE_DAILY_QUESTIONS: "10"
       # Local admin-console token (x-admin-token header; client stores it in
-      # localStorage['mlos_admin']). Unset in .env = admin routes disabled.
+      # localStorage['mlos_admin']). Roles + MFA also grant named permissions.
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       # Platform sign-in through the local Zitadel (infra/zitadel/provision.sh
       # prints these). Unset = password login + institution SSO only.
@@ -52,9 +52,9 @@ services:
       # Host side 18080: in the shared engine distro, 8080 belongs to
       # another project (Freebuff2API). Container-internal stays 8080.
       - "127.0.0.1:18080:8080"
-    # debian-slim ships no curl/wget; bash /dev/tcp GETs /healthz and greps ok.
+    # Readiness checks the database; liveness remains available separately.
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ok <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /readyz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"ok\"' <&3"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -66,7 +66,8 @@ services:
   medicalos-web:
     image: ghcr.io/jerryboganda/medicalos-web:${IMAGE_TAG:-latest}
     depends_on:
-      - medicalos-api
+      medicalos-api:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8081:80"
     healthcheck:

@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['e2e-admin-user-token']);
+});
 
 // EX-07: editorial mock builder supporting all 7 form types, API-backed catalog selections,
 // learner mock badges on /practice, and time analysis rendering on completed sessions.

@@ -446,6 +446,9 @@ pub async fn start_mock(
             r#"SELECT id, vignette, lead_in, difficulty, options
                FROM question_versions
                WHERE status = 'published' AND chapter_id = $1
+                 AND question_display_rights_active(
+                     rights_ref, source_ref, source_refs, media_refs
+                 )
                ORDER BY random() LIMIT $2"#,
             entry.chapter_id,
             count

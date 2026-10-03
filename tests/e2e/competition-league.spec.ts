@@ -1,4 +1,10 @@
+import { mockDeviceRegistration } from './mock-device-registration';
+
 import { expect, test, type Page } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+	await mockDeviceRegistration(page, ['league-e2e-token']);
+});
 
 const examId = 'exam-oet-medicine';
 const today = new Date();

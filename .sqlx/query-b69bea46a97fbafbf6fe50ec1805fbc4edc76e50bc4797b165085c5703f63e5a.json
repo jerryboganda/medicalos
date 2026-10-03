@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE question_versions SET status = 'in_review' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b69bea46a97fbafbf6fe50ec1805fbc4edc76e50bc4797b165085c5703f63e5a"
+}

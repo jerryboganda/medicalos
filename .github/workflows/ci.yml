@@ -50,8 +50,18 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Dependency advisories + licenses
         uses: EmbarkStudios/cargo-deny-action@v2
+      - name: Critical launch regression tests
+        run: cargo test -p api --test integration full_platform -- --test-threads=1
       - name: Tests
         run: cargo test --workspace -- --test-threads=1
+      - name: Install backup transport for the disposable restore drill
+        run: sudo apt-get update -qq && sudo apt-get install -y rclone
+      - name: Backup failure-path checks
+        run: bash scripts/verify-backup-offsite.sh
+      - name: Restore disposable database from verified off-site copy
+        env:
+          DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/verify-backup-restore.sh
       # ARCH-02: Rust DTOs own generated client contracts. Keep the first
       # export bootstrap green, then reject any stale checked-in declarations.
       - name: Export Rust-owned TypeScript contracts
@@ -121,6 +131,20 @@ jobs:
       - name: TRUST-01 audit
         run: node scripts/trust01-audit.mjs
 
+  offline:
+    # Release images expand SQLx queries without a database. Verify the committed
+    # cache independently; fresh artifacts from rust must not hide stale inputs.
+    needs: rust
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile API with the committed offline query cache
+        run: cargo check -p api
+
   site:
     # Astro marketing site — holds no learner data (§31.1)
     runs-on: ubuntu-latest
@@ -133,6 +157,15 @@ jobs:
         run: npm install
       - name: Build site
         run: npm run build -w @medical-os/site
+      - name: Exact-revision release policy tests
+        run: node --test scripts/release-ci-gate.test.cjs
+      - name: Validate Orca compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-compose-password
+          PACK_SIGNING_KEY: ci-only-compose-signing-key-32-characters
+          ZITADEL_MASTERKEY: ci-only-masterkey-32-characters!
+          ZITADEL_ADMIN_PASSWORD: Ci-Owner-Pass-1!
+        run: docker compose -f infra/local/docker-compose.yml config --quiet
 
   zitadel:
     # auth-zitadel phase 0: the identity provider's setup is code — pinned
@@ -253,6 +286,9 @@ jobs:
         working-directory: tests/e2e
       - name: Run browser E2E
         run: npx playwright test
+        working-directory: tests/e2e
+      - name: Repeat session cleanup without retries
+        run: npx playwright test timed-session.spec.ts --grep 'mock warning is server-enforced and integrity listeners stop after leaving' --repeat-each=3 --retries=0 --workers=1
         working-directory: tests/e2e
       - name: API logs on failure
         if: failure()

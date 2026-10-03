@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, vignette, lead_in, difficulty, options\n                   FROM question_versions qv\n                   WHERE status = 'published' AND chapter_id = ANY($1)\n                     AND question_display_rights_active(\n                         qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs\n                     )\n                     AND NOT EXISTS (\n                         SELECT 1 FROM question_reports r\n                         WHERE r.question_version_id = qv.id\n                           AND r.status = 'quarantined'\n                     )\n                     AND NOT EXISTS (\n                         SELECT 1 FROM reserved_questions rq\n                         WHERE rq.question_version_id = qv.id\n                     )\n                     AND (\n                         $3 = 'any'\n                         OR ($3 = 'unseen' AND NOT EXISTS (\n                             SELECT 1 FROM attempts a\n                             WHERE a.question_version_id = qv.id AND a.user_id = $2))\n                         OR ($3 = 'incorrect' AND EXISTS (\n                             SELECT 1 FROM attempts a\n                             WHERE a.question_version_id = qv.id AND a.user_id = $2\n                               AND a.correct = FALSE))\n                         OR ($3 = 'marked' AND EXISTS (\n                             SELECT 1 FROM question_marks m\n                             WHERE m.question_version_id = qv.id AND m.user_id = $2))\n                     )\n                   ORDER BY random() LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "vignette",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "lead_in",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "difficulty",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "options",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f0007f33226491e58149864565eeafc3e26acd9dce8f7b960e1df94bf8aa941f"
+}

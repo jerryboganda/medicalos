@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT clock_timestamp()::date AS \"today!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "today!",
+        "type_info": "Date"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "86a2f85b92d71066240ba5579a69cd4e4cb1a8f39ef023f0d55ab4eed0d4e5ba"
+}

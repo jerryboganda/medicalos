@@ -216,11 +216,30 @@ pub async fn list_notes(
                   n.created_at, n.updated_at,
                   COALESCE(json_agg(json_build_object(
                       'note_id', l.to_note_id, 'title', other.title
-                  )) FILTER (WHERE l.to_note_id IS NOT NULL), '[]') AS backlinks
+                  )) FILTER (
+                      WHERE l.to_note_id IS NOT NULL
+                        AND (other.source_question_version_id IS NULL OR EXISTS (
+                            SELECT 1 FROM question_versions linked_qv
+                            WHERE linked_qv.id = other.source_question_version_id
+                              AND linked_qv.status = 'published'
+                              AND question_display_rights_active(
+                                  linked_qv.rights_ref, linked_qv.source_ref,
+                                  linked_qv.source_refs, linked_qv.media_refs
+                              )
+                        ))
+                  ), '[]') AS backlinks
            FROM notes n
            LEFT JOIN note_links l ON l.from_note_id = n.id
            LEFT JOIN notes other ON other.id = l.to_note_id
            WHERE n.user_id = $1
+             AND (n.source_question_version_id IS NULL OR EXISTS (
+                 SELECT 1 FROM question_versions qv
+                 WHERE qv.id = n.source_question_version_id
+                   AND qv.status = 'published'
+                   AND question_display_rights_active(
+                       qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                   )
+             ))
            GROUP BY n.id
            ORDER BY n.updated_at DESC"#,
         user.user_id
@@ -303,7 +322,14 @@ pub async fn export_notes(
            FROM notes n
            LEFT JOIN question_versions qv
              ON qv.id = n.source_question_version_id
-           WHERE n.user_id = $1 ORDER BY n.created_at"#,
+           WHERE n.user_id = $1
+             AND (n.source_question_version_id IS NULL OR (
+                 qv.status = 'published'
+                 AND question_display_rights_active(
+                     qv.rights_ref, qv.source_ref, qv.source_refs, qv.media_refs
+                 )
+             ))
+           ORDER BY n.created_at"#,
         user.user_id
     )
     .fetch_all(&state.pool)
