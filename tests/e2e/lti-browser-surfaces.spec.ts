@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mockDeviceRegistration } from './mock-device-registration';
 
 const token = 'lti-session-token-for-browser-test';
+test.beforeEach(async ({ page }) => mockDeviceRegistration(page, [token]));
 
 async function expectResponsive(page: Page) {
 	for (const width of [320, 375, 414, 768]) {
